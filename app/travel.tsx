@@ -1,0 +1,534 @@
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import { addDoc, collection, doc, getDocs, query, writeBatch } from 'firebase/firestore';
+import React, { useEffect, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
+} from 'react-native';
+import { db } from '../firebaseConfig';
+import { useData } from './context/DataContext';
+
+export default function TravelNoteScreen() {
+  const router = useRouter();
+  const { travelList = [], user, refreshData } = useData(); 
+
+  // --- STATES ---
+  // Default 'All' rakha hai taaki aate hi purana data dikhe. 
+  // Agar aap chahte hain Year change par 0 ho, to isse 'Year' kar sakte hain.
+  const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'Year' | 'All'>('All'); 
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [searchText, setSearchText] = useState('');
+  
+  const [selectedItem, setSelectedItem] = useState<any>(null); 
+  const [modalVisible, setModalVisible] = useState(false);
+  const [isSettling, setIsSettling] = useState(false);
+
+  // --- EMPLOYEE FILTER ---
+  const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
+  const [selectedEmployeeName, setSelectedEmployeeName] = useState('All'); 
+  const [showEmployeePicker, setShowEmployeePicker] = useState(false);
+
+  const canManage = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr'].includes(user?.role || '');
+
+  // 0. FETCH EMPLOYEES
+  useEffect(() => {
+    if (canManage) {
+      const fetchEmployees = async () => {
+        try {
+          const q = query(collection(db, "users"));
+          const querySnapshot = await getDocs(q);
+          const usersData = querySnapshot.docs.map(doc => ({
+            id: doc.id,
+            name: doc.data().name || 'Unknown User'
+          }));
+          const uniqueUsers = Array.from(new Set(usersData.map(a => a.name)))
+            .map(name => usersData.find(a => a.name === name));
+          setEmployees([{ id: 'All', name: 'All' }, ...uniqueUsers as any]);
+        } catch (error) {}
+      };
+      fetchEmployees();
+    }
+  }, [user]);
+
+  // 1. DATE PARSER
+  const parseDate = (dateStr: any) => {
+      if (!dateStr) return new Date();
+      if (dateStr instanceof Date) return dateStr;
+      
+      if (typeof dateStr === 'string' && dateStr.includes('/')) {
+          const parts = dateStr.split('/');
+          if (parts.length === 3) {
+              return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+          }
+      }
+      return new Date(dateStr);
+  };
+
+  const changeDate = (dir: number) => {
+      const d = new Date(currentDate);
+      if (viewMode === 'Day') d.setDate(d.getDate() + dir);
+      else if (viewMode === 'Month') d.setMonth(d.getMonth() + dir);
+      else if (viewMode === 'Year') d.setFullYear(d.getFullYear() + dir);
+      setCurrentDate(d);
+  };
+
+  const getHeaderDate = () => {
+      if (viewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
+      if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      if (viewMode === 'Year') return currentDate.getFullYear().toString();
+      return "All Time";
+  };
+
+  // --- 🔥 FILTER LOGIC ---
+  const getFilteredData = () => {
+      let data = Array.isArray(travelList) ? [...travelList] : [];
+
+      // 1. SECURITY FILTER
+      if (canManage) {
+          if(selectedEmployeeName !== 'All') {
+              data = data.filter((item: any) => (item.senderName || item.userName) === selectedEmployeeName);
+          }
+      } else {
+          if(user?.uid) {
+              data = data.filter((item: any) => item.senderId === user.uid);
+          }
+      }
+
+      // 2. SEARCH FILTER
+      if (searchText) {
+          const term = searchText.toLowerCase();
+          data = data.filter((item: any) => {
+             const fullString = `
+                ${item.date || ''} 
+                ${item.amount ? item.amount.toString() : ''} 
+                ${item.from || ''} 
+                ${item.to || ''} 
+                ${item.senderName || item.userName || ''} 
+                ${item.mode || ''} 
+                ${item.status || ''}
+             `.toLowerCase();
+             return fullString.includes(term);
+          });
+      }
+
+      // 3. DATE FILTER
+      if (viewMode !== 'All') {
+          const targetYear = currentDate.getFullYear();
+          const targetMonth = currentDate.getMonth();
+          const targetDay = currentDate.getDate();
+
+          data = data.filter(item => {
+              if(!item.date) return false;
+              const itemDate = parseDate(item.date);
+              
+              if (viewMode === 'Year') return itemDate.getFullYear() === targetYear;
+              if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
+              if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
+              return true;
+          });
+      }
+
+      data.sort((a: any, b: any) => parseDate(b.date).getTime() - parseDate(a.date).getTime());
+      return data;
+  };
+
+  const displayList = getFilteredData();
+  
+  // 🔥🔥 UPDATED CALCULATION LOGIC 🔥🔥
+  
+  // 1. Outstanding (Current Payable): Pending + Approved (Excluded Settled/Paid/Rejected)
+  const outstandingAmount = displayList
+      .filter((item: any) => item.status === 'Pending' || item.status === 'Approved')
+      .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+
+  // 2. Total History: Everything visible (Except Rejected)
+  const totalHistoryAmount = displayList
+      .filter((item: any) => item.status !== 'Rejected')
+      .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+
+
+  // --- SETTLEMENT LOGIC ---
+  const handleSettlement = async () => {
+      if (selectedEmployeeName === 'All') {
+          Alert.alert("Error", "Please select a specific employee to settle.");
+          return;
+      }
+      
+      if (outstandingAmount === 0) {
+          Alert.alert("Info", "No outstanding travel balance to settle.");
+          return;
+      }
+
+      Alert.alert(
+          "Confirm Payment",
+          `Mark ₹${outstandingAmount} as PAID for ${selectedEmployeeName}?`,
+          [
+              { text: "Cancel", style: "cancel" },
+              { text: "Confirm & Pay", onPress: processSettlement }
+          ]
+      );
+  };
+
+  const processSettlement = async () => {
+      setIsSettling(true);
+      try {
+          const batch = writeBatch(db);
+          
+          // Settle Pending + Approved
+          const itemsToSettle = displayList.filter(item => item.status === 'Pending' || item.status === 'Approved');
+
+          if (itemsToSettle.length === 0) {
+              Alert.alert("Info", "No pending items to settle.");
+              setIsSettling(false);
+              return;
+          }
+
+          itemsToSettle.forEach((item) => {
+              // 🔥 FIX: Collection name matched with DataContext
+              const ref = doc(db, "travel_notes", item.id); 
+              batch.update(ref, { status: 'Settled', settlementDate: new Date().toISOString() });
+          });
+
+          await batch.commit();
+          
+          // 🔥 Notification Add Karein (Optional but Professional)
+          try {
+              const targetUserId = itemsToSettle[0].senderId;
+              if(targetUserId) {
+                  await addDoc(collection(db, "notifications"), {
+                      title: "Travel Expenses Settled 💰",
+                      message: `Your travel claims have been settled.`,
+                      to: selectedEmployeeName,
+                      userId: targetUserId,
+                      route: "/travel",
+                      read: false,
+                      createdAt: new Date().toISOString(),
+                      type: "success"
+                  });
+              }
+          } catch(e) {}
+
+          if(refreshData) await refreshData();
+          Alert.alert("Success", "Travel Expenses Settled!");
+      } catch (error) {
+          console.error(error);
+          Alert.alert("Error", "Settlement failed. Check console.");
+      } finally {
+          setIsSettling(false);
+      }
+  };
+
+  const openDetails = (item: any) => {
+      setSelectedItem(item);
+      setModalVisible(true);
+  };
+
+  const getModeIcon = (mode: string) => {
+      if(!mode) return 'walk';
+      const m = mode.toLowerCase();
+      if(m.includes('bike')) return 'bicycle';
+      if(m.includes('car') || m.includes('taxi')) return 'car';
+      if(m.includes('bus')) return 'bus';
+      if(m.includes('train')) return 'train';
+      if(m.includes('flight')) return 'airplane';
+      return 'walk';
+  };
+
+  const renderItem = ({ item }: any) => {
+    const isSettled = item.status === 'Settled' || item.status === 'Paid';
+    const isPending = item.status === 'Pending';
+    
+    return (
+        <TouchableOpacity style={[styles.card, isSettled && {opacity: 0.7, backgroundColor:'#f9f9f9'}]} onPress={() => openDetails(item)}>
+            <View style={styles.cardHeader}>
+                <Text style={styles.date}>{item.date}</Text>
+                <View style={{flexDirection:'row', alignItems:'center'}}>
+                    <View style={[styles.amountBadge, isSettled && {backgroundColor:'#e0e0e0', borderColor:'#ccc'}]}>
+                        <Text style={[styles.amountText, isSettled && {color:'gray'}]}>₹{item.amount || '0'}</Text>
+                    </View>
+                    
+                    {/* Status Badges */}
+                    {isSettled && (
+                        <View style={{marginLeft:5, backgroundColor:'#e3f2fd', paddingHorizontal:6, paddingVertical:2, borderRadius:4}}>
+                            <Text style={{color:'#1565c0', fontSize:10, fontWeight:'bold'}}>PAID</Text>
+                        </View>
+                    )}
+                    {isPending && (
+                        <View style={{marginLeft:5, backgroundColor:'#fff3e0', paddingHorizontal:6, paddingVertical:2, borderRadius:4}}>
+                            <Text style={{color:'#ef6c00', fontSize:10, fontWeight:'bold'}}>PENDING</Text>
+                        </View>
+                    )}
+                </View>
+            </View>
+            
+            <View style={styles.routeRow}>
+                <View style={{flex:1}}>
+                    <Text style={styles.label}>From</Text>
+                    <Text style={styles.place} numberOfLines={1}>{item.from}</Text>
+                </View>
+                <Ionicons name="arrow-forward" size={18} color="#bbb" style={{marginHorizontal:10, marginTop:12}} />
+                <View style={{flex:1, alignItems:'flex-end'}}>
+                    <Text style={styles.label}>To</Text>
+                    <Text style={styles.place} numberOfLines={1}>{item.to}</Text>
+                </View>
+            </View>
+
+            <View style={styles.divider} />
+            
+            <View style={styles.footer}>
+                <View style={{flexDirection:'row', alignItems:'center'}}>
+                    <Ionicons name="person-circle-outline" size={16} color="gray" />
+                    <Text style={styles.senderName} numberOfLines={1}> {item.senderName || item.userName || 'Unknown'}</Text>
+                </View>
+                <View style={{flexDirection:'row', alignItems:'center'}}>
+                    <Ionicons name={getModeIcon(item.mode) as any} size={14} color="#3b5998" style={{marginRight:4}}/>
+                    <Text style={styles.distance}>{item.distance} km</Text>
+                </View>
+            </View>
+        </TouchableOpacity>
+    );
+  };
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <View style={{flexDirection:'row', alignItems:'center'}}>
+            <TouchableOpacity onPress={() => router.back()}>
+                <Ionicons name="arrow-back" size={24} color="#333" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Travel History</Text>
+        </View>
+        <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_travel' as any)}>
+            <Ionicons name="add" size={20} color="white" />
+            <Text style={{color:'white', fontWeight:'bold', marginLeft:5}}>Add</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* 🔥 DUAL BALANCE CARD */}
+      <View style={styles.balanceContainer}>
+          <View style={{flexDirection:'row', justifyContent:'space-between', width:'100%'}}>
+              
+              {/* Outstanding Box */}
+              <View style={{alignItems:'center', flex:1}}>
+                  <Text style={styles.statLabel}>Outstanding (Due)</Text>
+                  <Text style={[styles.statValue, {color:'#d32f2f'}]}>₹{outstandingAmount.toLocaleString()}</Text>
+              </View>
+
+              <View style={styles.vDivider} />
+
+              {/* Total History Box */}
+              <View style={{alignItems:'center', flex:1}}>
+                  <Text style={styles.statLabel}>Total Spent</Text>
+                  <Text style={[styles.statValue, {color:'#3b5998'}]}>₹{totalHistoryAmount.toLocaleString()}</Text>
+              </View>
+          </View>
+
+          {/* Settle Button Row */}
+          <View style={{flexDirection:'row', justifyContent:'space-between', width:'100%', marginTop:15, alignItems:'center', borderTopWidth:1, borderTopColor:'#eee', paddingTop:10}}>
+              {canManage && selectedEmployeeName !== 'All' ? (
+                  <>
+                    <Text style={{color:'#3b5998', fontSize:12, fontWeight:'bold'}}>👤 {selectedEmployeeName}</Text>
+                    <TouchableOpacity style={[styles.settleBtn, outstandingAmount === 0 && {backgroundColor:'#ccc'}]} onPress={handleSettlement} disabled={isSettling || outstandingAmount === 0}>
+                        {isSettling ? <ActivityIndicator color="white" size="small"/> : <Text style={styles.settleText}>Clear Due</Text>}
+                    </TouchableOpacity>
+                  </>
+              ) : (
+                  <Text style={{color:'gray', fontSize:11, fontStyle:'italic', width:'100%', textAlign:'center'}}>
+                      {canManage ? "Select an employee to settle accounts" : "Your Travel Summary"}
+                  </Text>
+              )}
+          </View>
+      </View>
+
+      {/* FILTER UI */}
+      <View style={{backgroundColor:'white', paddingBottom:10}}>
+          
+          <View style={styles.tabContainer}>
+              {['Day', 'Month', 'Year', 'All'].map((m) => (
+                  <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
+                      <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
+                  </TouchableOpacity>
+              ))}
+          </View>
+
+          {canManage && (
+              <TouchableOpacity style={styles.employeeFilterBtn} onPress={() => setShowEmployeePicker(true)}>
+                  <Ionicons name="people" size={18} color="#2e7d32" />
+                  <Text style={{fontSize:13, marginLeft:8, color:'#2e7d32', fontWeight:'600'}}>
+                      {selectedEmployeeName === 'All' ? 'View All Staff' : selectedEmployeeName}
+                  </Text>
+                  <Ionicons name="chevron-down" size={16} color="#2e7d32" style={{marginLeft:'auto'}}/>
+              </TouchableOpacity>
+          )}
+
+          {viewMode !== 'All' && (
+              <View style={styles.dateNav}>
+                  <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
+                  <Text style={styles.monthText}>{getHeaderDate()}</Text>
+                  <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
+              </View>
+          )}
+
+          <View style={{paddingHorizontal:15}}>
+              <View style={styles.searchBar}>
+                  <Ionicons name="search" size={20} color="gray" />
+                  <TextInput 
+                      style={styles.searchInput}
+                      placeholder="Search..."
+                      value={searchText}
+                      onChangeText={setSearchText}
+                  />
+                  {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={20} color="gray" /></TouchableOpacity>}
+              </View>
+          </View>
+      </View>
+
+      <FlatList 
+        data={displayList}
+        keyExtractor={(item: any) => item.id}
+        renderItem={renderItem}
+        contentContainerStyle={{padding: 15}}
+        ListEmptyComponent={
+            <Text style={{textAlign:'center', marginTop:50, color:'gray'}}>No travel records found.</Text>
+        }
+      />
+
+      {/* DETAIL POPUP */}
+      <Modal visible={modalVisible} transparent={true} animationType="slide">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+                <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:15}}>
+                    <Text style={styles.modalTitle}>Travel Receipt</Text>
+                    <TouchableOpacity onPress={() => setModalVisible(false)}>
+                        <Ionicons name="close-circle" size={30} color="#d32f2f" />
+                    </TouchableOpacity>
+                </View>
+
+                {selectedItem && (
+                    <ScrollView showsVerticalScrollIndicator={false}>
+                        {canManage && (
+                            <View style={{backgroundColor:'#e3f2fd', padding:10, borderRadius:8, marginBottom:10}}>
+                                <Text style={{color:'#1565c0', fontWeight:'bold', textAlign:'center'}}>👤 {selectedItem.senderName}</Text>
+                            </View>
+                        )}
+
+                        <Text style={styles.sectionHeader}>Journey Details</Text>
+                        <DetailRow label="Date" value={selectedItem.date} icon="calendar" />
+                        <DetailRow label="Mode" value={selectedItem.mode} icon={getModeIcon(selectedItem.mode)} />
+                        <DetailRow label="From" value={selectedItem.from} icon="location" />
+                        <DetailRow label="To" value={selectedItem.to} icon="flag" />
+                        <DetailRow label="Distance" value={`${selectedItem.distance} km`} icon="resize" />
+
+                        <Text style={styles.sectionHeader}>Expense Details</Text>
+                        <View style={styles.amountBox}>
+                            <Text style={{fontSize:14, color:'gray'}}>Claim Amount</Text>
+                            <Text style={{fontSize:24, fontWeight:'bold', color:'#2e7d32'}}>₹{selectedItem.amount || 0}</Text>
+                            {selectedItem.status === 'Settled' && <Text style={{color:'green', fontSize:12, fontWeight:'bold', marginTop:5}}>(PAID / SETTLED)</Text>}
+                        </View>
+
+                        <Text style={styles.sectionHeader}>Purpose / Note</Text>
+                        <View style={styles.noteBox}>
+                            <Text style={{fontSize:14, color:'#333', lineHeight:20}}>
+                                {selectedItem.purpose || selectedItem.note || 'No description provided.'}
+                            </Text>
+                        </View>
+                    </ScrollView>
+                )}
+            </View>
+          </View>
+      </Modal>
+
+      <Modal visible={showEmployeePicker} transparent animationType="fade">
+          <TouchableOpacity style={styles.pickerOverlay} onPress={() => setShowEmployeePicker(false)}>
+              <View style={styles.pickerContainer}>
+                  <Text style={styles.pickerHeader}>Select Employee</Text>
+                  <FlatList 
+                    data={employees} 
+                    keyExtractor={(item, index) => index.toString()} 
+                    renderItem={({item}) => (
+                      <TouchableOpacity style={styles.pickerItem} onPress={() => { setSelectedEmployeeName(item.name); setShowEmployeePicker(false); }}>
+                          <Text style={{fontSize:16, color:'#333'}}>{item.name}</Text>
+                          {selectedEmployeeName === item.name && <Ionicons name="checkmark" size={18} color="green" />}
+                      </TouchableOpacity>
+                  )} />
+              </View>
+          </TouchableOpacity>
+      </Modal>
+
+    </View>
+  );
+}
+
+const DetailRow = ({label, value, icon}: any) => (
+    <View style={{flexDirection:'row', alignItems:'center', marginBottom:12, borderBottomWidth:1, borderBottomColor:'#f0f0f0', paddingBottom:8}}>
+        <View style={{width:30}}><Ionicons name={icon as any} size={20} color="#3b5998" /></View>
+        <View style={{flex:1, flexDirection:'row', justifyContent:'space-between'}}>
+            <Text style={{fontSize:13, color:'gray'}}>{label}</Text>
+            <Text style={{fontSize:14, fontWeight:'600', color:'#333'}}>{value}</Text>
+        </View>
+    </View>
+);
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 2, borderBottomWidth:1, borderColor:'#eee' },
+  headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#333' },
+  addBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#3b5998', borderRadius:5, paddingHorizontal:12, paddingVertical:8 },
+  
+  balanceContainer: { backgroundColor: 'white', margin: 15, borderRadius: 10, padding: 15, elevation: 3, alignItems:'center', borderLeftWidth:5, borderLeftColor:'#3b5998' },
+  statLabel: { fontSize:10, color:'gray', textTransform:'uppercase' },
+  statValue: { fontSize:18, fontWeight:'bold', marginTop:2 },
+  vDivider: { width:1, height:30, backgroundColor:'#eee' },
+  
+  settleBtn: { backgroundColor: '#2e7d32', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, marginLeft: 'auto' },
+  settleText: { color: 'white', fontSize: 12, fontWeight: 'bold' },
+
+  tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', margin: 15, borderRadius: 8, padding: 3, marginBottom: 10 },
+  tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
+  activeTab: { backgroundColor: 'white', elevation: 2 },
+  tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
+  activeTabText: { color: '#3b5998', fontWeight: 'bold' },
+  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 10, marginHorizontal: 15, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#eee' },
+  monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
+  employeeFilterBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#e8f5e9', paddingHorizontal:12, paddingVertical:10, marginHorizontal:15, borderRadius:8, borderWidth:1, borderColor:'#2e7d32', marginBottom:10 },
+  searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', paddingHorizontal: 10, borderRadius: 8, alignItems: 'center', height: 40 },
+  searchInput: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
+
+  card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 15, elevation: 2 },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom:10 },
+  date: { fontWeight:'bold', color:'gray', fontSize:13 },
+  modeBadge: { flexDirection:'row', backgroundColor:'#f57c00', paddingHorizontal:8, paddingVertical:4, borderRadius:12, alignItems:'center' },
+  amountBadge: { backgroundColor:'#e8f5e9', paddingHorizontal:8, paddingVertical:4, borderRadius:12, borderWidth:1, borderColor:'#c8e6c9' },
+  amountText: { color:'#2e7d32', fontWeight:'bold', fontSize:12 },
+  routeRow: { flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
+  label: { fontSize:10, color:'gray' },
+  place: { fontSize:15, fontWeight:'600', color:'#333' },
+  divider: { height:1, backgroundColor:'#eee', marginVertical:10 },
+  footer: { flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
+  senderName: { color:'gray', fontSize:12, fontStyle:'italic' },
+  distance: { fontWeight:'bold', color:'#3b5998', fontSize:16 },
+  
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 20 },
+  modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 25, elevation: 5, maxHeight:'85%' },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', color:'#3b5998' },
+  userInfoBox: { backgroundColor:'#f0f4f8', padding:15, borderRadius:10, marginBottom:15 },
+  infoLabel: { color:'gray', fontSize:12 },
+  infoValue: { fontWeight:'bold', color:'#333', fontSize:13 },
+  sectionHeader: { fontSize:14, fontWeight:'bold', color:'#555', marginTop:10, marginBottom:10, textTransform:'uppercase' },
+  amountBox: { alignItems:'center', backgroundColor:'#e8f5e9', padding:15, borderRadius:10, marginBottom:10, borderStyle:'dashed', borderWidth:1, borderColor:'green' },
+  noteBox: { backgroundColor: '#fff', padding: 10, borderRadius: 5, marginTop: 2, borderWidth:1, borderColor:'#eee' },
+  
+  pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
+  pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation:10 },
+  pickerHeader: { fontWeight:'bold', fontSize:16, marginBottom:10, color:'#3b5998', textAlign:'center' },
+  pickerItem: { paddingVertical:12, borderBottomWidth:1, borderBottomColor:'#eee', flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
+});
