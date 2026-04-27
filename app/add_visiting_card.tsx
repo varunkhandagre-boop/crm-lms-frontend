@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     FlatList,
     KeyboardAvoidingView,
@@ -14,19 +15,26 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { useData } from './context/DataContext';
 
-// 🔥🔥 1. FIREBASE IMPORTS ADDED
-import { addDoc, collection } from 'firebase/firestore';
-import { db } from '../firebaseConfig'; // ⚠️ Path check karein
+// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
+import { useData } from './context/DataContext';
 
 export default function AddVisitingCardScreen() {
   const router = useRouter();
-  // ✅ FIX: cardRequestList bhi nikala taaki count mil sake
-  const { addCardRequest, currentUser, cardRequestList = [] } = useData();
+  
+  // 🔥 1. Context se sirf User & Notification
+  const { currentUser, addNotification } = useData();
+
+  // 🔥 2. Naya SaaS Engine connect kiya
+  const { fetchSaaSData, addSaaSData } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded State
+  const [cardRequestList, setCardRequestList] = useState<any[]>([]);
 
   // --- FORM DATA ---
   const [shippingAddress, setShippingAddress] = useState('');
+  const [loading, setLoading] = useState(false); 
   
   // --- DYNAMIC TABLE STATE ---
   const [rows, setRows] = useState([
@@ -41,6 +49,17 @@ export default function AddVisitingCardScreen() {
     "Visiting Card", "Service Report", "Delivery Challan", "Receipt Book", "Letterhead",
     "Catalog", "Catalog (Manual Entry)", "Others"
   ];
+
+  // 🔥 4. LOAD REQUESTS ON MOUNT (For ID Generation)
+  useEffect(() => {
+      const loadData = async () => {
+          if (currentUser?.companyId) {
+              const reqs = await fetchSaaSData("visiting_cards");
+              setCardRequestList(reqs);
+          }
+      };
+      loadData();
+  }, [currentUser]);
 
   const handleAddRow = () => {
     const newId = rows.length > 0 ? rows[rows.length - 1].id + 1 : 1;
@@ -73,7 +92,7 @@ export default function AddVisitingCardScreen() {
     setRows(rows.map(row => row.id === id ? { ...row, customType: text } : row));
   };
 
-  // SAVE FUNCTION
+  // 🔥 5. SAAS SAVE LOGIC
   const handleSave = async () => {
       if (!shippingAddress) {
           Alert.alert("Required", "Please enter shipping address.");
@@ -86,60 +105,72 @@ export default function AddVisitingCardScreen() {
           return;
       }
 
-      // Prepare final items list
-      const finalItems = rows.map(r => ({
-          type: r.type === 'Catalog (Manual Entry)' ? (r as any).customType || 'Manual Catalog' : r.type,
-          quantity: r.quantity
-      }));
+      setLoading(true); 
 
-      // ✅ FIX 1: Sequential ID Logic
-      const yy = new Date().getFullYear().toString().slice(-2); // "25"
-      const nextNum = String((cardRequestList.length || 0) + 1).padStart(2, '0'); // "01", "02"...
-
-      const newRequest = {
-          id: Date.now().toString(),
-          reqId: `VCR-${yy}-${nextNum}`, // e.g. VCR-25-01
-          
-          date: new Date().toISOString().split('T')[0],
-          shippingAddress: shippingAddress,
-          items: finalItems,
-          
-          status: 'Pending',
-          trackingNo: '', 
-          outDate: '',
-
-          // SECURITY METADATA
-          senderId: currentUser?.id || 'guest',
-          
-          // ✅ FIX 2: Changed to 'userName' to match list view
-          userName: currentUser?.name || 'Unknown',
-          
-          role: currentUser?.role || 'Employee',
-          createdAt: new Date().toISOString()
-      };
-
-      await addCardRequest(newRequest);
-
-      // 🔥🔥 2. NOTIFICATION TRIGGER ADDED 🔥🔥
       try {
-          // Prepare a short summary of items for the notification
-          const itemSummary = finalItems.map(i => `${i.type} (${i.quantity})`).join(', ');
-          
-          await addDoc(collection(db, "notifications"), {
-              title: "New Stationery Request 📇",
-              message: `${currentUser?.name} requested: ${itemSummary}.`,
-              to: "Admin",
-              route: "/visiting_cards",
-              read: false,
-              createdAt: new Date().toISOString(),
-              type: "warning"
-          });
-      } catch (e) {
-          console.log("Notification Error:", e);
-      }
+          // Prepare final items list
+          const finalItems = rows.map(r => ({
+              type: r.type === 'Catalog (Manual Entry)' ? (r as any).customType || 'Manual Catalog' : r.type,
+              quantity: r.quantity
+          }));
 
-      Alert.alert("Success", "Request Submitted & Admin Notified!");
-      router.back();
+          // SMART FINANCIAL YEAR LOGIC
+          const today = new Date();
+          const targetMonth = today.getMonth(); 
+          const targetYear = today.getFullYear();
+          
+          const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+          const fyString = `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`; 
+          
+          const fyStartDateStr = `${fyStartYear}-04-01`;
+          const fyEndDateStr = `${fyStartYear + 1}-03-31`;
+
+          const count = cardRequestList ? cardRequestList.filter((c: any) => {
+              const reqDate = c.date || (c.createdAt ? c.createdAt.split('T')[0] : '');
+              if (!reqDate) return false;
+              return reqDate >= fyStartDateStr && reqDate <= fyEndDateStr;
+          }).length + 1 : 1;
+
+          const nextNum = String(count).padStart(2, '0'); 
+
+          // Clean Payload (Engine adds ID, CompanyId, SenderId, CreatedAt)
+          const newRequest = {
+              reqId: `VCR-${fyString}-${nextNum}`, 
+              date: today.toISOString().split('T')[0],
+              dateIso: today.toISOString().split('T')[0],
+              shippingAddress: shippingAddress,
+              items: finalItems,
+              status: 'Pending',
+              trackingNo: '', 
+              outDate: '',
+              role: currentUser?.role || 'Employee'
+          };
+
+          const res = await addSaaSData("visiting_cards", newRequest);
+
+          if (res.success) {
+              // 🔥 REAL PUSH NOTIFICATION
+              if (addNotification) {
+                  const itemSummary = finalItems.map(i => `${i.type} (${i.quantity})`).join(', ');
+                  await addNotification({
+                      title: "New Stationery Request 📇",
+                      message: `${currentUser?.name} requested: ${itemSummary}.`,
+                      to: "Admin", // Ya 'Store'
+                      route: "/visiting_cards",
+                      type: "warning"
+                  });
+              }
+
+              Alert.alert("Success", "Request Submitted & Admin Notified!");
+              router.back();
+          } else {
+              Alert.alert("Error", "Could not submit request.");
+          }
+      } catch (error) {
+          Alert.alert("Error", "Could not submit request. Try again.");
+      } finally {
+          setLoading(false); 
+      }
   };
 
   return (
@@ -156,7 +187,7 @@ export default function AddVisitingCardScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
         style={{flex: 1}}
       >
-        <ScrollView contentContainerStyle={styles.contentContainer}>
+        <ScrollView contentContainerStyle={styles.contentContainer} keyboardShouldPersistTaps="handled">
             
             {/* User Info */}
             <View style={styles.row}>
@@ -234,8 +265,16 @@ export default function AddVisitingCardScreen() {
                 <Text style={styles.addRowText}>+ Add Item</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-                <Text style={styles.saveBtnText}>Submit Request</Text>
+            <TouchableOpacity 
+                style={[styles.saveButton, loading && { opacity: 0.6 }]} 
+                onPress={handleSave}
+                disabled={loading}
+            >
+                {loading ? (
+                    <ActivityIndicator color="white" size="small" />
+                ) : (
+                    <Text style={styles.saveBtnText}>Submit Request</Text>
+                )}
             </TouchableOpacity>
             
             <View style={{height:50}} />

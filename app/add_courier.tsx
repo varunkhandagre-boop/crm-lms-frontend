@@ -16,20 +16,29 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+
+// 🔥 SAAS IMPORTS (Firebase DB removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
-import { addDoc, collection } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
-
-// 🔥 PDF & FILE SYSTEM IMPORTS
+// 🔥 PDF & FILE SYSTEM IMPORTS (Untouched)
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
 export default function AddCourierScreen() {
   const router = useRouter();
-  // 🔥 UPDATED: Added 'productList'
-  const { addCourier, user, courierList, orgList, companyProfile, productList = [] } = useData();
+  
+  // 🔥 1. Context se sirf user, profile aur Notification engine nikala
+  const { currentUser, companyProfile, addNotification } = useData();
+  
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded Lists
+  const [orgList, setOrgList] = useState<any[]>([]);
+  const [productList, setProductList] = useState<any[]>([]);
+  const [courierList, setCourierList] = useState<any[]>([]);
 
   // STATES
   const [date, setDate] = useState(new Date()); 
@@ -47,6 +56,7 @@ export default function AddCourierScreen() {
   const [searchOrg, setSearchOrg] = useState('');
   const [selectedOrg, setSelectedOrg] = useState<any>(null);
   const [isManualEntry, setIsManualEntry] = useState(false); 
+  const [orgId, setOrgId] = useState('');
 
   // ADDRESS STATES
   const [fromName, setFromName] = useState(''); 
@@ -58,10 +68,28 @@ export default function AddCourierScreen() {
   const [items, setItems] = useState([{ description: '', qty: '' }]);
   const [loading, setLoading] = useState(false);
 
-  // 🔥 PRODUCT MODAL STATES
+  // PRODUCT MODAL STATES
   const [showProductModal, setShowProductModal] = useState(false);
   const [activeRowIndex, setActiveRowIndex] = useState(-1);
   const [searchProduct, setSearchProduct] = useState('');
+
+  // 🔥 4. LOAD DATA ON MOUNT
+  useEffect(() => {
+      const loadData = async () => {
+          if (currentUser?.companyId) {
+              // Promise.all se teeno requests ek sath fast execute hongi
+              const [orgs, prods, couriers] = await Promise.all([
+                  fetchSaaSData("organizations"),
+                  fetchSaaSData("products"),
+                  fetchSaaSData("couriers") // Chahiye DC number calculation ke liye
+              ]);
+              setOrgList(orgs);
+              setProductList(prods);
+              setCourierList(couriers);
+          }
+      };
+      loadData();
+  }, [currentUser]);
 
   // AUTO FILL LOGIC
   useEffect(() => {
@@ -73,28 +101,30 @@ export default function AddCourierScreen() {
           setFromCity(myCity);
           setToName(''); setToCity('');
           setSelectedOrg(null); setIsManualEntry(false);
+          setOrgId(''); 
       } else {
           setFromName(''); setFromCity('');
           setSelectedOrg(null); setIsManualEntry(false);
+          setOrgId(''); 
 
-          const myRole = user?.role || '';
-          const isOfficeRole = ['Admin', 'Manager', 'Account', 'Accountant', 'Store', 'Store Keeper', 'Hr'].includes(myRole);
+          const myRole = currentUser?.role || '';
+          const isOfficeRole = ['Admin', 'Manager', 'Account', 'Accountant', 'Store', 'Store Keeper', 'Hr', 'SuperAdmin'].includes(myRole);
 
           if (isOfficeRole) {
               setToName(myCompName);
               setToCity(myCity);
           } else {
-              setToName(user?.name || 'Office'); 
-              setToCity('Nagpur');
+              setToName(currentUser?.name || 'Office'); 
+              setToCity('Nagpur'); // Default ya phir current user ka city map kar sakte hain
           }
       }
-  }, [type, user, companyProfile]);
+  }, [type, currentUser, companyProfile]);
 
   const formatDate = (rawDate: Date) => {
-    let day = rawDate.getDate().toString().padStart(2, '0');
-    let month = (rawDate.getMonth() + 1).toString().padStart(2, '0');
-    let year = rawDate.getFullYear();
-    return `${day}/${month}/${year}`;
+      let day = rawDate.getDate().toString().padStart(2, '0');
+      let month = (rawDate.getMonth() + 1).toString().padStart(2, '0');
+      let year = rawDate.getFullYear();
+      return `${day}/${month}/${year}`;
   };
 
   const handleAddItem = () => {
@@ -114,7 +144,6 @@ export default function AddCourierScreen() {
       setItems(newList);
   };
 
-  // 🔥 HANDLE PRODUCT SELECT
   const openProductModal = (index: number) => {
       setActiveRowIndex(index);
       setSearchProduct('');
@@ -130,7 +159,7 @@ export default function AddCourierScreen() {
       setShowProductModal(false);
   };
 
-  // PDF GENERATOR
+  // PDF GENERATOR (Untouched - works perfectly)
   const generateChallan = async (data: any) => {
       try {
           let tableRows = '';
@@ -273,6 +302,8 @@ export default function AddCourierScreen() {
           setFromName(name);
           setFromCity(fullAddress);
       }
+      
+      setOrgId(item.id || ''); 
       setSelectedOrg(item);
       setIsManualEntry(false); 
       setShowOrgModal(false);
@@ -281,11 +312,14 @@ export default function AddCourierScreen() {
   const handleManualEntry = () => {
       setIsManualEntry(true); 
       setSelectedOrg(null);
+      setOrgId(''); 
+      
       if(type === 'Outward') { setToName(''); setToCity(''); }
       else { setFromName(''); setFromCity(''); }
       setShowOrgModal(false);
   };
 
+  // 🔥 5. SAAS SAVE LOGIC
   const handleSave = async () => {
       if (!docketNo || !courierName || !fromName || !toName) {
           Alert.alert("Missing Fields", "Please fill Sender/Receiver and Courier details.");
@@ -303,69 +337,86 @@ export default function AddCourierScreen() {
           
           let dcNumber = "";
           if (type === 'Outward') {
-              const currentYear = new Date().getFullYear();
-              const count = courierList ? courierList.filter((c: any) => c.type === 'Outward' && c.dateIso && c.dateIso.startsWith(String(currentYear))).length + 1 : 1;
+              const targetMonth = date.getMonth(); 
+              const targetYear = date.getFullYear();
+              
+              const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+              const fyString = `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`;
+              
+              const fyStartDateStr = `${fyStartYear}-04-01`;
+              const fyEndDateStr = `${fyStartYear + 1}-03-31`;
+
+              const count = courierList ? courierList.filter((c: any) => {
+                  if (c.type !== 'Outward' || !c.dateIso) return false;
+                  return c.dateIso >= fyStartDateStr && c.dateIso <= fyEndDateStr;
+              }).length + 1 : 1;
+
               const prefix = companyProfile?.shortName ? companyProfile.shortName.toUpperCase() : 'LMS';
-              dcNumber = `${prefix}-DC-${currentYear}-${String(count).padStart(3, '0')}`;
+              dcNumber = `${prefix}-DC-${fyString}-${String(count).padStart(3, '0')}`;
           }
 
+          // Engine baaki saari details khud add kar dega
           const newEntry = {
-              id: Date.now().toString(),
               date: formatDate(date), 
               dateIso: date.toISOString().split('T')[0], 
               courierDate: formatDate(courierDate),
               type, docketNo, courierName,
+              orgId: orgId,
               sender: finalSender, receiver: finalReceiver, toCity, 
-              
               items: items, 
               material: items.map(i => i.description).join(', '), 
               qty: items.length.toString(), 
-              
               dcNo: dcNumber, 
               status: 'Pending',
-              senderId: user?.uid || 'guest', senderName: user?.name || 'Unknown', role: user?.role || 'Employee',
-              createdAt: new Date().toISOString(),
               location: null 
           };
 
-          await addCourier(newEntry);
+          const res = await addSaaSData("couriers", newEntry);
           
-          try {
-              let notifTitle = type === 'Inward' ? "New Courier Received 📦" : "Courier Dispatched 🚀";
-              let notifMsg = type === 'Inward' ? `Courier from ${fromName}` : `Outward to ${toName}. DC: ${dcNumber}`;
-              await addDoc(collection(db, "notifications"), {
-                  title: notifTitle, message: notifMsg, to: "Admin", route: "/courier", read: false, createdAt: new Date().toISOString(), type: "info"
-              });
-          } catch(e) {}
+          if (res.success) {
+              // 🔥 REAL PUSH NOTIFICATION
+              if (addNotification) {
+                  let notifTitle = type === 'Inward' ? "New Courier Received 📦" : "Courier Dispatched 🚀";
+                  let notifMsg = type === 'Inward' ? `Courier from ${fromName}` : `Outward to ${toName}. DC: ${dcNumber}`;
+                  await addNotification({
+                      title: notifTitle, 
+                      message: notifMsg, 
+                      to: "Admin", 
+                      route: "/courier", 
+                      type: "info"
+                  });
+              }
 
-          if (type === 'Outward') {
-              Alert.alert("Success ✅", "Saved! Share Delivery Challan?", [
-                  { text: "No", onPress: () => router.back(), style: 'cancel' },
-                  { text: "Yes, Share PDF", onPress: async () => { await generateChallan(newEntry); router.back(); }}
-              ]);
+              if (type === 'Outward') {
+                  Alert.alert("Success ✅", "Saved! Share Delivery Challan?", [
+                      { text: "No", onPress: () => router.back(), style: 'cancel' },
+                      { text: "Yes, Share PDF", onPress: async () => { await generateChallan(newEntry); router.back(); }}
+                  ]);
+              } else {
+                  Alert.alert("Success", "Entry Saved!");
+                  router.back();
+              }
           } else {
-              Alert.alert("Success", "Entry Saved!");
-              router.back();
+              Alert.alert("Error", "Could not save entry.");
           }
       } catch (e) { Alert.alert("Error", "Could not save entry."); } 
       finally { setLoading(false); }
   };
 
   const filteredOrgs = orgList.filter((o:any) => (o.name || '').toLowerCase().includes(searchOrg.toLowerCase()) || (o.orgName || '').toLowerCase().includes(searchOrg.toLowerCase()));
-  
-  // 🔥 FILTER PRODUCTS
   const filteredProducts = productList.filter((p:any) => (p.name || '').toLowerCase().includes(searchProduct.toLowerCase()));
 
   return (
     <View style={styles.container}>
+      
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
         <Text style={styles.headerTitle}>Log New Courier</Text>
         <View style={{width:24}} /> 
       </View>
 
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{flex: 1}}>
-        <ScrollView contentContainerStyle={styles.content}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{flex: 1}} keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 20}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
             
             <View style={styles.topRow}>
                 <TouchableOpacity style={styles.dateBtn} onPress={() => setShowDatePicker(true)}>
@@ -399,19 +450,21 @@ export default function AddCourierScreen() {
                         )}
                     </View>
                 </View>
+                
                 {type === 'Inward' && !isManualEntry ? (
                     <TouchableOpacity style={styles.selector} onPress={() => setShowOrgModal(true)}>
                         <Text style={[styles.selectorText, !fromName && {color:'#999'}]}>{fromName || "Select Sender"}</Text>
-                        <Ionicons name="search" size={20} color="#3b5998" />
+                        {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="#3b5998" />}
                     </TouchableOpacity>
                 ) : (
                     <TextInput 
-                        style={[styles.input, type==='Outward' && {backgroundColor:'#eee'}]} 
-                        placeholder="Sender Name" value={fromName} onChangeText={setFromName} 
-                        editable={type === 'Inward' || isManualEntry} 
+                        style={styles.input} 
+                        placeholder={type === 'Outward' ? "Sender Name (Your Branch)" : "Sender Name"} 
+                        value={fromName} 
+                        onChangeText={setFromName} 
                     />
                 )}
-                <TextInput style={[styles.input, type==='Outward' && {backgroundColor:'#eee'}]} placeholder="City / Location" value={fromCity} onChangeText={setFromCity} editable={type === 'Inward' || isManualEntry} />
+                <TextInput style={styles.input} placeholder={type === 'Outward' ? "City (Your Location)" : "City / Location"} value={fromCity} onChangeText={setFromCity} />
             </View>
 
             <View style={styles.sectionCard}>
@@ -426,19 +479,21 @@ export default function AddCourierScreen() {
                          )}
                     </View>
                 </View>
+
                 {type === 'Outward' && !isManualEntry ? (
                     <TouchableOpacity style={styles.selector} onPress={() => setShowOrgModal(true)}>
                         <Text style={[styles.selectorText, !toName && {color:'#999'}]}>{toName || "Select Receiver"}</Text>
-                        <Ionicons name="search" size={20} color="#3b5998" />
+                        {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="#3b5998" />}
                     </TouchableOpacity>
                 ) : (
                     <TextInput 
-                        style={[styles.input, type==='Inward' && {backgroundColor:'#eee'}]} 
-                        placeholder="Receiver Name" value={toName} onChangeText={setToName} 
-                        editable={type === 'Outward' || isManualEntry} 
+                        style={styles.input} 
+                        placeholder={type === 'Inward' ? "Receiver Name (Your Branch)" : "Receiver Name"} 
+                        value={toName} 
+                        onChangeText={setToName} 
                     />
                 )}
-                <TextInput style={[styles.input, type==='Inward' && {backgroundColor:'#eee'}]} placeholder="City / Address" value={toCity} onChangeText={setToCity} editable={type === 'Outward' || isManualEntry} />
+                <TextInput style={styles.input} placeholder={type === 'Inward' ? "City (Your Location)" : "City / Address"} value={toCity} onChangeText={setToCity} />
             </View>
 
             <Text style={styles.label}>Courier Service Details</Text>
@@ -473,10 +528,9 @@ export default function AddCourierScreen() {
                 <View key={index} style={styles.itemRow}>
                     <Text style={{position:'absolute', left:-15, top:12, fontSize:10, color:'#ccc'}}>{index+1}.</Text>
                     
-                    {/* 🔥 UPDATED: Input with List Icon */}
                     <View style={{flex: 2, marginRight: 10, position: 'relative'}}>
                         <TextInput 
-                            style={[styles.dynamicInput, {width: '100%', paddingRight: 35}]} // Padding for icon
+                            style={[styles.dynamicInput, {width: '100%', paddingRight: 35}]}
                             multiline={true} 
                             placeholder="Item Name" 
                             value={item.description} 
@@ -514,7 +568,8 @@ export default function AddCourierScreen() {
             <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={loading}>
                 {loading ? <ActivityIndicator color="white"/> : <Text style={styles.saveText}>{type === 'Outward' ? 'Save & Generate DC' : 'Save Entry'}</Text>}
             </TouchableOpacity>
-            <View style={{height: 50}} />
+            
+            <View style={{height: 100}} />
 
         </ScrollView>
       </KeyboardAvoidingView>
@@ -541,6 +596,9 @@ export default function AddCourierScreen() {
                 keyExtractor={item => item.id}
                 renderItem={({item}) => (
                     <TouchableOpacity style={styles.orgItem} onPress={() => handleOrgSelect(item)}>
+                        <View style={styles.orgIcon}>
+                            <Ionicons name="business" size={20} color="#3b5998" />
+                        </View>
                         <View style={{flex:1}}>
                             <Text style={styles.orgName}>{item.name || item.orgName}</Text>
                             <Text style={styles.orgSubText}>{item.city ? `📍 ${item.city}` : ''}</Text>
@@ -552,7 +610,7 @@ export default function AddCourierScreen() {
         </View>
       </Modal>
 
-      {/* 🔥 NEW: PRODUCT SELECTION MODAL */}
+      {/* PRODUCT SELECTION MODAL */}
       <Modal visible={showProductModal} animationType="slide">
         <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
@@ -614,6 +672,7 @@ const styles = StyleSheet.create({
   searchInputModal: { flex: 1, marginLeft: 10, fontSize: 16 },
   manualOption: { flexDirection:'row', alignItems:'center', padding:15, backgroundColor:'#fff3e0', borderRadius:10, marginBottom:10, borderWidth:1, borderColor:'#ffcc80' },
   orgItem: { padding: 15, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', flexDirection:'row', alignItems:'center', justifyContent:'space-between' },
+  orgIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#e3f2fd', justifyContent: 'center', alignItems: 'center', marginRight: 15 },
   orgName: { fontWeight: 'bold', fontSize: 16 },
   orgSubText: { color: 'gray', fontSize: 12, marginTop: 2 },
   

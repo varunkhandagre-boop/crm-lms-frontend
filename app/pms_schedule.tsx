@@ -3,6 +3,8 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { collection, getDocs, query } from 'firebase/firestore';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   FlatList,
   Modal,
   RefreshControl,
@@ -16,25 +18,46 @@ import {
 import { db } from '../firebaseConfig';
 import { useData } from './context/DataContext';
 
+// 🔥 PDF IMPORTS
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+
 export default function PMSScheduleScreen() {
   const router = useRouter();
-  const { pmsList = [], user, refreshData } = useData();
+  // 🔥 Added orgList to fetch missing address for PDF
+  const { pmsList = [], orgList = [], user, refreshData, companyProfile } = useData(); 
 
   // --- STATES ---
   const [filter, setFilter] = useState<'All' | 'Upcoming' | 'Completed' | 'Overdue'>('All');
   const [searchText, setSearchText] = useState('');
-  const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'Year' | 'All'>('Year');
+  
+  // 🔥 CHANGED: 'Year' to 'FY'
+  const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
+  const [generatingPdf, setGeneratingPdf] = useState(false); 
 
   // --- EMPLOYEE FILTER ---
   const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
   const [selectedEmployee, setSelectedEmployee] = useState('All');
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
+
+  // 🔥 PAGINATION STATE (SMART LOAD MORE)
+  const [visibleCount, setVisibleCount] = useState(20);
+
+  // 🔥 RESET PAGINATION ON FILTER CHANGE
+  useEffect(() => {
+      if (viewMode === 'Day') {
+          setVisibleCount(500); 
+      } else {
+          setVisibleCount(20); 
+      }
+  }, [viewMode, currentDate, searchText, filter, selectedEmployee]);
 
   const isAdmin = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr'].includes(user?.role || '');
 
@@ -104,19 +127,148 @@ export default function PMSScheduleScreen() {
     return `${yyyy}-${mm}-${dd}`;
   };
 
+  // 🔥 CHANGED: FY Navigation
   const changeDate = (dir: number) => {
     const d = new Date(currentDate);
     if (viewMode === 'Day') d.setDate(d.getDate() + dir);
     else if (viewMode === 'Month') d.setMonth(d.getMonth() + dir);
-    else if (viewMode === 'Year') d.setFullYear(d.getFullYear() + dir);
+    else if (viewMode === 'FY') d.setFullYear(d.getFullYear() + dir);
     setCurrentDate(d);
   };
 
+  // 🔥 CHANGED: Header Title logic for Financial Year
   const getHeaderDate = () => {
     if (viewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-    if (viewMode === 'Year') return currentDate.getFullYear().toString();
+    if (viewMode === 'FY') {
+        const m = currentDate.getMonth(); 
+        const y = currentDate.getFullYear();
+        const startY = m >= 3 ? y : y - 1;
+        return `FY ${startY.toString().slice(-2)}-${(startY + 1).toString().slice(-2)}`;
+    }
     return "All Time";
+  };
+
+  // 🔥 PDF GENERATOR FOR PMS REPORT
+  const generatePMSPDF = async (pmsData: any) => {
+    setGeneratingPdf(true);
+    try {
+        // 🔥 SMART ADDRESS FALLBACK
+        let orgAddr = pmsData.address || '';
+        let orgCity = pmsData.city || '';
+        
+        if (!orgAddr || !orgCity) {
+            const org = orgList.find((o: any) => 
+                (pmsData.orgId && o.id === pmsData.orgId) || 
+                o.orgName === pmsData.hospitalName || 
+                o.name === pmsData.hospitalName
+            );
+            if (org) {
+                orgAddr = orgAddr || org.address || '';
+                orgCity = orgCity || org.city || '';
+            }
+        }
+
+        const logoHTML = companyProfile?.logoUrl 
+            ? `<img src="${companyProfile.logoUrl}" style="height: 60px; margin-bottom: 10px;" />` 
+            : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
+
+        const signatureHTML = companyProfile?.signatureUrl 
+            ? `<img src="${companyProfile.signatureUrl}" style="height: 40px; margin-top: 5px; margin-bottom: 2px;" />` 
+            : `<div style="height: 40px;"></div>`;
+
+        const htmlContent = `
+        <html>
+          <head>
+            <style>
+              body { font-family: 'Helvetica', sans-serif; padding: 30px; border: 2px solid #333; }
+              .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px; }
+              .title { font-size: 22px; font-weight: bold; color: #1a237e; text-transform: uppercase; }
+              .sub-title { font-size: 12px; margin-top: 2px; color: #333; line-height: 1.4; }
+              .box { border: 1px solid #000; padding: 15px; margin-top: 10px; background-color: #fcfcfc; }
+              .row { display: flex; justify-content: space-between; margin-bottom: 5px; }
+              .label { font-weight: bold; color: #444; width: 120px; display: inline-block; }
+              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; }
+              .sign-box { text-align: center; width: 45%; }
+              .sign-line { border-top: 1px solid #000; width: 100%; margin-top: 5px; margin-bottom: 5px; }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              ${logoHTML}
+              ${companyProfile?.logoUrl ? `<div class="title">${companyProfile.companyName}</div>` : ''}
+              <div class="sub-title">${companyProfile?.address || ''}</div>
+              <div class="sub-title">
+                Phone: ${companyProfile?.contactPhone || companyProfile?.phone || '-'} | 
+                Email: ${companyProfile?.contactEmail || companyProfile?.email || '-'}
+              </div>
+            </div>
+
+            <h3 style="text-align: center; text-decoration: underline;">PREVENTIVE MAINTENANCE REPORT</h3>
+
+            <div class="box">
+                <div class="row">
+                    <div><span class="label">PMS Type:</span> <b>${pmsData.type || 'Preventive'}</b></div>
+                    <div><span class="label">Date:</span> ${new Date(pmsData.lastDoneDate || pmsData.date).toLocaleDateString('en-GB')}</div>
+                </div>
+            </div>
+
+            <div class="box">
+                <div style="font-size:14px; margin-bottom:5px;"><b>Client:</b> ${pmsData.hospitalName}</div>
+                <div style="font-size:14px; margin-bottom:5px;"><b>Address:</b> ${orgAddr}, ${orgCity}</div>
+                <div style="font-size:14px; margin-bottom:5px;"><b>Department:</b> ${pmsData.department || '-'}</div>
+            </div>
+
+            <div class="box">
+                <div class="row"><div><span class="label">Machine:</span> ${pmsData.machine || pmsData.machineName}</div></div>
+                <div class="row"><div><span class="label">Model:</span> ${pmsData.model}</div></div>
+                <div class="row"><div><span class="label">Serial No:</span> <b>${pmsData.serialNo}</b></div></div>
+            </div>
+
+            <div class="box" style="background-color: #e8f5e9;">
+                <div class="row">
+                    <div><span class="label">Next Due Date:</span> <b style="color:#d32f2f; font-size:16px;">${new Date(pmsData.computedDueDate).toLocaleDateString('en-GB')}</b></div>
+                </div>
+            </div>
+
+            <div class="box">
+                <div style="font-weight:bold; text-decoration:underline;">Engineer Checklist / Remarks:</div>
+                <div style="margin-top:10px; min-height: 60px;">${pmsData.remarks || pmsData.remark || 'Routine checkup done. Machine working fine.'}</div>
+            </div>
+
+            <div class="footer">
+              <div class="sign-box">
+                <div style="height: 60px;"></div> 
+                <div class="sign-line"></div>
+                <div style="font-weight: bold;">Client Signature & Stamp</div>
+              </div>
+
+              <div class="sign-box">
+                <div style="font-weight: bold; font-size: 12px;">Engineer: ${pmsData.senderName}</div>
+                ${signatureHTML}
+                <div class="sign-line"></div>
+                <div style="font-weight: bold;">Engineer Signature</div>
+              </div>
+            </div>
+          </body>
+        </html>`;
+
+        const { uri } = await Print.printToFileAsync({ html: htmlContent });
+        const cleanName = `PMS_${(pmsData.hospitalName || 'Client').replace(/ /g, '_')}_${Date.now()}.pdf`;
+        // @ts-ignore
+        const newPath = `${FileSystem.cacheDirectory}${cleanName}`;
+
+        try {
+            await FileSystem.copyAsync({ from: uri, to: newPath });
+            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share PMS Report` });
+        } catch (error) {
+            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+        }
+    } catch (error) {
+        Alert.alert("Error", "Could not generate PDF");
+    } finally {
+        setGeneratingPdf(false);
+    }
   };
 
   // --- DATA PROCESSING ---
@@ -187,13 +339,18 @@ export default function PMSScheduleScreen() {
       });
     }
 
-    // 3. DATE FILTER
+    // 3. DATE FILTER (🔥 FY Boundaries added)
     const shouldApplyDateFilter = viewMode !== 'All' && (filter === 'All' || filter === 'Completed');
 
     if (shouldApplyDateFilter) {
       const tYear = currentDate.getFullYear();
       const tMonth = currentDate.getMonth();
       const tDay = currentDate.getDate();
+
+      // FY Boundaries Logic
+      const fyStartYear = tMonth >= 3 ? tYear : tYear - 1;
+      const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // 1st April
+      const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // 31st March
 
       data = data.filter((item: any) => {
         let dateField;
@@ -207,9 +364,11 @@ export default function PMSScheduleScreen() {
         if (!ts) return false;
 
         const d = new Date(ts);
-        if (viewMode === 'Year') return d.getFullYear() === tYear;
+        const itemTime = d.getTime();
+
         if (viewMode === 'Month') return d.getFullYear() === tYear && d.getMonth() === tMonth;
         if (viewMode === 'Day') return d.getFullYear() === tYear && d.getMonth() === tMonth && d.getDate() === tDay;
+        if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
         return true;
       });
     }
@@ -227,7 +386,8 @@ export default function PMSScheduleScreen() {
     return data;
   };
 
-  const displayList = getFilteredData();
+  const fullList = getFilteredData(); 
+  const renderedList = fullList.slice(0, visibleCount);
 
   const openDetails = (item: any) => {
     setSelectedItem(item);
@@ -266,7 +426,6 @@ export default function PMSScheduleScreen() {
       >
         <View style={styles.cardHeader}>
           <View style={{ flex: 1 }}>
-            {/* 🔥 ADDED CITY HERE */}
             <Text style={styles.hospitalName} numberOfLines={1}>
                 {item.hospital || item.hospitalName || 'Unknown'}
                 {item.city ? `, ${item.city}` : ''}
@@ -309,7 +468,10 @@ export default function PMSScheduleScreen() {
           </View>
 
           {(filter === 'Upcoming' || filter === 'Overdue' || !isDone) && (
-            <TouchableOpacity style={styles.actionBtn} onPress={() => router.push({ pathname: '/add_pms', params: { id: item.id, hospital: item.hospitalName, serial: item.serialNo } } as any)}>
+            <TouchableOpacity 
+                style={styles.actionBtn} 
+                onPress={() => router.push({ pathname: '/add_pms', params: { id: item.id, hospital: item.hospitalName, orgId: item.orgId || '', serial: item.serialNo } } as any)}
+            >
               <Text style={styles.btnText}>Perform</Text>
               <Ionicons name="arrow-forward" size={12} color="#3b5998" />
             </TouchableOpacity>
@@ -338,7 +500,8 @@ export default function PMSScheduleScreen() {
       {/* FILTERS */}
       <View style={{ backgroundColor: 'white', paddingBottom: 10, marginBottom: 5 }}>
         <View style={styles.tabContainer}>
-          {['Day', 'Month', 'Year', 'All'].map((m) => (
+          {/* 🔥 CHANGED: 'Year' to 'FY' */}
+          {['Day', 'Month', 'FY', 'All'].map((m) => (
             <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
               <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
             </TouchableOpacity>
@@ -392,16 +555,47 @@ export default function PMSScheduleScreen() {
             </TouchableOpacity>
           ))}
         </ScrollView>
-        <Text style={{ textAlign: 'right', fontSize: 12, color: 'gray', paddingRight: 15 }}>Total: {displayList.length}</Text>
+        <Text style={{ textAlign: 'right', fontSize: 12, color: 'gray', paddingRight: 15 }}>Total: {fullList.length}</Text>
       </View>
 
       <FlatList
-        data={displayList}
+        data={renderedList}
         keyExtractor={(item, index) => item.id || index.toString()}
         contentContainerStyle={{ padding: 5, paddingBottom: 100 }}
         renderItem={renderItem}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListEmptyComponent={<Text style={{ textAlign: 'center', marginTop: 50, color: 'gray' }}>No Data Found</Text>}
+        
+        // 🔥 LOAD MORE BUTTON WRAPPED WITH PADDING
+        ListFooterComponent={
+            <View style={{ paddingBottom: 80 }}>
+                {visibleCount < fullList.length ? (
+                    <TouchableOpacity 
+                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                        style={{
+                            padding: 12, 
+                            backgroundColor: '#fff', 
+                            alignItems: 'center', 
+                            marginVertical: 10, 
+                            borderRadius: 8, 
+                            borderWidth: 1, 
+                            borderColor: '#ddd',
+                            marginHorizontal: 15
+                        }}
+                    >
+                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                            👇 Load More Records ({fullList.length - visibleCount} remaining)
+                        </Text>
+                    </TouchableOpacity>
+                ) : (
+                    fullList.length > 0 ? (
+                        <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
+                            --- End of List ---
+                        </Text>
+                    ) : null
+                )}
+            </View>
+        }
       />
 
       {/* DETAILS MODAL */}
@@ -419,12 +613,9 @@ export default function PMSScheduleScreen() {
               <ScrollView>
                 <View style={styles.infoSection}>
                   <Text style={styles.sectionHeader}>MACHINE INFO</Text>
-                  
-                  {/* 🔥 ADDED CITY HERE ALSO */}
                   <DetailRow label="Hospital" 
                              value={`${selectedItem.hospital || selectedItem.hospitalName}${selectedItem.city ? `, ${selectedItem.city}` : ''}`} 
                   />
-                  
                   <DetailRow label="Machine" value={selectedItem.machine || selectedItem.machineName} />
                   <DetailRow label="Model" value={selectedItem.model} /> 
                   <DetailRow label="Serial No" value={selectedItem.serialNo} highlight />
@@ -454,6 +645,24 @@ export default function PMSScheduleScreen() {
                 <View style={styles.noteBox}>
                   <Text style={styles.noteText}>{selectedItem.remarks || selectedItem.remark || 'No remarks added.'}</Text>
                 </View>
+
+                {isTaskCompleted(selectedItem.status) && (
+                    <TouchableOpacity 
+                        style={[styles.pdfBtn, generatingPdf && { opacity: 0.6 }]}
+                        onPress={() => generatePMSPDF(selectedItem)}
+                        disabled={generatingPdf}
+                    >
+                        {generatingPdf ? (
+                            <ActivityIndicator color="#1565c0" size="small" />
+                        ) : (
+                            <>
+                                <Ionicons name="document-text-outline" size={20} color="#1565c0" />
+                                <Text style={styles.pdfBtnText}>Share PMS Report</Text>
+                            </>
+                        )}
+                    </TouchableOpacity>
+                )}
+
               </ScrollView>
             )}
           </View>
@@ -513,7 +722,7 @@ const styles = StyleSheet.create({
 
   employeeFilterBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e8f5e9', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2e7d32' },
 
-  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 6, marginHorizontal: 15, borderRadius: 8, marginBottom: 5, borderWidth: 1, borderColor: '#eee' },
+  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 4, marginHorizontal: 15, borderRadius: 8, marginBottom: 5, borderWidth: 1, borderColor: '#eee' },
   monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
 
   searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', marginHorizontal: 15, paddingHorizontal: 10, borderRadius: 8, height: 36, alignItems: 'center', marginBottom: 5 },
@@ -544,6 +753,9 @@ const styles = StyleSheet.create({
   dateRowBox: { flexDirection: 'row', backgroundColor: '#f5f5f5', padding: 10, borderRadius: 8, marginBottom: 10 },
   noteBox: { backgroundColor: '#fff3e0', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ffe0b2' },
   noteText: { fontSize: 13, color: '#e65100', fontStyle: 'italic' },
+
+  pdfBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#e3f2fd', padding: 12, borderRadius: 8, marginTop: 15, borderWidth: 1, borderColor: '#2196f3' },
+  pdfBtnText: { color: '#1565c0', fontWeight: 'bold', marginLeft: 8 },
 
   pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
   pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation: 10 },

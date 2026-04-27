@@ -22,14 +22,15 @@ export default function TravelNoteScreen() {
   const { travelList = [], user, refreshData } = useData(); 
 
   // --- STATES ---
-  // Default 'All' rakha hai taaki aate hi purana data dikhe. 
-  // Agar aap chahte hain Year change par 0 ho, to isse 'Year' kar sakte hain.
-  const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'Year' | 'All'>('All'); 
+  // 🔥 CHANGED: 'Year' replaced with 'FY'
+  const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All'); 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [searchText, setSearchText] = useState('');
   
   const [selectedItem, setSelectedItem] = useState<any>(null); 
   const [modalVisible, setModalVisible] = useState(false);
+  
+  // 🔥 SETTLEMENT LOADING STATE
   const [isSettling, setIsSettling] = useState(false);
 
   // --- EMPLOYEE FILTER ---
@@ -37,7 +38,19 @@ export default function TravelNoteScreen() {
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All'); 
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
+  // 🔥 PAGINATION STATE (SMART LOAD MORE)
+  const [visibleCount, setVisibleCount] = useState(20);
+
   const canManage = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr'].includes(user?.role || '');
+
+  // 🔥 RESET PAGINATION ON FILTER CHANGE
+  useEffect(() => {
+      if (viewMode === 'Day') {
+          setVisibleCount(500); // Day view me sab dikha do
+      } else {
+          setVisibleCount(20); // Baki views me Load More use karo
+      }
+  }, [viewMode, currentDate, searchText, selectedEmployeeName]);
 
   // 0. FETCH EMPLOYEES
   useEffect(() => {
@@ -73,18 +86,25 @@ export default function TravelNoteScreen() {
       return new Date(dateStr);
   };
 
+  // 🔥 CHANGED: FY Navigation
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
       if (viewMode === 'Day') d.setDate(d.getDate() + dir);
       else if (viewMode === 'Month') d.setMonth(d.getMonth() + dir);
-      else if (viewMode === 'Year') d.setFullYear(d.getFullYear() + dir);
+      else if (viewMode === 'FY') d.setFullYear(d.getFullYear() + dir);
       setCurrentDate(d);
   };
 
+  // 🔥 CHANGED: Header Title logic for Financial Year
   const getHeaderDate = () => {
       if (viewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
       if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      if (viewMode === 'Year') return currentDate.getFullYear().toString();
+      if (viewMode === 'FY') {
+          const m = currentDate.getMonth(); 
+          const y = currentDate.getFullYear();
+          const startY = m >= 3 ? y : y - 1;
+          return `FY ${startY.toString().slice(-2)}-${(startY + 1).toString().slice(-2)}`;
+      }
       return "All Time";
   };
 
@@ -126,13 +146,19 @@ export default function TravelNoteScreen() {
           const targetMonth = currentDate.getMonth();
           const targetDay = currentDate.getDate();
 
+          // 🔥 FY Boundaries Logic
+          const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // 1st April
+          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // 31st March
+
           data = data.filter(item => {
               if(!item.date) return false;
               const itemDate = parseDate(item.date);
+              const itemTime = itemDate.getTime();
               
-              if (viewMode === 'Year') return itemDate.getFullYear() === targetYear;
               if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
               if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
+              if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
               return true;
           });
       }
@@ -141,9 +167,12 @@ export default function TravelNoteScreen() {
       return data;
   };
 
-  const displayList = getFilteredData();
+  const displayList = getFilteredData(); // 🔥 Full Data for Totals
   
-  // 🔥🔥 UPDATED CALCULATION LOGIC 🔥🔥
+  // 🔥 SLICE FOR LIST (Rendered Data)
+  const renderedList = displayList.slice(0, visibleCount);
+  
+  // 🔥🔥 UPDATED CALCULATION LOGIC (Uses Full List) 🔥🔥
   
   // 1. Outstanding (Current Payable): Pending + Approved (Excluded Settled/Paid/Rejected)
   const outstandingAmount = displayList
@@ -193,14 +222,13 @@ export default function TravelNoteScreen() {
           }
 
           itemsToSettle.forEach((item) => {
-              // 🔥 FIX: Collection name matched with DataContext
               const ref = doc(db, "travel_notes", item.id); 
               batch.update(ref, { status: 'Settled', settlementDate: new Date().toISOString() });
           });
 
           await batch.commit();
           
-          // 🔥 Notification Add Karein (Optional but Professional)
+          // 🔥 Notification Add
           try {
               const targetUserId = itemsToSettle[0].senderId;
               if(targetUserId) {
@@ -332,12 +360,19 @@ export default function TravelNoteScreen() {
               </View>
           </View>
 
-          {/* Settle Button Row */}
+          {/* 🔥 UPDATED SETTLE BUTTON WITH BLUR EFFECT */}
           <View style={{flexDirection:'row', justifyContent:'space-between', width:'100%', marginTop:15, alignItems:'center', borderTopWidth:1, borderTopColor:'#eee', paddingTop:10}}>
               {canManage && selectedEmployeeName !== 'All' ? (
                   <>
                     <Text style={{color:'#3b5998', fontSize:12, fontWeight:'bold'}}>👤 {selectedEmployeeName}</Text>
-                    <TouchableOpacity style={[styles.settleBtn, outstandingAmount === 0 && {backgroundColor:'#ccc'}]} onPress={handleSettlement} disabled={isSettling || outstandingAmount === 0}>
+                    <TouchableOpacity 
+                        style={[
+                            styles.settleBtn, 
+                            (outstandingAmount === 0 || isSettling) && {backgroundColor:'#ccc', opacity: 0.6}
+                        ]} 
+                        onPress={handleSettlement} 
+                        disabled={isSettling || outstandingAmount === 0}
+                    >
                         {isSettling ? <ActivityIndicator color="white" size="small"/> : <Text style={styles.settleText}>Clear Due</Text>}
                     </TouchableOpacity>
                   </>
@@ -352,8 +387,9 @@ export default function TravelNoteScreen() {
       {/* FILTER UI */}
       <View style={{backgroundColor:'white', paddingBottom:10}}>
           
+          {/* 🔥 CHANGED: 'Year' to 'FY' */}
           <View style={styles.tabContainer}>
-              {['Day', 'Month', 'Year', 'All'].map((m) => (
+              {['Day', 'Month', 'FY', 'All'].map((m) => (
                   <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
                       <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
                   </TouchableOpacity>
@@ -393,12 +429,41 @@ export default function TravelNoteScreen() {
       </View>
 
       <FlatList 
-        data={displayList}
+        data={renderedList}
         keyExtractor={(item: any) => item.id}
         renderItem={renderItem}
         contentContainerStyle={{padding: 15}}
         ListEmptyComponent={
             <Text style={{textAlign:'center', marginTop:50, color:'gray'}}>No travel records found.</Text>
+        }
+        
+        // 🔥 LOAD MORE BUTTON FOOTER
+        ListFooterComponent={
+            visibleCount < displayList.length ? (
+                <TouchableOpacity 
+                    onPress={() => setVisibleCount(prev => prev + 20)} 
+                    style={{
+                        padding: 12, 
+                        backgroundColor: '#fff', 
+                        alignItems: 'center', 
+                        marginVertical: 10, 
+                        borderRadius: 8,
+                        borderWidth: 1,
+                        borderColor: '#ddd',
+                        elevation: 1
+                    }}
+                >
+                    <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                        👇 Load More Records ({displayList.length - visibleCount} remaining)
+                    </Text>
+                </TouchableOpacity>
+            ) : (
+                displayList.length > 0 ? (
+                    <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
+                        --- End of List ---
+                    </Text>
+                ) : null
+            )
         }
       />
 

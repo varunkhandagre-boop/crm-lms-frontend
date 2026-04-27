@@ -24,7 +24,6 @@ import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 
 // PDF IMPORTS
-// 👇 Naya "Legacy" import use karein (Error hat jayega)
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -34,51 +33,56 @@ export default function PaymentCollection() {
     const { paymentList, currentUser, orgList, userList, companyProfile } = useData();
 
     const [historySearch, setHistorySearch] = useState(''); 
-    const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'Year' | 'All'>('Year');
+    const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
     const [historyDate, setHistoryDate] = useState(new Date()); 
     const [selectedHistoryItem, setSelectedHistoryItem] = useState<any>(null); 
     
-    // EDIT STATES
+    // 🔥 EDIT STATES UPGRADED
     const [isEditing, setIsEditing] = useState(false);
     const [editAmount, setEditAmount] = useState('');
     const [editNotes, setEditNotes] = useState('');
+    const [editModeVal, setEditModeVal] = useState('Cash');
+    const [editRefNumber, setEditRefNumber] = useState('');
+    
     const [loading, setLoading] = useState(false);
+    const [generatingPdf, setGeneratingPdf] = useState(false);
 
     const [selectedEmployee, setSelectedEmployee] = useState('All');
     const [showEmployeeModal, setShowEmployeeModal] = useState(false);
     const [showBankModal, setShowBankModal] = useState(false);
+    const [showEditModeModal, setShowEditModeModal] = useState(false); // Mode change picker
 
-    // 🔥 DYNAMIC QR & UPI
+    const [visibleCount, setVisibleCount] = useState(20);
+    const paymentModes = ['Cash', 'UPI', 'NEFT', 'RTGS', 'Cheque'];
+
+    useEffect(() => {
+        if (viewMode === 'Day') {
+            setVisibleCount(500); 
+        } else {
+            setVisibleCount(20); 
+        }
+    }, [viewMode, historyDate, historySearch, selectedEmployee]);
+
     const qrImageSource = companyProfile?.qrCodeUrl 
         ? { uri: companyProfile.qrCodeUrl } 
         : require('../assets/images/lmsqrcode.jpeg'); 
         
     const myUpiId = companyProfile?.upiId || "No UPI ID Set"; 
 
-    // 🔥 DYNAMIC BANK ACCOUNTS (From Profile)
-    // ✅ ADDED: 'branch' field here
     const bankAccounts = useMemo(() => {
         const banks = [];
         if (companyProfile?.bankDetails1?.accountNo) {
             banks.push({ 
-                id: 1, 
-                label: "Primary Account", 
-                name: companyProfile.companyName, 
-                bank: companyProfile.bankDetails1.bankName, 
-                branch: companyProfile.bankDetails1.branch, // 🔥 Branch Added
-                acNo: companyProfile.bankDetails1.accountNo, 
-                ifsc: companyProfile.bankDetails1.ifsc 
+                id: 1, label: "Primary Account", name: companyProfile.companyName, 
+                bank: companyProfile.bankDetails1.bankName, branch: companyProfile.bankDetails1.branch,
+                acNo: companyProfile.bankDetails1.accountNo, ifsc: companyProfile.bankDetails1.ifsc 
             });
         }
         if (companyProfile?.bankDetails2?.accountNo) {
             banks.push({ 
-                id: 2, 
-                label: "Secondary Account", 
-                name: companyProfile.companyName, 
-                bank: companyProfile.bankDetails2.bankName, 
-                branch: companyProfile.bankDetails2.branch, // 🔥 Branch Added
-                acNo: companyProfile.bankDetails2.accountNo, 
-                ifsc: companyProfile.bankDetails2.ifsc 
+                id: 2, label: "Secondary Account", name: companyProfile.companyName, 
+                bank: companyProfile.bankDetails2.bankName, branch: companyProfile.bankDetails2.branch,
+                acNo: companyProfile.bankDetails2.accountNo, ifsc: companyProfile.bankDetails2.ifsc 
             });
         }
         return banks;
@@ -86,12 +90,22 @@ export default function PaymentCollection() {
 
     const isAdmin = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr'].includes(currentUser?.role);
 
+    // 🔥 SMART LABEL HELPER
+    const getRefLabel = (mode: string) => {
+        if (mode === 'UPI') return 'UPI Transaction ID';
+        if (mode === 'NEFT' || mode === 'RTGS') return 'UTR Number';
+        if (mode === 'Cheque') return 'Cheque Number';
+        return 'Reference Number';
+    };
+
     // Reset Edit State
     useEffect(() => {
         if (selectedHistoryItem) {
             setIsEditing(false);
             setEditAmount(selectedHistoryItem.amount?.toString() || '');
             setEditNotes(selectedHistoryItem.notes || '');
+            setEditModeVal(selectedHistoryItem.mode || 'Cash');
+            setEditRefNumber(selectedHistoryItem.refNumber || '');
         }
     }, [selectedHistoryItem]);
 
@@ -110,11 +124,21 @@ export default function PaymentCollection() {
         return str + 'Only';
     };
 
+    const getFullOrgDetails = (item: any) => {
+        if (!orgList || !item) return null;
+        return orgList.find((o: any) => 
+            (item.orgId && o.id === item.orgId) || 
+            o.name === item.orgName || 
+            o.orgName === item.orgName
+        );
+    };
+
     const generateAndShareReceipt = async (paymentData: any) => {
+        setGeneratingPdf(true);
         try {
             let orgAddr = paymentData.orgAddress || '';
             if (!orgAddr) {
-                const org = orgList.find((o: any) => o.name === paymentData.orgName || o.orgName === paymentData.orgName);
+                const org = getFullOrgDetails(paymentData);
                 if (org) orgAddr = org.address || org.city || '';
             }
 
@@ -122,7 +146,7 @@ export default function PaymentCollection() {
             if (paymentData.mode !== 'Cash') {
                 paymentDetailsHTML += `
                     <div style="margin-top:2px;">Bank: ${paymentData.bankName || '-'}</div>
-                    <div>Inst. No: ${paymentData.refNumber || '-'}</div>
+                    <div>${getRefLabel(paymentData.mode)}: ${paymentData.refNumber || '-'}</div>
                 `;
                 if (paymentData.pdcDate) {
                     paymentDetailsHTML += `<div>Inst. Date: ${paymentData.pdcDate}</div>`;
@@ -169,17 +193,24 @@ export default function PaymentCollection() {
                 <div class="header">
                   ${logoHTML}
                   ${companyProfile?.logoUrl ? `<div class="title">${companyProfile.companyName}</div>` : ''}
+                  
+                  <div class="sub-title">${companyProfile?.address}</div>
                   <div class="sub-title">
-                    ${companyProfile?.address}<br>
-                    Mobile: ${companyProfile?.contactPhone || companyProfile?.phone} | Email: ${companyProfile?.contactEmail || companyProfile?.email}<br>
-                    ${companyProfile?.gstNumber ? `<b>GSTIN: ${companyProfile.gstNumber}</b>` : ''}
+                    Phone: ${companyProfile?.contactPhone || companyProfile?.phone} | 
+                    Email: ${companyProfile?.contactEmail || companyProfile?.email || '-'}
+                  </div>
+                  <div class="sub-title">
+                    ${companyProfile?.gstNumber ? `GSTIN: ${companyProfile.gstNumber}` : ''}
                   </div>
                 </div>
+
                 <h3 style="text-align: center; text-decoration: underline; margin-bottom: 20px;">PAYMENT RECEIPT</h3>
+
                 <div class="row">
                   <div><span class="label">Receipt No:</span> <b>${paymentData.receiptNo || '-'}</b></div>
                   <div><span class="label">Date:</span> ${new Date(paymentData.date).toLocaleDateString('en-GB')}</div>
                 </div>
+
                 <div class="box">
                   <p style="margin-bottom: 15px;">
                     <span class="label">Received with thanks from:</span><br> 
@@ -204,11 +235,14 @@ export default function PaymentCollection() {
                     </tr>
                   </table>
                 </div>
+
                 <div class="amount-wrapper">
                     <div style="font-weight:bold; margin-bottom:5px;">Total Payment Received</div>
                     <div class="amount-box">₹ ${paymentData.amount}/-</div>
                 </div>
+
                 ${companyBankHTML}
+
                 <div class="footer">
                   <div style="font-size:10px; max-width:250px; color:#333;">
                     *Subject to realisation of Cheque/DD.<br>
@@ -235,6 +269,8 @@ export default function PaymentCollection() {
             }
         } catch (error) { 
             Alert.alert("Error", "Could not generate receipt."); 
+        } finally {
+            setGeneratingPdf(false);
         }
     };
 
@@ -245,7 +281,9 @@ export default function PaymentCollection() {
             const payRef = doc(db, "payment_collections", selectedHistoryItem.id);
             await updateDoc(payRef, {
                 amount: parseFloat(editAmount) || 0,
-                notes: editNotes
+                notes: editNotes,
+                mode: editModeVal,
+                refNumber: editRefNumber
             });
             Alert.alert("Success", "Receipt Updated!");
             setIsEditing(false);
@@ -262,7 +300,8 @@ export default function PaymentCollection() {
             case 'Cash': return { bg: '#e8f5e9', text: '#2e7d32', icon: 'cash' };
             case 'Cheque': return { bg: '#e3f2fd', text: '#1565c0', icon: 'document-text' };
             case 'UPI': return { bg: '#fff3e0', text: '#e65100', icon: 'qr-code' };
-            case 'NEFT': return { bg: '#f3e5f5', text: '#7b1fa2', icon: 'globe' };
+            case 'NEFT': 
+            case 'RTGS': return { bg: '#f3e5f5', text: '#7b1fa2', icon: 'globe' };
             default: return { bg: '#eee', text: '#333', icon: 'card' };
         }
     };
@@ -294,14 +333,20 @@ export default function PaymentCollection() {
         const d = new Date(historyDate);
         if (viewMode === 'Day') d.setDate(d.getDate() + dir);
         else if (viewMode === 'Month') d.setMonth(d.getMonth() + dir);
-        else if (viewMode === 'Year') d.setFullYear(d.getFullYear() + dir);
+        else if (viewMode === 'FY') d.setFullYear(d.getFullYear() + dir);
         setHistoryDate(d);
     };
 
     const getHistoryHeaderDate = () => {
         if (viewMode === 'Day') return historyDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
         if (viewMode === 'Month') return historyDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-        if (viewMode === 'Year') return historyDate.getFullYear().toString();
+        if (viewMode === 'FY') {
+            const currentMonth = historyDate.getMonth(); 
+            const currentYear = historyDate.getFullYear();
+            const fyStartYear = currentMonth >= 3 ? currentYear : currentYear - 1;
+            const fyEndYear = fyStartYear + 1;
+            return `FY ${fyStartYear.toString().slice(-2)}-${fyEndYear.toString().slice(-2)}`;
+        }
         return "All Time";
     };
 
@@ -326,56 +371,44 @@ export default function PaymentCollection() {
             const targetMonth = historyDate.getMonth();
             const targetDay = historyDate.getDate();
 
+            const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+            const fyStartDate = new Date(fyStartYear, 3, 1); 
+            const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59); 
+
             data = data.filter((item: any) => {
                 if(!item.date) return false;
                 const itemDate = parseDate(item.date); 
-                if (viewMode === 'Year') return itemDate.getFullYear() === targetYear;
+                
                 if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
                 if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
+                if (viewMode === 'FY') return itemDate >= fyStartDate && itemDate <= fyEndDate;
                 return true;
             });
         }
         return data.sort((a: any, b: any) => parseDate(b.date).getTime() - parseDate(a.date).getTime());
     };
 
-    const myDisplayHistory = getMyFilteredHistory(); 
-    const totalCollected = myDisplayHistory.reduce((sum: number, item: any) => sum + (parseFloat(item.amount) || 0), 0);
+    const fullFilteredList = getMyFilteredHistory(); 
+    const renderedList = fullFilteredList.slice(0, visibleCount);
+    const totalCollected = fullFilteredList.reduce((sum: number, item: any) => sum + (parseFloat(item.amount) || 0), 0);
+    const linkedOrgDetails = selectedHistoryItem ? getFullOrgDetails(selectedHistoryItem) : null;
 
-    const getFullOrgDetails = (orgName: string) => {
-        if (!orgList || !orgName) return null;
-        return orgList.find((o: any) => o.name === orgName || o.orgName === orgName);
-    };
-
-    const linkedOrgDetails = selectedHistoryItem ? getFullOrgDetails(selectedHistoryItem.orgName) : null;
-
-    // 🔥 UPDATED SHARE FUNCTION (TypeScript Fix)
     const shareUPI = async () => {
         try {
             if (companyProfile?.qrCodeUrl) {
                 setLoading(true); 
-                
-                // 👇 FIX 1: Direct 'as any' use kiya hai taaki TS error na de
                 const cacheDir = (FileSystem as any).cacheDirectory;
                 const fileUri = `${cacheDir}payment_qr.jpg`;
 
-                // Check 1: Agar ye Base64 string hai (Data URL)
                 if (companyProfile.qrCodeUrl.startsWith('data:image')) {
                     const base64Code = companyProfile.qrCodeUrl.split('base64,')[1];
-                    
-                    // 👇 FIX 2: EncodingType ke liye bhi variable bana diya
                     const encodingType = (FileSystem as any).EncodingType ? (FileSystem as any).EncodingType.Base64 : 'base64';
-
-                    // Direct file create karo
-                    await FileSystem.writeAsStringAsync(fileUri, base64Code, {
-                        encoding: encodingType
-                    });
+                    await FileSystem.writeAsStringAsync(fileUri, base64Code, { encoding: encodingType });
                 } 
-                // Check 2: Agar ye Internet URL hai (Firebase Storage)
                 else {
                     await FileSystem.downloadAsync(companyProfile.qrCodeUrl, fileUri);
                 }
 
-                // Ab Share karo
                 await Sharing.shareAsync(fileUri, { 
                     mimeType: 'image/jpeg', 
                     dialogTitle: 'Share Payment QR', 
@@ -387,14 +420,12 @@ export default function PaymentCollection() {
                 await Share.share({ message });
             }
         } catch (error: any) { 
-            console.log("Share Error:", error); 
-            Alert.alert("Error", "Could not share QR Code. check console"); 
+            Alert.alert("Error", "Could not share QR Code."); 
         } finally {
             setLoading(false);
         }
     };
 
-    // 🔥 ADDED: Branch included in share message
     const shareAccount = async (acc: any) => {
         try {
             const message = `Bank Account Details:\n\n🏦 *${acc.bank}*\n🏛 *${acc.branch || ''}*\n📄 *${acc.label}*\n\n👤 Name: ${acc.name}\n🔢 A/C No: ${acc.acNo}\n📍 IFSC: ${acc.ifsc}\n\nPlease share screenshot after payment.`;
@@ -404,7 +435,7 @@ export default function PaymentCollection() {
 
     const renderItem = ({item}: {item: any}) => {
         const modeStyle = getModeStyles(item.mode);
-        const orgDetails = getFullOrgDetails(item.orgName);
+        const orgDetails = getFullOrgDetails(item);
         const city = orgDetails?.city || item.orgAddress || ''; 
 
         return (
@@ -469,7 +500,7 @@ export default function PaymentCollection() {
                 )}
 
                 <View style={styles.tabContainer}>
-                    {['Day', 'Month', 'Year', 'All'].map((m) => (
+                    {['Day', 'Month', 'FY', 'All'].map((m) => (
                         <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
                             <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
                         </TouchableOpacity>
@@ -496,8 +527,36 @@ export default function PaymentCollection() {
                 </View>
             </View>
 
-            <FlatList data={myDisplayHistory} keyExtractor={item => item.id} contentContainerStyle={{padding: 5, paddingBottom: 100}} renderItem={renderItem} ListEmptyComponent={<View style={{alignItems:'center', marginTop:50}}><Ionicons name="documents-outline" size={50} color="#ccc" /><Text style={{color:'gray', marginTop:10}}>No Collections Found</Text></View>} />
+            <FlatList 
+                data={renderedList} 
+                keyExtractor={item => item.id} 
+                contentContainerStyle={{padding: 5, paddingBottom: 100}} 
+                renderItem={renderItem} 
+                ListEmptyComponent={<View style={{alignItems:'center', marginTop:50}}><Ionicons name="documents-outline" size={50} color="#ccc" /><Text style={{color:'gray', marginTop:10}}>No Collections Found</Text></View>} 
+                
+                ListFooterComponent={
+                    <View style={{ paddingBottom: 80 }}>
+                        {visibleCount < fullFilteredList.length ? (
+                            <TouchableOpacity 
+                                onPress={() => setVisibleCount(prev => prev + 20)} 
+                                style={{ padding: 12, backgroundColor: '#fff', alignItems: 'center', marginVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ddd', marginHorizontal: 15 }}
+                            >
+                                <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                                    👇 Load More Records ({fullFilteredList.length - visibleCount} remaining)
+                                </Text>
+                            </TouchableOpacity>
+                        ) : (
+                            fullFilteredList.length > 0 ? (
+                                <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
+                                    --- End of List ---
+                                </Text>
+                            ) : null
+                        )}
+                    </View>
+                }
+            />
 
+            {/* DETAILS & EDIT MODAL */}
             <Modal visible={selectedHistoryItem !== null} transparent={true} animationType="fade">
                 <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{flex: 1}}>
                     <View style={styles.modalOverlayCenter}>
@@ -506,40 +565,96 @@ export default function PaymentCollection() {
                                 <Text style={styles.modalTitle}>Receipt Details</Text>
                                 <TouchableOpacity onPress={() => setSelectedHistoryItem(null)}><Ionicons name="close-circle" size={30} color="#d32f2f"/></TouchableOpacity>
                             </View>
-                            <ScrollView showsVerticalScrollIndicator={false}>
+                            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                                
+                                {/* AMOUNT BOX */}
                                 <View style={{alignItems:'center', marginBottom:15}}>
                                     {isEditing ? (
-                                        <TextInput style={styles.editInput} value={editAmount} onChangeText={setEditAmount} keyboardType="numeric" placeholder="Enter Amount" />
+                                        <View style={{width: '100%'}}>
+                                            <Text style={{fontSize:12, color:'gray', marginBottom:5}}>Edit Amount</Text>
+                                            <TextInput style={styles.editInput} value={editAmount} onChangeText={setEditAmount} keyboardType="numeric" placeholder="Enter Amount" />
+                                        </View>
                                     ) : (
-                                        <Text style={{fontSize:24, fontWeight:'bold', color:'green'}}>₹ {selectedHistoryItem?.amount}</Text>
+                                        <>
+                                            <Text style={{fontSize:24, fontWeight:'bold', color:'green'}}>₹ {selectedHistoryItem?.amount}</Text>
+                                            <Text style={{fontSize:12, color:'gray'}}>Payment Received</Text>
+                                        </>
                                     )}
-                                    <Text style={{fontSize:12, color:'gray'}}>Payment Received</Text>
                                 </View>
 
+                                {/* NON-EDITABLE ORG INFO */}
                                 <ReceiptRow label="Receipt No" value={selectedHistoryItem?.receiptNo} highlight color="#1a237e" />
-                                <ReceiptRow label="Date" value={selectedHistoryItem?.date} /><ReceiptRow label="Customer" value={selectedHistoryItem?.orgName} />
-                                {linkedOrgDetails && (<View style={{backgroundColor:'#f9f9f9', padding:10, borderRadius:8, marginBottom:10}}><ReceiptRow label="City" value={linkedOrgDetails.city} small /><ReceiptRow label="Contact" value={linkedOrgDetails.contactPerson} small /><ReceiptRow label="Mobile" value={linkedOrgDetails.mobile} small /><ReceiptRow label="Address" value={linkedOrgDetails.address} small /></View>)}
-                                <View style={styles.divider} />
-                                <View style={styles.receiptRow}><Text style={styles.receiptLabel}>Mode</Text><View style={[styles.modeBadge, {backgroundColor: getModeStyles(selectedHistoryItem?.mode || '').bg, paddingVertical:4, paddingHorizontal:10}]}><Text style={{color: getModeStyles(selectedHistoryItem?.mode || '').text, fontWeight:'bold', fontSize:14}}>{selectedHistoryItem?.mode}</Text></View></View>
-                                {selectedHistoryItem?.bankName ? <ReceiptRow label="Bank" value={selectedHistoryItem?.bankName} /> : null}
-                                {selectedHistoryItem?.refNumber ? <ReceiptRow label="Ref No" value={selectedHistoryItem?.refNumber} /> : null}
-                                
-                                {selectedHistoryItem?.billRef ? <ReceiptRow label="Manual Bill Ref" value={selectedHistoryItem?.billRef} /> : null}
-                                {selectedHistoryItem?.orderRef ? <ReceiptRow label="Linked System Order" value={selectedHistoryItem.orderRef} color="#e65100" highlight /> : null}
-                                
-                                {isEditing ? (
-                                    <TextInput style={[styles.editInput, {height:60, textAlignVertical:'top'}]} value={editNotes} onChangeText={setEditNotes} multiline placeholder="Edit Notes..." />
-                                ) : (
-                                    selectedHistoryItem?.notes ? (<View style={{marginTop:10, backgroundColor:'#fff9f0', padding:10, borderRadius:8}}><Text style={{fontSize:11, color:'#e65100', fontWeight:'bold'}}>NOTES:</Text><Text style={{fontSize:13, color:'#333'}}>{selectedHistoryItem?.notes}</Text></View>) : null
+                                <ReceiptRow label="Date" value={selectedHistoryItem?.date} />
+                                <ReceiptRow label="Customer" value={selectedHistoryItem?.orgName} />
+                                {linkedOrgDetails && (
+                                    <View style={{backgroundColor:'#f9f9f9', padding:10, borderRadius:8, marginBottom:10}}>
+                                        <ReceiptRow label="City" value={linkedOrgDetails.city} small />
+                                        <ReceiptRow label="Contact" value={linkedOrgDetails.contactPerson} small />
+                                        <ReceiptRow label="Mobile" value={linkedOrgDetails.mobile} small />
+                                        <ReceiptRow label="Address" value={linkedOrgDetails.address} small />
+                                    </View>
                                 )}
+                                <View style={styles.divider} />
                                 
+                                {/* MODE & REFERENCE SHOW (Hide when editing) */}
+                                {!isEditing && (
+                                    <>
+                                        <View style={styles.receiptRow}>
+                                            <Text style={styles.receiptLabel}>Mode</Text>
+                                            <View style={[styles.modeBadge, {backgroundColor: getModeStyles(selectedHistoryItem?.mode || '').bg, paddingVertical:4, paddingHorizontal:10}]}>
+                                                <Text style={{color: getModeStyles(selectedHistoryItem?.mode || '').text, fontWeight:'bold', fontSize:14}}>{selectedHistoryItem?.mode}</Text>
+                                            </View>
+                                        </View>
+                                        {selectedHistoryItem?.bankName ? <ReceiptRow label="Bank" value={selectedHistoryItem?.bankName} /> : null}
+                                        {selectedHistoryItem?.refNumber ? <ReceiptRow label={getRefLabel(selectedHistoryItem?.mode)} value={selectedHistoryItem?.refNumber} /> : null}
+                                        {selectedHistoryItem?.billRef ? <ReceiptRow label="Manual Bill Ref" value={selectedHistoryItem?.billRef} /> : null}
+                                        {selectedHistoryItem?.orderRef ? <ReceiptRow label="Linked System Order" value={selectedHistoryItem.orderRef} color="#e65100" highlight /> : null}
+                                    </>
+                                )}
+
+                                {/* 🔥 EDITABLE MODE & REFERENCE */}
+                                {isEditing && (
+                                    <View style={{marginTop: 10}}>
+                                        <Text style={{fontSize:12, color:'gray', marginBottom:5}}>Payment Mode</Text>
+                                        <TouchableOpacity style={styles.editDropdown} onPress={() => setShowEditModeModal(true)}>
+                                            <Text style={{color:'#333', fontSize: 16}}>{editModeVal}</Text>
+                                            <Ionicons name="caret-down" size={16} color="gray" />
+                                        </TouchableOpacity>
+
+                                        {editModeVal !== 'Cash' && (
+                                            <View style={{marginTop: 10}}>
+                                                <Text style={{fontSize:12, color:'gray', marginBottom:5}}>{getRefLabel(editModeVal)}</Text>
+                                                <TextInput style={styles.editInput} value={editRefNumber} onChangeText={setEditRefNumber} placeholder="Transaction ID / Cheque No" />
+                                            </View>
+                                        )}
+
+                                        <View style={{marginTop: 10}}>
+                                            <Text style={{fontSize:12, color:'gray', marginBottom:5}}>Notes</Text>
+                                            <TextInput style={[styles.editInput, {height:60, textAlignVertical:'top'}]} value={editNotes} onChangeText={setEditNotes} multiline placeholder="Edit Notes..." />
+                                        </View>
+                                    </View>
+                                )}
+
+                                {!isEditing && selectedHistoryItem?.notes ? (
+                                    <View style={{marginTop:10, backgroundColor:'#fff9f0', padding:10, borderRadius:8}}>
+                                        <Text style={{fontSize:11, color:'#e65100', fontWeight:'bold'}}>NOTES:</Text>
+                                        <Text style={{fontSize:13, color:'#333'}}>{selectedHistoryItem?.notes}</Text>
+                                    </View>
+                                ) : null}
+                                
+                                {/* 🔥 SHARE BUTTON */}
                                 {!isEditing && (
                                     <TouchableOpacity 
                                         style={{flexDirection:'row', alignItems:'center', justifyContent:'center', backgroundColor:'#e3f2fd', padding:12, borderRadius:8, marginTop:20, borderWidth:1, borderColor:'#2196f3'}}
                                         onPress={() => generateAndShareReceipt(selectedHistoryItem)}
+                                        disabled={generatingPdf}
                                     >
-                                        <Ionicons name="document-text-outline" size={20} color="#1565c0" />
-                                        <Text style={{color:'#1565c0', fontWeight:'bold', marginLeft:8}}>Share Receipt PDF</Text>
+                                        {generatingPdf ? <ActivityIndicator color="#1565c0" size="small"/> : 
+                                            <>
+                                                <Ionicons name="document-text-outline" size={20} color="#1565c0" />
+                                                <Text style={{color:'#1565c0', fontWeight:'bold', marginLeft:8}}>Share Receipt PDF</Text>
+                                            </>
+                                        }
                                     </TouchableOpacity>
                                 )}
 
@@ -572,11 +687,36 @@ export default function PaymentCollection() {
                 </KeyboardAvoidingView>
             </Modal>
 
-            <Modal visible={showEmployeeModal} transparent={true} animationType="slide"><View style={styles.modalOverlayCenter}><View style={styles.detailCard}>
-                <Text style={styles.modalTitle}>Select Employee</Text>
-                <FlatList data={employeeList as string[]} keyExtractor={(item) => item} renderItem={({item}) => (<TouchableOpacity style={[styles.empItem, selectedEmployee === item && {backgroundColor:'#e3f2fd'}]} onPress={() => { setSelectedEmployee(item); setShowEmployeeModal(false); }}><Text style={{fontSize:16, fontWeight: selectedEmployee === item ? 'bold' : 'normal'}}>{item}</Text>{selectedEmployee === item && <Ionicons name="checkmark" size={20} color="#3b5998" />}</TouchableOpacity>)} />
-                <TouchableOpacity style={styles.closeBtnPopup} onPress={() => setShowEmployeeModal(false)}><Text style={{color:'white', fontWeight:'bold'}}>Close</Text></TouchableOpacity>
-            </View></View></Modal>
+            {/* EDIT PAYMENT MODE MODAL */}
+            <Modal visible={showEditModeModal} transparent={true} animationType="fade">
+                <View style={styles.modalOverlayCenter}>
+                    <View style={[styles.detailCard, {maxHeight: 400}]}>
+                        <Text style={styles.modalTitle}>Change Mode</Text>
+                        {paymentModes.map(mode => (
+                            <TouchableOpacity key={mode} style={styles.empItem} onPress={() => { setEditModeVal(mode); setShowEditModeModal(false); }}>
+                                <Text style={{fontSize:16, color:'#333', fontWeight: editModeVal === mode ? 'bold' : 'normal'}}>{mode}</Text>
+                                {editModeVal === mode && <Ionicons name="checkmark" size={20} color="#3b5998" />}
+                            </TouchableOpacity>
+                        ))}
+                        <TouchableOpacity style={styles.closeBtnPopup} onPress={() => setShowEditModeModal(false)}><Text style={{color:'white', fontWeight:'bold'}}>Close</Text></TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+
+            <Modal visible={showEmployeeModal} transparent={true} animationType="slide">
+                <View style={styles.modalOverlayCenter}>
+                    <View style={styles.detailCard}>
+                        <Text style={styles.modalTitle}>Select Employee</Text>
+                        <FlatList data={employeeList as string[]} keyExtractor={(item) => item} renderItem={({item}) => (
+                            <TouchableOpacity style={[styles.empItem, selectedEmployee === item && {backgroundColor:'#e3f2fd'}]} onPress={() => { setSelectedEmployee(item); setShowEmployeeModal(false); }}>
+                                <Text style={{fontSize:16, fontWeight: selectedEmployee === item ? 'bold' : 'normal'}}>{item}</Text>
+                                {selectedEmployee === item && <Ionicons name="checkmark" size={20} color="#3b5998" />}
+                            </TouchableOpacity>
+                        )} />
+                        <TouchableOpacity style={styles.closeBtnPopup} onPress={() => setShowEmployeeModal(false)}><Text style={{color:'white', fontWeight:'bold'}}>Close</Text></TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
 
             <Modal visible={showBankModal} transparent={true} animationType="slide">
                 <View style={styles.modalOverlayCenter}>
@@ -604,7 +744,6 @@ export default function PaymentCollection() {
                                     <Text style={{fontWeight:'bold', color:'#3b5998', marginBottom:5, textDecorationLine:'underline'}}>{acc.label}</Text>
                                     <ReceiptRow label="Beneficiary" value={acc.name} small />
                                     <ReceiptRow label="Bank Name" value={acc.bank} small />
-                                    {/* 🔥 ADDED: Branch Name Display */}
                                     <ReceiptRow label="Branch" value={acc.branch} small />
                                     <ReceiptRow label="Account No" value={acc.acNo} highlight />
                                     <ReceiptRow label="IFSC Code" value={acc.ifsc} small />
@@ -657,10 +796,7 @@ const styles = StyleSheet.create({
     hOrg: { fontWeight: 'bold', fontSize: 15, color: '#333' },
     modeBadge: { flexDirection:'row', alignItems:'center', paddingHorizontal:6, paddingVertical:2, borderRadius:4, marginRight:5 },
     modeText: { fontSize: 10, fontWeight: 'bold', marginLeft: 3, textTransform:'uppercase' },
-    
-    // 🔥 New Link Badge Style
     linkTag: { flexDirection:'row', alignItems:'center', backgroundColor:'#e65100', paddingHorizontal:6, paddingVertical:2, borderRadius:4, marginRight:5 },
-
     hSubText: { fontSize: 11, color: 'gray' },
     hUser: { fontSize: 11, color: 'gray', marginLeft: 4 },
     hDate: { fontSize: 11, color: 'gray', marginTop: 2 },
@@ -676,6 +812,9 @@ const styles = StyleSheet.create({
     closeBtnPopup: { backgroundColor:'#3b5998', padding:12, borderRadius:10, alignItems:'center', marginTop:10 },
     empItem: { paddingVertical:15, borderBottomWidth:1, borderBottomColor:'#eee', flexDirection:'row', justifyContent:'space-between' },
     shareBtnSmall: { flexDirection:'row', alignItems:'center', backgroundColor:'#27ae60', paddingVertical:6, paddingHorizontal:12, borderRadius:15, alignSelf:'flex-end', marginTop:8 },
-    editInput: { borderWidth:1, borderColor:'#3b5998', borderRadius:8, padding:10, fontSize:16, width:'100%', backgroundColor:'#f0f4ff', marginBottom:10 },
+    
+    // 🔥 NEW EDIT STYLES
+    editInput: { borderWidth:1, borderColor:'#3b5998', borderRadius:8, padding:10, fontSize:15, width:'100%', backgroundColor:'#f0f4ff', marginBottom:10 },
+    editDropdown: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth:1, borderColor:'#3b5998', borderRadius:8, padding:10, backgroundColor:'#f0f4ff', marginBottom:10 },
     actionBtn: { padding:12, borderRadius:8, alignItems:'center' }
 });

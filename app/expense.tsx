@@ -24,7 +24,8 @@ export default function ExpenseScreen() {
   const { expenseList = [], updateExpenseStatus, user, addNotification, refreshData } = useData();
 
   // STATES
-  const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'Year' | 'All'>('All');
+  // 🔥 CHANGED: 'Year' to 'FY'
+  const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [searchText, setSearchText] = useState('');
   
@@ -32,12 +33,27 @@ export default function ExpenseScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [isSettling, setIsSettling] = useState(false);
 
+  // 🔥 NEW STATE FOR APPROVE/REJECT LOADING
+  const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
+
   // EMPLOYEE FILTER
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All'); 
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
+  // 🔥 PAGINATION STATE (SMART LOAD MORE)
+  const [visibleCount, setVisibleCount] = useState(20);
+
   const canManage = ['Admin', 'Manager', 'Hr', 'Account', 'Accountant'].includes(user?.role || '');
+
+  // 🔥 RESET PAGINATION ON FILTER CHANGE
+  useEffect(() => {
+      if (viewMode === 'Day') {
+          setVisibleCount(100); // Day view me sab dikha do
+      } else {
+          setVisibleCount(20); // Baki views me Load More use karo
+      }
+  }, [viewMode, currentDate, selectedEmployeeName, searchText]);
 
   // 0. FETCH EMPLOYEES
   useEffect(() => {
@@ -72,18 +88,25 @@ export default function ExpenseScreen() {
       return new Date(dateStr);
   };
 
+  // 🔥 CHANGED: FY Navigation
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
       if (viewMode === 'Day') d.setDate(d.getDate() + dir);
       else if (viewMode === 'Month') d.setMonth(d.getMonth() + dir);
-      else if (viewMode === 'Year') d.setFullYear(d.getFullYear() + dir);
+      else if (viewMode === 'FY') d.setFullYear(d.getFullYear() + dir);
       setCurrentDate(d);
   };
 
+  // 🔥 CHANGED: Header Title logic for Financial Year
   const getHeaderDate = () => {
       if (viewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
       if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      if (viewMode === 'Year') return currentDate.getFullYear().toString();
+      if (viewMode === 'FY') {
+          const m = currentDate.getMonth(); 
+          const y = currentDate.getFullYear();
+          const startY = m >= 3 ? y : y - 1;
+          return `FY ${startY.toString().slice(-2)}-${(startY + 1).toString().slice(-2)}`;
+      }
       return "All Time";
   };
 
@@ -108,13 +131,19 @@ export default function ExpenseScreen() {
         const targetMonth = currentDate.getMonth();
         const targetDay = currentDate.getDate();
 
+        // 🔥 FY Boundaries Logic
+        const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+        const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // 1st April
+        const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // 31st March
+
         data = data.filter(item => {
             if(!item.date) return false;
             const itemDate = parseDate(item.date);
+            const itemTime = itemDate.getTime();
             
-            if (viewMode === 'Year') return itemDate.getFullYear() === targetYear;
             if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
             if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
+            if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
             return true;
         });
     }
@@ -132,17 +161,20 @@ export default function ExpenseScreen() {
     return data;
   };
 
-  const displayList = getFilteredData();
+  const fullFilteredList = getFilteredData(); // 🔥 Full Data (For Calculations)
+  
+  // 🔥 SLICE DATA FOR FLATLIST (For Performance)
+  const renderedList = fullFilteredList.slice(0, visibleCount);
 
-  // 🔥🔥 UPDATED CALCULATION LOGIC (Matching Travel Page) 🔥🔥
+  // 🔥🔥 UPDATED CALCULATION LOGIC (Always uses Full Data) 🔥🔥
   
   // 1. Outstanding (Current Payable): Pending + Approved (Not Settled/Rejected)
-  const outstandingAmount = displayList
+  const outstandingAmount = fullFilteredList
       .filter((item: any) => item.status === 'Pending' || item.status === 'Approved')
       .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
 
   // 2. Total History (Spent): Everything except Rejected
-  const totalHistoryAmount = displayList
+  const totalHistoryAmount = fullFilteredList
       .filter((item: any) => item.status !== 'Rejected')
       .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
 
@@ -174,7 +206,7 @@ export default function ExpenseScreen() {
       try {
           const batch = writeBatch(db);
           // Settle both Pending & Approved
-          const itemsToSettle = displayList.filter(item => item.status === 'Pending' || item.status === 'Approved');
+          const itemsToSettle = fullFilteredList.filter(item => item.status === 'Pending' || item.status === 'Approved');
 
           itemsToSettle.forEach((item) => {
               const ref = doc(db, "expenses", item.id);
@@ -196,24 +228,31 @@ export default function ExpenseScreen() {
       setModalVisible(true);
   };
 
-  // --- APPROVAL LOGIC ---
+  // --- 🔥 UPDATED APPROVAL LOGIC (WITH LOADING) ---
   const handleStatusUpdate = async (status: string) => {
       if(updateExpenseStatus) {
-          await updateExpenseStatus(selectedItem.id, status);
+          setUpdatingStatus(status); // Start Loading
+          try {
+              await updateExpenseStatus(selectedItem.id, status);
 
-          const targetUserId = selectedItem.senderId || selectedItem.userId;
-          if (addNotification && targetUserId && targetUserId !== user?.uid) {
-              await addNotification({
-                  title: `Expense Claim ${status}`,
-                  message: `Your claim of ₹${selectedItem.amount} has been ${status}.`,
-                  type: status === 'Approved' ? 'success' : 'alert',
-                  userId: targetUserId,
-                  to: selectedItem.senderName,
-                  route: '/expense'
-              });
+              const targetUserId = selectedItem.senderId || selectedItem.userId;
+              if (addNotification && targetUserId && targetUserId !== user?.uid) {
+                  await addNotification({
+                      title: `Expense Claim ${status}`,
+                      message: `Your claim of ₹${selectedItem.amount} has been ${status}.`,
+                      type: status === 'Approved' ? 'success' : 'alert',
+                      userId: targetUserId,
+                      to: selectedItem.senderName,
+                      route: '/expense'
+                  });
+              }
+              setModalVisible(false);
+              Alert.alert("Updated", `Claim marked as ${status}`);
+          } catch (error) {
+              Alert.alert("Error", "Could not update status.");
+          } finally {
+              setUpdatingStatus(null); // Stop Loading
           }
-          setModalVisible(false);
-          Alert.alert("Updated", `Claim marked as ${status}`);
       }
   };
 
@@ -305,7 +344,8 @@ export default function ExpenseScreen() {
 
       <View style={{backgroundColor:'white', paddingBottom:10}}>
           <View style={styles.tabContainer}>
-              {['Day', 'Month', 'Year', 'All'].map((m) => (
+              {/* 🔥 CHANGED: 'Year' to 'FY' */}
+              {['Day', 'Month', 'FY', 'All'].map((m) => (
                   <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
                       <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
                   </TouchableOpacity>
@@ -345,7 +385,7 @@ export default function ExpenseScreen() {
       </View>
 
       <FlatList 
-        data={displayList}
+        data={renderedList}
         keyExtractor={item => item.id}
         renderItem={renderItem}
         contentContainerStyle={{padding: 15}}
@@ -353,6 +393,35 @@ export default function ExpenseScreen() {
             <View style={{alignItems:'center', marginTop:50}}>
                 <Ionicons name="receipt-outline" size={60} color="#ddd" />
                 <Text style={{textAlign:'center', marginTop:10, color:'gray'}}>No expense records found.</Text>
+            </View>
+        }
+        // 🔥 LOAD MORE BUTTON WRAPPED IN VIEW
+        ListFooterComponent={
+            <View style={{ paddingBottom: 80 }}>
+                {visibleCount < fullFilteredList.length ? (
+                    <TouchableOpacity 
+                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                        style={{
+                            padding: 12, 
+                            backgroundColor: '#fff', 
+                            alignItems: 'center', 
+                            marginVertical: 10, 
+                            borderRadius: 8,
+                            borderWidth: 1,
+                            borderColor: '#ddd'
+                        }}
+                    >
+                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                            👇 Load More Records ({fullFilteredList.length - visibleCount} remaining)
+                        </Text>
+                    </TouchableOpacity>
+                ) : (
+                    fullFilteredList.length > 0 ? (
+                        <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
+                            --- End of List ---
+                        </Text>
+                    ) : null
+                )}
             </View>
         }
       />
@@ -376,6 +445,12 @@ export default function ExpenseScreen() {
                           <View style={styles.divider} />
                           <DetailRow label="Amount" value={`₹ ${selectedItem.amount}`} icon="cash" highlight />
                           
+                          {/* Show Paid Label if Settled */}
+                          {selectedItem.status === 'Settled' && (
+                              <Text style={{textAlign:'center', color:'green', fontWeight:'bold', marginBottom:10}}>( PAID / SETTLED )</Text>
+                          )}
+
+                          <View style={styles.divider} />
                           <Text style={{fontSize:12, color:'gray', marginBottom:5, marginTop:5}}>Remark:</Text>
                           <Text style={{fontSize:14, fontStyle:'italic', marginBottom:15, color:'#333'}}>{selectedItem.remark}</Text>
 
@@ -386,10 +461,24 @@ export default function ExpenseScreen() {
                               </View>
                           ) : <Text style={{fontSize:12, color:'gray', fontStyle:'italic'}}>No bill attached.</Text>}
 
+                          {/* 🔥 UPDATED ACTION BUTTONS WITH BLUR & LOADING */}
                           {canManage && selectedItem.status === 'Pending' && (
                               <View style={styles.actionContainer}>
-                                  <TouchableOpacity style={styles.rejectBtn} onPress={() => handleStatusUpdate('Rejected')}><Text style={styles.btnText}>Reject</Text></TouchableOpacity>
-                                  <TouchableOpacity style={styles.approveBtn} onPress={() => handleStatusUpdate('Approved')}><Text style={styles.btnText}>Approve</Text></TouchableOpacity>
+                                  <TouchableOpacity 
+                                      style={[styles.rejectBtn, updatingStatus !== null && { opacity: 0.6 }]} 
+                                      onPress={() => handleStatusUpdate('Rejected')}
+                                      disabled={updatingStatus !== null}
+                                  >
+                                      {updatingStatus === 'Rejected' ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.btnText}>Reject</Text>}
+                                  </TouchableOpacity>
+                                  
+                                  <TouchableOpacity 
+                                      style={[styles.approveBtn, updatingStatus !== null && { opacity: 0.6 }]} 
+                                      onPress={() => handleStatusUpdate('Approved')}
+                                      disabled={updatingStatus !== null}
+                                  >
+                                      {updatingStatus === 'Approved' ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.btnText}>Approve</Text>}
+                                  </TouchableOpacity>
                               </View>
                           )}
                       </ScrollView>

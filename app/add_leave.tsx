@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import DateTimePicker from '@react-native-community/datetimepicker'; // 🔥 Golden Rule
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -16,15 +16,19 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { useData } from './context/DataContext';
 
-// 🔥🔥 1. FIREBASE IMPORTS ADDED
-import { addDoc, collection } from 'firebase/firestore';
-import { db } from '../firebaseConfig'; // ⚠️ Path check karein
+// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
+import { useData } from './context/DataContext';
 
 export default function AddLeaveScreen() {
   const router = useRouter();
-  const { addLeave, user } = useData();
+  
+  // 🔥 1. Context se Current User aur Notification Engine nikala
+  const { currentUser, addNotification } = useData();
+  
+  // 🔥 2. Naya SaaS Engine connect kiya
+  const { addSaaSData } = useSaaSDB();
 
   // States
   const [fromDate, setFromDate] = useState(new Date());
@@ -74,6 +78,7 @@ export default function AddLeaveScreen() {
     }
   }, [fromDate, toDate]);
 
+  // 🔥 3. SAAS SAVE LOGIC
   const handleSave = async () => {
       if (type === 'Select Leave Type' || !reason) {
           Alert.alert("Missing Fields", "Please select Type and enter Reason.");
@@ -86,46 +91,40 @@ export default function AddLeaveScreen() {
 
       setLoading(true);
       try {
+          // 🔥 4. CLEAN PAYLOAD: Engine will auto-add ID, CompanyID, SenderID & CreatedAt
           const newEntry = {
-              id: Date.now().toString(),
-              
               fromDate: formatDate(fromDate),
               toDate: formatDate(toDate),
               fromDateIso: fromDate.toISOString().split('T')[0],
-              
               days: days,
               type: type,
               reason: reason,
               status: 'Pending', // Manager Approval Needed
-              
-              // SECURITY METADATA
-              senderId: user?.uid || 'guest',
-              senderName: user?.name || 'Unknown',
-              role: user?.role || 'Employee',
-              createdAt: new Date().toISOString()
+              role: currentUser?.role || 'Employee',
           };
 
-          await addLeave(newEntry);
+          const result = await addSaaSData("leaves", newEntry);
           
-          // 🔥🔥 2. NOTIFICATION TRIGGER ADDED 🔥🔥
-          try {
-              await addDoc(collection(db, "notifications"), {
-                  title: "New Leave Application 📅",
-                  message: `${user?.name} applied for ${days} day(s) leave (${type}).`,
-                  to: "Admin",
-                  route: "/leave",
-                  read: false,
-                  createdAt: new Date().toISOString(),
-                  type: "alert" // High priority
-              });
-          } catch (e) {
-              console.log("Notification Error:", e);
-          }
+          if (result.success) {
+              // 🔥 5. REAL PUSH NOTIFICATION
+              if (addNotification) {
+                  await addNotification({
+                      title: "New Leave Application 📅",
+                      message: `${currentUser?.name} applied for ${days} day(s) leave (${type}).`,
+                      to: "Admin", // Manager ya HR ko bhi set kar sakte hain future me
+                      route: "/leave",
+                      type: "alert" // High priority
+                  });
+              }
 
-          Alert.alert("Success", `Applied for ${days} Day(s) Leave & Admin Notified!`);
-          router.back();
+              Alert.alert("Success", `Applied for ${days} Day(s) Leave & Admin Notified!`);
+              router.back();
+          } else {
+              Alert.alert("Error", "Could not apply leave.");
+          }
       } catch (e) {
           Alert.alert("Error", "Could not apply leave.");
+          console.error(e);
       } finally {
           setLoading(false);
       }
@@ -145,7 +144,7 @@ export default function AddLeaveScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
         style={{flex: 1}}
       >
-        <ScrollView contentContainerStyle={{padding: 20, paddingBottom: 100}}>
+        <ScrollView contentContainerStyle={{padding: 20, paddingBottom: 100}} keyboardShouldPersistTaps="handled">
             
             {/* Type Dropdown */}
             <Text style={styles.label}>Leave Type <Text style={{color:'red'}}>*</Text></Text>
@@ -203,8 +202,12 @@ export default function AddLeaveScreen() {
                 placeholder="Reason for leave..."
             />
 
-            {/* Submit */}
-            <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={loading}>
+            {/* SUBMIT BUTTON WITH BLUR EFFECT */}
+            <TouchableOpacity 
+                style={[styles.saveBtn, loading && { opacity: 0.6 }]} 
+                onPress={handleSave} 
+                disabled={loading}
+            >
                 {loading ? <ActivityIndicator color="white"/> : <Text style={styles.saveBtnText}>Apply</Text>}
             </TouchableOpacity>
 

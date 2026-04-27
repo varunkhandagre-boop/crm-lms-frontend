@@ -3,10 +3,10 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import { useRouter } from 'expo-router';
-import { addDoc, collection, doc, getDoc, getDocs, query, setDoc } from 'firebase/firestore';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     FlatList,
     Image,
@@ -20,21 +20,34 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 
 export default function AddOrderScreen() {
   const router = useRouter();
   
-  const { addOrder, orgList, user, productList = [] } = useData();
-  const getColor = (char: string) => {
-      const colors = ['#e57373', '#ba68c8', '#64b5f6', '#4db6ac', '#81c784', '#ffb74d', '#a1887f', '#90a4ae'];
-      const index = char.charCodeAt(0) % colors.length;
-      return colors[index];
-  };
+  // 🔥 1. Context se Sirf User & Notification
+  const { currentUser, companyProfile, addNotification } = useData();
 
-  // STATES
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData, addSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+
+  const { mode, leadId, leadOrg, leadOrgId, leadPerson, leadMobile, leadEmail, leadCity, leadAddress, leadProduct } = useLocalSearchParams(); 
+
+  // 🔥 3. Lazy Loaded Lists
+  const [orgList, setOrgList] = useState<any[]>([]);
+  const [productList, setProductList] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
+  const [orderList, setOrderList] = useState<any[]>([]); // For ID counting
+
   const [hospitalName, setHospitalName] = useState('');
+  const [orgId, setOrgId] = useState(''); 
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
   const [contactPerson, setContactPerson] = useState('');
@@ -50,46 +63,59 @@ export default function AddOrderScreen() {
   
   const [isSaving, setIsSaving] = useState(false); 
 
-  // DATES
   const [poDate, setPoDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
 
-  // FILE
   const [selectedFile, setSelectedFile] = useState<any>(null);
 
-  // MODAL
   const [modalVisible, setModalVisible] = useState(false);
   const [filteredData, setFilteredData] = useState<any[]>([]);
   const [searchText, setSearchText] = useState('');
   const [currentModalType, setCurrentModalType] = useState('');
 
-  // 🔥 SALES PERSON SELECTION
-  const [users, setUsers] = useState<any[]>([]);
   const [selectedSalesPerson, setSelectedSalesPerson] = useState<any>(null);
   const [showUserModal, setShowUserModal] = useState(false);
 
-  const canSelectSalesPerson = ['Admin', 'Manager', 'Account', 'Accountant'].includes(user?.role || '');
+  const canSelectSalesPerson = ['Admin', 'Manager', 'Account', 'Accountant', 'SuperAdmin'].includes(currentUser?.role || '');
 
-  // PRODUCT OPTIONS
+  // 🔥 4. LOAD DATA ON MOUNT
+  useEffect(() => {
+      const loadData = async () => {
+          if (currentUser?.companyId) {
+              const [orgs, prods, usrs, orders] = await Promise.all([
+                  fetchSaaSData("organizations"),
+                  fetchSaaSData("products"),
+                  fetchSaaSData("users"),
+                  fetchSaaSData("orders")
+              ]);
+              setOrgList(orgs);
+              setProductList(prods);
+              
+              // Only load users if user is Admin/Manager to save bandwidth
+              if (canSelectSalesPerson) setUsers(usrs);
+              setOrderList(orders);
+          }
+      };
+      loadData();
+  }, [currentUser]);
+
+  useEffect(() => {
+      if (mode === 'from_lead') {
+          setHospitalName(leadOrg as string || '');
+          setOrgId(leadOrgId as string || '');
+          setContactPerson(leadPerson as string || '');
+          setMobile(leadMobile as string || '');
+          setEmail(leadEmail as string || '');
+          setCity(leadCity as string || '');
+          setAddress(leadAddress as string || '');
+          setProductDetails(leadProduct as string || '');
+      }
+  }, [mode]);
+
   const getProductOptions = () => {
-      const dbProducts = productList.map((p: any) => {
-          return p.model ? `${p.name} - ${p.model}` : p.name;
-      });
+      const dbProducts = productList.map((p: any) => p.model ? `${p.name} - ${p.model}` : p.name);
       return [...dbProducts, "Other"];
   };
-
-  // FETCH USERS
-  useEffect(() => {
-      if (canSelectSalesPerson) {
-          const fetchUsers = async () => {
-              const q = query(collection(db, "users"));
-              const snap = await getDocs(q);
-              const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-              setUsers(list);
-          };
-          fetchUsers();
-      }
-  }, [user]);
 
   const formatDate = (rawDate: Date) => {
     let day = rawDate.getDate().toString().padStart(2, '0');
@@ -98,51 +124,130 @@ export default function AddOrderScreen() {
     return `${day}/${month}/${year}`;
   };
 
-  // LOCATION LOGIC
+  // 🔥 PDF GENERATOR
+  const generateOrderPDF = async (orderData: any) => {
+    try {
+        const logoHTML = companyProfile?.logoUrl 
+            ? `<img src="${companyProfile.logoUrl}" style="height: 60px; margin-bottom: 10px;" />` 
+            : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
+
+        const signatureHTML = companyProfile?.signatureUrl 
+            ? `<img src="${companyProfile.signatureUrl}" style="height: 50px; margin-top: 10px;" />` 
+            : `<div style="font-weight: bold; margin-top: 30px;">Authorized Signatory</div>`;
+
+        const htmlContent = `
+        <html>
+          <head>
+            <style>
+              body { font-family: 'Helvetica', sans-serif; padding: 30px; border: 2px solid #333; }
+              .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px; }
+              .title { font-size: 22px; font-weight: bold; color: #1a237e; text-transform: uppercase; }
+              .sub-title { font-size: 12px; margin-top: 2px; color: #333; line-height: 1.4; }
+              .row { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 14px; }
+              .label { font-weight: bold; color: #444; }
+              .box { border: 1px solid #000; padding: 15px; margin-top: 10px; background-color: #fcfcfc; }
+              .amount-box { display: inline-block; border: 2px solid #000; padding: 8px 25px; font-weight: bold; font-size: 18px; margin-top: 10px; }
+              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; }
+              .sign-box { text-align: center; }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              ${logoHTML}
+              ${companyProfile?.logoUrl ? `<div class="title">${companyProfile.companyName}</div>` : ''}
+              <div class="sub-title">${companyProfile?.address || ''}</div>
+              <div class="sub-title">Phone: ${companyProfile?.contactPhone || companyProfile?.phone || '-'} | Email: ${companyProfile?.contactEmail || companyProfile?.email || '-'}</div>
+              <div class="sub-title">${companyProfile?.gstNumber ? `GSTIN: ${companyProfile.gstNumber}` : ''}</div>
+            </div>
+
+            <h3 style="text-align: center; text-decoration: underline;">ORDER ACKNOWLEDGEMENT</h3>
+
+            <div class="row">
+              <div><span class="label">Order ID:</span> <b>${orderData.orderId}</b></div>
+              <div><span class="label">Date:</span> ${new Date(orderData.date).toLocaleDateString('en-GB')}</div>
+            </div>
+
+            <div class="box">
+              <div class="label" style="text-decoration: underline; margin-bottom: 5px;">Client Details:</div>
+              <div style="font-size: 16px; font-weight: bold;">${orderData.hospitalName}</div>
+              <div>${orderData.address}, ${orderData.city}</div>
+              <div style="margin-top: 5px;">Contact: ${orderData.contactPerson} (${orderData.mobile})</div>
+            </div>
+
+            <div class="box">
+              <div class="label" style="text-decoration: underline; margin-bottom: 5px;">Order Details:</div>
+              <div><span class="label">PO Number:</span> ${orderData.poNumber}</div>
+              <div style="margin-top: 5px;"><span class="label">Product Config:</span><br>${orderData.productDetails.replace(/\n/g, '<br>')}</div>
+            </div>
+
+            <div class="box">
+              <div><span class="label">Payment Terms:</span> ${orderData.paymentTerms || 'Standard'}</div>
+              <div><span class="label">Delivery Terms:</span> ${orderData.deliveryTerms || 'Standard'}</div>
+              ${orderData.notes ? `<div style="margin-top:5px;"><span class="label">Notes:</span> ${orderData.notes}</div>` : ''}
+            </div>
+
+            <div style="text-align: right; margin-top: 20px;">
+              <div style="font-weight: bold;">Total Order Value</div>
+              <div class="amount-box">₹ ${Number(orderData.amount).toLocaleString('en-IN')}/-</div>
+            </div>
+
+            <div class="footer">
+              <div>
+                * This is a computer generated document.<br>
+                * Subject to Jurisdiction.
+              </div>
+              <div class="sign-box">
+                <div style="margin-bottom: 5px;">Booked By: <b>${orderData.senderName}</b></div>
+                ${signatureHTML}
+              </div>
+            </div>
+          </body>
+        </html>`;
+
+        const { uri } = await Print.printToFileAsync({ html: htmlContent });
+        const cleanName = `Order_${orderData.orderId}.pdf`;
+        const newPath = `${(FileSystem as any).cacheDirectory}${cleanName}`;
+
+        try {
+            await FileSystem.copyAsync({ from: uri, to: newPath });
+            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Order PDF` });
+        } catch (error) {
+            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+        }
+    } catch (error) {
+        Alert.alert("Error", "Could not generate PDF");
+    }
+  };
+
   const getCurrentLocation = async () => {
       try {
           let { status } = await Location.requestForegroundPermissionsAsync();
-          if (status !== 'granted') {
-              Alert.alert('Permission Denied', 'Location access is required to submit order.');
-              return null;
-          }
+          if (status !== 'granted') return null;
           let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-          return {
-              lat: location.coords.latitude,
-              lng: location.coords.longitude,
-              timestamp: new Date().toISOString()
-          };
-      } catch (error) {
-          Alert.alert("GPS Required", "Please turn on GPS to submit.");
-          return null;
-      }
+          return { lat: location.coords.latitude, lng: location.coords.longitude, timestamp: new Date().toISOString() };
+      } catch (error) { return null; }
   };
 
-  const generateOrderId = async () => {
-      try {
-          const currentYear = new Date().getFullYear();
-          const counterRef = doc(db, 'settings', 'order_counter'); 
-          
-          const docSnap = await getDoc(counterRef);
-          let newCount = 1;
+  // 🔥 5. SMART SAAS FY ORDER ID GENERATOR
+  const generateOrderId = () => {
+      const targetMonth = poDate.getMonth(); 
+      const targetYear = poDate.getFullYear();
+      const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+      const fyString = `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`;
 
-          if (docSnap.exists()) {
-              const data = docSnap.data();
-              if (data.year === currentYear) {
-                  newCount = (data.count || 0) + 1;
-              } else {
-                  newCount = 1;
-              }
-          }
+      const fyStartDateStr = `${fyStartYear}-04-01`;
+      const fyEndDateStr = `${fyStartYear + 1}-03-31`;
 
-          await setDoc(counterRef, { count: newCount, year: currentYear }, { merge: true });
-          return `ORD-${currentYear}-${String(newCount).padStart(2, '0')}`;
-      } catch (error) {
-          return `ORD-${Date.now()}`; 
-      }
+      const count = orderList ? orderList.filter((c: any) => {
+          const dDate = c.dateIso || c.date; 
+          if (!dDate) return false;
+          return dDate >= fyStartDateStr && dDate <= fyEndDateStr;
+      }).length + 1 : 1;
+
+      const prefix = companyProfile?.shortName ? companyProfile.shortName.toUpperCase() : 'ORD';
+      return `${prefix}-${fyString}-${String(count).padStart(3, '0')}`;
   };
 
-  // MODAL LOGIC
   const openModal = (type: string, data: any[]) => {
       setCurrentModalType(type);
       setFilteredData(data);
@@ -152,20 +257,15 @@ export default function AddOrderScreen() {
 
   const handleSearch = (text: string) => {
       setSearchText(text);
-      
       let sourceData: any[] = [];
       if(currentModalType === 'Hospital') sourceData = orgList;
       else if(currentModalType === 'Product') sourceData = getProductOptions();
-      else sourceData = [];
 
       if (text) {
           const newData = sourceData.filter(item => {
-              if (typeof item === 'string') {
-                  return item.toLowerCase().includes(text.toLowerCase());
-              } else {
-                  return (item.orgName || item.name || '').toLowerCase().includes(text.toLowerCase()) || 
-                         (item.city || '').toLowerCase().includes(text.toLowerCase());
-              }
+              if (typeof item === 'string') return item.toLowerCase().includes(text.toLowerCase());
+              return (item.orgName || item.name || '').toLowerCase().includes(text.toLowerCase()) || 
+                     (item.city || '').toLowerCase().includes(text.toLowerCase());
           });
           setFilteredData(newData);
       } else {
@@ -177,6 +277,7 @@ export default function AddOrderScreen() {
       if (currentModalType === 'Hospital') {
           if (typeof item !== 'string') {
               setHospitalName(item.orgName || item.name); 
+              setOrgId(item.id || ''); 
               setCity(item.city || '');
               setAddress(item.address || '');
               setContactPerson(item.contactPerson || '');
@@ -184,17 +285,15 @@ export default function AddOrderScreen() {
               setEmail(item.email || '');
           } else {
               setHospitalName(item);
+              setOrgId('');
           }
       }
       else if (currentModalType === 'Product') {
-          if (item !== 'Other') {
-              setProductDetails(prev => prev ? `${prev}, ${item}` : item);
-          }
+          if (item !== 'Other') setProductDetails(prev => prev ? `${prev}, ${item}` : item);
       }
       setModalVisible(false);
   };
 
-  // UPLOAD LOGIC
   const handleUploadOptions = () => {
       Alert.alert("Upload PO", "Select file type", [
           { text: "Cancel", style: "cancel" },
@@ -213,10 +312,7 @@ export default function AddOrderScreen() {
 
   const pickDocument = async () => {
       try {
-          const result = await DocumentPicker.getDocumentAsync({
-              type: 'application/pdf',
-              copyToCacheDirectory: true
-          });
+          const result = await DocumentPicker.getDocumentAsync({ type: 'application/pdf', copyToCacheDirectory: true });
           if (!result.canceled && result.assets && result.assets.length > 0) {
               const file = result.assets[0];
               setSelectedFile({ type: 'pdf', uri: file.uri, name: file.name });
@@ -238,7 +334,7 @@ export default function AddOrderScreen() {
       if (!result.canceled) setSelectedFile({ type: 'image', uri: result.assets[0].uri, name: "gallery_img.jpg" });
   };
 
-  // --- SAVE LOGIC (🔥 FIXED HERE) ---
+  // 🔥 6. SAAS SAVE LOGIC
   const handleSave = async () => {
       if (!hospitalName || !poNumber || !amount || !productDetails) {
           Alert.alert("Missing Fields", "Please fill Hospital, PO No, Amount, Products.");
@@ -248,80 +344,144 @@ export default function AddOrderScreen() {
       setIsSaving(true); 
 
       const locationData = await getCurrentLocation();
-      if (!locationData) { 
-          setIsSaving(false); 
-          return; 
-      }
-
-      const newOrderId = await generateOrderId();
+      const newOrderId = generateOrderId();
       const cleanAmount = parseFloat(amount.toString().replace(/[^0-9.]/g, '')) || 0;
 
-      // 🔥 FIXED: Robust Name Selection Logic
-      let finalSenderId = user?.uid || user?.id || 'guest';
-      let finalSenderName = user?.name || 'Unknown';
-      let finalRole = user?.role || 'Employee';
+      let finalSenderId = currentUser?.id || 'guest';
+      let finalSenderName = currentUser?.name || 'Unknown';
+      let finalRole = currentUser?.role || 'Employee';
 
-      // Check if Admin selected someone else
-      // Only if canSelectSalesPerson is TRUE AND selectedSalesPerson is NOT NULL
+      // Override if Admin selected a different Sales Person
       if (canSelectSalesPerson && selectedSalesPerson) {
-          console.log("Saving for Selected Person:", selectedSalesPerson.name);
           finalSenderId = selectedSalesPerson.id;
-          finalSenderName = selectedSalesPerson.name; // This sets the name to 'Satish' or 'Preeti'
+          finalSenderName = selectedSalesPerson.name;
           finalRole = selectedSalesPerson.role || 'Sales Executive';
-      } else {
-          console.log("Saving for SELF (Admin/User):", user?.name);
       }
 
+      // Payload
       const newOrder = {
-          id: Date.now().toString(),
           orderId: newOrderId, 
+          orgId: orgId,
           date: poDate.toISOString().split('T')[0], 
-          
+          dateIso: poDate.toISOString().split('T')[0], 
           hospitalName, address, city, contactPerson, mobile, email,
-          
-          poNumber, 
-          amount: cleanAmount,
-          productDetails, 
+          poNumber, amount: cleanAmount, productDetails, 
           paymentTerms, deliveryTerms, notes,
-          
           status: 'Pending', 
-          
           poFileName: selectedFile?.name || '',
           poFileUri: selectedFile?.uri || '',
           poFileType: selectedFile?.type || '',
-
-          // ✅ Correct Data Saving
-          senderId: finalSenderId,      
-          senderName: finalSenderName,  
-          userName: finalSenderName,    
-          role: finalRole,
-          
-          bookedBy: user?.name,        
-          
-          timestamp: Date.now(),
-          location: locationData
+          bookedBy: currentUser?.name,        
+          location: locationData || null
       };
 
-      console.log("FINAL ORDER OBJECT:", newOrder); // Check logs for verification
-
-      await addOrder(newOrder);
-
-      // Notification
       try {
-          await addDoc(collection(db, "notifications"), {
-              title: `New Order: ${newOrderId} 🎉`,
-              message: `${finalSenderName} booked order from ${hospitalName} (Value: ₹${cleanAmount}).`,
-              to: "Admin",
-              route: "/orders",
-              read: false,
-              createdAt: new Date().toISOString(),
-              type: "success"
-          });
-      } catch (e) {}
+          const res = await addSaaSData("orders", { ...newOrder, senderId: finalSenderId, senderName: finalSenderName, role: finalRole });
 
-      setIsSaving(false);
-      Alert.alert("Success", `Order ${newOrderId} Booked for ${finalSenderName}!`);
-      router.back();
+          if (res.success) {
+              // 🔥 MAGIC: AUTO-CLOSE LEAD IF ORDER IS BOOKED FROM LEAD PAGE
+              if (leadId) {
+                  await updateSaaSData("leads", leadId as string, {
+                      status: 'Converted', 
+                      stage: 'Order Closed',
+                      isHot: false,
+                      type: 'Won',
+                      discussion: `🎉 Order Booked! (Order ID: ${newOrderId})\nValue: ₹${cleanAmount.toLocaleString('en-IN')}\n\n` 
+                  });
+              }
+
+              // PUSH NOTIFICATION
+              if (addNotification) {
+                  await addNotification({
+                      title: "New Order Received 📦",
+                      message: `Order ${newOrderId} added by ${finalSenderName} for ${hospitalName}.`,
+                      to: "Admin", 
+                      type: "info",
+                      route: "/orders"
+                  });
+              }
+
+              setIsSaving(false);
+
+              // 🔥 2-STEP MAGIC HANDOFF LOGIC
+              Alert.alert(
+                  "Order Booked! 🎉", 
+                  `Order ${newOrderId} has been saved successfully.\n\nDo you want to share the Order PDF now?`,
+                  [
+                      { 
+                          text: "No", 
+                          style: 'cancel',
+                          onPress: () => askNextSteps() 
+                      },
+                      { 
+                          text: "Yes, Share PDF", 
+                          onPress: async () => { 
+                              // Use the correct ID for the PDF logic
+                              await generateOrderPDF({ ...newOrder, id: res.id, senderName: finalSenderName }); 
+                              askNextSteps(); 
+                          }
+                      }
+                  ]
+              );
+
+              // 🛠️ Step 2: Next Action Function
+              const askNextSteps = () => {
+                  Alert.alert(
+                      "What's Next? 🚀",
+                      "Do you want to take advance payment or assign installation?",
+                      [
+                          { 
+                              text: "Just Close", 
+                              style: 'cancel',
+                              onPress: () => {
+                                  router.back(); 
+                                  if(mode === 'from_lead') router.back();
+                              }
+                          },
+                          { 
+                              text: "Assign Install 🛠️", 
+                              onPress: () => { 
+                                  router.replace({
+                                      pathname: '/add_installation',
+                                      params: {
+                                          hospital: hospitalName,
+                                          orgId: orgId,
+                                          city: city,
+                                          contactPerson: contactPerson,
+                                          mobile: mobile,
+                                          address: address,
+                                          product: productDetails.split(',')[0]
+                                      }
+                                  } as any);
+                              }
+                          },
+                          { 
+                              text: "Add Advance 💸", 
+                              onPress: () => { 
+                                  router.replace({
+                                      pathname: '/add_payment',
+                                      params: { 
+                                          orgName: hospitalName, 
+                                          amount: cleanAmount, 
+                                          linkedId: res.id, 
+                                          billNo: newOrderId, 
+                                          source: 'orders' 
+                                      }
+                                  } as any);
+                              }
+                          }
+                      ]
+                  );
+              };
+
+          } else {
+              Alert.alert("Error", "Could not save order.");
+          }
+
+      } catch (err) {
+          setIsSaving(false);
+          Alert.alert("Error", "Could not save order.");
+      }
   };
 
   return (
@@ -330,21 +490,25 @@ export default function AddOrderScreen() {
         <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>New Order Booking</Text>
+        <Text style={styles.headerTitle}>{mode === 'from_lead' ? 'Book Order from Lead' : 'New Order Booking'}</Text>
         <View style={{width:24}} /> 
       </View>
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{flex: 1}}>
         <ScrollView contentContainerStyle={styles.content}>
             
-            {/* SALES PERSON SELECTOR (Removed Self Option) */}
+            {mode === 'from_lead' && (
+                <View style={{backgroundColor: '#e8f5e9', padding: 10, borderRadius: 8, marginBottom: 15, borderWidth: 1, borderColor: '#a5d6a7'}}>
+                    <Text style={{color: '#2e7d32', fontWeight: 'bold', fontSize: 12}}>🎉 Lead Data Auto-Filled. Book your order!</Text>
+                </View>
+            )}
+
             {canSelectSalesPerson && (
                 <View style={{marginBottom: 20}}>
                     <Text style={[styles.label, {color:'#d32f2f'}]}>Book Order For</Text>
                     <TouchableOpacity style={styles.dropdownBtn} onPress={() => setShowUserModal(true)}>
                         <Text style={{color: '#333', fontSize:16, fontWeight: 'bold'}}>
-                            {/* 🔥 Default 'Me' dikhayega agar koi select nahi hai */}
-                            {selectedSalesPerson ? `👤 ${selectedSalesPerson.name}` : `👤 ${user?.name} (Me)`}
+                            {selectedSalesPerson ? `👤 ${selectedSalesPerson.name}` : `👤 ${currentUser?.name} (Me)`}
                         </Text>
                         <Ionicons name="caret-down" size={20} color="gray" />
                     </TouchableOpacity>
@@ -363,12 +527,12 @@ export default function AddOrderScreen() {
                 <Text style={{color: hospitalName ? '#333' : 'gray', fontSize:16}}>
                     {hospitalName || "Select from Organization List"}
                 </Text>
-                <Ionicons name="search" size={20} color="gray" />
+                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998"/> : <Ionicons name="search" size={20} color="gray" />}
             </TouchableOpacity>
 
             <View style={styles.row}>
-                 <View style={styles.col}><Text style={styles.label}>City</Text><TextInput style={styles.inputDisabled} value={city} editable={false} placeholder="Auto" /></View>
-                 <View style={styles.col}><Text style={styles.label}>Contact Person</Text><TextInput style={styles.inputDisabled} value={contactPerson} editable={false} placeholder="Auto" /></View>
+                  <View style={styles.col}><Text style={styles.label}>City</Text><TextInput style={styles.inputDisabled} value={city} editable={false} placeholder="Auto" /></View>
+                  <View style={styles.col}><Text style={styles.label}>Contact Person</Text><TextInput style={styles.inputDisabled} value={contactPerson} editable={false} placeholder="Auto" /></View>
             </View>
 
             <View style={styles.divider} />
@@ -392,8 +556,8 @@ export default function AddOrderScreen() {
             />
 
             <View style={styles.row}>
-                 <View style={styles.col}><Text style={styles.label}>Payment Terms</Text><TextInput style={styles.input} placeholder="e.g. 100% Advance" value={paymentTerms} onChangeText={setPaymentTerms} /></View>
-                 <View style={styles.col}><Text style={styles.label}>Delivery Terms</Text><TextInput style={styles.input} placeholder="e.g. 4-6 Weeks" value={deliveryTerms} onChangeText={setDeliveryTerms} /></View>
+                  <View style={styles.col}><Text style={styles.label}>Payment Terms</Text><TextInput style={styles.input} placeholder="e.g. 100% Advance" value={paymentTerms} onChangeText={setPaymentTerms} /></View>
+                  <View style={styles.col}><Text style={styles.label}>Delivery Terms</Text><TextInput style={styles.input} placeholder="e.g. 4-6 Weeks" value={deliveryTerms} onChangeText={setDeliveryTerms} /></View>
             </View>
 
             <Text style={styles.label}>Upload Purchase Order</Text>
@@ -423,7 +587,7 @@ export default function AddOrderScreen() {
             <TextInput style={[styles.input, {height: 60, textAlignVertical:'top'}]} multiline placeholder="Any special instructions..." value={notes} onChangeText={setNotes} />
 
             <TouchableOpacity style={[styles.saveBtn, isSaving && {backgroundColor:'#ccc'}]} onPress={handleSave} disabled={isSaving}>
-                <Text style={styles.saveText}>{isSaving ? 'Processing...' : 'Submit Order'}</Text>
+                <Text style={styles.saveText}>{isSaving ? 'Processing...' : 'Submit Order & Close Lead'}</Text>
             </TouchableOpacity>
             
             <Text style={{textAlign:'center', color:'gray', fontSize:10, marginTop:10}}>
@@ -444,9 +608,11 @@ export default function AddOrderScreen() {
                     <Ionicons name="search" size={20} color="gray" />
                     <TextInput style={{flex:1, marginLeft:10}} placeholder="Search..." value={searchText} onChangeText={handleSearch} />
                 </View>
+
                 <FlatList 
                     data={filteredData}
                     keyExtractor={(item, index) => index.toString()}
+                    style={{maxHeight: 300}}
                     renderItem={({item}) => (
                         <TouchableOpacity style={styles.modalItem} onPress={() => handleSelect(item)}>
                             {currentModalType === 'Hospital' && typeof item !== 'string' ? (
@@ -459,51 +625,28 @@ export default function AddOrderScreen() {
                                 </View>
                             ) : (
                                 <View style={{flexDirection:'row', alignItems:'center'}}>
-        {/* Colorful Icon Box */}
-        <View style={{
-            width: 40, 
-            height: 40, 
-            borderRadius: 20, 
-            backgroundColor: getColor((typeof item === 'string' ? item : item.name).charAt(0)), 
-            justifyContent: 'center', 
-            alignItems: 'center',
-            marginRight: 12
-        }}>
-            <Text style={{color: 'white', fontWeight: 'bold', fontSize: 18}}>
-                {(typeof item === 'string' ? item : item.name).charAt(0).toUpperCase()}
-            </Text>
-        </View>
-
-        {/* Product Name */}
-        <View style={{flex:1}}>
-            <Text style={{fontSize: 16, color: '#333', fontWeight: '500'}}>
-                {typeof item === 'string' ? item : item.name}
-            </Text>
-            {/* Agar "Other" nahi hai to "Product" likha hua dikhao */}
-            {item !== 'Other' && <Text style={{fontSize: 10, color: 'gray'}}>PRODUCT ITEM</Text>}
-        </View>
-
-        {/* Arrow Icon */}
-        <Ionicons name="add-circle-outline" size={24} color="#3b5998" />
-    </View>
+                                    <View style={[styles.iconBox, {backgroundColor:'#f3e5f5'}]}><Ionicons name={currentModalType === 'Product' ? "cube" : "radio-button-on"} size={20} color="#8e44ad" /></View>
+                                    <View style={{flex:1, marginLeft: 10}}><Text style={styles.modalText}>{typeof item === 'string' ? item : item.name}</Text></View>
+                                    <Ionicons name="add-circle-outline" size={24} color="#3b5998" />
+                                </View>
                             )}
                         </TouchableOpacity>
                     )}
-                    ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>No Matches Found</Text>}
+                    ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>No matches found</Text>}
                 />
+                
                 <TouchableOpacity style={styles.closeBtn} onPress={() => setModalVisible(false)}>
-                    <Text style={{color:'red'}}>Close</Text>
+                    <Text style={{color:'gray'}}>Close</Text>
                 </TouchableOpacity>
             </View>
         </View>
       </Modal>
 
-      {/* USER MODAL (Removed Self Button) */}
+      {/* USER MODAL */}
       <Modal visible={showUserModal} transparent={true} animationType="slide">
         <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
                 <Text style={styles.modalTitle}>Select Sales Person</Text>
-                
                 <FlatList 
                     data={users}
                     keyExtractor={(item) => item.id}
@@ -514,9 +657,8 @@ export default function AddOrderScreen() {
                         </TouchableOpacity>
                     )}
                 />
-                
                 <TouchableOpacity style={{padding:15, alignItems:'center', borderTopWidth:1, borderColor:'#eee'}} onPress={() => { setSelectedSalesPerson(null); setShowUserModal(false); }}>
-                     <Text style={{color:'#d32f2f', fontWeight:'bold'}}>Reset to Me ({user?.name})</Text>
+                      <Text style={{color:'#d32f2f', fontWeight:'bold'}}>Reset to Me ({currentUser?.name})</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity style={styles.closeBtn} onPress={() => setShowUserModal(false)}>
@@ -547,7 +689,7 @@ const styles = StyleSheet.create({
   filePreviewCard: { flexDirection:'row', alignItems:'center', padding:10, backgroundColor:'white', borderRadius:10, borderWidth:1, borderColor:'#ddd', elevation:2 },
   previewImage: { width: 50, height: 50, borderRadius: 5, resizeMode:'cover', backgroundColor:'#eee' },
   pdfIconBox: { width: 50, height: 50, justifyContent:'center', alignItems:'center', backgroundColor:'#ffebee', borderRadius:5 },
-  saveBtn: { backgroundColor: '#3b5998', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 10 },
+  saveBtn: { backgroundColor: '#4caf50', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 10, elevation: 2 },
   saveText: { color: 'white', fontWeight: 'bold', fontSize: 18 },
   
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding:20 },

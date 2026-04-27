@@ -2,8 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
-import { addDoc, collection, doc, getDocs, query, updateDoc, where } from 'firebase/firestore';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -18,25 +17,38 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS (Firebase DB imports completely removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function AddLeadScreen() {
   const router = useRouter();
   
-  // GET Data from DataContext
-  const { addLead, orgList = [], userList = [], user, productList = [] } = useData(); 
+  // 🔥 1. Context se sirf user aur notification nikala
+  const { currentUser, addNotification } = useData(); 
+
+  // 🔥 2. Naya SaaS Engine connect kiya
+  const { fetchSaaSData, addSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded States
+  const [orgList, setOrgList] = useState<any[]>([]);
+  const [userList, setUserList] = useState<any[]>([]);
+  const [productList, setProductList] = useState<any[]>([]);
+  const [leadsList, setLeadsList] = useState<any[]>([]); // For duplicate checking
 
   // --- FORM STATES ---
   const [org, setOrg] = useState(''); 
+  const [orgId, setOrgId] = useState('');
+
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
   const [clientName, setClientName] = useState(''); 
   const [mobile, setMobile] = useState('');
   const [email, setEmail] = useState('');
 
-  const [leadOwner, setLeadOwner] = useState(user?.name || 'Select'); 
-  const [allocatedTo, setAllocatedTo] = useState(user?.name || 'Select');
+  const [leadOwner, setLeadOwner] = useState(currentUser?.name || 'Select'); 
+  const [allocatedTo, setAllocatedTo] = useState(currentUser?.name || 'Select');
   const [leadSource, setLeadSource] = useState('Select');
   const [probability, setProbability] = useState('Select');
   const [status, setStatus] = useState('Open');
@@ -55,7 +67,7 @@ export default function AddLeadScreen() {
   const [discussion, setDiscussion] = useState('');
   const [errors, setErrors] = useState({ org: false, allocated: false, discussion: false });
 
-  // 🔥 Loading State for Save Button
+  // Loading State
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Modal States
@@ -64,9 +76,27 @@ export default function AddLeadScreen() {
   const [filteredData, setFilteredData] = useState<any[]>([]);
   const [currentModalType, setCurrentModalType] = useState('');
 
+  // 🔥 4. LOAD DATA ON MOUNT
+  useEffect(() => {
+      const loadData = async () => {
+          if (currentUser?.companyId) {
+              const [orgs, users, prods, leads] = await Promise.all([
+                  fetchSaaSData("organizations"),
+                  fetchSaaSData("users"),
+                  fetchSaaSData("products"),
+                  fetchSaaSData("leads")
+              ]);
+              setOrgList(orgs);
+              setUserList(users);
+              setProductList(prods);
+              setLeadsList(leads);
+          }
+      };
+      loadData();
+  }, [currentUser]);
+
   const employees = (userList && userList.length > 0) ? userList.map((u: any) => u.name || 'Unknown') : ['Loading...']; 
 
-  // Combined Name Logic
   const getProductOptions = () => {
       const dbProducts = productList.map((p: any) => {
           return p.model ? `${p.name} - ${p.model}` : p.name;
@@ -124,7 +154,6 @@ export default function AddLeadScreen() {
     else if(currentModalType === 'Status') sourceData = statusOptions;
     else if(currentModalType === 'Stage') sourceData = stageOptions;
     else if(currentModalType === 'Type') sourceData = typeOptions;
-    else sourceData = [];
 
     if (text) {
         const newData = sourceData.filter(item => {
@@ -142,13 +171,19 @@ export default function AddLeadScreen() {
   };
 
   const handleSelect = (item: any) => {
-    if (currentModalType === 'Organization' && typeof item !== 'string') {
-        setOrg(item.orgName || item.name); 
-        setAddress(item.address || '');
-        setCity(item.city || '');
-        setClientName(item.contactPerson || '');
-        setMobile(item.mobile || '');
-        setEmail(item.email || '');
+    if (currentModalType === 'Organization') {
+        if (typeof item !== 'string') {
+            setOrg(item.orgName || item.name); 
+            setOrgId(item.id || ''); 
+            setAddress(item.address || '');
+            setCity(item.city || '');
+            setClientName(item.contactPerson || '');
+            setMobile(item.mobile || '');
+            setEmail(item.email || '');
+        } else {
+            setOrg(item);
+            setOrgId(''); 
+        }
         setErrors(e => ({...e, org: false})); 
         setModalVisible(false);
         return;
@@ -178,8 +213,8 @@ export default function AddLeadScreen() {
       setSelectedRequirements(selectedRequirements.filter(r => r !== item));
   };
 
+  // 🔥 5. SAAS SAVE & MERGE LOGIC
   const handleSave = async () => {
-      // 🔥 Prevent double click
       if (isSubmitting) return;
 
       let hasError = false;
@@ -199,11 +234,11 @@ export default function AddLeadScreen() {
       if (hasError) {
           Alert.alert("Validation Error", "Please fill all required fields.");
       } else {
-          setIsSubmitting(true); // 🔥 Start Loading
+          setIsSubmitting(true); 
 
           const locationData = await getCurrentLocation();
           if (!locationData) {
-               setIsSubmitting(false); // Stop loading if error
+               setIsSubmitting(false); 
                return; 
           }
 
@@ -212,47 +247,31 @@ export default function AddLeadScreen() {
               finalRequirements.push(otherRequirement.trim());
           }
 
-          // 🔥 User ID Safety
-          const safeUserId = user?.uid || user?.id || 'guest';
-
-          // 🔥🔥🔥 DUPLICATE LEAD CHECK 🔥🔥🔥
-          // ... Upar ka code same rahega ...
-
-          // 🔥🔥🔥 DUPLICATE LEAD CHECK & MERGE LOGIC 🔥🔥🔥
           try {
-              const leadsRef = collection(db, "leads");
-              const q = query(leadsRef, where("orgName", "==", org)); // Ya org
-              const querySnapshot = await getDocs(q);
-
-              // Find active lead
-              const existingLead = querySnapshot.docs.find(doc => {
-                  const d = doc.data();
-                  return d.status !== 'Closed' && d.status !== 'Converted' && d.status !== 'Lost' && d.status !== 'Plan Drop';
+              // 🔥 FAST LOCAL DUPLICATE CHECK
+              const existingLead = leadsList.find(d => {
+                  return d.orgName === org && 
+                         d.status !== 'Closed' && 
+                         d.status !== 'Converted' && 
+                         d.status !== 'Lost' && 
+                         d.status !== 'Plan Drop';
               });
 
               if (existingLead) {
-                  // ⚠️ DUPLICATE FOUND: MERGE DATA
-                  const existingData = existingLead.data();
-                  const leadDocRef = doc(db, "leads", existingLead.id);
-
-                  // 1. Merge Requirements (Purane + Naye)
-                  let currentReqs = existingData.requirements || [];
-                  // Sirf wahi add karein jo pehle se nahi hai
+                  // ⚠️ DUPLICATE FOUND: MERGE DATA VIA SAAS HOOK
+                  let currentReqs = existingLead.requirements || [];
                   let newReqsToAdd = finalRequirements.filter((r: string) => !currentReqs.includes(r));
                   let updatedReqs = [...currentReqs, ...newReqsToAdd];
 
-                  // 2. Update Discussion History
                   const todayStr = new Date().toLocaleDateString('en-GB');
                   const newNote = `➕ New Inquiry Merged (${todayStr}):\nAdded Req: ${finalRequirements.join(', ')}\nNote: ${discussion}`;
-                  const updatedDiscussion = `${newNote}\n────────────────\n${existingData.discussion || ''}`;
+                  const updatedDiscussion = `${newNote}\n────────────────\n${existingLead.discussion || ''}`;
 
-                  // 3. Update in Database
-                  await updateDoc(leadDocRef, {
+                  await updateSaaSData("leads", existingLead.id, {
                       requirements: updatedReqs,
                       discussion: updatedDiscussion,
-                      lastUpdated: new Date().toISOString(),
-                      // Agar naya lead HOT hai, to purane ko bhi HOT kar do
-                      isHot: leadType === 'Hot' ? true : existingData.isHot 
+                      orgId: orgId || existingLead.orgId || '', 
+                      isHot: leadType === 'Hot' ? true : existingLead.isHot 
                   });
 
                   Alert.alert(
@@ -262,20 +281,18 @@ export default function AddLeadScreen() {
                   );
                   
                   setIsSubmitting(false);
-                  return; // Yahan return sahi hai kyunki humne update kar diya
+                  return; 
               }
 
           } catch (e) {
               console.log("Error checking duplicate:", e);
           }
 
-          // ... Niche ka Create New Lead code same rahega ...
-
-          // ✅ CREATE NEW LEAD (If no duplicate found)
+          // ✅ CREATE NEW LEAD (Engine Auto-injects CompanyId, SenderId, etc.)
           const newLeadData = {
-              id: Date.now().toString(),
               org: org,
-              orgName: org, // 🔥 Field Added
+              orgName: org, 
+              orgId: orgId, 
               address: address,
               city: city,
               contactPerson: clientName, 
@@ -288,47 +305,39 @@ export default function AddLeadScreen() {
               type: leadType,
               isHot: leadType === 'Hot',
               discussion: discussion,
-              
               requirements: finalRequirements,
-              
               nextDate: nextDate.toISOString().split('T')[0],
               closingDate: closingDate.toISOString().split('T')[0],
               date: new Date().toISOString().split('T')[0], 
-              
-              // 🔥 Safe IDs
-              userId: safeUserId,       
-              assignedTo: safeUserId, 
-              senderId: safeUserId,
-              senderName: user?.name || 'Unknown',
-              role: user?.role || 'Employee',
-              timestamp: Date.now(),
+              userId: currentUser?.id,       
+              assignedTo: currentUser?.id, 
               location: locationData,
-              
               history: [{
                   date: new Date().toLocaleString(),
                   msg: `Lead Created. Req: ${finalRequirements.join(', ')}. Note: ${discussion}`,
                   type: 'New Lead',
-                  by: user?.name || 'User'
+                  by: currentUser?.name || 'User'
               }]
           };
 
-          await addLead(newLeadData);
+          const result = await addSaaSData("leads", newLeadData);
 
-          try {
-              await addDoc(collection(db, "notifications"), {
-                  title: "New Lead Added 👥",
-                  message: `${user?.name} added a new lead: ${org}.`,
-                  to: "Admin",
-                  screen: "/leads", 
-                  read: false,
-                  createdAt: new Date().toISOString(),
-                  type: "info"
-              });
-          } catch (e) {}
-
-          setIsSubmitting(false); // 🔥 Stop Loading
-          Alert.alert("Success", "New Lead Added!");
-          router.back();
+          if (result.success) {
+              if (addNotification) {
+                  await addNotification({
+                      title: "New Lead Added 👥",
+                      message: `${currentUser?.name} added a new lead: ${org}.`,
+                      to: "Admin",
+                      route: "/leads", 
+                      type: "info"
+                  });
+              }
+              Alert.alert("Success", "New Lead Added!");
+              router.back();
+          } else {
+              Alert.alert("Error", "Could not save lead.");
+          }
+          setIsSubmitting(false); 
       }
   };
 
@@ -342,14 +351,14 @@ export default function AddLeadScreen() {
         <View style={{width:24}} /> 
       </View>
 
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{flex: 1}}>
-        <ScrollView style={styles.contentContainer} contentContainerStyle={{paddingBottom: 100}}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{flex: 1}} keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 20}>
+        <ScrollView style={styles.contentContainer} contentContainerStyle={{paddingBottom: 100}} keyboardShouldPersistTaps="handled">
             
             <Text style={styles.sectionTitle}>1. Organization Details</Text>
             <Text style={styles.label}>Select Organization <Text style={{color:'red'}}>*</Text></Text>
             <TouchableOpacity style={[styles.dropdown, errors.org && styles.errorBorder]} onPress={() => openModal('Organization', orgList)}>
                 <Text style={{color: org ? '#333' : 'gray', flex:1}}>{org || "Search Hospital / Clinic..."}</Text>
-                <Ionicons name="search" size={20} color="gray" />
+                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998"/> : <Ionicons name="search" size={20} color="gray" />}
             </TouchableOpacity>
             {errors.org && <Text style={styles.errorText}>Organization is required</Text>}
 
@@ -447,7 +456,6 @@ export default function AddLeadScreen() {
                 </View>
             </View>
 
-            {/* 3. REQUIREMENTS */}
             <Text style={styles.sectionTitle}>3. Requirements</Text>
             <TouchableOpacity style={styles.reqSearchBtn} onPress={() => openModal('Requirements', getProductOptions())}>
                 <Text style={{color:'gray'}}>Select Product / Requirement...</Text>
@@ -465,7 +473,6 @@ export default function AddLeadScreen() {
                 ))}
             </View>
 
-            {/* SHOW INPUT IF 'OTHER' IS SELECTED */}
             {selectedRequirements.includes("Other") && (
                 <View style={{marginBottom:15}}>
                     <Text style={styles.label}>Specify Other Requirement <Text style={{color:'red'}}>*</Text></Text>
@@ -488,7 +495,7 @@ export default function AddLeadScreen() {
             />
             {errors.discussion && <Text style={styles.errorText}>Discussion note is required</Text>}
 
-            {/* 🔥 UPDATED BUTTON WITH LOADING */}
+            {/* 🔥 BUTTON WITH LOADING */}
             <TouchableOpacity 
                 style={[styles.saveButton, isSubmitting && {backgroundColor:'#9fa8da'}]} 
                 onPress={handleSave} 
@@ -508,6 +515,7 @@ export default function AddLeadScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
+      {/* SEARCH MODAL */}
       <Modal visible={modalVisible} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
@@ -531,6 +539,7 @@ export default function AddLeadScreen() {
                     data={filteredData}
                     keyExtractor={(item, index) => index.toString()}
                     keyboardShouldPersistTaps='handled'
+                    style={{maxHeight: 300}}
                     renderItem={({item}) => (
                         <TouchableOpacity style={styles.modalItem} onPress={() => handleSelect(item)}>
                             {typeof item === 'string' ? (
@@ -565,11 +574,9 @@ export default function AddLeadScreen() {
                         <Text style={{color:'white', fontWeight:'bold'}}>Done</Text>
                     </TouchableOpacity>
                 )}
-
             </View>
         </View>
       </Modal>
-
     </View>
   );
 }

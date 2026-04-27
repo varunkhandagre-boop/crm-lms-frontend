@@ -4,27 +4,31 @@ import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
-import { useData } from './context/DataContext';
 
-// 🔥🔥 1. FIREBASE IMPORTS ADDED
-import { addDoc, collection } from 'firebase/firestore';
-import { db } from '../firebaseConfig'; // ⚠️ Path check karein
+// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
+import { useData } from './context/DataContext';
 
 export default function AddTravelScreen() {
   const router = useRouter();
-  const { addTravelNote, user } = useData(); 
+  
+  // 🔥 1. Context se Current User aur Notification Engine nikala
+  const { currentUser, addNotification } = useData(); 
+
+  // 🔥 2. Naya SaaS Engine connect kiya
+  const { addSaaSData } = useSaaSDB();
 
   // Form States
   const [date, setDate] = useState(new Date()); 
@@ -34,7 +38,7 @@ export default function AddTravelScreen() {
   const [toLoc, setToLoc] = useState('');
   const [mode, setMode] = useState('Select Mode');
   const [distance, setDistance] = useState('');
-  const [amount, setAmount] = useState(''); // 🔥 NEW: Amount State
+  const [amount, setAmount] = useState(''); 
   const [purpose, setPurpose] = useState('');
   
   // Loading States
@@ -90,9 +94,8 @@ export default function AddTravelScreen() {
     }
   };
 
-  // --- SAVE FUNCTION ---
+  // 🔥 3. SAAS SAVE LOGIC
   const handleSave = async () => {
-    // 🔥 Check if Amount is filled
     if (!fromLoc || !toLoc || !distance || !amount) {
         Alert.alert("Missing Fields", "Please fill From, To, Distance and Amount.");
         return;
@@ -101,43 +104,40 @@ export default function AddTravelScreen() {
     setSaveLoading(true); 
 
     try {
+        // 🔥 4. CLEAN PAYLOAD: Engine will auto-add ID, CompanyID, SenderID & CreatedAt
         const newNote = {
-            id: Date.now().toString(),
-            timestamp: Date.now(), 
             date: formatDate(date), 
+            dateIso: date.toISOString().split('T')[0], // Added for sorting
             rawDate: date.toISOString(), 
             from: fromLoc,
             to: toLoc,
             mode: mode === 'Select Mode' ? 'Bike' : mode,
             distance: distance,
-            amount: amount, // 🔥 NEW: Saving Amount
+            amount: amount,
             purpose: purpose || 'Official Visit',
-            
-            senderName: user?.name || 'Unknown Employee', 
-            senderId: user?.uid || 'guest',
-            organization: user?.organization || 'Global',
-            status: 'Pending' 
+            status: 'Pending',
+            role: currentUser?.role || 'Employee' 
         };
 
-        await addTravelNote(newNote); 
+        const result = await addSaaSData("travel_notes", newNote);
         
-        // 🔥🔥 2. NOTIFICATION TRIGGER ADDED 🔥🔥
-        try {
-            await addDoc(collection(db, "notifications"), {
-                title: "New Travel Logged 🚴",
-                message: `${user?.name} logged travel: ${fromLoc} to ${toLoc} (${distance} km).`,
-                to: "Admin",
-                route: "/travel",
-                read: false,
-                createdAt: new Date().toISOString(),
-                type: "info"
-            });
-        } catch (e) {
-            console.log("Notification Error:", e);
-        }
+        if (result.success) {
+            // 🔥 5. REAL PUSH NOTIFICATION
+            if (addNotification) {
+                await addNotification({
+                    title: "New Travel Logged 🚴",
+                    message: `${currentUser?.name} logged travel: ${fromLoc} to ${toLoc} (${distance} km).`,
+                    to: "Accountant", // Admin/Accountant ko alert jayega
+                    route: "/travel",
+                    type: "info"
+                });
+            }
 
-        Alert.alert("Success", "Travel Note Added & Admin Notified!");
-        router.back();
+            Alert.alert("Success", "Travel Note Added & Admin Notified!");
+            router.back();
+        } else {
+            Alert.alert("Error", "Failed to save travel note.");
+        }
     } catch (error) {
         Alert.alert("Error", "Failed to save travel note.");
         console.error(error);
@@ -163,6 +163,7 @@ export default function AddTravelScreen() {
         <ScrollView 
             style={styles.contentContainer} 
             contentContainerStyle={{paddingBottom: 100}} 
+            keyboardShouldPersistTaps="handled"
         >
             
             {/* Date Picker */}
@@ -225,7 +226,6 @@ export default function AddTravelScreen() {
                 </View>
             </View>
 
-            {/* 🔥 NEW: Amount Field */}
             <Text style={styles.label}>Total Amount (₹) *</Text>
             <TextInput 
                 style={styles.inputBox} 
@@ -245,7 +245,7 @@ export default function AddTravelScreen() {
                 placeholder="Reason for travel..."
             />
 
-            <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={saveLoading}>
+            <TouchableOpacity style={[styles.saveBtn, saveLoading && {opacity: 0.6}]} onPress={handleSave} disabled={saveLoading}>
                 {saveLoading ? (
                     <ActivityIndicator color="white" />
                 ) : (

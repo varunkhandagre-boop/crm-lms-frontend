@@ -2,9 +2,9 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { addDoc, collection } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     FlatList,
     KeyboardAvoidingView,
@@ -17,19 +17,53 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+
+// 🔥 OCR & CAMERA IMPORT
+import * as ImagePicker from 'expo-image-picker';
+
+// UPGRADED PINCODE DICTIONARY
+const districtPincodeMap: { [key: string]: string } = {
+    "Nagpur": "440001", "Pune": "411001", "Mumbai City": "400001", "Thane": "400601", "Nashik": "422001", "Aurangabad": "431001",
+    "Ahmedabad": "380001", "Surat": "395001", "Vadodara": "390001", "Rajkot": "360001",
+    "Indore": "452001", "Bhopal": "462001", "Jabalpur": "482001", "Gwalior": "474001",
+    "Raipur": "492001", "Bhilai": "490020", "Bilaspur": "495001",
+    "Patna": "800001", "Gaya": "823001", "Muzaffarpur": "842001",
+    "Jaipur": "302001", "Jodhpur": "342001", "Udaipur": "313001", "Kota": "324001",
+    "Lucknow": "226001", "Kanpur": "208001", "Varanasi": "221001", "Agra": "282001",
+    "Bengaluru Urban": "560001", "Mysuru": "570001", "Mangaluru": "575001",
+    "Chennai": "600001", "Coimbatore": "641001", "Madurai": "625001",
+    "Hyderabad": "500001", "Warangal": "506001",
+    "Kolkata": "700001", "Howrah": "711101",
+    "Delhi": "110001"
+};
 
 export default function AddInstallationScreen() {
   const router = useRouter();
   const params = useLocalSearchParams(); 
   
-  const { addInstallation, orgList, user, userList, productList } = useData();
+  // 🔥 1. Context Se SaaS Requirements Nikale
+  const { currentUser, companyProfile, updateActivityStatus, addNotification } = useData();
 
-  // --- COMMON DETAILS ---
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded States
+  const [orgList, setOrgList] = useState<any[]>([]);
+  const [productList, setProductList] = useState<any[]>([]);
+  const [userList, setUserList] = useState<any[]>([]);
+  const [installList, setInstallList] = useState<any[]>([]);
+
   const [hospital, setHospital] = useState('');
-  
-  // Auto-Fill States
+  const [orgId, setOrgId] = useState('');
+
   const [department, setDepartment] = useState('');
   const [city, setCity] = useState('');
   const [address, setAddress] = useState('');
@@ -39,7 +73,7 @@ export default function AddInstallationScreen() {
   const [installDate, setInstallDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   
-  const [engineer, setEngineer] = useState(user?.name || '');
+  const [engineer, setEngineer] = useState(currentUser?.name || '');
 
   // --- MACHINE DETAILS ---
   const [product, setProduct] = useState('');
@@ -48,51 +82,73 @@ export default function AddInstallationScreen() {
   const [warrantyYears, setWarrantyYears] = useState('1 Year');
   const [notes, setNotes] = useState('');
 
-  // --- LIST ---
+  // Custom Warranty States
+  const [customWarranty, setCustomWarranty] = useState('');
+  const [manualExpiry, setManualExpiry] = useState(new Date());
+  const [showManualExpiryPicker, setShowManualExpiryPicker] = useState(false);
+
   const [addedMachines, setAddedMachines] = useState<any[]>([]);
 
-  // MODAL STATES
   const [modalVisible, setModalVisible] = useState(false);
   const [currentModalType, setCurrentModalType] = useState('');
   const [filteredData, setFilteredData] = useState<any[]>([]); 
   const [searchText, setSearchText] = useState(''); 
   const [isSaving, setIsSaving] = useState(false);
+
+  // OCR State
+  const [isScanning, setIsScanning] = useState(false);
   
-  // --- OPTIONS ---
-  const warrantyOptions = ['1 Year', '2 Years', '3 Years', '5 Years'];
+  const warrantyOptions = ['6 Months', '1 Year', '2 Years', '3 Years', '5 Years', 'Other'];
+
+  // 🔥 4. LOAD DATA ON MOUNT
+  useEffect(() => {
+      const loadData = async () => {
+          if (currentUser?.companyId) {
+              const [orgs, prods, users, installs] = await Promise.all([
+                  fetchSaaSData("organizations"),
+                  fetchSaaSData("products"),
+                  fetchSaaSData("users"),
+                  fetchSaaSData("installations")
+              ]);
+              setOrgList(orgs);
+              setProductList(prods);
+              setUserList(users);
+              setInstallList(installs);
+          }
+      };
+      loadData();
+  }, [currentUser]);
 
   const getEngineerOptions = () => {
     const engineers = userList.map((u: any) => u.name);
-    // 'Self' hata diya, ab sirf engineers list aur 'Other' rahega
     return [...engineers, 'Other'];
-};
+  };
 
-  // 🔥 1. GET UNIQUE PRODUCT NAMES (Duplicates hata kar)
   const getUniqueProductNames = () => {
       const names = productList.map((p: any) => p.name);
-      // Set use karke duplicates remove kiye
       return [...new Set(names), 'Other'];
   };
 
-  // 🔥 2. GET MODELS FOR SELECTED PRODUCT
   const getModelOptions = () => {
       if (!product || product === 'Other') return ['Other'];
-      
-      // Sirf wahi models dhundo jo selected product ke hain
-      const models = productList
-          .filter((p: any) => p.name === product && p.model) // Name match kare aur Model exist kare
-          .map((p: any) => p.model);
-          
+      const models = productList.filter((p: any) => p.name === product && p.model).map((p: any) => p.model);
       return [...new Set(models), 'Other'];
   };
 
   useEffect(() => {
-      if (params.hospital) {
+      if (params.hospital && orgList.length > 0) {
           setHospital(params.hospital as string);
-          if(orgList.length > 0) {
-             const found = orgList.find((o:any) => o.orgName === params.hospital);
-             if(found) selectOrganization(found);
-          }
+          setOrgId(params.orgId as string || '');
+          setCity(params.city as string || '');
+          setContactPerson(params.contactPerson as string || '');
+          setMobile(params.mobile as string || '');
+          setAddress(params.address as string || '');
+
+          const found = orgList.find((o:any) => (o.orgName === params.hospital || o.name === params.hospital));
+          if(found) selectOrganization(found);
+      }
+      if (params.product) {
+          setProduct(params.product as string);
       }
   }, [params, orgList]);
 
@@ -104,53 +160,271 @@ export default function AddInstallationScreen() {
   };
 
   const getWarrantyExpiry = (dateObj: Date, yearsStr: string) => {
-      const years = parseInt(yearsStr.split(' ')[0]);
+      if (!yearsStr || yearsStr === 'Other') return '';
       const expiryDate = new Date(dateObj);
-      expiryDate.setFullYear(expiryDate.getFullYear() + years);
+      const num = parseInt(yearsStr.split(' ')[0]) || 0;
+
+      if (yearsStr.includes('Month')) {
+          expiryDate.setMonth(expiryDate.getMonth() + num);
+      } else {
+          expiryDate.setFullYear(expiryDate.getFullYear() + num);
+      }
+      
       expiryDate.setDate(expiryDate.getDate() - 1);
       return expiryDate.toISOString().split('T')[0];
   };
 
-  // 🔥 LOCATION LOGIC
-  const getCurrentLocation = async () => {
-      try {
-          let { status } = await Location.requestForegroundPermissionsAsync();
-          if (status !== 'granted') {
-              Alert.alert('Permission Denied', 'Location access is required.');
-              return null;
+  const handleCustomWarrantyChange = (text: string) => {
+      setCustomWarranty(text);
+      const num = parseInt(text.replace(/[^0-9]/g, '')); 
+      
+      if (!isNaN(num) && num > 0) {
+          const newExpiry = new Date(installDate); 
+          const lowerText = text.toLowerCase();
+          
+          if (lowerText.includes('day')) {
+              newExpiry.setDate(newExpiry.getDate() + num);
+          } else if (lowerText.includes('month')) {
+              newExpiry.setMonth(newExpiry.getMonth() + num);
+          } else if (lowerText.includes('year')) {
+              newExpiry.setFullYear(newExpiry.getFullYear() + num);
           }
-          let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-          return {
-              lat: location.coords.latitude,
-              lng: location.coords.longitude,
-              timestamp: new Date().toISOString()
-          };
-      } catch (error) {
-          Alert.alert("GPS Required", "Please turn on GPS.");
-          return null;
+          
+          newExpiry.setDate(newExpiry.getDate() - 1); 
+          setManualExpiry(newExpiry); 
       }
   };
 
-  // --- MODAL LOGIC ---
-  const openModal = (type: string) => {
-      setCurrentModalType(type);
-      setSearchText('');
+  // ==========================================
+  // 🔥 SMART MACHINE LABEL OCR PARSER
+  // ==========================================
+  const handleScanMachineLabel = async () => {
+      try {
+          const { status } = await ImagePicker.requestCameraPermissionsAsync();
+          if (status !== 'granted') {
+              Alert.alert('Permission Required', 'We need camera permission to scan the label.');
+              return;
+          }
+
+          const result = await ImagePicker.launchCameraAsync({
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              quality: 0.2, 
+              base64: true,
+          });
+
+          if (!result.canceled && result.assets[0].base64) {
+              setIsScanning(true);
+              const base64Image = `data:image/jpeg;base64,${result.assets[0].base64}`;
+
+              const formData = new FormData();
+              formData.append('base64Image', base64Image);
+              formData.append('language', 'eng');
+              formData.append('isOverlayRequired', 'false');
+
+              const response = await fetch('https://api.ocr.space/parse/image', {
+                  method: 'POST',
+                  headers: { 'apikey': 'helloworld' }, // You should replace this with your real API key
+                  body: formData,
+              });
+
+              const data = await response.json();
+
+              if (data.IsErroredOnProcessing) {
+                  Alert.alert('API Error', data.ErrorMessage?.[0] || 'Image size might be too large.');
+                  return;
+              }
+
+              if (data.ParsedResults && data.ParsedResults.length > 0) {
+                  const extractedText = data.ParsedResults[0].ParsedText;
+                  processMachineOCR(extractedText);
+              } else {
+                  Alert.alert('Scan Failed', 'Could not read label clearly. Please hold steady and try again.');
+              }
+          }
+      } catch (error) {
+          Alert.alert('Error', 'Failed to scan the label. Check your internet.');
+      } finally {
+          setIsScanning(false);
+      }
+  };
+
+  const processMachineOCR = (text: string) => {
+      let foundSomething = false;
+      const fullTextLower = text.toLowerCase();
+
+      const snMatch = text.match(/(?:SN|S\/N|Serial No\.?|Serial Number|S\.N\.|Ser\.No)\s*[:\-]?\s*([A-Za-z0-9\-]{5,20})/i);
+      if (snMatch && snMatch[1]) {
+          setSerialNo(snMatch[1].toUpperCase());
+          foundSomething = true;
+      } else {
+          const fallbackSN = text.match(/\b[A-Z0-9]{8,20}\b/i);
+          if (fallbackSN) {
+              setSerialNo(fallbackSN[0].toUpperCase());
+              foundSomething = true;
+          }
+      }
+
+      const modelMatch = text.match(/(?:Model|REF|M\/N|PN|P\/N|Part No\.?)\s*[:\-]?\s*([A-Za-z0-9\-]{3,15})/i);
+      if (modelMatch && modelMatch[1]) {
+          setModel(modelMatch[1].toUpperCase());
+          foundSomething = true;
+      }
+
+      const allProducts = getUniqueProductNames() as string[]; 
+      for (let prod of allProducts) {
+          if (prod && prod !== 'Other' && typeof prod === 'string' && fullTextLower.includes(prod.toLowerCase())) {
+              setProduct(prod);
+              foundSomething = true;
+              break;
+          }
+      }
+
+      if (foundSomething) {
+          Alert.alert("Auto-Fill Magic ✨", "Machine details extracted! Please verify the Serial Number.");
+      } else {
+          Alert.alert("No Details Found", "Could not confidently extract Serial No. or Model. Please fill manually.");
+      }
+  };
+
+  // 🔥 5. SMART SAAS FY INSTALLATION ID GENERATOR
+  const generateInstallationId = () => {
+      const targetMonth = installDate.getMonth(); 
+      const targetYear = installDate.getFullYear();
+      const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+      const fyString = `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`; 
       
+      const fyStartDateStr = `${fyStartYear}-04-01`;
+      const fyEndDateStr = `${fyStartYear + 1}-03-31`;
+
+      const count = installList ? installList.filter((c: any) => {
+          const dDate = c.dateIso || c.date; // Use dateIso if available
+          if (!dDate) return false;
+          return dDate >= fyStartDateStr && dDate <= fyEndDateStr;
+      }).length + 1 : 1;
+
+      const prefix = companyProfile?.shortName ? companyProfile.shortName.toUpperCase() : 'INS';
+      return `${prefix}-INS-${fyString}-${String(count).padStart(3, '0')}`;
+  };
+
+  // 🔥 PDF GENERATOR
+  const generateInstallationPDF = async (installId: string) => {
+    try {
+        const logoHTML = companyProfile?.logoUrl ? `<img src="${companyProfile.logoUrl}" style="height: 60px; margin-bottom: 10px;" />` : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
+        const signatureHTML = companyProfile?.signatureUrl ? `<img src="${companyProfile.signatureUrl}" style="height: 40px; margin-top: 5px; margin-bottom: 2px;" />` : `<div style="height: 40px;"></div>`;
+
+        const machineRows = addedMachines.map((m, index) => `
+            <tr>
+                <td style="padding:8px; border:1px solid #ddd; text-align: center;">${index + 1}</td>
+                <td style="padding:8px; border:1px solid #ddd;"><b>${m.product}</b><br><span style="font-size:12px; color:#555;">Model: ${m.model || '-'}</span></td>
+                <td style="padding:8px; border:1px solid #ddd;"><b>${m.serialNo}</b></td>
+                <td style="padding:8px; border:1px solid #ddd; text-align: center;">${m.warrantyYears}</td>
+                <td style="padding:8px; border:1px solid #ddd; text-align: center;">${m.warrantyExpiry}</td>
+            </tr>
+        `).join('');
+
+        const htmlContent = `
+        <html>
+          <head>
+            <style>
+              body { font-family: 'Helvetica', sans-serif; padding: 30px; border: 2px solid #333; }
+              .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px; }
+              .title { font-size: 22px; font-weight: bold; color: #1a237e; text-transform: uppercase; }
+              .sub-title { font-size: 12px; margin-top: 2px; color: #333; line-height: 1.4; }
+              .box { border: 1px solid #000; padding: 15px; margin-top: 10px; background-color: #fcfcfc; }
+              .row { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 14px; }
+              .label { font-weight: bold; color: #444; }
+              .table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+              .table th { background-color: #eee; padding: 10px; border: 1px solid #000; text-align: left; font-size: 12px; }
+              .table td { border: 1px solid #000; padding: 8px; text-align: center; vertical-align: top; }
+              .footer { margin-top: 50px; display: flex; justify-content: space-between; align-items: flex-end; }
+              .sign-box { text-align: center; width: 45%; }
+              .sign-line { border-top: 1px solid #000; width: 100%; margin-top: 5px; margin-bottom: 5px; }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              ${logoHTML}
+              ${companyProfile?.logoUrl ? `<div class="title">${companyProfile.companyName}</div>` : ''}
+              <div class="sub-title">${companyProfile?.address || ''}</div>
+              <div class="sub-title">Phone: ${companyProfile?.contactPhone || companyProfile?.phone || '-'} | Email: ${companyProfile?.contactEmail || companyProfile?.email || '-'}</div>
+            </div>
+            <h3 style="text-align: center; text-decoration: underline; margin-bottom: 20px;">INSTALLATION REPORT</h3>
+            <div class="row">
+              <div><span class="label">Report No:</span> <b>${installId}</b></div>
+              <div><span class="label">Date:</span> ${formatDate(installDate)}</div>
+            </div>
+            <div class="box">
+              <div style="font-size: 14px;"><b>Client Name:</b> ${hospital}</div>
+              <div style="font-size: 14px; margin-top:5px;"><b>Address:</b> ${address}, ${city}</div>
+              <div style="font-size: 14px; margin-top:5px;"><b>Contact:</b> ${contactPerson} (${mobile})</div>
+              <div style="font-size: 14px; margin-top:5px;"><b>Department:</b> ${department || '-'}</div>
+            </div>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th style="width: 5%;">#</th>
+                        <th style="width: 40%;">Product / Model</th>
+                        <th style="width: 25%;">Serial No.</th>
+                        <th style="width: 15%;">Warranty</th>
+                        <th style="width: 15%;">Expiry</th>
+                    </tr>
+                </thead>
+                <tbody>${machineRows}</tbody>
+            </table>
+            <div style="margin-top: 20px; font-size: 12px; color: #555;">
+                <b>Engineer Remarks:</b> ${notes || 'Installation completed successfully.'}
+            </div>
+            <div class="footer">
+              <div class="sign-box">
+                <div style="height: 60px;"></div> <div class="sign-line"></div>
+                <div style="font-weight: bold;">Client Signature & Stamp</div>
+              </div>
+              <div class="sign-box">
+                <div style="font-weight: bold; font-size: 12px;">Installed By: ${engineer}</div>
+                ${signatureHTML} <div class="sign-line"></div>
+                <div style="font-weight: bold;">Engineer Signature</div>
+              </div>
+            </div>
+          </body>
+        </html>`;
+
+        const { uri } = await Print.printToFileAsync({ html: htmlContent });
+        const cleanName = `${installId}_${hospital.replace(/ /g, '_')}.pdf`;
+        const newPath = `${(FileSystem as any).cacheDirectory}${cleanName}`;
+
+        try {
+            await FileSystem.copyAsync({ from: uri, to: newPath });
+            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Report` });
+        } catch (error) {
+            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+        }
+    } catch (error) { Alert.alert("Error", "Could not generate PDF"); }
+  };
+
+  const getCurrentLocation = async () => {
+      try {
+          let { status } = await Location.requestForegroundPermissionsAsync();
+          if (status !== 'granted') { Alert.alert('Permission Denied'); return null; }
+          let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          return { lat: location.coords.latitude, lng: location.coords.longitude, timestamp: new Date().toISOString() };
+      } catch (error) { Alert.alert("GPS Required", "Please turn on GPS."); return null; }
+  };
+
+  const openModal = (type: string) => {
+      setCurrentModalType(type); setSearchText('');
       let data: any[] = [];
       if (type === 'Hospital') data = orgList; 
       else if (type === 'Warranty') data = warrantyOptions; 
       else if (type === 'Engineer') data = getEngineerOptions(); 
-      else if (type === 'Product') data = getUniqueProductNames(); // 🔥 Unique Products
-      else if (type === 'Model') data = getModelOptions(); // 🔥 Filtered Models
+      else if (type === 'Product') data = getUniqueProductNames();
+      else if (type === 'Model') data = getModelOptions();
       
-      setFilteredData(data);
-      setModalVisible(true);
+      setFilteredData(data); setModalVisible(true);
   };
 
   const handleSearch = (text: string) => {
       setSearchText(text);
       let sourceList: any[] = [];
-      
       if (currentModalType === 'Hospital') sourceList = orgList;
       else if (currentModalType === 'Warranty') sourceList = warrantyOptions;
       else if (currentModalType === 'Engineer') sourceList = getEngineerOptions();
@@ -164,13 +438,12 @@ export default function AddInstallationScreen() {
               return val.toLowerCase().includes(text.toLowerCase()) || (item.city || '').toLowerCase().includes(text.toLowerCase());
           });
           setFilteredData(newData);
-      } else {
-          setFilteredData(sourceList);
-      }
+      } else { setFilteredData(sourceList); }
   };
 
   const selectOrganization = (orgItem: any) => {
       setHospital(orgItem.orgName || orgItem.name);
+      setOrgId(orgItem.id || ''); 
       setCity(orgItem.city || orgItem.City || '');
       setAddress(orgItem.address || orgItem.address1 || orgItem.location || '');
       setContactPerson(orgItem.contactPerson || '');
@@ -180,45 +453,35 @@ export default function AddInstallationScreen() {
 
   const handleSelect = (item: any) => {
       if (currentModalType === 'Hospital') {
-          if (typeof item === 'string') {
-             const found = orgList.find((o:any) => o.orgName === item);
-             if(found) selectOrganization(found);
-             else setHospital(item);
-          } else {
-             selectOrganization(item);
-          }
+          if (typeof item === 'string') { setHospital(item); setOrgId(''); } 
+          else { selectOrganization(item); }
       }
       else if (currentModalType === 'Warranty') { setWarrantyYears(item); }
       else if (currentModalType === 'Engineer') { setEngineer(item); }
-      
-      else if (currentModalType === 'Product') { 
-          setProduct(item); 
-          setModel(''); // 🔥 Reset Model when Product changes
-      } 
+      else if (currentModalType === 'Product') { setProduct(item); setModel(''); } 
       else if (currentModalType === 'Model') { setModel(item); }
-
       setModalVisible(false);
   };
 
   const handleAddMachine = () => {
-      if (!product || !serialNo) {
-          Alert.alert("Missing Info", "Product Name and Serial No are required.");
+      const finalWarrantyText = warrantyYears === 'Other' ? customWarranty : warrantyYears;
+      const finalExpiryDate = warrantyYears === 'Other' ? manualExpiry.toISOString().split('T')[0] : getWarrantyExpiry(installDate, warrantyYears);
+
+      if (!product || !serialNo || !finalWarrantyText) {
+          Alert.alert("Missing Info", "Product Name, Serial No, and Warranty are required.");
           return;
       }
 
       const machineEntry = {
           id: Date.now().toString(),
-          product,
-          model,
-          serialNo,
-          warrantyYears,
-          warrantyExpiry: getWarrantyExpiry(installDate, warrantyYears),
+          product, model, serialNo,
+          warrantyYears: finalWarrantyText,
+          warrantyExpiry: finalExpiryDate,
           note: notes
       };
 
       setAddedMachines([...addedMachines, machineEntry]);
-      // Reset machine fields
-      setProduct(''); setModel(''); setSerialNo(''); setNotes('');
+      setProduct(''); setModel(''); setSerialNo(''); setNotes(''); setCustomWarranty('');
   };
 
   const removeMachine = (index: number) => {
@@ -227,85 +490,87 @@ export default function AddInstallationScreen() {
       setAddedMachines(newList);
   };
 
+  // 🔥 6. SAAS SAVE LOGIC
   const handleFinalSubmit = async () => {
-      if (!hospital) return Alert.alert("Missing", "Select Hospital.");
+      if (!hospital || !department) return Alert.alert("Missing", "Select Hospital and enter Department.");
       if (addedMachines.length === 0) return Alert.alert("Empty", "Add at least one machine.");
 
       setIsSaving(true); 
-
-      // 🔥 Capture Location
       const locationData = await getCurrentLocation();
-      if (!locationData) {
-          setIsSaving(false);
-          return; 
-      }
-
-      const promises = addedMachines.map(async (machine) => {
-          const newEntry = {
-              id: Date.now().toString() + Math.random(),
-              date: installDate.toISOString().split('T')[0],
-              hospital: hospital,
-              orgName: hospital,
-              
-              city, address, contactPerson, mobile, department,
-              
-              engineer,
-              status: 'Installed',
-              
-              product: machine.product, 
-              productName: machine.product, 
-              model: machine.model,
-              serialNo: machine.serialNo, 
-              warrantyExpiry: machine.warrantyExpiry,
-              note: machine.note,
-
-              senderId: user?.uid || 'guest',
-              senderName: user?.name || 'Unknown',
-              createdAt: new Date().toISOString(),
-              location: locationData // 🔥 Save Location
-          };
-          return addInstallation(newEntry);
-      });
-
-      await Promise.all(promises);
+      const installId = generateInstallationId(); // Synchronous execution now
 
       try {
-          await addDoc(collection(db, "notifications"), {
-              title: "New Installation Report 🛠️",
-              message: `${user?.name} installed ${addedMachines.length} machine(s) at ${hospital}.`,
-              to: "Admin",
-              route: "/installation",
-              read: false,
-              createdAt: new Date().toISOString(),
-              type: "success"
-          });
-      } catch (e) {}
+        // Multi-machine Save via SaaS Hook
+        const promises = addedMachines.map(async (machine) => {
+            const newEntry = {
+                installId: installId, 
+                dateIso: installDate.toISOString().split('T')[0],
+                displayDate: formatDate(installDate),
+                hospital: hospital, orgName: hospital, orgId: orgId,
+                city, address, contactPerson, mobile, department, engineer,
+                status: 'Installed',
+                product: machine.product, productName: machine.product, model: machine.model, serialNo: machine.serialNo, 
+                warrantyExpiry: machine.warrantyExpiry, note: machine.note,
+                location: locationData
+            };
+            return addSaaSData("installations", newEntry);
+        });
 
-      setIsSaving(false);
-      Alert.alert("Success", "Installation Report Saved!");
-      router.back();
+        const results = await Promise.all(promises);
+        const allSuccess = results.every(r => r.success);
+        
+        if (allSuccess) {
+            // REAL PUSH NOTIFICATION
+            if (addNotification) {
+                await addNotification({
+                    title: "Installation Completed 🛠️",
+                    message: `${currentUser?.name} installed ${addedMachines.length} machine(s) at ${hospital}.`,
+                    to: "Admin",
+                    route: "/installations",
+                    type: "success"
+                });
+            }
+
+            if (params.activityId && updateActivityStatus) {
+                await updateActivityStatus(params.activityId as string, 'Completed');
+            }
+
+            Alert.alert(
+                "Success ✅", 
+                `Installation Report ${installId} Saved!\nDo you want to share PDF?`,
+                [
+                    { text: "No", onPress: () => router.back(), style: 'cancel' },
+                    { text: "Yes, Share PDF", onPress: async () => { await generateInstallationPDF(installId); router.back(); }}
+                ]
+            );
+        } else {
+            Alert.alert("Warning", "Some machines might not have saved correctly.");
+        }
+      } catch (err) {
+        Alert.alert("Error", "Could not save installation.");
+      } finally {
+        setIsSaving(false);
+      }
   };
+
+  const isSubmitDisabled = !hospital || !department || addedMachines.length === 0 || isSaving;
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <View style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()}>
-              <Ionicons name="arrow-back" size={24} color="#333" />
-          </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
           <Text style={styles.headerTitle}>New Installation</Text>
           <View style={{width:24}} /> 
         </View>
 
         <ScrollView contentContainerStyle={{padding: 20, paddingBottom: 100}} keyboardShouldPersistTaps="handled">
             
-            {/* SECTION 1 */}
             <Text style={styles.sectionHeader}>1. Client & Site Details</Text>
-            
             <Text style={styles.label}>Hospital / Client *</Text>
             <TouchableOpacity style={styles.dropdown} onPress={() => openModal('Hospital')}>
                 <Text style={{color: hospital ? 'black' : 'gray'}}>{hospital || 'Select from List'}</Text>
-                <Ionicons name="search" size={18} color="gray" />
+                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998"/> : <Ionicons name="search" size={18} color="gray" />}
             </TouchableOpacity>
 
             {hospital ? (
@@ -324,11 +589,11 @@ export default function AddInstallationScreen() {
 
             <View style={styles.row}>
                 <View style={styles.col}>
-                    <Text style={styles.label}>Department</Text>
+                    <Text style={styles.label}>Department *</Text>
                     <TextInput style={styles.input} placeholder="e.g. ICU/OT" value={department} onChangeText={setDepartment} />
                 </View>
                 <View style={styles.col}>
-                    <Text style={styles.label}>Install Date</Text>
+                    <Text style={styles.label}>Install Date *</Text>
                     <TouchableOpacity style={styles.dropdown} onPress={() => setShowDatePicker(true)}>
                         <Text style={{color: '#333'}}>{formatDate(installDate)}</Text>
                         <Ionicons name="calendar-outline" size={18} color="gray" />
@@ -339,56 +604,66 @@ export default function AddInstallationScreen() {
 
             <Text style={styles.label}>Installation Engineer</Text>
             <TouchableOpacity style={styles.dropdown} onPress={() => openModal('Engineer')}>
-                <Text>{engineer || user?.name || 'Select Engineer'}</Text>
+                <Text>{engineer || currentUser?.name || 'Select Engineer'}</Text>
                 <Ionicons name="caret-down" size={14} color="gray" />
             </TouchableOpacity>
 
             <View style={styles.divider} />
-
-            {/* SECTION 2 */}
             <Text style={styles.sectionHeader}>2. Add Machine Details</Text>
 
-            {/* 🔥 PRODUCT SELECTION FROM MASTER */}
+            <TouchableOpacity style={[styles.scannerBtn, isScanning && {opacity: 0.6}]} onPress={handleScanMachineLabel} disabled={isScanning}>
+                {isScanning ? <ActivityIndicator color="white" /> : <><Ionicons name="barcode-outline" size={22} color="white" /><Text style={styles.scannerBtnText}>Scan Machine Label (S/N)</Text></>}
+            </TouchableOpacity>
+
             <Text style={styles.label}>Product Name *</Text>
             <TouchableOpacity style={styles.dropdown} onPress={() => openModal('Product')}>
                 <Text style={{color: product ? 'black' : 'gray'}}>{product || 'Select Product'}</Text>
                 <Ionicons name="cube-outline" size={18} color="gray" />
             </TouchableOpacity>
+            {product === 'Other' && <TextInput style={[styles.input, {marginTop:5, borderColor:'#3b5998'}]} placeholder="Type Product Name..." onChangeText={setProduct} />}
 
-            {product === 'Other' && (
-                <TextInput style={[styles.input, {marginTop:5, borderColor:'#3b5998'}]} placeholder="Type Product Name..." onChangeText={setProduct} />
-            )}
-
-            {/* 🔥 MODEL SELECTION FROM MASTER (FILTERED) */}
             <Text style={styles.label}>Model Name</Text>
-            <TouchableOpacity style={styles.dropdown} onPress={() => {
-                if(!product) Alert.alert("Wait", "Please select Product first.");
-                else openModal('Model');
-            }}>
+            <TouchableOpacity style={styles.dropdown} onPress={() => { if(!product) Alert.alert("Wait", "Select Product first."); else openModal('Model'); }}>
                 <Text style={{color: model ? 'black' : 'gray'}}>{model || 'Select Model'}</Text>
                 <Ionicons name="layers-outline" size={18} color="gray" />
             </TouchableOpacity>
-
-            {model === 'Other' && (
-                <TextInput style={[styles.input, {marginTop:5}]} placeholder="Type Model Name..." onChangeText={setModel} />
-            )}
+            {model === 'Other' && <TextInput style={[styles.input, {marginTop:5}]} placeholder="Type Model Name..." onChangeText={setModel} />}
 
             <Text style={styles.label}>Serial Number *</Text>
             <TextInput style={styles.input} placeholder="e.g. AN-2025-XX" value={serialNo} onChangeText={setSerialNo} />
 
             <View style={styles.row}>
                 <View style={styles.col}>
-                    <Text style={styles.label}>Warranty</Text>
+                    <Text style={styles.label}>Warranty *</Text>
                     <TouchableOpacity style={styles.dropdown} onPress={() => openModal('Warranty')}>
                         <Text>{warrantyYears}</Text>
                         <Ionicons name="caret-down" size={14} color="gray" />
                     </TouchableOpacity>
                 </View>
-                <View style={styles.col}>
-                    <Text style={styles.label}>Expiry (Preview)</Text>
-                    <TextInput style={[styles.input, {backgroundColor:'#eee'}]} editable={false} value={getWarrantyExpiry(installDate, warrantyYears)} />
-                </View>
+                {warrantyYears !== 'Other' && (
+                    <View style={styles.col}>
+                        <Text style={styles.label}>Expiry (Preview)</Text>
+                        <TextInput style={[styles.input, {backgroundColor:'#eee'}]} editable={false} value={getWarrantyExpiry(installDate, warrantyYears)} />
+                    </View>
+                )}
             </View>
+
+            {warrantyYears === 'Other' && (
+                <View style={[styles.autoFillBox, {borderColor: '#ffb74d', backgroundColor: '#fff8e1'}]}>
+                    <Text style={{fontSize:11, color:'#f57c00', fontWeight:'bold', marginBottom:8}}>CUSTOM WARRANTY DETAILS</Text>
+                    <View style={styles.row}>
+                        <View style={styles.col}>
+                            <Text style={styles.label}>Warranty Text</Text>
+                            <TextInput style={styles.inputGray} placeholder="e.g. 45 Days" value={customWarranty} onChangeText={handleCustomWarrantyChange} />
+                        </View>
+                        <View style={styles.col}>
+                            <Text style={styles.label}>Expiry Date</Text>
+                            <TouchableOpacity style={styles.inputGray} onPress={() => setShowManualExpiryPicker(true)}><Text style={{color: '#333', marginTop: 4}}>{formatDate(manualExpiry)}</Text></TouchableOpacity>
+                            {showManualExpiryPicker && <DateTimePicker value={manualExpiry} mode="date" onChange={(e, d) => { setShowManualExpiryPicker(false); if(d) setManualExpiry(d); }} />}
+                        </View>
+                    </View>
+                </View>
+            )}
 
             <Text style={styles.label}>Accessories / Notes</Text>
             <TextInput style={[styles.input, {height: 60}]} placeholder="UPS, Stand etc." value={notes} onChangeText={setNotes} />
@@ -398,51 +673,41 @@ export default function AddInstallationScreen() {
                 <Text style={styles.addMachineText}>Add This Machine</Text>
             </TouchableOpacity>
 
-            {/* SECTION 3: LIST */}
             {addedMachines.length > 0 && (
                 <View style={styles.addedListContainer}>
                     <Text style={styles.listTitle}>Machines to be Added ({addedMachines.length})</Text>
                     {addedMachines.map((m, index) => (
                         <View key={index} style={styles.addedItem}>
                             <View style={{flex:1}}>
-                                <Text style={{fontWeight:'bold'}}>{m.product} <Text style={{fontWeight:'normal', color:'gray'}}>({m.model})</Text></Text>
-                                <Text style={{fontSize:12, color:'#333'}}>SN: {m.serialNo} • Warranty: {m.warrantyYears}</Text>
+                                <Text style={{fontWeight:'bold'}}>{m.product} ({m.model})</Text>
+                                <Text style={{fontSize:12, color:'#333'}}>SN: {m.serialNo} • Expiry: {m.warrantyExpiry}</Text>
                             </View>
-                            <TouchableOpacity onPress={() => removeMachine(index)}>
-                                <Ionicons name="trash-outline" size={20} color="red" />
-                            </TouchableOpacity>
+                            <TouchableOpacity onPress={() => removeMachine(index)}><Ionicons name="trash-outline" size={20} color="red" /></TouchableOpacity>
                         </View>
                     ))}
                 </View>
             )}
 
-            <TouchableOpacity style={[styles.saveBtn, {backgroundColor: addedMachines.length > 0 ? '#3b5998' : 'gray'}]} onPress={handleFinalSubmit} disabled={addedMachines.length === 0 || isSaving}>
-                <Text style={styles.saveBtnText}>{isSaving ? 'Submitting...' : `Submit All (${addedMachines.length})`}</Text>
+            {/* FINAL SUBMIT BUTTON */}
+            <TouchableOpacity 
+                style={[styles.saveBtn, { backgroundColor: isSubmitDisabled ? '#ccc' : '#3b5998' }]} 
+                onPress={handleFinalSubmit} 
+                disabled={isSubmitDisabled}
+            >
+                {isSaving ? (
+                    <ActivityIndicator color="white" />
+                ) : (
+                    <Text style={styles.saveBtnText}>Submit All ({addedMachines.length})</Text>
+                )}
             </TouchableOpacity>
-            
-            {/* 🔥 Location Disclaimer */}
-            <Text style={{textAlign:'center', color:'gray', fontSize:10, marginTop:10}}>
-                📍 Location will be captured automatically.
-            </Text>
             
         </ScrollView>
 
-        {/* MODAL */}
         <Modal visible={modalVisible} transparent={true} animationType="fade">
           <View style={styles.modalOverlay}>
               <View style={styles.modalContent}>
                   <Text style={styles.modalTitle}>Select {currentModalType}</Text>
-                  
-                  <View style={styles.modalSearchBox}>
-                      <Ionicons name="search" size={20} color="gray" />
-                      <TextInput 
-                          style={{flex:1, marginLeft:10}} 
-                          placeholder="Search..." 
-                          value={searchText} 
-                          onChangeText={handleSearch} 
-                      />
-                  </View>
-
+                  <View style={styles.modalSearchBox}><Ionicons name="search" size={20} color="gray" /><TextInput style={{flex:1, marginLeft:10}} placeholder="Search..." value={searchText} onChangeText={handleSearch} /></View>
                   <FlatList 
                       data={filteredData}
                       keyExtractor={(item, index) => index.toString()}
@@ -450,31 +715,18 @@ export default function AddInstallationScreen() {
                       renderItem={({item}) => (
                           <TouchableOpacity style={styles.modalItem} onPress={() => handleSelect(item)}>
                               {currentModalType === 'Hospital' && typeof item !== 'string' ? (
-                                  <View style={{flexDirection:'row', alignItems:'center'}}>
-                                      <View style={styles.iconBox}><Ionicons name="business" size={20} color="#3b5998" /></View>
-                                      <View style={{marginLeft:10}}>
-                                          <Text style={styles.modalMainText}>{item.orgName || item.name}</Text>
-                                          <Text style={styles.modalSubText}>{item.city || 'No City'}</Text>
-                                      </View>
-                                  </View>
+                                  <View style={{flexDirection:'row', alignItems:'center'}}><View style={styles.iconBox}><Ionicons name="business" size={20} color="#3b5998" /></View><View style={{marginLeft:10}}><Text style={styles.modalMainText}>{item.orgName || item.name}</Text><Text style={styles.modalSubText}>{item.city || 'No City'}</Text></View></View>
                               ) : (
-                                  <View style={{flexDirection:'row', alignItems:'center'}}>
-                                      <Ionicons name="radio-button-on" size={18} color="#666" style={{marginRight:10}}/>
-                                      <Text style={styles.modalText}>{typeof item === 'string' ? item : (item.orgName || item.name)}</Text>
-                                  </View>
+                                  <View style={{flexDirection:'row', alignItems:'center'}}><View style={[styles.iconBox, {backgroundColor:'#f3e5f5'}]}><Ionicons name={currentModalType === 'Product' ? "cube" : "radio-button-on"} size={20} color="#8e44ad" /></View><View style={{flex:1, marginLeft: 10}}><Text style={styles.modalText}>{typeof item === 'string' ? item : (item.orgName || item.name)}</Text></View><Ionicons name="add-circle-outline" size={24} color="#3b5998" /></View>
                               )}
                           </TouchableOpacity>
                       )}
                       ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>No matches found</Text>}
                   />
-                  
-                  <TouchableOpacity style={styles.closeBtn} onPress={() => setModalVisible(false)}>
-                      <Text style={{color:'red', fontWeight:'bold'}}>Close</Text>
-                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.closeBtn} onPress={() => setModalVisible(false)}><Text style={{color:'red', fontWeight:'bold'}}>Close</Text></TouchableOpacity>
               </View>
           </View>
         </Modal>
-
       </View>
     </KeyboardAvoidingView>
   );
@@ -487,11 +739,11 @@ const styles = StyleSheet.create({
   sectionHeader: { fontSize: 16, fontWeight: 'bold', color: '#3b5998', marginTop: 15, marginBottom: 10 },
   label: { marginBottom: 5, color:'#555', fontWeight:'600', fontSize:13, marginTop:10 },
   input: { backgroundColor: '#f9f9f9', borderWidth:1, borderColor:'#ddd', borderRadius: 8, padding: 12, fontSize:16 },
-  
+  scannerBtn: { flexDirection: 'row', backgroundColor: '#388e3c', padding: 12, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginBottom: 15, elevation: 2 },
+  scannerBtnText: { color: 'white', fontWeight: 'bold', fontSize: 15, marginLeft: 8 },
   autoFillBox: { backgroundColor: '#f0f8ff', padding: 10, borderRadius: 8, marginBottom: 10, borderWidth: 1, borderColor: '#d0eaff' },
   inputGray: { backgroundColor: '#ffffff', borderWidth:1, borderColor:'#ddd', borderRadius: 8, padding: 10, fontSize: 15, color:'#333' },
-
-  dropdown: { backgroundColor: '#f9f9f9', borderWidth:1, borderColor:'#ddd', borderRadius: 8, padding: 12, flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
+  dropdown: { backgroundColor: '#f9f9f9', borderWidth:1, borderColor:'#ddd', borderRadius: 8, padding: 12, flexDirection:'row', justifyContent:'space-between', alignItems:'center', height:50 },
   row: { flexDirection: 'row', justifyContent: 'space-between' },
   col: { width: '48%' },
   divider: { height:1, backgroundColor:'#eee', marginVertical:20 },

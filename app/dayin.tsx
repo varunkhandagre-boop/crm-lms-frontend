@@ -54,7 +54,14 @@ export default function DayInScreen() {
     const [detailModalVisible, setDetailModalVisible] = useState(false);
     const [selectedItem, setSelectedItem] = useState<any>(null);
 
-    const YEARLY_LEAVE_QUOTA = 24;
+    // 🔥 PAGINATION STATE
+    const [visibleCount, setVisibleCount] = useState(20);
+
+    useEffect(() => {
+        if (viewMode === 'Day') setVisibleCount(500); 
+        else setVisibleCount(20);  
+    }, [viewMode, currentDate, filterUser]);
+
     const canManage = currentUser?.role === 'Admin' || currentUser?.role === 'Manager' || currentUser?.role === 'Hr' || currentUser?.role === 'Accountant';
 
     // HELPER: Unique Users
@@ -63,7 +70,23 @@ export default function DayInScreen() {
         return userList.map((u:any) => u.name).sort();
     }, [userList, canManage]);
 
-    // HELPERS
+    // --- 🔥 NEW BULLETPROOF HELPERS 🔥 ---
+    const normalizeDate = (dStr: string, isoStr?: string) => {
+        if (isoStr && isoStr.includes('-')) return isoStr.split('T')[0];
+        if (!dStr) return "";
+        if (dStr.includes('/')) {
+            const parts = dStr.split('/');
+            if(parts.length === 3) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        }
+        if (dStr.includes('T')) return dStr.split('T')[0];
+        return dStr;
+    };
+
+    const isSameUser = (name1: string, name2: string) => {
+        if (!name1 || !name2) return false;
+        return name1.trim().toLowerCase() === name2.trim().toLowerCase();
+    };
+
     const formatMonth = (date: Date) => date.toLocaleString('default', { month: 'long', year: 'numeric' });
     const formatFullDate = (date: Date) => date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     const formatDateDisplay = (dateStr: string) => {
@@ -106,25 +129,20 @@ export default function DayInScreen() {
         const misc = parseFloat(newExpenses.misc) || 0;
         const total = da + hotel + misc;
         
-        setExpenses({
-            ...newExpenses,
-            totalAmount: total >= 0 ? total.toString() : ''
-        });
+        setExpenses({ ...newExpenses, totalAmount: total >= 0 ? total.toString() : '' });
     };
 
-    // --- 🔥 FIX: Refresh Status whenever Screen Focuses ---
+    // --- Refresh Status whenever Screen Focuses ---
     useFocusEffect(
         useCallback(() => {
             const checkStatus = () => {
                 const now = new Date();
-                // 🔥 FIX: Use Local Date to avoid UTC mismatch in evening
                 const offset = now.getTimezoneOffset() * 60000;
                 const localDate = new Date(now.getTime() - offset);
                 const todayStr = localDate.toISOString().split('T')[0];
                 
-                // Aaj ki entry dhundo
                 const myEntry = attendanceList.find((a: any) => 
-                    a.date === todayStr && a.userName === currentUser?.name
+                    a.date === todayStr && (isSameUser(a.userName, currentUser?.name) || a.userId === currentUser?.id)
                 );
 
                 if (myEntry) {
@@ -136,7 +154,6 @@ export default function DayInScreen() {
                     } else {
                         if (status === 'Completed') return;
                         setStatus('In');
-                        // Timer logic
                         const start = new Date(myEntry.createdAt).getTime();
                         setStartTime(start);
                         const diff = Math.floor((now.getTime() - start) / 1000);
@@ -153,12 +170,10 @@ export default function DayInScreen() {
                 }
             };
 
-            // Check tabhi karein jab list load ho chuki ho
-            if(attendanceList && currentUser) {
-                checkStatus();
-            }
+            if(attendanceList && currentUser) checkStatus();
         }, [attendanceList, currentUser, status])
     );
+
     useEffect(() => {
         let interval: any;
         if (status === 'In' && startTime) {
@@ -188,29 +203,7 @@ export default function DayInScreen() {
         return 'PRESENT';
     };
 
-    // --- NEW HELPER: Count Calendar Holidays Only ---
-    const getMonthlyHolidayCount = () => {
-        if (viewMode !== 'Month') return 0;
-        
-        const year = currentDate.getFullYear();
-        const month = currentDate.getMonth();
-        const daysInMonth = new Date(year, month + 1, 0).getDate();
-        let count = 0;
-
-        for (let d = 1; d <= daysInMonth; d++) {
-            const date = new Date(year, month, d);
-            const dateStr = date.toISOString().split('T')[0];
-            const isSunday = date.getDay() === 0;
-            const isDbHoliday = holidayList.find((h:any) => h.date === dateStr);
-
-            if (isSunday || isDbHoliday) {
-                count++;
-            }
-        }
-        return count;
-    };
-
-    // --- DATA GENERATION ---
+    // --- 🔥 DATA GENERATION ENGINE 🔥 ---
     const getDisplayData = () => {
         let rawData: any[] = [];
 
@@ -218,44 +211,51 @@ export default function DayInScreen() {
             const selectedDateStr = currentDate.toISOString().split('T')[0];
             const finalOutput: any[] = [];
             const usersToCheck = (filterUser !== 'All' && canManage) 
-                ? userList.filter((u:any) => u.name === filterUser) 
+                ? userList.filter((u:any) => isSameUser(u.name, filterUser)) 
                 : (canManage ? userList : [currentUser]); 
 
             usersToCheck.forEach((emp: any) => {
-                // 1. Leave Check
-                const leave = leaveList.find((l: any) => 
-                    l.senderName === emp.name && l.status === 'Approved' && 
-                    selectedDateStr >= l.fromDate && selectedDateStr <= (l.toDate || l.fromDate)
+                if (!emp || !emp.name) return;
+
+                // 1. ATTENDANCE CHECK FIRST! (Priority 1)
+                const attendance = attendanceList.find((a: any) => 
+                    (isSameUser(a.userName, emp.name) || isSameUser(a.senderName, emp.name)) && 
+                    a.date === selectedDateStr
                 );
+
+                if (attendance) {
+                    finalOutput.push({ ...attendance, type: 'ATTENDANCE', senderName: emp.name });
+                    return; // 🔥 STOP HERE. If present, ignore Leave/Holiday/Absent.
+                }
+
+                // 2. LEAVE CHECK (Correct Date Comparison)
+                const leave = leaveList.find((l: any) => {
+                    if (!isSameUser(l.senderName, emp.name) || l.status !== 'Approved') return false;
+                    const startD = normalizeDate(l.fromDate, l.fromDateIso);
+                    const endD = normalizeDate(l.toDate || l.fromDate, l.toDateIso);
+                    return selectedDateStr >= startD && selectedDateStr <= endD;
+                });
+
                 if (leave) {
                     finalOutput.push({ id: `leave-${leave.id}-${emp.id}`, date: selectedDateStr, type: 'LEAVE', senderName: emp.name, outTime: leave.type, workHrs: '0' });
                     return;
                 }
 
-                // 2. Attendance Check
-                const attendance = attendanceList.find((a: any) => 
-                    (a.userName === emp.name || a.senderName === emp.name) && a.date === selectedDateStr
-                );
-                if (attendance) {
-                    finalOutput.push({ ...attendance, type: 'ATTENDANCE', senderName: emp.name });
-                    return;
-                }
-
-                // 3. Database Holiday Check
-                const holiday = holidayList.find((h:any) => h.date === selectedDateStr);
+                // 3. HOLIDAY CHECK
+                const holiday = holidayList.find((h:any) => normalizeDate(h.date, h.dateIso) === selectedDateStr);
                 if (holiday) {
                     finalOutput.push({ id: `holiday-${selectedDateStr}-${emp.id}`, date: selectedDateStr, type: 'HOLIDAY', senderName: emp.name, outTime: holiday.name, workHrs: '0' });
                     return;
                 }
 
-                // 4. 🔥 FIXED: Sunday Check for Day View
+                // 4. SUNDAY CHECK
                 const d = new Date(selectedDateStr);
                 if (d.getDay() === 0) {
                      finalOutput.push({ id: `sunday-${selectedDateStr}-${emp.id}`, date: selectedDateStr, type: 'HOLIDAY', senderName: emp.name, outTime: 'Sunday Off', workHrs: '0' });
                      return;
                 }
 
-                // 5. Absent Check (If date is past or today)
+                // 5. ABSENT CHECK (Only if date is past/today)
                 if (selectedDateStr <= new Date().toISOString().split('T')[0]) {
                     finalOutput.push({ id: `absent-${selectedDateStr}-${emp.id}`, date: selectedDateStr, type: 'ABSENT', senderName: emp.name, inTime: '-', outTime: '-', workHrs: '0' });
                 }
@@ -267,18 +267,46 @@ export default function DayInScreen() {
             let leaveSource = [...leaveList];
             const targetUser = (canManage && filterUser !== 'All') ? filterUser : (canManage ? null : currentUser?.name);
 
+            // Filter data by selected user
             if (targetUser) {
-                attSource = attSource.filter((item: any) => (item.userName || item.senderName) === targetUser);
-                leaveSource = leaveSource.filter((item: any) => item.senderName === targetUser);
+                attSource = attSource.filter((item: any) => isSameUser(item.userName, targetUser) || isSameUser(item.senderName, targetUser));
+                leaveSource = leaveSource.filter((item: any) => isSameUser(item.senderName, targetUser));
             } else if (!canManage) {
                 attSource = attSource.filter((item: any) => item.userId === currentUser?.id);
                 leaveSource = leaveSource.filter((item: any) => item.userId === currentUser?.id);
             }
 
+            // Push Attendance
             attSource.forEach((att: any) => rawData.push({ ...att, type: 'ATTENDANCE', senderName: att.userName || att.senderName }));
+            
+            // Expand Multi-Day Leaves
             leaveSource.forEach((leave: any) => {
                 if (leave.status === 'Approved') {
-                    rawData.push({ id: `leave-${leave.id}`, date: leave.fromDate, inTime: 'LEAVE', outTime: leave.type, workHrs: '0', location: 'Approved Leave', senderName: leave.senderName, type: 'LEAVE' });
+                    const startD = normalizeDate(leave.fromDate, leave.fromDateIso);
+                    const endD = normalizeDate(leave.toDate || leave.fromDate, leave.toDateIso);
+
+                    let currDate = new Date(startD);
+                    const lastDate = new Date(endD);
+
+                    while (currDate <= lastDate) {
+                        const dStr = currDate.toISOString().split('T')[0];
+                        // Only add leave if no attendance exists for this specific day
+                        const hasAtt = attSource.some(a => a.date === dStr && (isSameUser(a.userName, leave.senderName) || isSameUser(a.senderName, leave.senderName)));
+
+                        if (!hasAtt) {
+                            rawData.push({
+                                id: `leave-${leave.id}-${dStr}`,
+                                date: dStr,
+                                inTime: 'LEAVE',
+                                outTime: leave.type,
+                                workHrs: '0',
+                                location: 'Approved Leave',
+                                senderName: leave.senderName,
+                                type: 'LEAVE'
+                            });
+                        }
+                        currDate.setDate(currDate.getDate() + 1);
+                    }
                 }
             });
 
@@ -290,10 +318,11 @@ export default function DayInScreen() {
                 
                 for (let i = 1; i <= daysInMonth; i++) {
                     const d = new Date(year, month, i);
-                    const dateStr = d.toISOString().split('T')[0];
+                    const offset = d.getTimezoneOffset() * 60000;
+                    const dateStr = new Date(d.getTime() - offset).toISOString().split('T')[0];
                     
                     const logs = rawData.filter(item => item.date === dateStr);
-                    const holiday = holidayList.find((h:any) => h.date === dateStr);
+                    const holiday = holidayList.find((h:any) => normalizeDate(h.date, h.dateIso) === dateStr);
                     const isSunday = d.getDay() === 0;
 
                     if (logs.length > 0) {
@@ -303,14 +332,7 @@ export default function DayInScreen() {
                         fullMonthData.push({ id: `holiday-${i}`, date: dateStr, type: 'HOLIDAY', outTime: holiday.name, workHrs: '0', senderName: targetUser || 'N/A' });
                     }
                     else if (isSunday) {
-                        fullMonthData.push({ 
-                            id: `sunday-${i}`, 
-                            date: dateStr, 
-                            type: 'HOLIDAY', 
-                            outTime: 'Sunday Off', 
-                            workHrs: '0', 
-                            senderName: targetUser || 'N/A' 
-                        });
+                        fullMonthData.push({ id: `sunday-${i}`, date: dateStr, type: 'HOLIDAY', outTime: 'Sunday Off', workHrs: '0', senderName: targetUser || 'N/A' });
                     }
                     else if (targetUser && d <= new Date()) {
                         fullMonthData.push({ id: `absent-${i}`, date: dateStr, type: 'ABSENT', inTime: '-', outTime: '-', workHrs: '0', senderName: targetUser });
@@ -326,23 +348,72 @@ export default function DayInScreen() {
     };
 
     const finalData = getDisplayData();
+    const displayData = finalData.slice(0, visibleCount);
 
-    // Stats
+    // ==========================================
+    // 💡 SMART HOLIDAY REMINDER LOGIC
+    // ==========================================
+    const todayObj = new Date();
+    const tomorrowObj = new Date();
+    tomorrowObj.setDate(todayObj.getDate() + 1);
+
+    const getStandardDate = (dateObj: Date) => {
+        const offset = dateObj.getTimezoneOffset() * 60000;
+        return new Date(dateObj.getTime() - offset).toISOString().split('T')[0];
+    };
+
+    const todayStrFull = getStandardDate(todayObj);
+    const tomorrowStrFull = getStandardDate(tomorrowObj);
+
+    const todayIsSunday = todayObj.getDay() === 0;
+    const tomorrowIsSunday = tomorrowObj.getDay() === 0;
+
+    const todayHoliday = holidayList?.find((h:any) => normalizeDate(h.date, h.dateIso) === todayStrFull);
+    const tomorrowHoliday = holidayList?.find((h:any) => normalizeDate(h.date, h.dateIso) === tomorrowStrFull);
+
+    let holidayMessage = null;
+    let isTodayHoliday = false;
+
+    if (todayHoliday || todayIsSunday) {
+        isTodayHoliday = true;
+        holidayMessage = `🎉 Today is ${todayHoliday ? todayHoliday.name : 'Sunday'}. Enjoy your day off!`;
+    } else if (tomorrowHoliday || tomorrowIsSunday) {
+        holidayMessage = `💡 Reminder: Tomorrow is ${tomorrowHoliday ? tomorrowHoliday.name : 'Sunday'}.`;
+    }
+
     const daysPresent = finalData.filter(i => getStatus(i) === 'PRESENT').length;
-    const shortDays = finalData.filter(i => getStatus(i) === 'SHORT').length;
+    const actualHolidayCount = finalData.filter(i => getStatus(i) === 'HOLIDAY').length;
     const leavesOrAbsent = finalData.filter(i => getStatus(i) === 'LEAVE' || getStatus(i) === 'ABSENT').length;
     const midLabel = "Leaves/Abs";
-    
-    // Holiday Count Logic
-    const actualHolidayCount = (filterUser === 'All' && viewMode === 'Month') 
-        ? getMonthlyHolidayCount() 
-        : finalData.filter(i => getStatus(i) === 'HOLIDAY').length;
 
-    // --- ACTIONS ---
+    // ==========================================
+    // 🔥 CORE ACTIONS 
+    // ==========================================
     const handleDayIn = async () => {
         setLoading(true);
         setAddress("Fetching GPS...");
         try {
+            const now = new Date();
+            const todayStr = getStandardDate(now);
+            
+            // DUPLICATE CHECK (Case Insensitive)
+            const existingEntry = attendanceList.find((a: any) => 
+                a.date === todayStr && (a.userId === currentUser?.id || isSameUser(a.userName, currentUser?.name) || isSameUser(a.senderName, currentUser?.name))
+            );
+
+            if (existingEntry) {
+                Alert.alert("Already Punched In", "You have already marked your attendance for today.");
+                setStatus(existingEntry.outTime && existingEntry.outTime !== '--' ? 'Completed' : 'In');
+                setLoading(false);
+                return;
+            }
+
+            let realName = currentUser?.name || 'Unknown';
+            if (currentUser?.email) {
+                const dbUser = userList.find((u: any) => u.email === currentUser.email || u.id === currentUser.id);
+                if (dbUser && dbUser.name) realName = dbUser.name;
+            }
+
             let { status: permStatus } = await Location.requestForegroundPermissionsAsync();
             if (permStatus !== 'granted') throw new Error("Denied");
 
@@ -368,16 +439,17 @@ export default function DayInScreen() {
             }
             setAddress(currentAddr);
 
-            const now = new Date();
             const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
             await addAttendance({
-                date: new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().split('T')[0],
+                date: todayStr,
                 inTime: timeString,
                 outTime: '', workHrs: '', status: 'Present',
                 expenses: { da: '0', hotel: '0', misc: '0', totalAmount: '0' },
                 location: { address: currentAddr, latitude: loc.coords.latitude, longitude: loc.coords.longitude },
-                note: 'Marked via GPS'
+                note: 'Marked via GPS',
+                userName: realName, 
+                senderName: realName
             });
             
             setStatus('In');
@@ -400,127 +472,75 @@ export default function DayInScreen() {
         else Alert.alert("Done", "Aaj ka kaam ho gaya hai.");
     };
 
-const handleFinalizeDayOut = async () => {
-    // 1. Safety Check: Agar Start Time load nahi hua to wait karne bole
-    if (!todayDocId) return;
-    if (!startTime) {
-        Alert.alert("Please Wait", "Syncing attendance data... try again in 5 seconds.");
-        return;
-    }
-    if (loading) return;
-    setLoading(true);
+    const handleFinalizeDayOut = async () => {
+        if (!todayDocId) return;
+        if (!startTime) {
+            Alert.alert("Please Wait", "Syncing attendance data... try again in 5 seconds.");
+            return;
+        }
+        if (loading) return;
+        setLoading(true);
 
-    try {
-        // 🔥 FIX: Timer state par trust mat karo. Abhi calculate karo.
-        const nowMs = new Date().getTime();
-        const actualDurationSeconds = Math.floor((nowMs - startTime) / 1000);
-        
-        // Negative check (just in case time settings changed)
-        const finalSeconds = actualDurationSeconds > 0 ? actualDurationSeconds : 0;
-
-        const hoursWorked = finalSeconds / 3600;
-        
-        // Logic: Agar 4 ghante se kam hai to Short Day, nahi to Present
-        // Note: Aap chahe to is logic ko adjust kar sakte hain (e.g. > 0 present)
-        const attendanceStatus = hoursWorked < 4 ? 'Short Day' : 'Present';
-
-        const finalExpenses = {
-    da: expenses.da || '0',
-    hotel: expenses.hotel || '0',
-    misc: expenses.misc || '0',
-    totalAmount: expenses.totalAmount || '0',
-    note: expenses.note || '' // 🔥 Note bhi save hoga ab
-};
-
-        let outLocData = null;
-        let outAddr = "Unknown";
         try {
-            let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-            outLocData = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+            const nowMs = new Date().getTime();
+            const actualDurationSeconds = Math.floor((nowMs - startTime) / 1000);
+            const finalSeconds = actualDurationSeconds > 0 ? actualDurationSeconds : 0;
+            const hoursWorked = finalSeconds / 3600;
+            
+            const attendanceStatus = hoursWorked < 4 ? 'Short Day' : 'Present';
 
-            let addrRes = await Location.reverseGeocodeAsync(outLocData);
-            if (addrRes.length > 0) {
-                const obj = addrRes[0];
-                let building = obj.name || '';
-                if (building.includes(',')) building = '';
-                let street = obj.street || '';
-                if (street === building) street = '';
-                let area = obj.district || obj.subregion || '';
-                let city = obj.city || '';
-                if (area === city) area = '';
-                outAddr = [building, street, area, city].filter(Boolean).join(', ');
-            }
-        } catch (e) { console.log("Out loc failed"); }
+            const finalExpenses = {
+                da: expenses.da || '0',
+                hotel: expenses.hotel || '0',
+                misc: expenses.misc || '0',
+                totalAmount: expenses.totalAmount || '0',
+                note: expenses.note || '' 
+            };
 
-        const docRef = doc(db, "attendance", todayDocId);
-        await updateDoc(docRef, {
-            outTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            workHrs: formatTime(finalSeconds), // 🔥 Use Calculated Seconds
-            status: attendanceStatus,
-            expenses: finalExpenses,
-            outLocation: outLocData,
-            outAddress: outAddr
-        });
-
-        await Notifications.dismissAllNotificationsAsync();
-        await Notifications.cancelAllScheduledNotificationsAsync();
-        await manageAttendanceReminders('COMPLETED', holidayList);
-
-        setStatus('Completed');
-        setExpenseModalVisible(false);
-        setExpenses({ da: '', hotel: '', misc: '', totalAmount: '', note: '' });
-
-        Alert.alert("Day End", `✅ Punched Out Successfully!\nTotal Expense: ₹${finalExpenses.totalAmount}`);
-
-    } catch (error) {
-        Alert.alert("Error", "Day Out Update Failed.");
-    } finally {
-        setLoading(false);
-    }
-};
-// 🔥 ADMIN FORCE OUT LOGIC (Updated for Popup)
-    const handleForceOut = async () => {
-        if (!selectedItem) return;
-
-        Alert.alert("Force Day Out", `Are you sure you want to mark Day Out for ${selectedItem.senderName}?`, [
-            { text: "Cancel", style: "cancel" },
-            { 
-                text: "Mark Out", 
-                style: 'destructive',
-                onPress: async () => {
-                    try {
-                        const now = new Date();
-                        const outTimeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                        
-                        // Calculate Duration
-                        let workHrs = "00:00:00";
-                        try {
-                            const entryDate = new Date(selectedItem.createdAt || selectedItem.date);
-                            const diffMs = now.getTime() - entryDate.getTime();
-                            const diffSec = Math.floor(diffMs / 1000);
-                            const hrs = Math.floor(diffSec / 3600);
-                            const mins = Math.floor((diffSec % 3600) / 60);
-                            workHrs = `${hrs}:${mins}:00`;
-                        } catch(e) {}
-
-                        const docRef = doc(db, "attendance", selectedItem.id);
-                        await updateDoc(docRef, {
-                            outTime: outTimeStr,
-                            workHrs: workHrs,
-                            status: 'Present (Admin)',
-                            note: 'Force Out by Admin',
-                            expenses: { da: '0', hotel: '0', misc: '0', totalAmount: '0' }
-                        });
-
-                        Alert.alert("Success", "Employee marked out successfully.");
-                        setDetailModalVisible(false); // Popup band kar do
-                        setSelectedItem(null);
-                    } catch (error) {
-                        Alert.alert("Error", "Could not update status.");
-                    }
+            let outLocData = null;
+            let outAddr = "Unknown";
+            try {
+                let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+                outLocData = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+                let addrRes = await Location.reverseGeocodeAsync(outLocData);
+                if (addrRes.length > 0) {
+                    const obj = addrRes[0];
+                    let building = obj.name || '';
+                    if (building.includes(',')) building = '';
+                    let street = obj.street || '';
+                    if (street === building) street = '';
+                    let area = obj.district || obj.subregion || '';
+                    let city = obj.city || '';
+                    if (area === city) area = '';
+                    outAddr = [building, street, area, city].filter(Boolean).join(', ');
                 }
-            }
-        ]);
+            } catch (e) { console.log("Out loc failed"); }
+
+            const docRef = doc(db, "attendance", todayDocId);
+            await updateDoc(docRef, {
+                outTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                workHrs: formatTime(finalSeconds), 
+                status: attendanceStatus,
+                expenses: finalExpenses,
+                outLocation: outLocData,
+                outAddress: outAddr
+            });
+
+            await Notifications.dismissAllNotificationsAsync();
+            await Notifications.cancelAllScheduledNotificationsAsync();
+            await manageAttendanceReminders('COMPLETED', holidayList);
+
+            setStatus('Completed');
+            setExpenseModalVisible(false);
+            setExpenses({ da: '', hotel: '', misc: '', totalAmount: '', note: '' });
+
+            Alert.alert("Day End", `✅ Punched Out Successfully!\nTotal Expense: ₹${finalExpenses.totalAmount}`);
+
+        } catch (error) {
+            Alert.alert("Error", "Day Out Update Failed.");
+        } finally {
+            setLoading(false);
+        }
     };
 
     const renderHistoryItem = ({ item }: any) => {
@@ -573,7 +593,6 @@ const handleFinalizeDayOut = async () => {
 
             <ScrollView contentContainerStyle={{paddingBottom: 20}}>
                 
-                {/* 1. BIG PUNCH CARD */}
                 <View style={styles.card}>
                     <Text style={styles.dateText}>{new Date().toDateString()}</Text>
                     {status === 'In' ? (
@@ -582,6 +601,18 @@ const handleFinalizeDayOut = async () => {
                         <Text style={[styles.timerText, {color:'green', fontSize:24}]}>Shift Done ✅</Text>
                     ) : (
                         <Text style={styles.timeText}>Ready to Start</Text>
+                    )}
+                    
+                    {holidayMessage && (
+                        <View style={{
+                            backgroundColor: isTodayHoliday ? '#e8f5e9' : '#fff3e0', 
+                            padding: 10, borderRadius: 8, marginBottom: 15, width: '100%', 
+                            borderWidth: 1, borderColor: isTodayHoliday ? '#c8e6c9' : '#ffe0b2'
+                        }}>
+                            <Text style={{color: isTodayHoliday ? '#2e7d32' : '#e65100', fontWeight: 'bold', fontSize: 13, textAlign: 'center'}}>
+                                {holidayMessage}
+                            </Text>
+                        </View>
                     )}
                     
                     <View style={styles.locationBox}>
@@ -593,8 +624,7 @@ const handleFinalizeDayOut = async () => {
 
                     <TouchableOpacity 
                         style={[styles.punchBtn, {backgroundColor: status === 'In' ? '#d32f2f' : (status === 'Completed' ? 'gray' : '#2e7d32')}]} 
-                        onPress={handleMainButton} 
-                        disabled={loading || status === 'Completed'}
+                        onPress={handleMainButton} disabled={loading || status === 'Completed'}
                     >
                         {loading ? <ActivityIndicator color="white" size="large" /> : (
                             <>
@@ -605,7 +635,6 @@ const handleFinalizeDayOut = async () => {
                     </TouchableOpacity>
                 </View>
 
-                {/* 2. HISTORY FILTER SECTION */}
                 <View style={styles.historySection}>
                     <Text style={styles.sectionTitle}>Log Book</Text>
 
@@ -637,83 +666,58 @@ const handleFinalizeDayOut = async () => {
                     </View>
 
                     <FlatList 
-                        data={finalData} 
-                        keyExtractor={(item) => item.id} 
+                        data={displayData} 
+                        keyExtractor={(item, index) => item.id || `log-${index}`} 
                         renderItem={renderHistoryItem} 
                         scrollEnabled={false} 
                         contentContainerStyle={{paddingBottom: 20}}
                         ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>No records found.</Text>}
+                        
+                        ListFooterComponent={
+                            <View style={{ marginTop: 10 }}>
+                                {visibleCount < finalData.length ? (
+                                    <TouchableOpacity onPress={() => setVisibleCount(prev => prev + 20)} style={styles.loadMoreBtn}>
+                                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({finalData.length - visibleCount} remaining)</Text>
+                                    </TouchableOpacity>
+                                ) : (
+                                    finalData.length > 0 ? <Text style={styles.endListText}>--- End of List ---</Text> : null
+                                )}
+                            </View>
+                        }
                     />
                 </View>
             </ScrollView>
 
             {/* EXPENSE MODAL */}
             <Modal visible={expenseModalVisible} transparent={true} animationType="slide">
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
-                        <Text style={styles.modalTitle}>End Day Expenses</Text>
-                        <View style={{marginBottom:10}}>
-                            <Text style={{fontSize:12, color:'gray', marginBottom:2}}>Total Amount (Auto)</Text>
-                            <TextInput 
-                                style={[styles.input, {borderColor:'#3b5998', borderWidth:2, backgroundColor:'#e3f2fd', color:'#333', fontWeight:'bold'}]} 
-                                placeholder="0" 
-                                value={expenses.totalAmount} 
-                                editable={false} 
-                            />
-                        </View>
+                <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+                    <ScrollView contentContainerStyle={{flexGrow: 1, justifyContent: 'center'}} keyboardShouldPersistTaps="handled">
+                        <View style={styles.modalContent}>
+                            <Text style={styles.modalTitle}>End Day Expenses</Text>
+                            
+                            <View style={{marginBottom:10}}>
+                                <Text style={{fontSize:12, color:'gray', marginBottom:2}}>Total Amount (Auto)</Text>
+                                <TextInput style={[styles.input, {borderColor:'#3b5998', borderWidth:2, backgroundColor:'#e3f2fd', color:'#333', fontWeight:'bold'}]} placeholder="0" value={expenses.totalAmount} editable={false} />
+                            </View>
 
-                        <TextInput 
-                            style={styles.input} 
-                            placeholder="DA" 
-                            keyboardType="numeric" 
-                            value={expenses.da} 
-                            onChangeText={(t) => handleExpenseChange('da', t)}
-                        />
-                        <TextInput 
-                            style={styles.input} 
-                            placeholder="Hotel" 
-                            keyboardType="numeric" 
-                            value={expenses.hotel} 
-                            onChangeText={(t) => handleExpenseChange('hotel', t)}
-                        />
-                        <TextInput 
-                            style={styles.input} 
-                            placeholder="Misc" 
-                            keyboardType="numeric" 
-                            value={expenses.misc} 
-                            onChangeText={(t) => handleExpenseChange('misc', t)}
-                        />
-                        {/* 🔥 EXPENSE NOTE INPUT */}
-<TextInput 
-    style={[styles.input, {height: 60, textAlignVertical: 'top'}]} 
-    placeholder="Note / Remark (Optional)" 
-    multiline={true}
-    value={expenses.note} 
-    onChangeText={(t) => setExpenses(prev => ({...prev, note: t}))}
-/>
-                        <View style={styles.row}>
-    <TouchableOpacity 
-        style={styles.cancelBtn} 
-        onPress={() => setExpenseModalVisible(false)}
-        disabled={loading} // 🔥 Disable Cancel too during loading
-    >
-        <Text>Cancel</Text>
-    </TouchableOpacity>
-    
-    <TouchableOpacity 
-        style={[styles.saveBtn, loading && {opacity: 0.6}]} // 🔥 Dim color when loading
-        onPress={handleFinalizeDayOut}
-        disabled={loading} // 🔥 DISABLE CLICK
-    >
-        {loading ? (
-            <ActivityIndicator size="small" color="white" /> // 🔥 Show Spinner
-        ) : (
-            <Text style={{color:'white'}}>Submit</Text>
-        )}
-    </TouchableOpacity>
-</View>
-                    </View>
-                </View>
+                            <TextInput style={styles.input} placeholder="DA" keyboardType="numeric" value={expenses.da} onChangeText={(t) => handleExpenseChange('da', t)} />
+                            <TextInput style={styles.input} placeholder="Hotel" keyboardType="numeric" value={expenses.hotel} onChangeText={(t) => handleExpenseChange('hotel', t)} />
+                            <TextInput style={styles.input} placeholder="Misc" keyboardType="numeric" value={expenses.misc} onChangeText={(t) => handleExpenseChange('misc', t)} />
+                            
+                            <TextInput style={[styles.input, {height: 80, textAlignVertical: 'top'}]} placeholder="Note / Remark (Optional)" multiline={true} numberOfLines={3} value={expenses.note} onChangeText={(t) => setExpenses(prev => ({...prev, note: t}))} />
+
+                            <View style={styles.row}>
+                                <TouchableOpacity style={styles.cancelBtn} onPress={() => setExpenseModalVisible(false)} disabled={loading}>
+                                    <Text>Cancel</Text>
+                                </TouchableOpacity>
+                                
+                                <TouchableOpacity style={[styles.saveBtn, loading && {opacity: 0.6}]} onPress={handleFinalizeDayOut} disabled={loading}>
+                                    {loading ? <ActivityIndicator size="small" color="white" /> : <Text style={{color:'white'}}>Submit</Text>}
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </ScrollView>
+                </KeyboardAvoidingView>
             </Modal>
 
             {/* USER FILTER MODAL */}
@@ -746,77 +750,77 @@ const handleFinalizeDayOut = async () => {
                         </View>
                         {selectedItem && (
                             <View>
-                                <DetailRow label="Employee" value={selectedItem.senderName} highlight />
-                                <DetailRow label="Date" value={formatDateDisplay(selectedItem.date)} />
-                                <DetailRow label="Status" value={getStatus(selectedItem) === 'SHORT' ? 'Short Day' : (getStatus(selectedItem) === 'PRESENT' ? 'Present' : selectedItem.type)} highlight color={getStatus(selectedItem) === 'PRESENT' ? 'green' : (getStatus(selectedItem) === 'SHORT' ? 'orange' : 'red')} />
+                                <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:10}}>
+                                    <Text style={{color:'gray', fontWeight:'600', fontSize:14}}>Employee</Text>
+                                    <Text style={{fontWeight:'bold', color: '#2e7d32', maxWidth:'60%', textAlign:'right', fontSize:14}}>{selectedItem.senderName}</Text>
+                                </View>
+                                <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:10}}>
+                                    <Text style={{color:'gray', fontWeight:'600', fontSize:14}}>Date</Text>
+                                    <Text style={{fontWeight:'bold', color: '#333', maxWidth:'60%', textAlign:'right', fontSize:14}}>{formatDateDisplay(selectedItem.date)}</Text>
+                                </View>
                                 
                                 <View style={styles.divider} />
                                 
                                 {selectedItem.type === 'ATTENDANCE' && (
                                     <>
-                                        <DetailRow label="In Time" value={selectedItem.inTime} />
-                                        <DetailRow label="Out Time" value={selectedItem.outTime || '-'} />
-                                        <DetailRow label="Work Hrs" value={selectedItem.workHrs || 'Ongoing'} highlight />
-                                        
-                                        <View style={styles.divider} />
-                                        <Text style={{fontWeight:'bold', color:'#3b5998', marginBottom:10}}>💰 Expenses</Text>
-                                        <DetailRow label="DA" value={`₹${selectedItem.expenses?.da || 0}`} />
-                                        <DetailRow label="Hotel" value={`₹${selectedItem.expenses?.hotel || 0}`} />
-                                        <DetailRow label="Misc" value={`₹${selectedItem.expenses?.misc || 0}`} />
-                                        <View style={{height:1, backgroundColor:'#eee', marginVertical:5}}/>
-                                        <DetailRow label="Total" value={`₹${selectedItem.expenses?.totalAmount || 0}`} highlight color="#e65100" />
+                                        <View style={{flexDirection:'row', justifyContent:'space-between', backgroundColor:'#f9f9f9', padding:10, borderRadius:8}}>
+                                            <View style={{alignItems:'center'}}>
+                                                <Text style={{fontSize:11, color:'gray'}}>IN TIME</Text>
+                                                <Text style={{fontWeight:'bold', color:'green', fontSize:14}}>{selectedItem.inTime}</Text>
+                                            </View>
+                                            <View style={{alignItems:'center'}}>
+                                                <Text style={{fontSize:11, color:'gray'}}>OUT TIME</Text>
+                                                <Text style={{fontWeight:'bold', color:'red', fontSize:14}}>{selectedItem.outTime || '--'}</Text>
+                                            </View>
+                                            <View style={{alignItems:'center'}}>
+                                                <Text style={{fontSize:11, color:'gray'}}>TOTAL HRS</Text>
+                                                <Text style={{fontWeight:'bold', color:'#333', fontSize:14}}>{selectedItem.workHrs || '--'}</Text>
+                                            </View>
+                                        </View>
 
-{/* 🔥 SHOW EXPENSE NOTE HERE */}
-{selectedItem.expenses?.note ? (
-    <View style={{marginTop: 5, marginBottom: 5, backgroundColor:'#fffde7', padding:8, borderRadius:5, borderWidth:1, borderColor:'#fff9c4'}}>
-        <Text style={{fontSize:11, color:'#fbc02d', fontWeight:'bold', marginBottom:2}}>📝 EXPENSE NOTE:</Text>
-        <Text style={{fontSize:13, color:'#333'}}>{selectedItem.expenses.note}</Text>
-    </View>
-) : null}
+                                        <View style={styles.divider}/>
+                                        <Text style={{fontSize:14, fontWeight:'bold', color:'#3b5998', marginBottom:8}}>📍 Locations</Text>
+                                        <View style={{marginBottom:10}}>
+                                            <Text style={{fontSize:11, color:'green', fontWeight:'bold'}}>Login Location:</Text>
+                                            <Text style={{fontSize:12, color:'#333'}}>{selectedItem.location?.address || 'Unknown Location'}</Text>
+                                        </View>
+                                        {selectedItem.outTime && selectedItem.outTime !== '--' && (
+                                            <View>
+                                                <Text style={{fontSize:11, color:'red', fontWeight:'bold'}}>Logout Location:</Text>
+                                                <Text style={{fontSize:12, color:'#333'}}>{selectedItem.outAddress || 'Unknown Location'}</Text>
+                                            </View>
+                                        )}
 
-<View style={styles.divider} />
-                                        <Text style={{fontSize:12, color:'gray'}}>In Loc: {selectedItem.location?.address || 'Unknown'}</Text>
-                                        {selectedItem.outAddress && <Text style={{fontSize:12, color:'gray', marginTop:2}}>Out Loc: {selectedItem.outAddress}</Text>}
+                                        <View style={styles.divider}/>
+                                        <Text style={{fontSize:14, fontWeight:'bold', color:'#3b5998', marginBottom:8}}>💰 Today's Expenses</Text>
+                                        <View style={{backgroundColor:'#fff3e0', padding:10, borderRadius:8}}>
+                                            <Text style={{color:'#333', fontSize:13}}>DA: ₹{selectedItem.expenses?.da || 0}</Text>
+                                            <Text style={{color:'#333', fontSize:13}}>Hotel: ₹{selectedItem.expenses?.hotel || 0}</Text>
+                                            <Text style={{color:'#333', fontSize:13}}>Misc: ₹{selectedItem.expenses?.misc || 0}</Text>
+                                            <View style={{height:1, backgroundColor:'#ccc', marginVertical:5}}/>
+                                            <Text style={{color:'#e65100', fontWeight:'bold', fontSize:14}}>Total: ₹{selectedItem.expenses?.totalAmount || 0}</Text>
+                                            {selectedItem.expenses?.note ? (
+                                                <View style={{marginTop: 5, backgroundColor:'#fffde7', padding:8, borderRadius:5, borderWidth:1, borderColor:'#fff9c4'}}>
+                                                    <Text style={{fontSize:11, color:'#fbc02d', fontWeight:'bold'}}>NOTE: {selectedItem.expenses.note}</Text>
+                                                </View>
+                                            ) : null}
+                                        </View>
                                     </>
                                 )}
-                                {/* 🔥 FORCE OUT BUTTON (Only for Admin & Pending Out) */}
-{canManage && selectedItem.type === 'ATTENDANCE' && (!selectedItem.outTime || selectedItem.outTime === '--') && (
-    <View style={{marginTop: 20, borderTopWidth:1, borderColor:'#eee', paddingTop:15}}>
-        <Text style={{textAlign:'center', color:'orange', fontSize:12, marginBottom:10, fontWeight:'bold'}}>
-            ⚠️ Warning: Employee has not logged out.
-        </Text>
-        <TouchableOpacity 
-            style={{backgroundColor:'#d32f2f', padding:12, borderRadius:8, alignItems:'center', flexDirection:'row', justifyContent:'center'}}
-            onPress={handleForceOut}
-        >
-            <Ionicons name="power" size={20} color="white" style={{marginRight:8}} />
-            <Text style={{color:'white', fontWeight:'bold'}}>FORCE DAY OUT</Text>
-        </TouchableOpacity>
-    </View>
-)}
                             </View>
                         )}
                     </View>
                 </View>
             </Modal>
-
         </KeyboardAvoidingView>
     );
 }
-
-const DetailRow = ({label, value, highlight, color}: any) => (
-    <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:10}}>
-        <Text style={{color:'gray', fontWeight:'600', fontSize:14}}>{label}</Text>
-        <Text style={{fontWeight:'bold', color: color ? color : (highlight ? '#2e7d32' : '#333'), maxWidth:'60%', textAlign:'right', fontSize:14}} numberOfLines={2}>{value}</Text>
-    </View>
-);
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f5f5f5' },
     header: { backgroundColor: '#3b5998', paddingTop: 50, padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     headerTitle: { color: 'white', fontSize: 20, fontWeight: 'bold' },
     
-    // BIG CARD STYLES
     card: { backgroundColor: 'white', margin: 15, padding: 20, borderRadius: 15, alignItems: 'center', elevation: 3 },
     dateText: { fontSize: 16, color: 'gray' },
     timerText: { fontSize: 36, fontWeight: 'bold', color: '#2e7d32', marginVertical: 10 },
@@ -826,7 +830,6 @@ const styles = StyleSheet.create({
     punchBtn: { width: 150, height: 150, borderRadius: 75, justifyContent: 'center', alignItems: 'center', elevation: 5 },
     punchBtnText: { color: 'white', fontWeight: 'bold', fontSize: 18, marginTop:5 },
 
-    // History Styles
     historySection: { marginHorizontal: 12 },
     sectionTitle: { fontWeight: 'bold', fontSize: 16, color:'#555', marginBottom: 8 },
     filterBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#0d47a1', padding: 10, borderRadius: 8, marginBottom: 10 },
@@ -842,7 +845,6 @@ const styles = StyleSheet.create({
     summaryGrid: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
     summaryBox: { width: '32%', paddingVertical: 8, borderRadius: 8, alignItems: 'center', elevation: 1 },
 
-    // UPDATED LIST ITEM STYLES
     historyCard: { backgroundColor: 'white', marginBottom: 12, padding: 15, borderRadius: 10, elevation: 2, borderLeftWidth: 5, borderLeftColor: '#3b5998' },
     bgLeave: { backgroundColor: '#fff3e0', borderLeftColor: '#e65100' },
     bgHoliday: { backgroundColor: '#fce4ec', borderLeftColor: '#c2185b' },
@@ -851,7 +853,9 @@ const styles = StyleSheet.create({
     historyTitle: { fontWeight: 'bold', fontSize: 16, color: '#333' },
     valText: { fontSize: 14, color: '#555', marginTop: 4 },
 
-    // Modals
+    loadMoreBtn: { padding: 12, backgroundColor: '#fff', alignItems: 'center', borderRadius: 8, borderWidth: 1, borderColor: '#ddd' },
+    endListText: { textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic' },
+
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 20 },
     modalContent: { backgroundColor: 'white', padding: 20, borderRadius: 10 },
     modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, color:'#3b5998' },

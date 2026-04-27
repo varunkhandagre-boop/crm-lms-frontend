@@ -29,16 +29,25 @@ export default function ProfileScreen() {
   const [sharing, setSharing] = useState(false);
   
   const [currentImage, setCurrentImage] = useState(currentUser?.profileImage || null);
+  const [userData, setUserData] = useState(currentUser);
 
   useEffect(() => {
     const fetchLatestProfile = async () => {
       if (currentUser?.id) {
         try {
+          // Firebase se fresh data lo
           const userDoc = await getDoc(doc(db, "users", currentUser.email.toLowerCase()));
+          
           if (userDoc.exists()) {
-            setCurrentImage(userDoc.data().profileImage || null);
+            const data = userDoc.data();
+            // 1. Photo update karo
+            setCurrentImage(data.profileImage || null);
+            // 2. Baki details (City, State) bhi update karo
+            setUserData({ ...currentUser, ...data });
           }
-        } catch (error) {}
+        } catch (error) {
+          console.log("Error fetching profile:", error);
+        }
       }
     };
     fetchLatestProfile();
@@ -103,21 +112,27 @@ export default function ProfileScreen() {
       return { uri: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' };
   };
 
-  // 🔥🔥 GENERATE VISITING CARD (FIXED LAYOUT) 🔥🔥
+  // 🔥🔥 GENERATE VISITING CARD (CLICKABLE LINKS PDF) 🔥🔥
   const shareVisitingCard = async () => {
       setSharing(true);
       try {
+          // Company Info
           const companyName = companyProfile?.companyName || 'My Company';
           const companyLogo = companyProfile?.logoUrl || ''; 
-          const headOffice = companyProfile?.headOfficeAddress || companyProfile?.address || 'Nagpur, India';
-          const website = companyProfile?.website || 'www.google.com';
+          const headOffice = companyProfile?.headOfficeAddress || companyProfile?.address || '';
+          
+          let website = companyProfile?.website || 'www.google.com';
+          if (!website.startsWith('http')) website = 'https://' + website; // Link sahi karne ke liye
+
           const compEmail = companyProfile?.contactEmail || companyProfile?.email || 'info@company.com';
           const compPhone = companyProfile?.contactPhone || companyProfile?.phone || '';
 
-          const empName = currentUser?.name || 'Employee Name';
-          const designation = currentUser?.role || 'Staff Member';
-          const empMobile = currentUser?.mobile || '';
-          const empEmail = currentUser?.email || '';
+          // Employee Info
+          const user = userData || currentUser; 
+          const empName = user?.name || 'Employee Name';
+          const designation = user?.role || 'Staff Member';
+          const empMobile = user?.mobile || '';
+          const empEmail = user?.email || '';
 
           const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${website}`;
 
@@ -126,132 +141,76 @@ export default function ProfileScreen() {
             <head>
               <style>
                 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap');
-                
                 * { box-sizing: border-box; }
                 body { margin: 0; padding: 0; font-family: 'Poppins', sans-serif; background-color: #f5f5f5; display: flex; justify-content: center; align-items: center; height: 100vh; }
+                .card { width: 600px; height: 350px; background: white; border-radius: 20px; box-shadow: 0 15px 30px rgba(0,0,0,0.2); overflow: hidden; display: flex; border: 1px solid #ddd; }
                 
-                .card { 
-                    width: 600px; height: 350px; 
-                    background: white; border-radius: 20px; 
-                    box-shadow: 0 15px 30px rgba(0,0,0,0.2); 
-                    overflow: hidden; display: flex;
-                    border: 1px solid #ddd;
-                }
+                /* Link Styles (Taaki PDF me blue na dikhe, par click ho) */
+                a { text-decoration: none; color: inherit; }
 
-                /* --- LEFT SECTION (Dark) --- */
-                .left-section {
-                    width: 38%;
-                    background: linear-gradient(135deg, #1a237e 0%, #283593 100%);
-                    color: white;
-                    padding: 20px;
-                    display: flex;
-                    flex-direction: column;
-                    justify-content: space-between; /* Space Top and Bottom */
-                    align-items: center;
-                    text-align: center;
-                }
-
-                .top-content { margin-top: 20px; width: 100%; }
-                
-                .logo-img { 
-                    width: 70px; height: 70px; 
-                    object-fit: contain; 
-                    background: white; 
-                    border-radius: 10px; 
-                    padding: 5px; 
-                    margin: 0 auto 15px auto; 
-                    display: block;
-                }
-                
-                .comp-name-vertical { 
-                    font-size: 18px; 
-                    font-weight: 700; 
-                    text-transform: uppercase; 
-                    letter-spacing: 1px; 
-                    line-height: 1.2;
-                    word-wrap: break-word;
-                }
-                
-                .qr-box { 
-                    background: white; padding: 5px; border-radius: 5px; margin-bottom: 10px;
-                }
+                /* Left Section */
+                .left-section { width: 38%; background: linear-gradient(135deg, #1a237e 0%, #283593 100%); color: white; padding: 20px; display: flex; flex-direction: column; justify-content: space-between; align-items: center; text-align: center; }
+                .logo-img { width: 70px; height: 70px; object-fit: contain; background: white; border-radius: 10px; padding: 5px; margin: 0 auto 15px auto; display: block; }
+                .comp-name-vertical { font-size: 18px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; line-height: 1.2; word-wrap: break-word; }
+                .qr-box { background: white; padding: 5px; border-radius: 5px; margin-bottom: 10px; }
                 .qr-img { width: 70px; height: 70px; display: block; }
 
-                /* --- RIGHT SECTION (Light) --- */
-                .right-section {
-                    width: 62%;
-                    padding: 25px 35px;
-                    display: flex;
-                    flex-direction: column;
-                    justify-content: space-between; /* Content spread out */
-                    position: relative;
-                }
-
-                /* Employee Info Block */
-                .emp-block {
-                    margin-top: 30px;
-                    z-index: 2;
-                }
-
+                /* Right Section */
+                .right-section { width: 62%; padding: 25px 35px; display: flex; flex-direction: column; justify-content: space-between; position: relative; }
+                .circle-bg { position: absolute; top: -70px; right: -70px; width: 180px; height: 180px; background: #e8eaf6; border-radius: 50%; z-index: 1; }
+                
+                .emp-block { margin-top: 30px; z-index: 2; }
                 .emp-name { font-size: 24px; font-weight: 700; color: #333; text-transform: uppercase; margin-bottom: 4px; line-height: 1; }
-                .emp-role { font-size: 12px; color: #e65100; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 20px; }
-
-                .info-row { display: flex; align-items: center; margin-bottom: 8px; font-size: 13px; color: #555; }
+                .emp-role { font-size: 12px; color: #e65100; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+                
+                /* Info Rows */
+                .info-row { display: flex; align-items: center; margin-bottom: 6px; font-size: 13px; color: #555; }
                 .icon { width: 24px; height: 24px; background: #3b5998; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-right: 12px; color: white; font-size: 11px; flex-shrink: 0; }
 
-                /* Head Office Block (Bottom) */
-                .ho-section { 
-                    background-color: #f9f9f9; padding: 12px; 
-                    border-radius: 8px; border-left: 4px solid #3b5998; 
-                }
+                /* Head Office Block */
+                .ho-section { background-color: #f9f9f9; padding: 12px; border-radius: 8px; border-left: 4px solid #3b5998; }
                 .ho-label { font-size: 9px; font-weight: bold; color: #999; text-transform: uppercase; margin-bottom: 4px; }
                 .ho-address { font-size: 10px; color: #333; line-height: 1.4; }
-
-                /* Decorative Circle */
-                .circle-bg {
-                    position: absolute; top: -70px; right: -70px;
-                    width: 180px; height: 180px; background: #e8eaf6; border-radius: 50%; z-index: 1;
-                }
-
               </style>
             </head>
             <body>
               <div class="card">
-                
                 <div class="left-section">
                     <div class="top-content">
                         ${companyLogo ? `<img src="${companyLogo}" class="logo-img" />` : ''}
                         <div class="comp-name-vertical">${companyName}</div>
                     </div>
-                    
-                    <div class="qr-box">
-                        <img src="${qrCodeUrl}" class="qr-img" />
-                    </div>
+                    <div class="qr-box"><img src="${qrCodeUrl}" class="qr-img" /></div>
                 </div>
 
                 <div class="right-section">
                     <div class="circle-bg"></div>
-                    
                     <div class="emp-block">
                         <div class="emp-name">${empName}</div>
                         <div class="emp-role">${designation}</div>
 
                         <div class="info-row">
-                            <div class="icon">📞</div> <span>${empMobile}</span>
+                            <div class="icon">📞</div> 
+                            <span><a href="tel:${empMobile}">${empMobile}</a></span>
                         </div>
                         <div class="info-row">
-                            <div class="icon">✉️</div> <span>${empEmail}</span>
+                            <div class="icon">✉️</div> 
+                            <span><a href="mailto:${empEmail}">${empEmail}</a></span>
                         </div>
+                        
                         <div class="info-row">
-                            <div class="icon">🌐</div> <span>${website}</span>
+                            <div class="icon">🌐</div> 
+                            <span><a href="${website}" target="_blank">${website.replace('https://','')}</a></span>
                         </div>
+
                     </div>
 
                     <div class="ho-section">
-                        <div class="ho-label">🏢 HEAD OFFICE & SUPPORT</div>
+                        <div class="ho-label">🏢 HEAD OFFICE</div>
                         <div class="ho-address">${headOffice}</div>
                         <div class="ho-address" style="margin-top:2px;">
-                            ${compPhone ? `📞 ${compPhone}  ` : ''} ✉️ ${compEmail}
+                            ${compPhone ? `📞 <a href="tel:${compPhone}">${compPhone}</a> &nbsp;` : ''} 
+                            ✉️ <a href="mailto:${compEmail}">${compEmail}</a>
                         </div>
                     </div>
                 </div>
@@ -323,9 +282,12 @@ export default function ProfileScreen() {
                     <Text style={styles.value}>{currentUser?.role || 'Staff'}</Text>
                 </View>
                 <View style={styles.infoItem}>
-                    <Text style={styles.label}>Location</Text>
-                    <Text style={styles.value}>Nagpur</Text>
-                </View>
+    <Text style={styles.label}>Location</Text>
+    <Text style={styles.value}>
+        {/* Ab ye 'userData' se fresh city uthayega */}
+        {userData?.city ? `${userData?.city} ${userData?.state ? ', ' + userData.state : ''}` : (userData?.address || 'Not Set')}
+    </Text>
+</View>
             </View>
 
             {/* COMPANY DETAILS */}

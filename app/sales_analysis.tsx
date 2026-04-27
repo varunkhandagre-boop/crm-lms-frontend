@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     FlatList,
     Modal,
@@ -16,10 +16,10 @@ import { useData } from './context/DataContext';
 export default function SalesAnalysisScreen() {
   const router = useRouter();
   
-  const { orderList = [], paymentList = [], user, userList = [] } = useData();
+  const { orderList = [], paymentList = [], orgList = [], user, userList = [] } = useData();
 
   // STATES
-  const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'Year' | 'All'>('Year');
+  const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
   const [searchText, setSearchText] = useState('');
@@ -31,31 +31,38 @@ export default function SalesAnalysisScreen() {
   
   // GRAPH
   const [graphModalVisible, setGraphModalVisible] = useState(false);
-  const [graphTitle, setGraphTitle] = useState('');
   const [graphTab, setGraphTab] = useState<'Trend' | 'Products'>('Trend');
   const [trendData, setTrendData] = useState<any[]>([]); 
   const [productData, setProductData] = useState<any[]>([]); 
 
+  // PAGINATION STATE 
+  const [visibleCount, setVisibleCount] = useState(20);
+
   const userRole = user?.role ? user.role.toLowerCase() : 'unknown';
   const isAdmin = userRole === 'admin' || userRole === 'manager' || userRole === 'accountant';
 
-  // HELPER: DATE PARSER
-  const parseDate = (dateStr: any) => {
-      if (!dateStr) return new Date(0);
-      if (dateStr.seconds) return new Date(dateStr.seconds * 1000);
-      if (typeof dateStr === 'string') {
-          if (dateStr.includes('-') && !dateStr.includes('T')) {
-              const parts = dateStr.split('-'); 
-              return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-          }
-          if (dateStr.includes('T')) return new Date(dateStr);
-          if (dateStr.includes('/')) {
-              const parts = dateStr.split('/');
-              if (parts.length === 3) return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-          }
+  useEffect(() => {
+      if (viewMode === 'Day') {
+          setVisibleCount(500); 
+      } else {
+          setVisibleCount(20); 
       }
-      if (dateStr instanceof Date) return dateStr;
-      return new Date(0);
+  }, [viewMode, currentDate, selectedEmployee, searchText]);
+
+  // 🔥 NEW HELPER: Standardize any date string to YYYY-MM-DD
+  const getValidDateStr = (obj: any) => {
+      if (obj.dateIso) return obj.dateIso;
+      if (obj.createdAt) return obj.createdAt.split('T')[0];
+      if (obj.date && obj.date.includes('-')) {
+           const parts = obj.date.split('-');
+           if (parts[0].length === 4) return obj.date.split('T')[0]; // YYYY-MM-DD
+           if (parts[2].length === 4) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`; // DD-MM-YYYY
+      }
+      if (obj.date && obj.date.includes('/')) {
+          const parts = obj.date.split('/');
+          if(parts.length === 3) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+      }
+      return "1970-01-01";
   };
 
   const parseAmount = (amountStr: any) => {
@@ -64,31 +71,47 @@ export default function SalesAnalysisScreen() {
       return parseFloat(str) || 0;
   };
 
+  // Navigation for FY
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
       if (viewMode === 'Day') d.setDate(d.getDate() + dir);
       else if (viewMode === 'Month') d.setMonth(d.getMonth() + dir);
-      else if (viewMode === 'Year') d.setFullYear(d.getFullYear() + dir);
+      else if (viewMode === 'FY') d.setFullYear(d.getFullYear() + dir);
       setCurrentDate(d);
   };
 
+  // FY Header Date format
   const getHeaderDate = () => {
       if (viewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
       if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      if (viewMode === 'Year') return currentDate.getFullYear().toString();
+      if (viewMode === 'FY') {
+          const currentMonth = currentDate.getMonth(); 
+          const currentYear = currentDate.getFullYear();
+          const fyStartYear = currentMonth >= 3 ? currentYear : currentYear - 1;
+          const fyEndYear = fyStartYear + 1;
+          return `FY ${fyStartYear.toString().slice(-2)}-${fyEndYear.toString().slice(-2)}`;
+      }
       return "All Time";
+  };
+
+  const getCity = (item: any) => {
+      if (item.city) return item.city;
+      const orgData = orgList.find((o: any) => 
+          (item.orgId && o.id === item.orgId) || 
+          o.orgName === item.hospitalName ||
+          o.name === item.hospitalName
+      );
+      return orgData?.city || '';
   };
 
   // --- 1. FILTER LOGIC FOR ORDERS ---
   const getFilteredData = () => {
       let data = [...orderList];
 
-      // FILTER 1: Only Approved/Completed/Dispatched
       data = data.filter(order => 
           ['Approved', 'Completed', 'Dispatched'].includes(order.status)
       );
 
-      // FILTER 2: Employee
       if (isAdmin) {
           if (selectedEmployee) {
               const selectedUserObj = userList.find((u: any) => (u.uid === selectedEmployee || u.id === selectedEmployee));
@@ -111,7 +134,6 @@ export default function SalesAnalysisScreen() {
           );
       }
 
-      // FILTER 3: Search
       if (searchText) {
           const lower = searchText.toLowerCase();
           data = data.filter((item: any) => {
@@ -120,25 +142,30 @@ export default function SalesAnalysisScreen() {
           });
       }
 
-      // FILTER 4: Date
       if (viewMode !== 'All') {
           const targetYear = currentDate.getFullYear();
           const targetMonth = currentDate.getMonth();
           const targetDay = currentDate.getDate();
 
+          const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+          const fyStartDateStr = `${fyStartYear}-04-01`; 
+          const fyEndDateStr = `${fyStartYear + 1}-03-31`;
+          
+          const targetYM = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}`;
+          const targetYMD = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}`;
+
           data = data.filter((item: any) => {
-              const dateField = item.date || item.createdAt;
-              if(!dateField) return false;
-              const itemDate = parseDate(dateField);
+              const dateStr = getValidDateStr(item);
+              if(dateStr === "1970-01-01") return false;
               
-              if (viewMode === 'Year') return itemDate.getFullYear() === targetYear;
-              if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-              if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
+              if (viewMode === 'Month') return dateStr.startsWith(targetYM);
+              if (viewMode === 'Day') return dateStr === targetYMD;
+              if (viewMode === 'FY') return dateStr >= fyStartDateStr && dateStr <= fyEndDateStr;
               return true;
           });
       }
 
-      return data.sort((a: any, b: any) => parseDate(b.date).getTime() - parseDate(a.date).getTime());
+      return data.sort((a: any, b: any) => getValidDateStr(b).localeCompare(getValidDateStr(a)));
   };
 
   // 🔥 FILTER PAYMENTS INDEPENDENTLY
@@ -171,86 +198,166 @@ export default function SalesAnalysisScreen() {
           const targetMonth = currentDate.getMonth();
           const targetDay = currentDate.getDate();
 
+          const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+          const fyStartDateStr = `${fyStartYear}-04-01`; 
+          const fyEndDateStr = `${fyStartYear + 1}-03-31`;
+          
+          const targetYM = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}`;
+          const targetYMD = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}`;
+
           pData = pData.filter((item: any) => {
-              const dateField = item.date || item.createdAt;
-              if(!dateField) return false;
-              const itemDate = parseDate(dateField);
+              const dateStr = getValidDateStr(item);
+              if(dateStr === "1970-01-01") return false;
               
-              if (viewMode === 'Year') return itemDate.getFullYear() === targetYear;
-              if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-              if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
+              if (viewMode === 'Month') return dateStr.startsWith(targetYM);
+              if (viewMode === 'Day') return dateStr === targetYMD;
+              if (viewMode === 'FY') return dateStr >= fyStartDateStr && dateStr <= fyEndDateStr;
               return true;
           });
       }
       return pData;
   };
 
-  const displayList = getFilteredData();
+  const displayList = getFilteredData(); 
+  const renderedList = displayList.slice(0, visibleCount);
   const displayPayments = getFilteredPayments(); 
 
   // --- 2. CALCULATIONS ---
   const totalSales = displayList.reduce((sum, item) => sum + parseAmount(item.amount), 0);
-  
-  // 🔥 FIX: Total Collection from Payments List directly
   const totalCollection = displayPayments.reduce((sum, item) => sum + parseAmount(item.amount), 0);
 
   let baseMonthlyTarget = 0;
   if (selectedEmployee) {
       const u = userList.find((x:any) => x.uid === selectedEmployee || x.id === selectedEmployee);
-      if (u && u.monthlyTarget) baseMonthlyTarget = Number(u.monthlyTarget);
-      else baseMonthlyTarget = 1000000;
+      baseMonthlyTarget = (u && u.monthlyTarget && Number(u.monthlyTarget) > 0) ? Number(u.monthlyTarget) : 1000000;
   } else if (!isAdmin) {
-      if (user?.monthlyTarget) baseMonthlyTarget = Number(user.monthlyTarget);
-      else baseMonthlyTarget = 1000000;
+      baseMonthlyTarget = (user?.monthlyTarget && Number(user.monthlyTarget) > 0) ? Number(user.monthlyTarget) : 1000000;
   } else {
+      // 🔥 ALL TEAM TARGET
       baseMonthlyTarget = userList.reduce((sum:number, u:any) => {
           const role = (u.role || '').toLowerCase();
-          if(role.includes('sales') || role.includes('manager') || role.includes('admin')) {
-              return sum + (Number(u.monthlyTarget) || 1000000);
+          if(role.includes('sales') || role.includes('manager') || role.includes('admin') || role.includes('account')) {
+              const t = (u.monthlyTarget && Number(u.monthlyTarget) > 0) ? Number(u.monthlyTarget) : 1000000;
+              return sum + t;
           }
           return sum;
       }, 0);
   }
 
   let target1 = baseMonthlyTarget;
-  if (viewMode === 'Year') target1 = baseMonthlyTarget * 12;
-  else if (viewMode === 'Day') target1 = baseMonthlyTarget / 25;
+  if (viewMode === 'FY') {
+      target1 = baseMonthlyTarget * 12; 
+  } else if (viewMode === 'Day') {
+      target1 = baseMonthlyTarget / 25; 
+  } else if (viewMode === 'All') {
+      // 🔥 FIX FOR "ALL" MODE: Dynamic Target based on total months of data
+      if (displayList.length > 0) {
+          // चूंकि लिस्ट उल्टी सॉर्ट (Sort) है, इसलिए सबसे आखिरी आइटम सबसे पुराना होगा
+          const oldestDateStr = getValidDateStr(displayList[displayList.length - 1]);
+          const oldestDate = new Date(oldestDateStr !== "1970-01-01" ? oldestDateStr : Date.now());
+          const today = new Date();
+          
+          // Calculate exact number of months between first order and today
+          const monthsDiff = Math.abs((today.getFullYear() - oldestDate.getFullYear()) * 12 + (today.getMonth() - oldestDate.getMonth())) + 1;
+          
+          target1 = baseMonthlyTarget * Math.max(1, monthsDiff);
+      } else {
+          target1 = baseMonthlyTarget * 12; // Fallback
+      }
+  }
 
   const target2 = target1 * 1.5;
   const t1Percent = target1 > 0 ? (totalSales / target1) * 100 : 0;
   const t2Percent = target2 > 0 ? (totalSales / target2) * 100 : 0;
 
-  // --- 3. GRAPH LOGIC ---
+ // --- 3. GRAPH LOGIC (100% Bulletproof Date Matching) ---
   const handleGraph = () => {
       let graphSourceList = [...orderList];
-      // (Graph logic same as before, condensed for brevity)
+      
+      // 1. Basic Status Filter
       graphSourceList = graphSourceList.filter(order => ['Approved', 'Completed', 'Dispatched'].includes(order.status));
+      
+      // 2. Employee Filter
       if (isAdmin && selectedEmployee) {
-          graphSourceList = graphSourceList.filter((item: any) => String(item.senderId) === String(selectedEmployee) || String(item.userId) === String(selectedEmployee));
+          const selectedUserObj = userList.find((u: any) => (u.uid === selectedEmployee || u.id === selectedEmployee));
+          const targetName = selectedUserObj?.name?.trim().toLowerCase();
+          
+          graphSourceList = graphSourceList.filter((item: any) => {
+              const idMatch = (String(item.senderId) === String(selectedEmployee)) || 
+                              (String(item.userId) === String(selectedEmployee)) ||
+                              (String(item.uid) === String(selectedEmployee));
+              const itemName = (item.senderName || item.userName || '').trim().toLowerCase();
+              const nameMatch = targetName && itemName === targetName;
+              return idMatch || nameMatch;
+          });
       } else if (!isAdmin) {
-          graphSourceList = graphSourceList.filter((o: any) => o.senderId === user?.uid || o.senderId === user?.id);
+          graphSourceList = graphSourceList.filter((o: any) => 
+              o.senderId === user?.uid || o.senderId === user?.id || o.userName === user?.name
+          );
       }
-      const targetYear = currentDate.getFullYear();
-      graphSourceList = graphSourceList.filter((item: any) => parseDate(item.date || item.createdAt).getFullYear() === targetYear);
 
-      const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-      let tData = [];
+      const targetMonth = currentDate.getMonth(); 
+      const targetYear = currentDate.getFullYear();
+      const targetDay = currentDate.getDate();
+      
+      const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+      const fyStartDateStr = `${fyStartYear}-04-01`; 
+      const fyEndDateStr = `${fyStartYear + 1}-03-31`;
+      
+      const targetYM = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}`;
+      const targetYMD = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}`;
+
+      // 3. String-based Date Filter (Immune to Timezone Bugs)
+      graphSourceList = graphSourceList.filter((item: any) => {
+          const dateStr = getValidDateStr(item);
+          if (dateStr === "1970-01-01") return false;
+
+          if (viewMode === 'FY') return dateStr >= fyStartDateStr && dateStr <= fyEndDateStr;
+          if (viewMode === 'Month') return dateStr.startsWith(targetYM);
+          if (viewMode === 'Day') return dateStr === targetYMD;
+          return true; 
+      });
+
+      let tData: any[] = [];
       if (viewMode === 'Day') {
-          tData = displayList.slice(0, 7).map((o:any, i) => ({ label: `${i+1}`, value: parseAmount(o.amount) }));
+          tData = graphSourceList.slice(0, 7).map((o:any, i) => ({ label: `Ord ${i+1}`, value: parseAmount(o.amount) }));
+      } else if (viewMode === 'Month') {
+          tData = [1,2,3,4].map(week => ({label: `Wk ${week}`, value: 0})); 
+          graphSourceList.forEach(o => {
+              const dateStr = getValidDateStr(o);
+              const day = parseInt(dateStr.split('-')[2]); // Extracts DD from YYYY-MM-DD
+              const weekIdx = Math.min(Math.floor((day-1)/7), 3);
+              tData[weekIdx].value += parseAmount(o.amount);
+          });
       } else {
-          tData = months.map((m, i) => ({ label: m, value: graphSourceList.filter((o:any) => parseDate(o.date).getMonth() === i).reduce((sum, o:any) => sum + parseAmount(o.amount), 0) }));
+          // FY View: Group by YYYY-MM explicitly
+          const fyMonthsStr = [
+              `${fyStartYear}-04`, `${fyStartYear}-05`, `${fyStartYear}-06`,
+              `${fyStartYear}-07`, `${fyStartYear}-08`, `${fyStartYear}-09`,
+              `${fyStartYear}-10`, `${fyStartYear}-11`, `${fyStartYear}-12`,
+              `${fyStartYear + 1}-01`, `${fyStartYear + 1}-02`, `${fyStartYear + 1}-03`
+          ];
+          const fyMonthLabels = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
+          
+          tData = fyMonthsStr.map((ym, i) => {
+              const monthSales = graphSourceList.filter((o:any) => getValidDateStr(o).startsWith(ym))
+                                                .reduce((sum, o:any) => sum + parseAmount(o.amount), 0);
+              return { label: fyMonthLabels[i], value: monthSales };
+          });
       }
       setTrendData(tData);
 
+      // 4. Product Stats Calculation
       const stats: Record<string, number> = {};
-      const sourceForProduct = viewMode === 'Year' ? graphSourceList : displayList;
-      sourceForProduct.forEach((order: any) => {
+      graphSourceList.forEach((order: any) => {
           const rawName = order.productDetails || "Unknown";
           const name = rawName.split(',')[0].split('-')[0].trim().substring(0, 15);
           stats[name] = (stats[name] || 0) + parseAmount(order.amount);
       });
+      
       const pData = Object.keys(stats).map(key => ({ label: key, value: stats[key] })).sort((a, b) => b.value - a.value).slice(0, 5);
       setProductData(pData.length ? pData : [{label:'No Data', value:0}]);
+      
       setGraphTab('Trend'); 
       setGraphModalVisible(true);
   };
@@ -281,7 +388,8 @@ export default function SalesAnalysisScreen() {
 
       <View style={styles.filterBox}>
           <View style={styles.tabContainer}>
-              {['Day', 'Month', 'Year', 'All'].map((m) => (
+              {/* 🔥 CHANGED: FY Tab Included */}
+              {['Day', 'Month', 'FY', 'All'].map((m) => (
                   <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
                       <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
                   </TouchableOpacity>
@@ -371,8 +479,8 @@ export default function SalesAnalysisScreen() {
                 </View>
 
                 <View style={{marginTop:15, paddingTop:10, borderTopWidth:1, borderColor:'#eee', flexDirection:'row', justifyContent:'space-between'}}>
-                     <Text style={{fontSize:12, color:'gray'}}>Total Collection:</Text>
-                     <Text style={{fontSize:14, fontWeight:'bold', color: '#2e7d32'}}>₹{totalCollection.toLocaleString()}</Text>
+                      <Text style={{fontSize:12, color:'gray'}}>Total Collection:</Text>
+                      <Text style={{fontSize:14, fontWeight:'bold', color: '#2e7d32'}}>₹{totalCollection.toLocaleString()}</Text>
                 </View>
                 {totalSales > 0 && (
                     <Text style={{fontSize:11, color:'gray', alignSelf:'flex-end', marginTop:2}}>
@@ -386,13 +494,12 @@ export default function SalesAnalysisScreen() {
         <View style={styles.listSection}>
             <Text style={styles.sectionHeader}>Confirmed Orders</Text>
             <FlatList 
-                data={displayList}
+                data={renderedList}
                 keyExtractor={item => item.id}
                 scrollEnabled={false}
                 renderItem={({item}) => {
                     const totalAmt = parseAmount(item.amount);
                     
-                    // 🔥 FIX: USE DATABASE BALANCE IF AVAILABLE
                     let pending = 0;
                     let paidAmt = 0;
 
@@ -400,7 +507,6 @@ export default function SalesAnalysisScreen() {
                         pending = parseFloat(item.balance);
                         paidAmt = totalAmt - pending;
                     } else {
-                        // Fallback (Agar balance field na ho)
                         paidAmt = getOrderPayments(item).reduce((s:number, p:any) => s + parseAmount(p.amount), 0);
                         pending = totalAmt - paidAmt;
                     }
@@ -439,6 +545,37 @@ export default function SalesAnalysisScreen() {
                     );
                 }}
                 ListEmptyComponent={<Text style={{textAlign:'center', color:'gray', marginTop:20}}>No confirmed orders found.</Text>}
+                
+                // 🔥 CHANGED: Wrap Load More Button with paddingBottom: 80
+                ListFooterComponent={
+                    <View style={{ paddingBottom: 80 }}>
+                        {visibleCount < displayList.length ? (
+                            <TouchableOpacity 
+                                onPress={() => setVisibleCount(prev => prev + 20)} 
+                                style={{
+                                    padding: 12, 
+                                    backgroundColor: '#fff', 
+                                    alignItems: 'center', 
+                                    marginVertical: 15, 
+                                    borderRadius: 8,
+                                    borderWidth: 1,
+                                    borderColor: '#ddd',
+                                    elevation: 1
+                                }}
+                            >
+                                <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                                    👇 Load More Records ({displayList.length - visibleCount} remaining)
+                                </Text>
+                            </TouchableOpacity>
+                        ) : (
+                            displayList.length > 0 ? (
+                                <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
+                                    --- End of List ---
+                                </Text>
+                            ) : null
+                        )}
+                    </View>
+                }
             />
         </View>
       </ScrollView>

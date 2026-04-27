@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     FlatList,
     KeyboardAvoidingView,
@@ -14,18 +15,36 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+
+// 🔥 SAAS IMPORTS (DataContext & Engine)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+
+// 🔥 FIREBASE IMPORTS (Strictly for Cascading Batch Updates on Edit)
+import { collection, getDocs, query, where, writeBatch } from 'firebase/firestore';
+import { db } from '../firebaseConfig';
+
+// 🔥 OCR & CAMERA IMPORT
+import * as ImagePicker from 'expo-image-picker';
+
+// 🔥 DATE PICKER IMPORT
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 export default function AddOrganizationScreen() {
   const router = useRouter();
   const params = useLocalSearchParams(); 
-  
-  // 🔥 DATA CONTEXT
-  const { addOrganization, updateOrganization, orgList, user } = useData();
-
   const isEditMode = params.editId ? true : false;
+  
+  // 🔥 1. Context se sirf User & Notification
+  const { currentUser, addNotification } = useData();
 
-  // --- INDIA DATA: STATE -> DISTRICT MAPPING ---
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData, addSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded Organization List (For Edit Mode Auto-fill)
+  const [orgList, setOrgList] = useState<any[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+
   const stateDistrictData: any = {
     "Andhra Pradesh": ["Anantapur", "Chittoor", "East Godavari", "Guntur", "Krishna", "Kurnool", "Prakasam", "Srikakulam", "Sri Potti Sriramulu Nellore", "Visakhapatnam", "Vizianagaram", "West Godavari", "YSR District, Kadapa", "Other"],
     "Arunachal Pradesh": ["Tawang", "West Kameng", "East Kameng", "Papum Pare", "Kurung Kumey", "Kra Daadi", "Lower Subansiri", "Upper Subansiri", "West Siang", "East Siang", "Siang", "Upper Siang", "Lower Siang", "Lower Dibang Valley", "Dibang Valley", "Anjaw", "Lohit", "Namsai", "Changlang", "Tirap", "Longding", "Other"],
@@ -55,19 +74,25 @@ export default function AddOrganizationScreen() {
     "Uttar Pradesh": ["Agra", "Aligarh", "Allahabad", "Ambedkar Nagar", "Amethi", "Amroha", "Auraiya", "Azamgarh", "Baghpat", "Bahraich", "Ballia", "Balrampur", "Banda", "Barabanki", "Bareilly", "Basti", "Bhadohi", "Bijnor", "Budaun", "Bulandshahr", "Chandauli", "Chitrakoot", "Deoria", "Etah", "Etawah", "Faizabad", "Farrukhabad", "Fatehpur", "Firozabad", "Gautam Buddha Nagar", "Ghaziabad", "Ghazipur", "Gonda", "Gorakhpur", "Hamirpur", "Hapur", "Hardoi", "Hathras", "Jalaun", "Jaunpur", "Jhansi", "Kannauj", "Kanpur Dehat", "Kanpur Nagar", "Kasganj", "Kaushambi", "Kheri", "Kushinagar", "Lalitpur", "Lucknow", "Maharajganj", "Mahoba", "Mainpuri", "Mathura", "Mau", "Meerut", "Mirzapur", "Moradabad", "Muzaffarnagar", "Pilibhit", "Pratapgarh", "Raebareli", "Rampur", "Saharanpur", "Sambhal", "Sant Kabir Nagar", "Shahjahanpur", "Shamli", "Shravasti", "Siddharthnagar", "Sitapur", "Sonbhadra", "Sultanpur", "Unnao", "Varanasi", "Other"],
     "Uttarakhand": ["Almora", "Bageshwar", "Chamoli", "Champawat", "Dehradun", "Haridwar", "Nainital", "Pauri Garhwal", "Pithoragarh", "Rudraprayag", "Tehri Garhwal", "Udham Singh Nagar", "Uttarkashi", "Other"],
     "West Bengal": ["Alipurduar", "Bankura", "Birbhum", "Cooch Behar", "Dakshin Dinajpur", "Darjeeling", "Hooghly", "Howrah", "Jalpaiguri", "Jhargram", "Kalimpong", "Kolkata", "Malda", "Murshidabad", "Nadia", "North 24 Parganas", "Paschim Bardhaman", "Paschim Medinipur", "Purba Bardhaman", "Purba Medinipur", "Purulia", "South 24 Parganas", "Uttar Dinajpur", "Other"],
-    "Andaman and Nicobar": ["Nicobar", "North and Middle Andaman", "South Andaman", "Other"],
-    "Chandigarh": ["Chandigarh", "Other"],
-    "Dadra and Nagar Haveli": ["Dadra and Nagar Haveli", "Other"],
-    "Daman and Diu": ["Daman", "Diu", "Other"],
     "Delhi": ["Central Delhi", "East Delhi", "New Delhi", "North Delhi", "North East Delhi", "North West Delhi", "Shahdara", "South Delhi", "South East Delhi", "South West Delhi", "West Delhi", "Other"],
-    "Jammu and Kashmir": ["Anantnag", "Bandipora", "Baramulla", "Budgam", "Doda", "Ganderbal", "Jammu", "Kathua", "Kishtwar", "Kulgam", "Kupwara", "Poonch", "Pulwama", "Rajouri", "Ramban", "Reasi", "Samba", "Shopian", "Srinagar", "Udhampur", "Other"],
-    "Ladakh": ["Kargil", "Leh", "Other"],
-    "Lakshadweep": ["Lakshadweep", "Other"],
-    "Puducherry": ["Karaikal", "Mahe", "Puducherry", "Yanam", "Other"],
     "Other": ["Other"]
   };
 
-  // --- STATES ---
+  const districtPincodeMap: { [key: string]: string } = {
+    "Nagpur": "440001", "Pune": "411001", "Mumbai City": "400001", "Thane": "400601", "Nashik": "422001", "Aurangabad": "431001",
+    "Ahmedabad": "380001", "Surat": "395001", "Vadodara": "390001", "Rajkot": "360001",
+    "Indore": "452001", "Bhopal": "462001", "Jabalpur": "482001", "Gwalior": "474001",
+    "Raipur": "492001", "Bhilai": "490020", "Bilaspur": "495001",
+    "Patna": "800001", "Gaya": "823001", "Muzaffarpur": "842001",
+    "Jaipur": "302001", "Jodhpur": "342001", "Udaipur": "313001", "Kota": "324001",
+    "Lucknow": "226001", "Kanpur": "208001", "Varanasi": "221001", "Agra": "282001",
+    "Bengaluru Urban": "560001", "Mysuru": "570001", "Mangaluru": "575001",
+    "Chennai": "600001", "Coimbatore": "641001", "Madurai": "625001",
+    "Hyderabad": "500001", "Warangal": "506001",
+    "Kolkata": "700001", "Howrah": "711101",
+    "Delhi": "110001"
+  };
+
   const [orgName, setOrgName] = useState('');
   const [customerGroup, setCustomerGroup] = useState('Select');
   const [beds, setBeds] = useState('Select');
@@ -78,91 +103,275 @@ export default function AddOrganizationScreen() {
   const [address1, setAddress1] = useState('');
   const [address2, setAddress2] = useState('');
   const [mobile, setMobile] = useState('');
+  const [phone, setPhone] = useState(''); 
   const [city, setCity] = useState('');
   const [email, setEmail] = useState('');
   const [pincode, setPincode] = useState('');
+  const [gstNumber, setGstNumber] = useState('');
   
-  // State Logic
   const [selectedState, setSelectedState] = useState('Select');
   const [isManualState, setIsManualState] = useState(false);
 
-  // District Logic
   const [selectedDistrict, setSelectedDistrict] = useState('Select');
   const [districtList, setDistrictList] = useState<string[]>([]);
   const [isManualDistrict, setIsManualDistrict] = useState(false);
 
   const [designation, setDesignation] = useState('Select');
-  const [territory, setTerritory] = useState('Select');
+  const [territory, setTerritory] = useState('West');
 
-  // --- MODAL STATES ---
+  // DOB & ANNIVERSARY STATES
+  const [dob, setDob] = useState<Date | null>(null);
+  const [showDobPicker, setShowDobPicker] = useState(false);
+  const [anniversary, setAnniversary] = useState<Date | null>(null);
+  const [showAnniversaryPicker, setShowAnniversaryPicker] = useState(false);
+
   const [modalVisible, setModalVisible] = useState(false);
   const [currentModalType, setCurrentModalType] = useState('');
   const [modalData, setModalData] = useState<string[]>([]);
-  
-  // 🔥 Search inside Modal
   const [modalSearchText, setModalSearchText] = useState('');
   const [filteredModalData, setFilteredModalData] = useState<string[]>([]);
 
-  // --- OPTIONS ---
+  const [isScanning, setIsScanning] = useState(false);
+
   const customerGroupOptions = [
     "Conference/Exhibition", "Dealer", "Free Lancer/Reseller", "Govt Hospital", 
-    "Govt Medical College", "Military Hospital", "Railway Hospital", 
+    "Govt Medical College", "Institute", "Military Hospital", "Railway Hospital", 
     "Private Corporate Hospital", "Private Hospital", "Private Medical College", 
     "Private Non Profit Hospital", "Others"
   ];
-  const bedsOptions = ["0-50", "50-100", "100-200", "Above 200"];
+  const bedsOptions = ["None", "0-50", "50-100", "100-200", "Above 200", "Others"];
   const salutationOptions = ["Dr.", "Mr.", "Mrs.", "Ms.", "Prof."];
   const countryOptions = ["India", "USA", "UK", "UAE", "Others"];
   const designationOptions = [
-    "Secretary", "Associate", "Business Development Manager", "Project Manager", 
+    "Owner", "CEO", "Manager", "Secretary", "Associate", "Business Development Manager", "Project Manager", 
     "Head of Marketing and Sales", "Executive-Sales", "Sales & Service Engineer", 
     "Executive-Accounts/Taxation", "Supervisor-Production", "BME", 
-    "Business Development Officer", "Application Engineer", "Administrative Officer"
+    "Business Development Officer", "Application Engineer", "Administrative Officer", "Doctor"
   ];
   const territoryOptions = ["North", "South", "East", "West", "Central"];
 
-  // --- AUTO FILL (EDIT MODE) ---
+  // 🔥 4. LOAD ORGS ON MOUNT (Needed for Edit Mode)
   useEffect(() => {
-      if (isEditMode) {
+      const loadData = async () => {
+          if (currentUser?.companyId) {
+              const orgs = await fetchSaaSData("organizations");
+              setOrgList(orgs);
+          }
+      };
+      loadData();
+  }, [currentUser]);
+
+  useEffect(() => {
+      if (isEditMode && orgList.length > 0) {
           const orgToEdit = orgList.find((o: any) => o.id === params.editId);
           if (orgToEdit) {
-              setOrgName(orgToEdit.name);
-              setCustomerGroup(orgToEdit.type);
-              setBeds(orgToEdit.beds || 'Select');
-              setCity(orgToEdit.city);
-              setAddress1(orgToEdit.address1 || '');
-              setAddress2(orgToEdit.address2 || '');
-              setMobile(orgToEdit.mobile || '');
-              setEmail(orgToEdit.email || '');
-              setPincode(orgToEdit.pincode || '');
-              
-              setSalutation(orgToEdit.salutation || 'Select');
-              setFirstName(orgToEdit.firstName || '');
-              setLastName(orgToEdit.lastName || '');
+              setOrgName(orgToEdit.name); setCustomerGroup(orgToEdit.type); setBeds(orgToEdit.beds || 'Select');
+              setCity(orgToEdit.city); setAddress1(orgToEdit.address1 || ''); setAddress2(orgToEdit.address2 || '');
+              setMobile(orgToEdit.mobile || ''); setPhone(orgToEdit.phone || ''); setEmail(orgToEdit.email || ''); 
+              setPincode(orgToEdit.pincode || ''); setGstNumber(orgToEdit.gstNumber || ''); 
+              setSalutation(orgToEdit.salutation || 'Select'); setFirstName(orgToEdit.firstName || ''); 
+              setLastName(orgToEdit.lastName || ''); setCountry(orgToEdit.country || 'India');
               
               if(orgToEdit.state && stateDistrictData[orgToEdit.state]) {
-                  setSelectedState(orgToEdit.state);
-                  setDistrictList(stateDistrictData[orgToEdit.state]);
-              } else {
-                  setSelectedState('Select');
-              }
-              setSelectedDistrict(orgToEdit.district || 'Select');
-              setDesignation(orgToEdit.designation || 'Select');
-              setTerritory(orgToEdit.territory || 'Select');
+                  setSelectedState(orgToEdit.state); setDistrictList(stateDistrictData[orgToEdit.state]);
+              } else setSelectedState('Select');
+              
+              setSelectedDistrict(orgToEdit.district || 'Select'); setDesignation(orgToEdit.designation || 'Select');
+              setTerritory(orgToEdit.territory || 'West'); 
+
+              if (orgToEdit.dob) setDob(new Date(orgToEdit.dob));
+              if (orgToEdit.anniversary) setAnniversary(new Date(orgToEdit.anniversary));
           }
       }
-  }, [isEditMode]);
+  }, [isEditMode, orgList]);
 
-  // --- OPEN MODAL ---
-  const openModal = (type: string, data: any[]) => {
-    setCurrentModalType(type);
-    setModalData(data);
-    setFilteredModalData(data); // Initial List
-    setModalSearchText('');
-    setModalVisible(true);
+  const formatDate = (rawDate: Date) => {
+      let day = rawDate.getDate().toString().padStart(2, '0');
+      let month = (rawDate.getMonth() + 1).toString().padStart(2, '0');
+      let year = rawDate.getFullYear();
+      return `${day}/${month}/${year}`;
   };
 
-  // --- SEARCH IN MODAL ---
+  // ==========================================
+  // 🔥 MEDICAL OCR PARSER (V3.0) - Kept fully intact
+  // ==========================================
+  const handleScanCard = async () => {
+      try {
+          const { status } = await ImagePicker.requestCameraPermissionsAsync();
+          if (status !== 'granted') {
+              Alert.alert('Permission Required', 'We need camera permission to scan the card.');
+              return;
+          }
+
+          const result = await ImagePicker.launchCameraAsync({
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              quality: 0.2,
+              base64: true,
+          });
+
+          if (!result.canceled && result.assets[0].base64) {
+              setIsScanning(true);
+              const base64Image = `data:image/jpeg;base64,${result.assets[0].base64}`;
+
+              const formData = new FormData();
+              formData.append('base64Image', base64Image);
+              formData.append('language', 'eng');
+              formData.append('isOverlayRequired', 'false');
+
+              const response = await fetch('https://api.ocr.space/parse/image', {
+                  method: 'POST',
+                  headers: { 'apikey': 'helloworld' },
+                  body: formData,
+              });
+
+              const data = await response.json();
+
+              if (data.IsErroredOnProcessing) {
+                  Alert.alert('API Error', data.ErrorMessage?.[0] || 'Image size might be too large.');
+                  return;
+              }
+
+              if (data.ParsedResults && data.ParsedResults.length > 0) {
+                  const extractedText = data.ParsedResults[0].ParsedText;
+                  processOCRText(extractedText);
+              } else {
+                  Alert.alert('Scan Failed', 'Could not read text clearly. Please hold the phone steady and try again.');
+              }
+          }
+      } catch (error) {
+          Alert.alert('Error', 'Failed to scan the card. Check your internet connection.');
+      } finally {
+          setIsScanning(false);
+      }
+  };
+
+  const processOCRText = (text: string) => {
+      let foundSomething = false;
+      const rawLines = text.split('\n').map(l => l.trim()).filter(l => l.length > 2);
+      const lines = rawLines.map(l => l.replace(/\s+/g, ' ')); 
+      const fullTextLower = text.toLowerCase();
+
+      const pinMatch = text.match(/\b[1-9][0-9]{5}\b/);
+      if (pinMatch) { setPincode(pinMatch[0]); foundSomething = true; }
+
+      const emailMatch = text.match(/[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}/);
+      if (emailMatch) { setEmail(emailMatch[0]); foundSomething = true; }
+
+      let foundPhoneLineIndex = -1;
+      const phoneMatch = text.match(/(?:(?:\+|0{0,2})91[\s-]?)?[6789]\d{2}[\s-]?\d{3}[\s-]?\d{4}/);
+      if (phoneMatch) {
+          const cleanMobile = phoneMatch[0].replace(/\D/g, '').slice(-10);
+          setMobile(cleanMobile);
+          foundPhoneLineIndex = lines.findIndex(l => l.includes(phoneMatch[0]));
+          foundSomething = true;
+      }
+
+      let tempOrgName = '';
+      const orgKeywords = ['hospital', 'clinic', 'healthcare', 'diagnostics', 'pvt', 'ltd', 'care', 'enterprise', 'agency', 'medical', 'pharma', 'poly', 'maternity', 'nursing'];
+      for (let line of lines) {
+          const lower = line.toLowerCase();
+          if (orgKeywords.some(kw => lower.includes(kw))) {
+              setOrgName(line); tempOrgName = line; foundSomething = true; break;
+          }
+      }
+
+      const medicalDegrees = ['mbbs', 'md', 'ms', 'bams', 'bhms', 'bds', 'mds', 'dnb', 'surgeon', 'physician', 'ortho', 'neuro', 'consultant', 'specialist'];
+      let nameFound = false;
+
+      for (let i = 0; i < lines.length; i++) {
+          let line = lines[i];
+          let lowerLine = line.toLowerCase();
+
+          if (/^dr[\.\s]/i.test(line)) {
+              const cleanName = line.replace(/^dr[\.\s]+/i, '').split(',')[0].trim();
+              setFirstName(cleanName.split(' ')[0]);
+              if (cleanName.split(' ').length > 1) setLastName(cleanName.split(' ').slice(1).join(' '));
+              
+              setSalutation('Dr.'); nameFound = true; foundSomething = true;
+
+              if (line.includes(',')) setDesignation(line.split(',')[1].trim());
+              else if (i + 1 < lines.length && medicalDegrees.some(deg => lines[i + 1].toLowerCase().includes(deg))) setDesignation(lines[i + 1]);
+              break;
+          }
+
+          const hasDegreeInLine = medicalDegrees.some(deg => lowerLine.includes(deg));
+          if (hasDegreeInLine && !orgKeywords.some(kw => lowerLine.includes(kw))) {
+              const parts = line.split(',');
+              const cleanName = parts[0].trim();
+              setFirstName(cleanName.split(' ')[0]);
+              if (cleanName.split(' ').length > 1) setLastName(cleanName.split(' ').slice(1).join(' '));
+              
+              setSalutation('Dr.'); setDesignation(parts[1] ? parts[1].trim() : 'Doctor');
+              nameFound = true; foundSomething = true; break;
+          }
+
+          if (i + 1 < lines.length) {
+              const nextLineLower = lines[i + 1].toLowerCase();
+              const nextHasDegree = medicalDegrees.some(deg => nextLineLower.includes(deg));
+              if (nextHasDegree && line !== tempOrgName && !line.includes('@') && !line.match(/\d/)) {
+                  setFirstName(line.split(' ')[0]);
+                  if (line.split(' ').length > 1) setLastName(line.split(' ').slice(1).join(' '));
+                  
+                  setSalutation('Dr.'); setDesignation(lines[i + 1]);
+                  nameFound = true; foundSomething = true; break;
+              }
+          }
+      }
+
+      if (!nameFound) {
+          const mrMatch = text.match(/(Mr\.|Mrs\.|Ms\.)\s+([A-Za-z]+)\s*([A-Za-z]+)?/i);
+          if (mrMatch) {
+              const validSalutation = salutationOptions.find(s => s.toLowerCase() === mrMatch[1].toLowerCase());
+              if(validSalutation) setSalutation(validSalutation);
+              setFirstName(mrMatch[2]);
+              if(mrMatch[3]) setLastName(mrMatch[3]);
+              foundSomething = true;
+          }
+      }
+
+      let addressLines = [];
+      const addrKeywords = ['nagar', 'road', 'marg', 'street', 'floor', 'opp', 'near', 'plot', 'shop', 'block', 'phase', 'rd', 'behind', 'front', 'above', 'square', 'chowk', 'gali', 'bhawan', 'complex', 'apartment', 'apt', 'colony', 'sector', 'sec'];
+      
+      for (let line of lines) {
+          const lowerLine = line.toLowerCase();
+          if (!line.includes('@') && !line.match(/\d{10}/) && line !== tempOrgName) {
+              if (!medicalDegrees.some(deg => lowerLine.includes(deg)) && !/^dr[\.\s]/i.test(line)) {
+                  if (addrKeywords.some(kw => lowerLine.includes(kw)) || lowerLine.match(/\d+\/\d+/) || lowerLine.includes('no.')) {
+                      addressLines.push(line);
+                  }
+              }
+          }
+      }
+      if (addressLines.length > 0) { setAddress1(addressLines.join(', ')); foundSomething = true; }
+
+      let foundState = '';
+      const allStates = Object.keys(stateDistrictData);
+      for (let s of allStates) {
+          if (s !== 'Other' && s !== 'Select' && fullTextLower.includes(s.toLowerCase())) {
+              setSelectedState(s); foundState = s; setDistrictList(stateDistrictData[s]); foundSomething = true; break;
+          }
+      }
+
+      const districtsToSearch = foundState ? stateDistrictData[foundState] : Object.values(stateDistrictData).flat();
+      for (let d of districtsToSearch) {
+          if (d !== 'Other' && d !== 'Select' && fullTextLower.includes(d.toLowerCase())) {
+              setSelectedDistrict(d); setCity(d);
+              if (!foundState) {
+                  const stateOfDistrict = Object.keys(stateDistrictData).find(key => stateDistrictData[key].includes(d));
+                  if (stateOfDistrict) { setSelectedState(stateOfDistrict); setDistrictList(stateDistrictData[stateOfDistrict]); }
+              }
+              foundSomething = true; break;
+          }
+      }
+
+      if (foundSomething) Alert.alert("Auto-Fill Magic ✨", "Medical Details extracted! Please review.");
+      else Alert.alert("No Details Found", "The card format is too complex or blurry. Please fill manually.");
+  };
+
+  const openModal = (type: string, data: any[]) => {
+      setCurrentModalType(type); setModalData(data); setFilteredModalData(data); setModalSearchText(''); setModalVisible(true);
+  };
+
   const handleModalSearch = (text: string) => {
       setModalSearchText(text);
       if (text) {
@@ -173,79 +382,122 @@ export default function AddOrganizationScreen() {
       }
   };
 
-  // --- HANDLE SELECTION ---
   const handleSelect = (item: string) => {
     switch (currentModalType) {
       case 'Customer Group': setCustomerGroup(item); break;
       case 'Beds': setBeds(item); break;
       case 'Salutation': setSalutation(item); break;
       case 'Country': setCountry(item); break;
-      
       case 'State': 
         if (item === 'Other') { setIsManualState(true); setSelectedState(''); setDistrictList([]); } 
         else { setIsManualState(false); setSelectedState(item); setDistrictList(stateDistrictData[item] || ['Other']); setSelectedDistrict('Select'); setIsManualDistrict(false); }
         break;
-
       case 'District':
         if (item === 'Other') { setIsManualDistrict(true); setSelectedDistrict(''); } 
-        else { setIsManualDistrict(false); setSelectedDistrict(item); }
+        else { 
+            setIsManualDistrict(false); setSelectedDistrict(item); 
+            if (!city || city.trim() === '') setCity(item);
+            const autoPincode = districtPincodeMap[item];
+            if (autoPincode) setPincode(autoPincode);
+        }
         break;
-
       case 'Designation': setDesignation(item); break;
       case 'Territory': setTerritory(item); break;
     }
     setModalVisible(false);
   };
 
-  // --- SAVE ORGANIZATION ---
-  // --- SAVE ORGANIZATION ---
+  // 🔥 5. SAAS SAVE & BATCH UPDATE LOGIC
   const handleSave = async () => {
-      if (!orgName || customerGroup === 'Select' || selectedState === 'Select') {
-          Alert.alert("Missing Fields", "Please fill Organization, Customer Group and State.");
+      if (!orgName || customerGroup === 'Select' || selectedState === 'Select' || !mobile) {
+          Alert.alert("Missing Fields", "Please fill Organization, Customer Group, State, and Mobile No.");
           return;
       }
 
+      setIsSaving(true);
+
       const orgData = {
-          name: orgName,
-          orgName: orgName, 
-          type: customerGroup,
-          city: city || selectedDistrict, 
+          name: orgName, orgName: orgName, type: customerGroup, city: city || selectedDistrict, 
           equipment: { ventilator: 0, anesthesia: 0, bubble: 0, compressor: 0, monitor: 0 },
-          
-          beds, 
-          address1, 
-          address: address1, 
-          address2,
-          salutation, firstName, lastName,
-          mobile, email, state: selectedState, district: selectedDistrict,
+          beds, address1, address: address1, address2,
+          salutation, firstName, lastName, country, 
+          mobile, phone, email, state: selectedState, district: selectedDistrict, 
           designation, territory, pincode,
-          contactPerson: `${salutation} ${firstName} ${lastName}`,
-          
-          senderId: user?.uid || 'guest',
-          senderName: user?.name || 'Unknown',
-          role: user?.role || 'Employee',
-          createdAt: new Date().toISOString()
+          dob: dob ? dob.toISOString().split('T')[0] : '',
+          anniversary: anniversary ? anniversary.toISOString().split('T')[0] : '',
+          gstNumber: gstNumber ? gstNumber.toUpperCase() : '',
+          contactPerson: `${salutation} ${firstName} ${lastName}`
       };
 
-      if (isEditMode) {
-          updateOrganization(params.editId, orgData);
-          Alert.alert("Updated", "Organization details updated!");
-      } else {
-          // ❌ OLD ERROR LINE: addOrganization({ id: Date.now().toString(), ...orgData });
-          
-          // ✅ CORRECT LINE (Do not send ID, Firebase will generate it)
-          addOrganization(orgData); 
-          
-          Alert.alert("Success", "Organization Added!");
+      try {
+          if (isEditMode) {
+              const res = await updateSaaSData("organizations", params.editId as string, orgData);
+              
+              if (res.success && orgName) {
+                  // 🔥 CASCADING BATCH UPDATE MAGIC (If Name Changed)
+                  const batch = writeBatch(db);
+                  let updateCount = 0;
+                  const orgIdToUpdate = params.editId as string;
+
+                  const updateOldRecords = async (colName: string, fieldsToUpdate: any) => {
+                      // Note: Filtering by orgId ensures we only update this specific hospital's old records
+                      const q = query(collection(db, colName), where("orgId", "==", orgIdToUpdate));
+                      const snap = await getDocs(q);
+                      snap.forEach((docItem) => {
+                          batch.update(docItem.ref, fieldsToUpdate);
+                          updateCount++;
+                      });
+                  };
+
+                  await updateOldRecords("orders", { hospitalName: orgName });
+                  await updateOldRecords("payment_collections", { orgName: orgName }); 
+                  await updateOldRecords("payment_dues", { orgName: orgName });
+                  await updateOldRecords("leads", { orgName: orgName, companyName: orgName });
+                  await updateOldRecords("service_calls", { hospitalName: orgName, orgName: orgName });
+                  await updateOldRecords("installations", { hospitalName: orgName, orgName: orgName });
+                  await updateOldRecords("pms_reports", { hospitalName: orgName, orgName: orgName });
+                  await updateOldRecords("demos", { hospitalName: orgName, orgName: orgName });
+                  await updateOldRecords("couriers", { orgName: orgName, hospitalName: orgName });
+
+                  if (updateCount > 0) {
+                      await batch.commit();
+                      console.log(`🚀 Magic Success! Changed old names in ${updateCount} places across ALL collections.`);
+                  }
+
+                  Alert.alert("Updated", "Organization details updated!");
+              } else {
+                  Alert.alert("Error", "Could not update organization.");
+              }
+          } else {
+              const res = await addSaaSData("organizations", orgData);
+              if (res.success) {
+                  if (addNotification) {
+                      await addNotification({
+                          title: "New Organization 🏥",
+                          message: `New Hospital Added: ${orgName}`,
+                          type: "info",        
+                          to: "Admin",         
+                          route: "/organization" 
+                      });
+                  }
+                  Alert.alert("Success", "Organization Added!");
+              } else {
+                  Alert.alert("Error", "Could not add organization.");
+              }
+          }
+          router.back();
+      } catch (e) {
+          Alert.alert("Error", "Something went wrong.");
+      } finally {
+          setIsSaving(false);
       }
-      router.back();
   };
 
   return (
-    // 🔥 1. Wrapped everything in KeyboardAvoidingView
     <KeyboardAvoidingView 
         style={{ flex: 1 }} 
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 20}
     >
       <View style={styles.container}>
         <View style={styles.header}>
@@ -256,9 +508,25 @@ export default function AddOrganizationScreen() {
           <View style={{width:24}} /> 
         </View>
 
-        {/* 🔥 2. ScrollView Wrapper */}
         <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
             
+            {!isEditMode && (
+                <TouchableOpacity 
+                    style={[styles.scannerBtn, isScanning && {opacity: 0.6}]} 
+                    onPress={handleScanCard} 
+                    disabled={isScanning}
+                >
+                    {isScanning ? (
+                        <ActivityIndicator color="white" />
+                    ) : (
+                        <>
+                            <Ionicons name="camera" size={22} color="white" />
+                            <Text style={styles.scannerBtnText}>Scan Visiting Card (Auto-Fill)</Text>
+                        </>
+                    )}
+                </TouchableOpacity>
+            )}
+
             <Text style={styles.label}>Organization *</Text>
             <TextInput style={styles.inputGray} value={orgName} onChangeText={setOrgName} placeholder="Enter Hospital Name" />
 
@@ -334,7 +602,7 @@ export default function AddOrganizationScreen() {
                     )}
                 </View>
                 <View style={styles.col}>
-                    <Text style={styles.label}>Mobile No</Text>
+                    <Text style={styles.label}>Mobile No *</Text>
                     <TextInput style={styles.inputGray} keyboardType="phone-pad" value={mobile} onChangeText={setMobile} />
                 </View>
             </View>
@@ -362,7 +630,7 @@ export default function AddOrganizationScreen() {
                 </View>
                 <View style={styles.col}>
                     <Text style={styles.label}>Phone (Optional)</Text>
-                    <TextInput style={styles.inputGray} keyboardType="phone-pad" />
+                    <TextInput style={styles.inputGray} keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
                 </View>
             </View>
 
@@ -373,7 +641,7 @@ export default function AddOrganizationScreen() {
                 </View>
                 <View style={styles.col}>
                     <Text style={styles.label}>Email Address</Text>
-                    <TextInput style={styles.inputGray} keyboardType="email-address" value={email} onChangeText={setEmail} />
+                    <TextInput style={styles.inputGray} keyboardType="email-address" value={email} onChangeText={setEmail} autoCapitalize="none" />
                 </View>
             </View>
 
@@ -393,39 +661,69 @@ export default function AddOrganizationScreen() {
 
             <View style={styles.row}>
                 <View style={styles.col}>
+                    <Text style={styles.label}>Date of Birth <Text style={{color:'gray', fontSize:10}}>(Optional)</Text></Text>
+                    <TouchableOpacity style={styles.dropdown} onPress={() => setShowDobPicker(true)}>
+                        <Text style={{color: dob ? '#333' : 'gray'}}>{dob ? formatDate(dob) : 'Select DOB'}</Text>
+                        <Ionicons name="gift-outline" size={16} color="gray" />
+                    </TouchableOpacity>
+                    {showDobPicker && (
+                        <DateTimePicker 
+                            value={dob || new Date()} mode="date" maximumDate={new Date()} 
+                            onChange={(e, d) => { setShowDobPicker(false); if(d) setDob(d); }} 
+                        />
+                    )}
+                </View>
+                <View style={styles.col}>
+                    <Text style={styles.label}>Anniversary <Text style={{color:'gray', fontSize:10}}>(Optional)</Text></Text>
+                    <TouchableOpacity style={styles.dropdown} onPress={() => setShowAnniversaryPicker(true)}>
+                        <Text style={{color: anniversary ? '#333' : 'gray'}}>{anniversary ? formatDate(anniversary) : 'Select Date'}</Text>
+                        <Ionicons name="heart-outline" size={16} color="gray" />
+                    </TouchableOpacity>
+                    {showAnniversaryPicker && (
+                        <DateTimePicker 
+                            value={anniversary || new Date()} mode="date" maximumDate={new Date()} 
+                            onChange={(e, d) => { setShowAnniversaryPicker(false); if(d) setAnniversary(d); }} 
+                        />
+                    )}
+                </View>
+            </View>
+
+            <View style={styles.row}>
+                <View style={styles.col}>
                     <Text style={styles.label}>Territory *</Text>
                     <TouchableOpacity style={styles.dropdown} onPress={() => openModal('Territory', territoryOptions)}>
                           <Text style={{color: territory === 'Select' ? 'gray' : 'black'}}>{territory}</Text>
                           <Ionicons name="caret-down" size={14} color="gray" />
                     </TouchableOpacity>
                 </View>
+                <View style={styles.col}>
+                    <Text style={styles.label}>GST Number</Text>
+                    <TextInput 
+                        style={styles.inputGray} 
+                        placeholder="e.g. 27ABCDE1234F1Z5" 
+                        value={gstNumber} 
+                        onChangeText={setGstNumber}
+                        autoCapitalize="characters" 
+                    />
+                </View>
             </View>
 
-            <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-                <Text style={styles.saveBtnText}>{isEditMode ? 'Update' : 'Save'}</Text>
+            <TouchableOpacity 
+                style={[styles.saveButton, isSaving && {opacity: 0.7}]} 
+                onPress={handleSave}
+                disabled={isSaving}
+            >
+                {isSaving ? <ActivityIndicator color="white" /> : <Text style={styles.saveBtnText}>{isEditMode ? 'Update' : 'Save'}</Text>}
             </TouchableOpacity>
             
-            <View style={{height:50}} />
-        </ScrollView>
-        {/* --- REUSABLE DROPDOWN MODAL WITH SEARCH --- */}
-        <Modal visible={modalVisible} transparent={true} animationType="fade">
+            <View style={{height: 200}} />
             
-            {/* 1. KeyboardAvoidingView wrapper */}
-            <KeyboardAvoidingView 
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
-                style={{flex: 1}}
-            >
-                {/* 2. TouchableOpacity (Overlay) - SCROLLVIEW HATA DIYA HAI */}
-                <TouchableOpacity 
-                    style={styles.modalOverlay} 
-                    onPress={() => setModalVisible(false)} 
-                    activeOpacity={1}
-                >
-                    {/* 3. Modal Content */}
-                    <View 
-                        style={styles.modalContent} 
-                        onStartShouldSetResponder={() => true}
-                    >
+        </ScrollView>
+        
+        <Modal visible={modalVisible} transparent={true} animationType="fade">
+            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{flex: 1}}>
+                <TouchableOpacity style={styles.modalOverlay} onPress={() => setModalVisible(false)} activeOpacity={1}>
+                    <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
                         <Text style={styles.modalTitle}>Select {currentModalType}</Text>
                         
                         <View style={styles.modalSearchBox}>
@@ -438,7 +736,6 @@ export default function AddOrganizationScreen() {
                             />
                         </View>
 
-                        {/* 4. FlatList (Ab ye ScrollView ke andar nahi hai, to Error nahi aayega) */}
                         <FlatList 
                             data={filteredModalData}
                             keyExtractor={(item, index) => index.toString()}
@@ -448,7 +745,7 @@ export default function AddOrganizationScreen() {
                                 </TouchableOpacity>
                             )}
                             ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>No matches found</Text>}
-                            style={{maxHeight: 300}} // Height limit jaruri hai
+                            style={{maxHeight: 300}} 
                         />
                     </View>
                 </TouchableOpacity>
@@ -463,10 +760,12 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
   header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
-  scrollContent: { padding: 20, paddingBottom: 100 }, // 🔥 Cleaned up styles
+  scrollContent: { padding: 20, paddingBottom: 10 }, 
+  scannerBtn: { flexDirection: 'row', backgroundColor: '#e65100', padding: 15, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, elevation: 3 },
+  scannerBtnText: { color: 'white', fontWeight: 'bold', fontSize: 16, marginLeft: 10 },
   searchBox: { flexDirection:'row', alignItems:'center', borderWidth:1, borderColor:'#3b5998', borderRadius:30, paddingHorizontal:15, paddingVertical:10, marginBottom:20 },
   label: { marginBottom: 5, color:'#aaa', fontWeight:'600', fontSize:14 },
-  inputGray: { backgroundColor: '#e8e8e8', borderRadius: 8, padding: 12, marginBottom: 15, height: 50 },
+  inputGray: { backgroundColor: '#e8e8e8', borderRadius: 8, padding: 12, marginBottom: 15, height: 50, color: '#333' },
   row: { flexDirection: 'row', justifyContent: 'space-between' },
   col: { width: '48%' },
   dropdown: { backgroundColor: '#e8e8e8', borderRadius: 8, padding: 12, marginBottom: 15, flexDirection:'row', justifyContent:'space-between', alignItems:'center', height:50 },
@@ -474,7 +773,6 @@ const styles = StyleSheet.create({
   manualInput: { flex: 1, fontSize: 14, color: 'black' },
   saveButton: { backgroundColor: '#3b5998', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 20 },
   saveBtnText: { color: 'white', fontWeight: 'bold', fontSize: 18 },
-  
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   modalContent: { width: '85%', backgroundColor: 'white', borderRadius: 10, padding: 20, maxHeight: '60%' },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center', color: '#3b5998' },

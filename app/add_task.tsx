@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import DateTimePicker from '@react-native-community/datetimepicker'; // 🔥 Golden Rule: Calendar
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -16,41 +16,57 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { useData } from './context/DataContext';
 
-// 🔥🔥 1. FIREBASE IMPORTS ADDED
-import { addDoc, collection } from 'firebase/firestore';
-import { db } from '../firebaseConfig'; // ⚠️ Path check karein
+// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
+import { useData } from './context/DataContext';
 
 export default function AddTaskScreen() {
   const router = useRouter();
   
-  // 🔥 GET DATA FROM CONTEXT (Single Source of Truth)
-  const { addTask, user, userList } = useData(); 
+  // 🔥 1. Context se User & Notification engine
+  const { currentUser, addNotification } = useData(); 
+
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded States
+  const [userList, setUserList] = useState<any[]>([]);
 
   // --- STATES ---
   const [taskTitle, setTaskTitle] = useState('');
   const [assignedTo, setAssignedTo] = useState('');
-  const [assignedToId, setAssignedToId] = useState(''); // 🔥 Store ID for security
+  const [assignedToId, setAssignedToId] = useState(''); 
   
   const [priority, setPriority] = useState('Medium');
   const [department, setDepartment] = useState('Sales');
   const [remark, setRemark] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // 🔥 DATES
+  // DATES
   const [dueDate, setDueDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
 
   // --- MODAL STATES ---
   const [modalVisible, setModalVisible] = useState(false);
   const [currentModalType, setCurrentModalType] = useState('');
-  const [filteredData, setFilteredData] = useState<any[]>([]); // Data for list
+  const [filteredData, setFilteredData] = useState<any[]>([]); 
   const [searchText, setSearchText] = useState('');
 
   // --- OPTIONS ---
   const priorityOptions = ['Most Urgent', 'High', 'Medium', 'Low'];
   const deptOptions = ['Sales', 'Service', 'Account', 'HR', 'Admin', 'Store', 'Office', 'Other'];
+
+  // 🔥 4. LOAD USERS ON MOUNT
+  useEffect(() => {
+      const loadUsers = async () => {
+          if (currentUser?.companyId) {
+              const users = await fetchSaaSData("users");
+              setUserList(users);
+          }
+      };
+      loadUsers();
+  }, [currentUser]);
 
   // DATE FORMATTER
   const formatDate = (rawDate: Date) => {
@@ -67,8 +83,7 @@ export default function AddTaskScreen() {
       
       let data: any[] = [];
       if (type === 'Assign To') {
-          // Use Global User List
-          data = userList.length > 0 ? userList : [{name: 'Loading...', id: '0'}]; 
+          data = userList.length > 0 ? userList : [{name: 'No Users Found', id: '0'}]; 
       } 
       else if (type === 'Priority') data = priorityOptions;
       else if (type === 'Department') data = deptOptions;
@@ -99,7 +114,7 @@ export default function AddTaskScreen() {
   const handleSelect = (item: any) => {
       if (currentModalType === 'Assign To') {
           setAssignedTo(item.name);
-          setAssignedToId(item.uid || item.id); // Save ID
+          setAssignedToId(item.uid || item.id); 
       }
       else if (currentModalType === 'Priority') setPriority(item);
       else if (currentModalType === 'Department') setDepartment(item);
@@ -107,61 +122,48 @@ export default function AddTaskScreen() {
       setModalVisible(false);
   };
 
-  // 🔥 SAVE TASK
+  // 🔥 5. SAAS SAVE & SYNC LOGIC
   const handleSave = async () => {
       if(!taskTitle) return Alert.alert("Required", "Please enter task title.");
       if(!assignedTo) return Alert.alert("Required", "Please select a user.");
 
       setLoading(true);
       try {
+          // Engine handles ID, SenderId, CompanyId, CreatedAt automatically
           const newTask = {
               task: taskTitle,
-              
-              // Sender Info (From Context)
-              from: user?.name || 'Unknown', 
-              senderId: user?.uid || 'guest',
-
-              // Receiver Info
               to: assignedTo,
-              toUid: assignedToId, // 🔥 Critical for filtering "My Tasks"
-              
+              toUid: assignedToId, 
               priority: priority,
               department: department, 
-              department_lower: department.toLowerCase(), // Helper for search
-              
-              dueDate: formatDate(dueDate), // Display Date
-              dateIso: dueDate.toISOString().split('T')[0], // Sorting Date
-              
+              department_lower: department.toLowerCase(), 
+              dueDate: formatDate(dueDate), 
+              dateIso: dueDate.toISOString().split('T')[0], 
               status: 'Pending',
-              remark: remark || '',
-              
-              createdAt: new Date().toISOString()
+              remark: remark || ''
           };
 
-          // Use DataContext function (Handles Firebase internally)
-          await addTask(newTask);
+          const res = await addSaaSData("tasks", newTask);
 
-          // 🔥🔥 2. NOTIFICATION TRIGGER ADDED 🔥🔥
-          try {
-              // Notification for the Assigned User
-              await addDoc(collection(db, "notifications"), {
-                  title: "New Task Assigned 📋",
-                  message: `${user?.name} assigned you a task: ${taskTitle}.`,
-                  to: assignedTo,       // User Name
-                  userId: assignedToId, // Target User ID (Sirf usko dikhega)
-                  route: "/tasks",
-                  read: false,
-                  createdAt: new Date().toISOString(),
-                  type: "warning" // Priority task color
-              });
-          } catch (e) {
-              console.log("Notification Error:", e);
+          if (res.success) {
+              // REAL PUSH NOTIFICATION
+              if (addNotification) {
+                  await addNotification({
+                      title: "New Task Assigned 📋",
+                      message: `${currentUser?.name} assigned you a task: ${taskTitle}.`,
+                      userId: assignedToId, // Target User ID (Sirf usko dikhega aur Push Notification jayegi)
+                      route: "/tasks",
+                      type: "warning" // Priority task color
+                  });
+              }
+
+              Alert.alert("Success", "Task Assigned & User Notified! 🚀");
+              router.back();
+          } else {
+              Alert.alert("Error", "Could not save task.");
           }
-
-          Alert.alert("Success", "Task Assigned & User Notified! 🚀");
-          router.back();
       } catch (e) {
-          Alert.alert("Error", "Could not save task.");
+          Alert.alert("Error", "Something went wrong.");
           console.log(e);
       } finally {
           setLoading(false);
@@ -185,12 +187,13 @@ export default function AddTaskScreen() {
         <ScrollView 
             style={styles.contentContainer} 
             contentContainerStyle={{paddingBottom: 100}} 
+            keyboardShouldPersistTaps="handled"
         >
             
             {/* SENDER INFO (Read Only) */}
             <Text style={styles.label}>Assigning From</Text>
             <View style={[styles.input, {backgroundColor:'#eee'}]}>
-                <Text style={{color:'#555'}}>{user?.name || 'Loading...'}</Text>
+                <Text style={{color:'#555'}}>{currentUser?.name || 'Loading...'}</Text>
             </View>
 
             <Text style={styles.label}>Task Title *</Text>
@@ -205,8 +208,10 @@ export default function AddTaskScreen() {
                 <View style={styles.col}>
                     <Text style={styles.label}>Assign To *</Text>
                     <TouchableOpacity style={styles.dropdown} onPress={() => openModal('Assign To')}>
-                        <Text style={{color: assignedTo ? '#333' : 'gray'}}>{assignedTo || 'Select User'}</Text>
-                        <Ionicons name="caret-down" size={14} color="gray" />
+                        <View style={{flexDirection: 'row', alignItems: 'center', flex: 1}}>
+                            <Text style={{color: assignedTo ? '#333' : 'gray'}} numberOfLines={1}>{assignedTo || 'Select User'}</Text>
+                        </View>
+                        {isDbLoading && currentModalType === 'Assign To' ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="caret-down" size={14} color="gray" />}
                     </TouchableOpacity>
                 </View>
                 <View style={styles.col}>

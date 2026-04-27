@@ -16,12 +16,24 @@ import {
     orderBy,
     query,
     updateDoc,
-    where
+    where,
+    writeBatch
 } from 'firebase/firestore';
 import { auth, db } from '../../firebaseConfig';
+import { registerForPushNotificationsAsync, sendExpoPushNotification } from '../../utils/notificationHelper';
 
-// --- DATA TYPES ---
-type User = { id: string; name: string; email: string; role: string; empId: string; mobile: string; profileImage?: string | null; };
+// --- DATA TYPES (🔥 SaaS Variables Added) ---
+type User = { 
+    id: string; 
+    name: string; 
+    email: string; 
+    role: string; 
+    empId: string; 
+    mobile: string; 
+    profileImage?: string | null; 
+    companyId?: string;       // 🔥 SAAS FIELD
+    isCompanyActive?: boolean; // 🔥 KILL SWITCH
+};
 
 const DataContext = createContext<any>(null);
 
@@ -30,6 +42,8 @@ export const DataProvider = ({ children }: any) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [shouldOpenSidebar, setShouldOpenSidebar] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [isAutomationEnabled, setIsAutomationEnabled] = useState(true); 
+  const [isFirebaseSynced, setIsFirebaseSynced] = useState(false); 
 
   // --- LISTS STATES ---
   const [userList, setUserList] = useState<any[]>([]); 
@@ -73,38 +87,66 @@ export const DataProvider = ({ children }: any) => {
       logoUrl: '',
       signatureUrl: ''
   });
+
+  // =========================================================
+  // 🔥 MASTER MESSAGING ENGINE (WhatsApp & Email Queue)
+  // =========================================================
+  const queueAutomatedMessage = async (type: 'whatsapp' | 'email', to: string, templateName: string, variables: any, scheduledDate: string | null = null) => {
+      if (!isAutomationEnabled) {
+          console.log(`⏸️ Automation OFF: Skipped ${type} for ${to}`);
+          return;
+      }
+      
+      if (!to || to.trim() === '') return;
+      try {
+          let finalTo = to;
+          if (type === 'whatsapp' && !to.startsWith('91') && !to.startsWith('+91')) {
+              finalTo = `91${to.replace(/[^0-9]/g, '')}`; 
+          }
+          await addDoc(collection(db, 'outbound_messages'), {
+              type: type, 
+              to: finalTo, 
+              templateName: templateName, 
+              variables: variables,
+              status: 'pending', 
+              createdAt: new Date().toISOString(), 
+              scheduledFor: scheduledDate || new Date().toISOString(), 
+              retryCount: 0
+          });
+          console.log(`✉️ [Message Queued] ${templateName} - Scheduled: ${scheduledDate ? 'Future ⏳' : 'Now ⚡'}`);
+      } catch (error) { console.error("❌ [Queue Error]:", error); }
+  };
   
-  const fetchCompanySettings = async () => {
+  // =========================================================
+  // 🔥 COMPANY SETTINGS FETCH (UPDATED FOR SAAS)
+  // =========================================================
+  const fetchCompanySettings = async (companyId: string) => {
+        if (!companyId) return;
+
         try {
             const localProfile = await AsyncStorage.getItem('companyProfileLocal');
             if (localProfile) {
                 setCompanyProfile(JSON.parse(localProfile));
             }
 
-            // 2. Phir Firebase se Latest Data lao
-            const docRef = doc(db, "company_profile", "main_profile");
+            // 🔥 FIX: Ab profile uski specific companyId se aayegi
+            const docRef = doc(db, "company_profile", companyId);
             const docSnap = await getDoc(docRef);
             
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 
-                // 3. Data Formatting (Fixes Phone/Email & Missing Fields)
                 const profileData = {
                     companyName: data.companyName || 'LMS',
                     shortName: data.shortName || 'LMS',
                     tagline: data.tagline || '',
-                    
-                    // Address Logic
                     address: data.address || (data.fullAddress ? `${data.fullAddress.line || ''}, ${data.fullAddress.city || ''}` : ''),
                     fullAddress: data.fullAddress || {},
-
                     phone: data.contactPhone || data.phone || '', 
                     email: data.contactEmail || data.email || '',
                     landline: data.landline || '',
                     website: data.website || '',
-                    
                     gstNumber: data.gstNumber || '',
-
                     logoUrl: data.logoUrl || '',
                     signatureUrl: data.signatureUrl || '',
                     qrCodeUrl: data.qrCodeUrl || '',
@@ -119,6 +161,7 @@ export const DataProvider = ({ children }: any) => {
             console.log("Error fetching company settings:", error);
         }
     };
+
   const [projectList, setProjectList] = useState<any[]>([]);
   const fetchProjects = async () => {
       try {
@@ -131,28 +174,25 @@ export const DataProvider = ({ children }: any) => {
       }
   };
 
-  // 2. Add New Project
   const addProject = async (data: any) => {
       try {
           await addDoc(collection(db, "projects"), data);
-          await fetchProjects(); // List refresh karein
+          await fetchProjects(); 
       } catch (e) {
           console.log("Error adding project:", e);
-          throw e; // Error aage bheje taki alert dikha sake
+          throw e; 
       }
   };
 
-  // 3. Auto Fetch on Load
- useEffect(() => {
+  useEffect(() => {
      if(currentUser) {  
          fetchProjects();
      }
- }, [currentUser]);  
+  }, [currentUser]);  
   
-  // 🔥 PROJECT MODULE END
-  
-  // 1. AUTH LISTENER
-  
+  // =========================================================
+  // 1. AUTH LISTENER & PUSH TOKEN SYNC (🔥 SAAS ENGINE UPGRADED)
+  // =========================================================
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (user) {
@@ -160,6 +200,11 @@ export const DataProvider = ({ children }: any) => {
         let name = user.email?.split('@')[0] || "User";
         let mobile = "7030223345";
         const emailKey = user.email?.trim().toLowerCase() || ""; 
+        let dbTarget = 1000000; 
+
+        // 🔥 SAAS VARIABLES INITIALIZED
+        let companyId = "";
+        let isCompanyActive = true; 
 
         try {
             const usersRef = collection(db, "users");
@@ -167,23 +212,18 @@ export const DataProvider = ({ children }: any) => {
             const querySnap = await getDocs(q);
 
             if (!querySnap.empty) {
-                const userData = querySnap.docs[0].data();
-                // 👇👇 DEBUGGING LOGS (Terminal me dekhein) 👇👇
+                const userDoc = querySnap.docs[0];
+                const userData = userDoc.data();
+                const userDocId = userDoc.id;
+
                 console.log("🔥 Full User Data from DB:", userData);
-                console.log("🎯 Found Target in DB:", userData.monthlyTarget);
 
-                // 1. Data Nikalo (Number convert karke safety ke liye)
-                const dbTarget = userData.monthlyTarget;
-                const mTarget = (dbTarget && !isNaN(dbTarget)) ? Number(dbTarget) : 1000000;
-                
-                console.log("✅ Final Target Set To:", mTarget);
+                // 🔥 Extract Company ID
+                companyId = userData.companyId || "";
 
-                // 2. State update karo
-                setSalesTargets({
-                    monthly: mTarget,
-                    yearly: mTarget * 12
-                });
-                // 👆👆 YE CODE UPDATE KAREIN 👆👆
+                dbTarget = (userData.monthlyTarget && !isNaN(userData.monthlyTarget)) ? Number(userData.monthlyTarget) : 1000000;
+                setSalesTargets({ monthly: dbTarget, yearly: dbTarget * 12 });
+
                 let dbRole = userData.role || 'Service Engineer';
                 name = userData.name || name;
                 if (userData.mobile) mobile = userData.mobile;
@@ -193,14 +233,54 @@ export const DataProvider = ({ children }: any) => {
                 else if (dbRole === 'Account') finalRole = 'Accountant';
                 else if (dbRole === 'Back Office' || dbRole === 'Store') finalRole = 'Store Keeper';
                 else finalRole = dbRole; 
+
+                // 🔥 SUPER ADMIN CHECK
+                const superAdmins = ["varunkhandagre@gmail.com", "admin@lms.com", "admin@mycrm.com"];
+                if(superAdmins.includes(emailKey)) {
+                    finalRole = "SuperAdmin";
+                }
+
+                // 🔥 KILL SWITCH LOGIC (Check if Plan/Trial Expired)
+                if (companyId && finalRole !== "SuperAdmin") {
+                    const companyDocRef = doc(db, "company_profile", companyId);
+                    const companySnap = await getDoc(companyDocRef);
+                    if (companySnap.exists()) {
+                        const compData = companySnap.data();
+                        let active = compData.isActive !== false; 
+                        
+                        if (active && compData.expiryDate) {
+                            const today = new Date().getTime();
+                            const expiry = new Date(compData.expiryDate).getTime();
+                            if (today > expiry) active = false; 
+                        }
+                        isCompanyActive = active;
+                    }
+                }
+
+                // Push Token Sync
+                try {
+                    const token = await registerForPushNotificationsAsync();
+                    if (token) {
+                        const userRefToUpdate = doc(db, "users", userDocId);
+                        await updateDoc(userRefToUpdate, { 
+                            expoPushToken: token,
+                            lastActive: new Date().toISOString() 
+                        });
+                        console.log("✅ Push Token Saved for:", name);
+                    }
+                } catch (tokenErr) {
+                    console.log("⚠️ Could not fetch/save push token:", tokenErr);
+                }
+
             } else {
                 if(emailKey === "varunkhandagre@gmail.com" || emailKey === "admin@mycrm.com") {
-                    finalRole = "Admin";
+                    finalRole = "SuperAdmin";
                 }
             }
         } catch (e) { console.log("⚠️ Auth Error:", e); }
         
-        console.log(`✅ Logged in as: ${name} (Role: ${finalRole})`);
+        console.log(`✅ Logged in as: ${name} (Role: ${finalRole}, Company: ${companyId})`);
+        
         setCurrentUser({
             id: user.uid,
             name: name,
@@ -208,9 +288,14 @@ export const DataProvider = ({ children }: any) => {
             role: finalRole, 
             empId: "EMP-" + user.uid.slice(0,4).toUpperCase(),
             profileImage: null,
-            mobile: mobile
+            mobile: mobile,
+            companyId: companyId,             // 🔥 ADDED
+            isCompanyActive: isCompanyActive  // 🔥 ADDED
         });
-        fetchCompanySettings();
+
+        // 🔥 Fetch Company profile automatically
+        if (companyId) fetchCompanySettings(companyId);
+
       } else {
         setCurrentUser(null);
       }
@@ -221,24 +306,29 @@ export const DataProvider = ({ children }: any) => {
 
   // =========================================================
   // 2. PERMISSIONS & USER LIST
-  // =========================================================
+  // ==========================================
   useEffect(() => {
-      // 🔥 FIX: Permission Error (Jab tak user na mile, wait karo)
-      if (!currentUser) return; 
+      if (!currentUser) {
+          setIsFirebaseSynced(false); 
+          return; 
+      }
 
       const unsub = onSnapshot(doc(db, "settings", "permissions"), (d) => { if (d.exists()) setAppPermissions(d.data()); });
+      const unsubAuto = onSnapshot(doc(db, "settings", "automation"), (d) => { 
+          if (d.exists()) setIsAutomationEnabled(d.data().enabled !== false); 
+      });
       const unsubUsers = onSnapshot(collection(db, "users"), (snapshot) => {
           const list = snapshot.docs.map(doc => ({ id: doc.id, uid: doc.id, ...doc.data() }));
           setUserList(list);
+          setIsFirebaseSynced(true); 
       });
-      return () => { unsub(); unsubUsers(); };
-  }, [currentUser]); 
+      return () => { unsub(); unsubUsers(); unsubAuto(); };
+  }, [currentUser]);
 
   // =========================================================
-  // 3. DATA LISTENERS
+  // 3. DATA LISTENERS (To be migrated to useSaaSDB later)
   // =========================================================
   useEffect(() => {
-    // 🔥 FIX: Data load mat karo jab tak login na ho
     if (!currentUser) return;
 
     const role = currentUser.role ? currentUser.role.toLowerCase() : '';
@@ -273,7 +363,6 @@ export const DataProvider = ({ children }: any) => {
                     data = data.filter((item: any) => item.senderId === currentUser.id || item.userId === currentUser.id);
                 }
             }
-            
             else {
                 data = data.filter((item: any) => 
                     item.senderId === currentUser.id || 
@@ -320,8 +409,8 @@ export const DataProvider = ({ children }: any) => {
     
     const unsubNotif = onSnapshot(collection(db, "notifications"), (snapshot) => {
         const notifList = snapshot.docs.map(doc => ({
-            ...doc.data(), // Pehle data failao
-            id: doc.id     // 🔥 BAAD ME ID set karo (Taaki asli ID hi mile)
+            ...doc.data(), 
+            id: doc.id    
         }));
         
         notifList.sort((a:any, b:any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -382,12 +471,61 @@ export const DataProvider = ({ children }: any) => {
         });
         await updateDoc(docRef, { id: docRef.id });
         console.log(`✅ Added to ${col} with ID: ${docRef.id}`);
+
+        try {
+            if (col === 'sales_reports' && data.mobile) {
+                await queueAutomatedMessage('whatsapp', data.mobile, 'sales_visit_thanks', {
+                    customer_name: data.person || data.orgName || 'Customer',
+                    company_name: companyProfile?.companyName || 'Our Company'
+                });
+            } else if (col === 'service_calls' && data.mobile) {
+                await queueAutomatedMessage('whatsapp', data.mobile, 'service_ticket_created', {
+                    customer_name: data.contactPerson || data.hospitalName || 'Customer',
+                    ticket_id: docRef.id.slice(-6).toUpperCase()
+                });
+            } else if (col === 'demos' && data.mobile) {
+                await queueAutomatedMessage('whatsapp', data.mobile, 'demo_scheduled', {
+                    customer_name: data.contactPerson || data.hospitalName || 'Customer',
+                    date: data.date
+                });
+            } else if (col === 'installations' && data.mobile) {
+                await queueAutomatedMessage('whatsapp', data.mobile, 'installation_completed', {
+                    customer_name: data.contactPerson || data.hospitalName || 'Customer',
+                    product: data.productName || 'Machine'
+                });
+            } else if (col === 'pms_reports' && data.mobile) {
+                await queueAutomatedMessage('whatsapp', data.mobile, 'pms_scheduled', {
+                    customer_name: data.contactPerson || data.hospitalName || 'Customer',
+                    date: data.nextServiceDate || 'Upcoming'
+                });
+            }
+        } catch (queueErr) { console.error("Queue Logic Error:", queueErr); }
+
+        if (addNotification && col !== 'notifications') {
+            let notifTitle = "New Entry Added";
+            let notifRoute = "/";
+
+            if(col === 'leaves') { notifTitle = "New Leave Request 🌴"; notifRoute = "/leave"; }
+            else if(col === 'expenses') { notifTitle = "New Expense Claim 💸"; notifRoute = "/expense"; }
+            else if(col === 'leads') { notifTitle = "New Lead Added 🎯"; notifRoute = "/leads"; }
+            else if(col === 'tasks') { notifTitle = "New Task Assigned 📝"; notifRoute = "/tasks"; }
+            else if(col === 'travel_notes') { notifTitle = "New Travel Claim 🚗"; notifRoute = "/travel"; }
+
+            await addNotification({
+                title: notifTitle,
+                message: `${currentUser?.name} has added a new entry in ${col}.`,
+                to: "Admin", 
+                type: "info",
+                route: notifRoute
+            });
+        }
+
     } catch (e) {
         console.error(`❌ Error adding to ${col}:`, e);
         Alert.alert("Error Saving Data", "Please try again.");
     }
   };
-
+  
   const updateStatus = async (col: string, id: string, status: string) => {
     try {
         const ref = doc(db, col, id);
@@ -401,26 +539,21 @@ export const DataProvider = ({ children }: any) => {
   const updateActivityStatus = (id: string, status: string) => updateStatus("activity_plans", id, status);
   const updateExpenseStatus = (id: string, status: string) => updateStatus("expenses", id, status);
   const updateLeaveStatus = (id: string, status: string) => updateStatus("leaves", id, status);
-  // 🔥 UPDATE ORDER & AUTO ADD TO DUES (Corrected)
+  
   const updateOrderStatus = async (id: string, status: string, orderData?: any) => {
     try {
         const ref = doc(db, "orders", id);
-        
-        // 1. Status Update
         await updateDoc(ref, { status: status });
 
-        // 2. Auto Due Logic (Sirf Approved hone par)
         if (status === 'Approved' && orderData) {
-            
             const dueAmount = parseFloat(orderData.amount || 0);
-            
             if (dueAmount > 0) {
                 const dueData = {
                     orgName: orderData.hospitalName || orderData.partyName || "Unknown",
-                    orgId: orderData.orgId || "", // <--- YE LINE ADD KAR DEIN
+                    orgId: orderData.orgId || "", 
                     city: orderData.city || "",
                     amount: dueAmount,          
-                    balance: dueAmount,         // Balance shuru me full amount rahega
+                    balance: dueAmount,         
                     received: 0,
                     orderId: orderData.orderId || "ORD-XX",
                     date: new Date().toISOString().split('T')[0], 
@@ -430,23 +563,20 @@ export const DataProvider = ({ children }: any) => {
                     createdAt: new Date().toISOString()
                 };
 
-                // ✅ Collection Name: "payment_dues" (Database ke liye)
                 await addDoc(collection(db, "payment_dues"), dueData);
                 
-                // ✅ Notification
                 if(addNotification) {
                     addNotification({
                         title: "New Due Generated 💰",
                         message: `Order Approved. ₹${dueAmount} added to dues for ${dueData.orgName}.`,
                         to: "Accountant", 
                         type: "info",
-                        route: "/payment_duelist" // 🔥 FIX: Aapke file ka naam yahan dala hai
+                        route: "/payment_duelist" 
                     });
                 }
                 console.log("✅ Auto Due Created");
             }
         }
-
     } catch (e: any) {
         Alert.alert("Update Failed", e.message);
     }
@@ -461,12 +591,41 @@ export const DataProvider = ({ children }: any) => {
       }
   };
 
-  // 🔥 ADDED: UPDATE ORGANIZATION FUNCTION (Fixes your error)
   const updateOrganization = async (id: string, data: any) => {
       try {
           const ref = doc(db, "organizations", id);
           await updateDoc(ref, data);
           console.log(`✅ Organization updated:`, data);
+
+          if (data.name) {
+              const newName = data.name;
+              const batch = writeBatch(db);
+              let updateCount = 0;
+
+              const updateOldRecords = async (colName: string, fieldsToUpdate: any) => {
+                  const q = query(collection(db, colName), where("orgId", "==", id));
+                  const snap = await getDocs(q);
+                  snap.forEach((docItem) => {
+                      batch.update(docItem.ref, fieldsToUpdate);
+                      updateCount++;
+                  });
+              };
+
+              await updateOldRecords("orders", { hospitalName: newName });
+              await updateOldRecords("payment_collections", { orgName: newName }); 
+              await updateOldRecords("payment_dues", { orgName: newName });
+              await updateOldRecords("leads", { orgName: newName, companyName: newName });
+              await updateOldRecords("service_calls", { hospitalName: newName, orgName: newName });
+              await updateOldRecords("installations", { hospitalName: newName, orgName: newName });
+              await updateOldRecords("pms_reports", { hospitalName: newName, orgName: newName });
+              await updateOldRecords("demos", { hospitalName: newName, orgName: newName });
+              await updateOldRecords("couriers", { orgName: newName, hospitalName: newName });
+
+              if (updateCount > 0) {
+                  await batch.commit();
+                  console.log(`🚀 Magic Success! Changed old names in ${updateCount} places across ALL collections.`);
+              }
+          }
       } catch (e: any) {
           console.error("❌ Error updating org:", e);
           Alert.alert("Update Failed", e.message);
@@ -494,41 +653,65 @@ export const DataProvider = ({ children }: any) => {
   const addExpense = (i:any) => addWithMeta("expenses", i);
   const addLeave = (i:any) => addWithMeta("leaves", i);
   const addSalesVisit = (i:any) => addWithMeta("sales_reports", i);
+  
+  const addQuotation = async (data: any) => {
+      await addWithMeta("quotations", data);
+      
+      if (data.mobile || data.phone) {
+          const custMobile = data.mobile || data.phone;
+          const futureDate = new Date();
+          futureDate.setDate(futureDate.getDate() + 3); 
+          const scheduledTime = futureDate.toISOString();
+
+          await queueAutomatedMessage('whatsapp', custMobile, 'quotation_followup_3days', {
+              customer_name: data.contactPerson || data.orgName || 'Doctor/Sir',
+              company_name: companyProfile?.companyName || 'Our Company'
+          }, scheduledTime);
+
+          console.log("⏳ Drip Campaign Activated: Follow-up set for 3 days later!");
+      }
+  };
   const addServiceCall = (i:any) => addWithMeta("service_calls", i);
-  // 🔥 FIX: Save Order & Sync ID (Taaki Approve me error na aaye)
+  
   const addOrder = async (orderData: any) => {
       try {
-          // 1. Pehle document create karo (Firestore ID generate karega)
           const docRef = await addDoc(collection(db, "orders"), orderData);
-          
-          // 2. Ab wapas ussi document ko update karo taaki 'id' field match kare
-          // Isse "No document to update" wala error khatam ho jayega
           await updateDoc(docRef, { id: docRef.id });
-
           console.log("✅ Order Saved & ID Synced:", docRef.id);
-          
-          // Agar fetchOrders function hai to call karein (optional)
-          // if(fetchOrders) await fetchOrders(); 
 
+          if (orderData.mobile) {
+              await queueAutomatedMessage('whatsapp', orderData.mobile, 'order_confirmed', {
+                  customer_name: orderData.contactPerson || orderData.hospitalName || 'Customer',
+                  order_id: orderData.orderId,
+                  amount: String(orderData.amount)
+              });
+          }
+
+          if (addNotification) {
+              await addNotification({
+                  title: "New Order Received 📦",
+                  message: `Order added by ${currentUser?.name} for ${orderData.hospitalName || 'a hospital'}.`,
+                  to: "Admin", 
+                  type: "info",
+                  route: "/orders"
+              });
+          }
       } catch (error) {
           console.error("❌ Error adding order:", error);
           throw error;
       }
   };
-  // 🔥 NEW CODE: Save Data + Send Notification
+
   const addOrganization = async (orgData: any) => {
       try {
-          // 1. Organization Save Karein
           await addWithMeta("organizations", orgData);
           
-          // 2. Notification Bhejein (Admin ko)
-          // Notification ka object banaya
           const notifData = {
             title: "New Organization",
             message: `New Hospital Added: ${orgData.name || orgData.orgName}`,
-            type: "info",        // Icon type
-            to: "Admin",         // Kisko dikhana hai
-            screen: "organization", // Click karne par kya khulega
+            type: "info",        
+            to: "Admin",         
+            screen: "organization", 
             id: orgData.id || Date.now().toString(),
             createdAt: new Date().toISOString(),
             read: false,
@@ -536,7 +719,6 @@ export const DataProvider = ({ children }: any) => {
             senderName: currentUser?.name || 'App User'
           };
 
-          // Database ke 'notifications' folder me save kiya
           await addDoc(collection(db, "notifications"), notifData);
           console.log("🔔 Notification Sent Successfully!");
 
@@ -549,12 +731,11 @@ export const DataProvider = ({ children }: any) => {
   const addActivityPlan = (i:any) => addWithMeta("activity_plans", i);
   const addCardRequest = (i:any) => addWithMeta("card_requests", i);
   const addCourier = (i:any) => addWithMeta("couriers", i);
-  // 🔥 ADD PAYMENT & AUTO REDUCE DUES (Final Fix)
+  
   const addPayment = async (paymentData: any) => {
       try {
           console.log("💰 Processing Payment for:", paymentData.orgName);
 
-          // 1. Payment Save
           const docRef = await addDoc(collection(db, "payment_collections"), { 
               ...paymentData, 
               status: 'Approved', 
@@ -562,10 +743,29 @@ export const DataProvider = ({ children }: any) => {
           });
           await updateDoc(docRef, { id: docRef.id });
 
-          // 2. Auto Deduct Logic
+          try {
+              const orgInfo = orgList.find((o:any) => o.id === paymentData.orgId) || {};
+              const custMobile = paymentData.mobile || orgInfo.mobile || orgInfo.phone;
+              if (custMobile) {
+                  await queueAutomatedMessage('whatsapp', custMobile, 'payment_received', {
+                      customer_name: paymentData.orgName,
+                      amount: String(paymentData.amount),
+                      receipt_no: paymentData.receiptNo || docRef.id.slice(-6).toUpperCase()
+                  });
+              }
+          } catch(e) {}
+
+          if (addNotification) {
+              await addNotification({
+                  title: "Payment Received 💰",
+                  message: `₹${paymentData.amount} received from ${paymentData.orgName || 'a client'} by ${currentUser?.name}.`,
+                  to: "Admin", 
+                  type: "success",
+                  route: "/payment_collections"
+              });
+          }
+
           const payAmount = parseFloat(String(paymentData.amount || 0));
-          
-          // Org Name aur ID nikalo
           let orgName = paymentData.orgName || paymentData.partyName || paymentData.hospitalName || "";
           const orgId = paymentData.orgId || "";
 
@@ -573,50 +773,38 @@ export const DataProvider = ({ children }: any) => {
               let querySnapshot;
               const duesRef = collection(db, "payment_dues");
 
-              // 🔥 STRATEGY 1: Try finding by Org ID (Sabse Accurate)
               if (orgId) {
                   const qId = query(duesRef, where("orgId", "==", orgId), where("status", "in", ["Pending", "Partial"]));
                   querySnapshot = await getDocs(qId);
               }
 
-              // 🔥 STRATEGY 2: Agar ID se nahi mila, to Name se dhundo (Space hata ke)
               if (!querySnapshot || querySnapshot.empty) {
-                  console.log("⚠️ ID not found in dues, trying Name match...");
-                  
-                  // Try Exact Name
                   let qName = query(duesRef, where("orgName", "==", orgName), where("status", "in", ["Pending", "Partial"]));
                   querySnapshot = await getDocs(qName);
 
-                  // Try Trimmed Name (Agar upar wala fail hua)
                   if (querySnapshot.empty) {
-                      console.log("⚠️ Exact name failed, trying Trimmed name...");
                       qName = query(duesRef, where("orgName", "==", orgName.trim()), where("status", "in", ["Pending", "Partial"]));
                       querySnapshot = await getDocs(qName);
                   }
               }
 
-              // 3. Process Deductions
               if (querySnapshot && !querySnapshot.empty) {
                   console.log(`✅ Found ${querySnapshot.size} Dues. Deducting...`);
                   
                   let remainingPayment = payAmount;
                   
-                  // Sort: Oldest First
                   const dues = querySnapshot.docs.map(d => ({id: d.id, ...d.data() as any}))
                                .sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
                   for (const due of dues) {
-                      if (remainingPayment <= 0.5) break; // Stop if payment exhausted (0.5 for rounding errors)
+                      if (remainingPayment <= 0.5) break; 
 
                       const currentBalance = parseFloat(String(due.balance || due.amount));
                       
                       if (currentBalance > 0) {
                           const deductAmount = Math.min(currentBalance, remainingPayment);
-                          
                           const newBalance = currentBalance - deductAmount;
                           const newReceived = (parseFloat(String(due.received || 0))) + deductAmount;
-                          
-                          // Agar balance < 1 hai to 'Collected'
                           const newStatus = newBalance < 1 ? 'Collected' : 'Partial';
 
                           const dueRef = doc(db, "payment_dues", due.id);
@@ -627,7 +815,6 @@ export const DataProvider = ({ children }: any) => {
                           });
 
                           remainingPayment -= deductAmount;
-                          console.log(`✅ Deducted ${deductAmount} from Due ID: ${due.id}. New Balance: ${newBalance}`);
                       }
                   }
               } else {
@@ -641,7 +828,53 @@ export const DataProvider = ({ children }: any) => {
           return false;
       }
   };
-  const addNotification = (i:any) => addWithMeta("notifications", i);
+  
+  const addNotification = async (notifData: any) => {
+      try {
+          const docRef = await addDoc(collection(db, "notifications"), {
+              ...notifData,
+              createdAt: new Date().toISOString(),
+              read: false,
+              senderId: currentUser?.id || 'app',
+              senderName: currentUser?.name || 'App User'
+          });
+          await updateDoc(docRef, { id: docRef.id });
+
+          if (notifData.userId) {
+              const userDoc = await getDoc(doc(db, "users", notifData.userId));
+              if (userDoc.exists()) {
+                  const targetUser = userDoc.data();
+                  if (targetUser.expoPushToken) {
+                      await sendExpoPushNotification(
+                          targetUser.expoPushToken, 
+                          notifData.title, 
+                          notifData.message, 
+                          { route: notifData.route || '/' }
+                      );
+                  }
+              }
+          } else if (notifData.to) {
+              const roleQuery = query(collection(db, "users"), where("role", "==", notifData.to));
+              const roleSnap = await getDocs(roleQuery);
+              
+              roleSnap.forEach((userDoc) => {
+                  const targetUser = userDoc.data();
+                  if (targetUser.expoPushToken) {
+                      sendExpoPushNotification(
+                          targetUser.expoPushToken, 
+                          notifData.title, 
+                          notifData.message, 
+                          { route: notifData.route || '/' }
+                      );
+                  }
+              });
+          }
+          console.log("🔔 Notification Process Completed!");
+
+      } catch (e) {
+          console.error("❌ Add Notification Error:", e);
+      }
+  };
 
   const addDue = async (dueData: any) => {
     try {
@@ -679,7 +912,38 @@ export const DataProvider = ({ children }: any) => {
   const deleteTask = (id: string) => deleteDocument("tasks", id);
   const deleteLead = (id: string) => deleteDocument("leads", id);
 
-  const login = async (e:string, p:string) => { try { await signInWithEmailAndPassword(auth, e, p); return true; } catch (e:any) { Alert.alert("Login Failed", e.message); return false; } };
+  const login = async (e: string, p: string) => { 
+    try { 
+        const userCredential = await signInWithEmailAndPassword(auth, e, p); 
+        const firebaseUser = userCredential.user;
+
+        const usersRef = collection(db, "users");
+        const q = query(usersRef, where("email", "==", firebaseUser.email));
+        const querySnap = await getDocs(q);
+
+        if (!querySnap.empty) {
+            const userData = querySnap.docs[0].data();
+            
+            const fullUser = { 
+                uid: firebaseUser.uid, 
+                ...userData            
+            } as any;
+            
+            setCurrentUser(fullUser); 
+            await AsyncStorage.setItem('user', JSON.stringify(fullUser));
+
+            return true; 
+        } else {
+            Alert.alert("Error", "User data not found in database.");
+            await auth.signOut();
+            return false;
+        }
+
+    } catch (error: any) { 
+        Alert.alert("Login Failed", error.message); 
+        return false; 
+    } 
+  };
   const logout = async () => { await signOut(auth); setCurrentUser(null); };
   
   const markNotificationRead = async (id: string) => {
@@ -700,7 +964,7 @@ export const DataProvider = ({ children }: any) => {
   return (
     <DataContext.Provider value={{ 
         currentUser, loading, login, logout, activeSection, setActiveSection, shouldOpenSidebar, setShouldOpenSidebar, user: currentUser,
-        
+        isFirebaseSynced, isAutomationEnabled,
         taskList, leadsList, pmsList, notificationList, notificationCount, attendanceList, leaveList, expenseList, advanceList, travelList, 
         salesVisitList, orderList, serviceCallList, orgList, installList, sparePartsList, activityPlanList, courierList, 
         cardRequestList, paymentList, dueList, demoList, serviceList, productList, companyProfile,
@@ -710,7 +974,7 @@ export const DataProvider = ({ children }: any) => {
         
         addAttendance, addTask, addLead, addTravelNote, addAdvance, addExpense, addLeave, addSalesVisit, addServiceCall, 
         addOrder, addPayment, addDue, addOrganization, addInstallation, addSparePart, addActivityPlan, addCardRequest, addCourier, 
-        addDemo, addPMS, completeTask, addProduct, addNotification, addProject,
+        addDemo, addPMS, completeTask, addProduct, addNotification, addProject, addQuotation,
         
         updateAdvanceStatus, 
         updateExpenseStatus, 
@@ -718,7 +982,7 @@ export const DataProvider = ({ children }: any) => {
         updateActivityStatus,
         updateOrderStatus,
         updateLead,
-        updateOrganization, // 🔥 ADDED HERE
+        updateOrganization, 
         addLeadActivity,
 
         deleteOrder, deleteTask, deleteLead,

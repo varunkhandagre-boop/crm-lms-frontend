@@ -4,10 +4,13 @@ import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import React, { useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     FlatList,
+    KeyboardAvoidingView,
     Linking,
     Modal,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
@@ -17,32 +20,54 @@ import {
 } from 'react-native';
 import { useData } from './context/DataContext';
 
-// FIREBASE IMPORTS
-import { collection, getDocs, query } from 'firebase/firestore';
+// FIREBASE IMPORTS (🔥 doc, updateDoc added)
+import { collection, doc, getDocs, query, updateDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
+
+// PDF IMPORTS
+import * as Print from 'expo-print';
 
 export default function OrderListScreen() {
   const router = useRouter();
-  const { orderList, user, updateOrderStatus, addNotification } = useData();
+  const { orderList, user, updateOrderStatus, addNotification, companyProfile } = useData();
 
   // STATES
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
-  const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'Year' | 'All'>('Year');
+  // 🔥 CHANGED: 'Year' changed to 'FY'
+  const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
+  
+  // 🔥 ADMIN EDIT STATES
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editData, setEditData] = useState<any>({});
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  
+  const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
 
-  // EMPLOYEE FILTER
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
   const [selectedEmployee, setSelectedEmployee] = useState('All'); 
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  const isAdmin = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr'].includes(user?.role || '');
+  const [visibleCount, setVisibleCount] = useState(20);
 
-  // FETCH EMPLOYEES
+  const isAdmin = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr'].includes(user?.role || '');
+  // 🔥 ONLY PURE ADMIN CAN EDIT (Or add 'Manager' here if you want)
+  const isStrictAdmin = user?.role === 'Admin' || user?.role === 'Manager'; 
+
+  useEffect(() => {
+      if (viewMode === 'Day') {
+          setVisibleCount(500); 
+      } else {
+          setVisibleCount(20); 
+      }
+  }, [viewMode, currentDate, searchText, statusFilter, selectedEmployee]);
+
   useEffect(() => {
     if (isAdmin) {
       const fetchEmployees = async () => {
@@ -62,7 +87,6 @@ export default function OrderListScreen() {
     }
   }, [user]);
 
-  // DATE PARSER
   const parseDate = (dateStr: any) => {
       if (!dateStr) return 0;
       if (typeof dateStr === 'number') return dateStr; 
@@ -78,7 +102,6 @@ export default function OrderListScreen() {
               const day = parseInt(parts[2]);
               return new Date(year, month, day).getTime();
           }
-          
           if (parts.length === 3 && parts[2].length === 4) {
               const day = parseInt(parts[0]);
               const month = parseInt(parts[1]) - 1;
@@ -90,101 +113,168 @@ export default function OrderListScreen() {
       return isNaN(d.getTime()) ? 0 : d.getTime();
   };
 
+  // 🔥 CHANGED: FY Navigation Logic
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
       if (viewMode === 'Day') d.setDate(d.getDate() + dir);
       else if (viewMode === 'Month') d.setMonth(d.getMonth() + dir);
-      else if (viewMode === 'Year') d.setFullYear(d.getFullYear() + dir);
+      else if (viewMode === 'FY') d.setFullYear(d.getFullYear() + dir);
       setCurrentDate(d);
   };
 
+  // 🔥 CHANGED: Header Title to show Financial Year
   const getHeaderDate = () => {
       if (viewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
       if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      if (viewMode === 'Year') return currentDate.getFullYear().toString();
+      if (viewMode === 'FY') {
+          const currentMonth = currentDate.getMonth(); 
+          const currentYear = currentDate.getFullYear();
+          
+          const fyStartYear = currentMonth >= 3 ? currentYear : currentYear - 1;
+          const fyEndYear = fyStartYear + 1;
+          
+          return `FY ${fyStartYear.toString().slice(-2)}-${fyEndYear.toString().slice(-2)}`;
+      }
       return "All Time";
   };
 
-  // FILE OPENER
+  // --- PDF GENERATOR ---
+  const generateOrderPDF = async (orderData: any) => {
+    setGeneratingPdf(true);
+    try {
+        const logoHTML = companyProfile?.logoUrl 
+            ? `<img src="${companyProfile.logoUrl}" style="height: 60px; margin-bottom: 10px;" />` 
+            : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
+
+        const signatureHTML = companyProfile?.signatureUrl 
+            ? `<img src="${companyProfile.signatureUrl}" style="height: 50px; margin-top: 10px;" />` 
+            : `<div style="font-weight: bold; margin-top: 30px;">Authorized Signatory</div>`;
+
+        const htmlContent = `
+        <html>
+          <head>
+            <style>
+              body { font-family: 'Helvetica', sans-serif; padding: 30px; border: 2px solid #333; }
+              .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px; }
+              .title { font-size: 22px; font-weight: bold; color: #1a237e; text-transform: uppercase; }
+              .sub-title { font-size: 12px; margin-top: 2px; color: #333; line-height: 1.4; }
+              .row { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 14px; }
+              .label { font-weight: bold; color: #444; }
+              .box { border: 1px solid #000; padding: 15px; margin-top: 10px; background-color: #fcfcfc; }
+              .amount-box { display: inline-block; border: 2px solid #000; padding: 8px 25px; font-weight: bold; font-size: 18px; margin-top: 10px; }
+              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; }
+              .sign-box { text-align: center; }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              ${logoHTML}
+              ${companyProfile?.logoUrl ? `<div class="title">${companyProfile.companyName}</div>` : ''}
+              <div class="sub-title">${companyProfile?.address || ''}</div>
+              <div class="sub-title">Phone: ${companyProfile?.contactPhone || '-'} | Email: ${companyProfile?.contactEmail || '-'}</div>
+              <div class="sub-title">${companyProfile?.gstNumber ? `GSTIN: ${companyProfile.gstNumber}` : ''}</div>
+            </div>
+            <h3 style="text-align: center; text-decoration: underline;">ORDER ACKNOWLEDGEMENT</h3>
+            <div class="row">
+              <div><span class="label">Order ID:</span> <b>${orderData.orderId}</b></div>
+              <div><span class="label">Date:</span> ${new Date(orderData.date).toLocaleDateString('en-GB')}</div>
+            </div>
+            <div class="box">
+              <div class="label" style="text-decoration: underline; margin-bottom: 5px;">Client Details:</div>
+              <div style="font-size: 16px; font-weight: bold;">${orderData.hospitalName}</div>
+              <div>${orderData.address || ''}, ${orderData.city || ''}</div>
+              <div style="margin-top: 5px;">Contact: ${orderData.contactPerson || ''} (${orderData.mobile || ''})</div>
+            </div>
+            <div class="box">
+              <div class="label" style="text-decoration: underline; margin-bottom: 5px;">Order Details:</div>
+              <div><span class="label">PO Number:</span> ${orderData.poNumber}</div>
+              <div style="margin-top: 5px;"><span class="label">Product Config:</span><br>${orderData.productDetails?.replace(/\n/g, '<br>') || ''}</div>
+            </div>
+            <div class="box">
+              <div><span class="label">Payment Terms:</span> ${orderData.paymentTerms || 'Standard'}</div>
+              <div><span class="label">Delivery Terms:</span> ${orderData.deliveryTerms || 'Standard'}</div>
+              ${orderData.notes ? `<div style="margin-top:5px;"><span class="label">Notes:</span> ${orderData.notes}</div>` : ''}
+            </div>
+            <div style="text-align: right; margin-top: 20px;">
+              <div style="font-weight: bold;">Total Order Value</div>
+              <div class="amount-box">₹ ${Number(orderData.amount).toLocaleString('en-IN')}/-</div>
+            </div>
+            <div class="footer">
+              <div>* This is a computer generated document.</div>
+              <div class="sign-box">
+                <div style="margin-bottom: 5px;">Booked By: <b>${orderData.senderName}</b></div>
+                ${signatureHTML}
+              </div>
+            </div>
+          </body>
+        </html>`;
+
+        const { uri } = await Print.printToFileAsync({ html: htmlContent });
+        const cleanName = `Order_${orderData.orderId}.pdf`;
+        const newPath = `${FileSystem.cacheDirectory}${cleanName}`;
+
+        try {
+            await FileSystem.copyAsync({ from: uri, to: newPath });
+            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Order PDF` });
+        } catch (error) {
+            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+        }
+    } catch (error) {
+        Alert.alert("Error", "Could not generate PDF");
+    } finally {
+        setGeneratingPdf(false);
+    }
+  };
+
   const handleOpenFile = async (url: string) => {
-      if (!url) {
-          Alert.alert("Error", "No file link found.");
-          return;
-      }
+      if (!url) return;
       try {
           if (url.startsWith('http')) {
               Linking.openURL(url);
               return;
           }
-          if (!(await Sharing.isAvailableAsync())) {
-              Alert.alert("Error", "Sharing is not available");
-              return;
-          }
+          if (!(await Sharing.isAvailableAsync())) return;
           if (url.startsWith('file://') || url.startsWith('/')) {
               const cacheDir = (FileSystem as any).cacheDirectory;
               let extension = 'jpg'; 
               if (url.toLowerCase().includes('.pdf')) extension = 'pdf';
               else if (url.toLowerCase().includes('.png')) extension = 'png';
-
-              const safeFileName = `temp_share_${Date.now()}.${extension}`;
-              const newPath = `${cacheDir}${safeFileName}`;
+              const newPath = `${cacheDir}temp_share_${Date.now()}.${extension}`;
 
               try {
                   await FileSystem.copyAsync({ from: url, to: newPath });
-                  await Sharing.shareAsync(newPath, {
-                      mimeType: extension === 'pdf' ? 'application/pdf' : 'image/jpeg',
-                      dialogTitle: 'View Attachment'
-                  });
+                  await Sharing.shareAsync(newPath, { mimeType: extension === 'pdf' ? 'application/pdf' : 'image/jpeg' });
               } catch (copyError) {
                   await Sharing.shareAsync(url);
               }
           } 
-      } catch (e: any) {
-          Alert.alert("Error", "Could not open file.");
-      }
+      } catch (e: any) { Alert.alert("Error", "Could not open file."); }
   };
 
-  // --- FILTER LOGIC (ROBUST) ---
+  // 🔥 CHANGED: Filter logic to process Financial Year (April 1 to March 31)
   const getFilteredData = () => {
       let data = orderList ? [...orderList] : [];
 
-      // 1. Admin Employee Filter
-    if (isAdmin && selectedEmployee !== 'All') {
-        const targetName = selectedEmployeeName.toLowerCase().trim();
-        
-        data = data.filter((item: any) => 
-            (item.senderId === selectedEmployee) || 
-            (item.userId === selectedEmployee) ||
-            (item.senderName && item.senderName.toLowerCase().trim().includes(targetName)) ||
-            (item.userName && item.userName.toLowerCase().trim().includes(targetName)) ||
-            (item.bookedBy && item.bookedBy.toLowerCase().trim().includes(targetName))
-        );
-    } 
-    else if (!isAdmin) {
-        // Employee: Show if order is THEIRS or BOOKED BY them
-        data = data.filter((item: any) => 
-            item.senderId === user?.uid || 
-            item.bookedBy === user?.name
-        );
-    }
-
-      if (statusFilter !== 'All') {
-          data = data.filter((item: any) => item.status === statusFilter);
+      if (isAdmin && selectedEmployee !== 'All') {
+          const targetName = selectedEmployeeName.toLowerCase().trim();
+          data = data.filter((item: any) => 
+              (item.senderId === selectedEmployee) || 
+              (item.userId === selectedEmployee) ||
+              (item.senderName && item.senderName.toLowerCase().trim().includes(targetName)) ||
+              (item.userName && item.userName.toLowerCase().trim().includes(targetName)) ||
+              (item.bookedBy && item.bookedBy.toLowerCase().trim().includes(targetName))
+          );
+      } 
+      else if (!isAdmin) {
+          data = data.filter((item: any) => item.senderId === user?.uid || item.bookedBy === user?.name);
       }
+
+      if (statusFilter !== 'All') data = data.filter((item: any) => item.status === statusFilter);
 
       if (searchText) {
           const term = searchText.toLowerCase();
           data = data.filter((item: any) => {
-              const fullString = `
-                  ${item.hospitalName || ''}
-                  ${item.poNumber || ''}
-                  ${item.orderId || ''}
-                  ${item.productDetails || ''}
-                  ${item.amount || ''}
-                  ${item.status || ''}
-                  ${item.senderName || item.userName || ''}
-                  ${item.bookedBy || ''}
-              `.toLowerCase();
+              const fullString = `${item.hospitalName || ''} ${item.poNumber || ''} ${item.orderId || ''} ${item.productDetails || ''} ${item.amount || ''} ${item.status || ''} ${item.senderName || item.userName || ''} ${item.bookedBy || ''}`.toLowerCase();
               return fullString.includes(term);
           });
       }
@@ -194,16 +284,19 @@ export default function OrderListScreen() {
           const targetMonth = currentDate.getMonth();
           const targetDay = currentDate.getDate();
 
-          data = data.filter((item: any) => {
-              const dateVal = item.date || item.createdAt;
-              const ts = parseDate(dateVal);
-              if (ts === 0) return false;
+          // Calculate FY Boundaries
+          const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // April 1st
+          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // March 31st
 
+          data = data.filter((item: any) => {
+              const ts = parseDate(item.date || item.createdAt);
+              if (ts === 0) return false;
               const itemDate = new Date(ts);
               
-              if (viewMode === 'Year') return itemDate.getFullYear() === targetYear;
               if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
               if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
+              if (viewMode === 'FY') return ts >= fyStartDate && ts <= fyEndDate;
               return true;
           });
       }
@@ -212,31 +305,80 @@ export default function OrderListScreen() {
       return data;
   };
 
-  const displayList = getFilteredData();
+  const fullList = getFilteredData(); 
+  const renderedList = fullList.slice(0, visibleCount);
 
   const handleUpdateStatus = async (newStatus: string) => {
       if (!selectedOrder || !updateOrderStatus) return;
-      
       Alert.alert("Confirm", `Mark as ${newStatus}?`, [
           { text: "Cancel", style: "cancel" },
           { 
               text: "Yes", 
               onPress: async () => {
-                  await updateOrderStatus(selectedOrder.id, newStatus, selectedOrder);
-                  if (addNotification && selectedOrder.senderId) {
-                      await addNotification({
-                          title: `Order ${newStatus}`, 
-                          message: `Order for ${selectedOrder.hospitalName} (PO: ${selectedOrder.poNumber}) has been ${newStatus}.`,
-                          type: newStatus === 'Approved' ? 'success' : newStatus === 'Rejected' ? 'alert' : 'info',
-                          userId: selectedOrder.senderId,
-                          to: selectedOrder.senderName, 
-                          route: '/orders'
-                      });
-                  }
-                  setModalVisible(false);
+                  setIsUpdating(true);
+                  try {
+                      await updateOrderStatus(selectedOrder.id, newStatus, selectedOrder);
+                      if (addNotification && selectedOrder.senderId) {
+                          await addNotification({
+                              title: `Order ${newStatus}`, 
+                              message: `Order for ${selectedOrder.hospitalName} (PO: ${selectedOrder.poNumber}) has been ${newStatus}.`,
+                              type: newStatus === 'Approved' ? 'success' : newStatus === 'Rejected' ? 'alert' : 'info',
+                              userId: selectedOrder.senderId,
+                              to: selectedOrder.senderName, 
+                              route: '/orders'
+                          });
+                      }
+                      setModalVisible(false);
+                  } catch (error) { Alert.alert("Error", "Failed to update status."); } 
+                  finally { setIsUpdating(false); }
               }
           }
       ]);
+  };
+
+  // 🔥 1. OPEN EDIT MODAL FUNCTION
+  const openEditModal = (item: any) => {
+      setEditData({
+          id: item.id,
+          hospitalName: item.hospitalName || '',
+          poNumber: item.poNumber || '',
+          amount: item.amount ? item.amount.toString() : '',
+          productDetails: item.productDetails || '',
+          paymentTerms: item.paymentTerms || '',
+          deliveryTerms: item.deliveryTerms || '',
+          notes: item.notes || '',
+          status: item.status || 'Pending'
+      });
+      setEditModalVisible(true);
+  };
+
+  // 🔥 2. SAVE EDITED DATA TO FIREBASE
+  const handleSaveEdit = async () => {
+      if (!editData.id) return;
+      if (!editData.hospitalName || !editData.amount) {
+          Alert.alert("Error", "Hospital Name and Amount are mandatory.");
+          return;
+      }
+      setIsSavingEdit(true);
+      try {
+          const docRef = doc(db, "orders", editData.id);
+          await updateDoc(docRef, {
+              hospitalName: editData.hospitalName,
+              poNumber: editData.poNumber,
+              amount: parseFloat(editData.amount),
+              productDetails: editData.productDetails,
+              paymentTerms: editData.paymentTerms,
+              deliveryTerms: editData.deliveryTerms,
+              notes: editData.notes,
+              status: editData.status // Allows admin to manually change status from edit too
+          });
+          Alert.alert("Success", "Order details updated successfully!");
+          setEditModalVisible(false);
+      } catch (error: any) {
+          Alert.alert("Error", "Could not update order. " + error.message);
+      } finally {
+          setIsSavingEdit(false);
+      }
   };
 
   const userRole = user?.role?.toLowerCase() || '';
@@ -256,12 +398,22 @@ export default function OrderListScreen() {
         <TouchableOpacity style={[styles.card, isApproved && styles.cardApproved, isRejected && styles.cardRejected]} onPress={() => openDetails(item)}>
             <View style={styles.cardHeader}>
                 <View style={{flex:1}}>
-                    <Text style={styles.hospitalName} numberOfLines={1}>{item.hospitalName}</Text>
+                    <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                        <Text style={styles.hospitalName} numberOfLines={1}>{item.hospitalName}</Text>
+                        
+                        {/* 🔥 EDIT BUTTON FOR ADMIN ONLY */}
+                        {isStrictAdmin && (
+                            <TouchableOpacity style={{marginLeft: 10}} onPress={() => openEditModal(item)}>
+                                <Ionicons name="create" size={18} color="#d32f2f" />
+                            </TouchableOpacity>
+                        )}
+                    </View>
+
                     {item.city ? (
-                <Text style={{fontSize: 11, color: 'gray', marginBottom: 2}}>
-                    <Ionicons name="location-outline" size={11} color="gray" /> {item.city}
-                </Text>
-            ) : null}
+                        <Text style={{fontSize: 11, color: 'gray', marginBottom: 2}}>
+                            <Ionicons name="location-outline" size={11} color="gray" /> {item.city}
+                        </Text>
+                    ) : null}
                     <Text style={styles.poNumber}>PO: {item.poNumber}</Text>
                 </View>
                 <View style={[styles.statusBadge, { backgroundColor: isApproved ? '#e8f5e9' : (isRejected ? '#ffebee' : '#fff3e0') }]}>
@@ -280,7 +432,6 @@ export default function OrderListScreen() {
 
             <View style={styles.divider} />
 
-            {/* 👇 IMPROVED FOOTER FOR ADMIN ENTRY 👇 */}
             <View style={styles.footer}>
                 <View style={{flex: 1}}>
                     <View style={{flexDirection:'row', alignItems:'center'}}>
@@ -319,9 +470,9 @@ export default function OrderListScreen() {
       </View>
 
       <View style={{backgroundColor:'white', paddingBottom:10, marginBottom:5}}>
-          
+          {/* 🔥 CHANGED: Year tab mapped to FY */}
           <View style={styles.tabContainer}>
-              {['Day', 'Month', 'Year', 'All'].map((m) => (
+              {['Day', 'Month', 'FY', 'All'].map((m) => (
                   <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
                       <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
                   </TouchableOpacity>
@@ -331,11 +482,11 @@ export default function OrderListScreen() {
           {isAdmin && (
             <View style={{paddingHorizontal: 15, marginBottom: 10}}>
                <TouchableOpacity style={styles.employeeFilterBtn} onPress={() => setShowEmployeePicker(true)}>
-                    <Ionicons name="people" size={18} color="#2e7d32" />
-                    <Text style={{fontSize:13, marginLeft:8, color:'#2e7d32', fontWeight:'600'}}>
-                        {selectedEmployee === 'All' ? 'View All Staff' : selectedEmployeeName}
-                    </Text>
-                    <Ionicons name="chevron-down" size={16} color="#2e7d32" style={{marginLeft:'auto'}}/>
+                   <Ionicons name="people" size={18} color="#2e7d32" />
+                   <Text style={{fontSize:13, marginLeft:8, color:'#2e7d32', fontWeight:'600'}}>
+                       {selectedEmployee === 'All' ? 'View All Staff' : selectedEmployeeName}
+                   </Text>
+                   <Ionicons name="chevron-down" size={16} color="#2e7d32" style={{marginLeft:'auto'}}/>
                </TouchableOpacity>
             </View>
           )}
@@ -363,17 +514,92 @@ export default function OrderListScreen() {
                   </TouchableOpacity>
               ))}
           </ScrollView>
-          <Text style={{textAlign:'right', fontSize:12, color:'gray', paddingRight:15}}>Total: <Text style={{fontWeight:'bold', color:'#3b5998'}}>{displayList.length}</Text></Text>
+          
+          <Text style={{textAlign:'right', fontSize:12, color:'gray', paddingRight:15}}>
+              Total: <Text style={{fontWeight:'bold', color:'#3b5998'}}>{fullList.length}</Text>
+          </Text>
       </View>
 
       <FlatList 
-          data={displayList}
+          data={renderedList}
           keyExtractor={item => item.id}
           renderItem={renderItem}
-          contentContainerStyle={{padding: 5, paddingBottom: 50}}
+          // 🔥 CHANGED: Increased paddingBottom so the list content scroll further up
+          contentContainerStyle={{padding: 5, paddingBottom: 100}} 
           ListEmptyComponent={<Text style={{textAlign:'center', marginTop:50, color:'gray'}}>No Orders Found</Text>}
+          ListFooterComponent={
+            // 🔥 CHANGED: Wrapped Footer in a View with Extra padding Bottom
+            <View style={{ paddingBottom: 80 }}>
+                {visibleCount < fullList.length ? (
+                    <TouchableOpacity onPress={() => setVisibleCount(prev => prev + 20)} style={styles.loadMoreBtn}>
+                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({fullList.length - visibleCount} remaining)</Text>
+                    </TouchableOpacity>
+                ) : (fullList.length > 0 ? <Text style={styles.endListText}>--- End of List ---</Text> : null)}
+            </View>
+        }
       />
 
+      {/* ========================================== */}
+      {/* 🔥 ADMIN EDIT MODAL 🔥 */}
+      {/* ========================================== */}
+      <Modal visible={editModalVisible} transparent animationType="slide">
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                  <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:15}}>
+                      <Text style={styles.modalTitle}>Edit Order (Admin)</Text>
+                      <TouchableOpacity onPress={() => setEditModalVisible(false)}>
+                          <Ionicons name="close-circle" size={28} color="#d32f2f" />
+                      </TouchableOpacity>
+                  </View>
+
+                  <ScrollView showsVerticalScrollIndicator={false}>
+                      <Text style={styles.inputLabel}>Client / Hospital Name *</Text>
+                      <TextInput style={styles.editInput} value={editData.hospitalName} onChangeText={t => setEditData({...editData, hospitalName: t})} />
+
+                      <Text style={styles.inputLabel}>PO Number</Text>
+                      <TextInput style={styles.editInput} value={editData.poNumber} onChangeText={t => setEditData({...editData, poNumber: t})} />
+
+                      <Text style={styles.inputLabel}>Amount (₹) *</Text>
+                      <TextInput style={styles.editInput} keyboardType="numeric" value={editData.amount} onChangeText={t => setEditData({...editData, amount: t})} />
+
+                      <Text style={styles.inputLabel}>Status</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom: 10}}>
+                          {['Pending', 'Approved', 'Rejected', 'Dispatched', 'Completed'].map(st => (
+                              <TouchableOpacity 
+                                  key={st} 
+                                  style={[styles.statusChip, editData.status === st && {backgroundColor: '#3b5998', borderColor: '#3b5998'}]}
+                                  onPress={() => setEditData({...editData, status: st})}
+                              >
+                                  <Text style={{color: editData.status === st ? 'white' : '#555', fontSize: 12}}>{st}</Text>
+                              </TouchableOpacity>
+                          ))}
+                      </ScrollView>
+
+                      <Text style={styles.inputLabel}>Product Details</Text>
+                      <TextInput style={[styles.editInput, {height: 80, textAlignVertical: 'top'}]} multiline value={editData.productDetails} onChangeText={t => setEditData({...editData, productDetails: t})} />
+
+                      <Text style={styles.inputLabel}>Payment Terms</Text>
+                      <TextInput style={styles.editInput} value={editData.paymentTerms} onChangeText={t => setEditData({...editData, paymentTerms: t})} />
+
+                      <Text style={styles.inputLabel}>Delivery Terms</Text>
+                      <TextInput style={styles.editInput} value={editData.deliveryTerms} onChangeText={t => setEditData({...editData, deliveryTerms: t})} />
+
+                      <Text style={styles.inputLabel}>Notes</Text>
+                      <TextInput style={[styles.editInput, {height: 60, textAlignVertical: 'top'}]} multiline value={editData.notes} onChangeText={t => setEditData({...editData, notes: t})} />
+                  </ScrollView>
+
+                  <TouchableOpacity 
+                      style={[styles.saveEditBtn, isSavingEdit && {opacity: 0.6}]} 
+                      onPress={handleSaveEdit}
+                      disabled={isSavingEdit}
+                  >
+                      {isSavingEdit ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Save Changes</Text>}
+                  </TouchableOpacity>
+              </View>
+          </KeyboardAvoidingView>
+      </Modal>
+
+      {/* DETAILS MODAL */}
       <Modal visible={modalVisible} transparent={true} animationType="slide">
           <View style={styles.modalOverlay}>
               <View style={styles.modalContent}>
@@ -395,7 +621,6 @@ export default function OrderListScreen() {
 
                           <View style={styles.divider}/>
 
-                          {/* 🔥 NEW SECTION: SALES INFO */}
                           <Text style={styles.sectionHeader}>💼 Sales Team</Text>
                           <DetailRow label="Sales Person" value={selectedOrder.senderName} highlight />
                           {selectedOrder.bookedBy && selectedOrder.bookedBy !== selectedOrder.senderName && (
@@ -433,6 +658,21 @@ export default function OrderListScreen() {
                                   <Ionicons name="open-outline" size={16} color="green" />
                               </TouchableOpacity>
                           )}
+
+                          <TouchableOpacity 
+                              style={{flexDirection:'row', alignItems:'center', justifyContent:'center', backgroundColor:'#e3f2fd', padding:12, borderRadius:8, marginTop:20, borderWidth:1, borderColor:'#2196f3'}}
+                              onPress={() => generateOrderPDF(selectedOrder)}
+                              disabled={generatingPdf}
+                          >
+                              {generatingPdf ? (
+                                <ActivityIndicator color="#1565c0" size="small" />
+                              ) : (
+                                <>
+                                  <Ionicons name="document-text-outline" size={20} color="#1565c0" />
+                                  <Text style={{color:'#1565c0', fontWeight:'bold', marginLeft:8}}>Share Order PDF</Text>
+                                </>
+                              )}
+                          </TouchableOpacity>
                           
                           <View style={styles.divider}/>
                           <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center'}}>
@@ -442,18 +682,19 @@ export default function OrderListScreen() {
 
                           {canApprove && selectedOrder.status === 'Pending' && (
                               <View style={styles.actionRow}>
-                                  <TouchableOpacity style={[styles.actionBtn, {backgroundColor:'#d32f2f'}]} onPress={() => handleUpdateStatus('Rejected')}>
+                                  <TouchableOpacity style={[styles.actionBtn, {backgroundColor:'#d32f2f', opacity: isUpdating ? 0.6 : 1}]} onPress={() => handleUpdateStatus('Rejected')} disabled={isUpdating}>
                                       <Text style={styles.btnText}>Reject</Text>
                                   </TouchableOpacity>
-                                  <TouchableOpacity style={[styles.actionBtn, {backgroundColor:'#2e7d32'}]} onPress={() => handleUpdateStatus('Approved')}>
-                                      <Text style={styles.btnText}>Approve</Text>
+
+                                  <TouchableOpacity style={[styles.actionBtn, {backgroundColor:'#2e7d32', opacity: isUpdating ? 0.6 : 1}]} onPress={() => handleUpdateStatus('Approved')} disabled={isUpdating}>
+                                      {isUpdating ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Approve</Text>}
                                   </TouchableOpacity>
                               </View>
                           )}
                           
                           {isStore && selectedOrder.status === 'Approved' && (
-                              <TouchableOpacity style={[styles.actionBtn, {backgroundColor:'#1976d2', marginTop:15}]} onPress={() => handleUpdateStatus('Dispatched')}>
-                                  <Text style={styles.btnText}>Mark as Dispatched</Text>
+                              <TouchableOpacity style={[styles.actionBtn, {backgroundColor:'#1976d2', marginTop:15, opacity: isUpdating ? 0.6 : 1}]} onPress={() => handleUpdateStatus('Dispatched')} disabled={isUpdating}>
+                                  {isUpdating ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Mark as Dispatched</Text>}
                               </TouchableOpacity>
                           )}
                       </ScrollView>
@@ -493,10 +734,13 @@ export default function OrderListScreen() {
   );
 }
 
-const DetailRow = ({label, value, highlight}: any) => (
-    <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:8, borderBottomWidth:1, borderColor:'#f0f0f0', paddingBottom:5}}>
-        <Text style={{color:'gray', fontSize:13, width:'35%'}}>{label}</Text>
-        <Text style={{color:'#333', fontWeight: highlight?'bold':'500', fontSize:14, width:'65%', textAlign:'right'}}>{value || '-'}</Text>
+const DetailRow = ({label, value, icon, highlight}: any) => (
+    <View style={{flexDirection:'row', alignItems:'center', marginBottom:10}}>
+        {icon && <View style={{width:30}}><Ionicons name={icon} size={20} color="#3b5998" /></View>}
+        <View style={{flex: 1, flexDirection:'row', justifyContent: 'space-between', paddingRight: 10}}>
+            <Text style={{fontSize:12, color:'gray'}}>{label}</Text>
+            <Text style={{fontSize:14, fontWeight:'bold', color: highlight ? '#2e7d32' : '#333', maxWidth:'70%', textAlign:'right'}}>{value || '-'}</Text>
+        </View>
     </View>
 );
 
@@ -512,7 +756,7 @@ const styles = StyleSheet.create({
   tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
   activeTabText: { color: '#3b5998', fontWeight: 'bold' },
 
-  employeeFilterBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#e8f5e9', paddingHorizontal:12, paddingVertical:10, borderRadius:8, borderWidth:1, borderColor:'#2e7d32' },
+  employeeFilterBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#e8f5e9', paddingHorizontal:12, paddingVertical:10, borderRadius:8, borderWidth:1, borderColor:'#2e7d32', marginBottom:10 },
 
   dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 6, marginHorizontal: 15, borderRadius: 8, marginBottom: 5, borderWidth:1, borderColor:'#eee' },
   monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
@@ -528,19 +772,18 @@ const styles = StyleSheet.create({
   cardApproved: { borderLeftColor: '#4caf50' },
   cardRejected: { borderLeftColor: '#f44336' },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  hospitalName: { fontWeight: 'bold', fontSize: 16, color: '#333' },
+  hospitalName: { fontWeight: 'bold', fontSize: 16, color: '#333', flex:1 },
   poNumber: { fontSize: 12, color: 'gray' },
-  statusBadge: { paddingHorizontal:8, paddingVertical:3, borderRadius:4 },
+  statusBadge: { paddingHorizontal:8, paddingVertical:3, borderRadius:4, marginLeft: 10 },
   productText: { fontSize: 13, color: '#555', marginTop: 8, fontStyle: 'italic' },
   row: { flexDirection:'row', justifyContent:'space-between', marginTop:10 },
   amount: { fontWeight:'bold', fontSize:16, color:'#333' },
   date: { color:'gray', fontSize:12 },
   divider: { height:1, backgroundColor:'#eee', marginVertical:10 },
   footer: { flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
-  senderName: { color:'gray', fontSize:12 },
   
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 20 },
-  modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 20, maxHeight:'90%', width:'100%' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end', padding: 10 },
+  modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 20, maxHeight:'85%', width:'100%' },
   modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
   hospitalNameLarge: { fontSize:18, fontWeight:'bold', color:'#333' },
   sectionHeader: { fontSize:14, fontWeight:'bold', color:'#3b5998', marginTop:15, marginBottom:10, backgroundColor:'#e3f2fd', padding:5, borderRadius:5 },
@@ -554,9 +797,18 @@ const styles = StyleSheet.create({
   
   fileBox: { flexDirection:'row', alignItems:'center', backgroundColor:'#e0f7fa', padding:12, borderRadius:8, marginTop:5, borderWidth:1, borderColor:'#26c6da' },
   
-  actionRow: { flexDirection:'row', justifyContent:'space-between', marginTop:20 },
+  actionRow: { flexDirection:'row', justifyContent:'space-between', marginTop: 20, paddingBottom: 20 },
   actionBtn: { flex:0.48, padding:12, borderRadius:8, alignItems:'center', justifyContent:'center' },
   btnText: { color:'white', fontWeight:'bold' },
+
+  // EDIT MODAL STYLES 🔥
+  inputLabel: { fontSize: 12, color: 'gray', marginTop: 10, marginBottom: 5, fontWeight: 'bold' },
+  editInput: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, fontSize: 14, color: '#333', backgroundColor: '#f9f9f9' },
+  saveEditBtn: { backgroundColor: '#d32f2f', padding: 15, borderRadius: 8, alignItems: 'center', marginTop: 20 },
+  statusChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: '#ddd', marginRight: 10 },
+
+  loadMoreBtn: { padding: 12, backgroundColor: '#fff', alignItems: 'center', marginVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ddd' },
+  endListText: { textAlign: 'center', padding: 20, color: '#aaa', fontSize: 12, fontStyle: 'italic' },
 
   pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
   pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation:10 },

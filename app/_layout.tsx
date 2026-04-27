@@ -37,10 +37,16 @@ function NavigationLayout() {
   const router = useRouter();
   const pathname = usePathname();
   
-  // 🔥 GET DATA
+  // 🔥 SaaS Update: Replace 'user' with 'currentUser'
   const { currentUser, appPermissions, loading, attendanceList, taskList = [] } = useData();
   
   const insets = useSafeAreaInsets(); 
+
+  // 🔥 SAAS FILTERING FOR BADGE
+  const myCompanyId = currentUser?.companyId;
+  const myTasks = (Array.isArray(taskList) ? taskList : []).filter((item:any) => 
+      !myCompanyId || item.companyId === myCompanyId
+  );
 
   // ==========================================
   // 🔥 NOTIFICATION CLICK LISTENER (FIXED)
@@ -90,26 +96,26 @@ function NavigationLayout() {
   }, []);
 
   // ==========================================
-  // 🔥 BADGE LOGIC (TASKS)
+  // 🔥 BADGE LOGIC (TASKS) - SAAS FILTERED
   // ==========================================
   const calculateTaskBadge = () => {
       if (!currentUser) return 0;
       
       const isAdmin = currentUser.role === 'Admin' || currentUser.role === 'Manager';
 
-      // 1. Received Pending
-      const myPending = taskList.filter((t: any) => 
+      // 1. Received Pending (Using myTasks)
+      const myPending = myTasks.filter((t: any) => 
           (t.to === 'Self' || t.to === currentUser?.name) && t.status === 'Pending'
       ).length;
 
-      // 2. Assigned Pending
-      const assignedPending = taskList.filter((t: any) => 
+      // 2. Assigned Pending (Using myTasks)
+      const assignedPending = myTasks.filter((t: any) => 
           t.from === currentUser?.name && t.to !== 'Self' && t.to !== currentUser?.name && t.status === 'Pending'
       ).length;
 
-      // Admin sees ALL, User sees (My + Assigned)
+      // Admin sees ALL pending in company, User sees (My + Assigned)
       return isAdmin 
-          ? taskList.filter((t:any) => t.status === 'Pending').length 
+          ? myTasks.filter((t:any) => t.status === 'Pending').length 
           : (myPending + assignedPending);
   };
 
@@ -160,6 +166,10 @@ function NavigationLayout() {
                         await addDoc(collection(db, "location_logs"), {
                             userId: currentUser.email || currentUser.uid,
                             userName: currentUser.name || "App User",
+                            
+                            // 🔥 SAAS UPDATE: Add Company ID
+                            companyId: currentUser.companyId, 
+                            
                             latitude: loc.coords.latitude,
                             longitude: loc.coords.longitude,
                             timestamp: serverTimestamp(),
@@ -202,6 +212,8 @@ function NavigationLayout() {
         
         const now = new Date();
         const todayStr = now.toISOString().split('T')[0];
+        
+        // 🔥 Use Filtered Attendance List if needed, but currentUser check is enough here
         const myEntry = attendanceList.find((a: any) => 
             a.date === todayStr && a.userName === currentUser.name
         );
@@ -220,7 +232,7 @@ function NavigationLayout() {
   }, [attendanceList, currentUser, loading]);
 
   if (loading) {
-     return <View style={{flex:1, justifyContent:'center', alignItems:'center'}}><ActivityIndicator size="large" color="#3b5998"/></View>;
+      return <View style={{flex:1, justifyContent:'center', alignItems:'center'}}><ActivityIndicator size="large" color="#3b5998"/></View>;
   }
 
   const canSeeTab = (moduleKey: string) => {

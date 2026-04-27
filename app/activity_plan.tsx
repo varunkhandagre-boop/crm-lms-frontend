@@ -1,20 +1,40 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
-import { Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+
+// 🔥 NAYA SAAS ENGINE AUR CONTEXT IMPORT
+import { useSaaSDB } from '../hooks/useSaaSDB'; // Apna correct path check kar lein
 import { useData } from './context/DataContext';
 
 export default function ActivityPlanScreen() {
   const router = useRouter();
   
-  // 🔥 GET DATA FROM CONTEXT
-  const { activityPlanList = [], updateActivityStatus, user } = useData();
+  // 🔥 1. Get current user from Context
+  const { currentUser } = useData();
+  
+  // 🔥 2. Get Data Engine (SaaS Hook)
+  const { fetchSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
 
   // STATES
+  const [activities, setActivities] = useState<any[]>([]); // Local state for data
   const [filter, setFilter] = useState<'Today' | 'Upcoming' | 'Completed' | 'All'>('Today');
+  const [updatingId, setUpdatingId] = useState<string | null>(null); // Loader for specific button
   
-  // POWER USER CHECK
-  const canManage = user?.role === 'Admin' || user?.role === 'Manager' || user?.role === 'Account' || user?.role === 'Hr';
+  // POWER USER CHECK (Slightly improved to match your new roles)
+  const role = currentUser?.role || '';
+  const canManage = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr', 'SuperAdmin'].includes(role);
+
+  // --- FETCH DATA ON MOUNT ---
+  useEffect(() => {
+      loadData();
+  }, [currentUser]); // Refresh agar user change ho (jaise admin account switch kare)
+
+  const loadData = async () => {
+      if (!currentUser?.companyId) return;
+      const data = await fetchSaaSData("activity_plans");
+      setActivities(data);
+  };
 
   // --- DATE HELPERS ---
   const getTodayFormatted = () => {
@@ -31,12 +51,13 @@ export default function ActivityPlanScreen() {
       return new Date(y, m - 1, d);
   };
 
-  // --- FILTER LOGIC ---
+  // --- FILTER LOGIC (Now uses local 'activities' state) ---
   const getFilteredData = () => {
-      let data = Array.isArray(activityPlanList) ? [...activityPlanList] : [];
+      let data = [...activities];
 
-      if (!canManage && user?.uid) {
-          data = data.filter((item: any) => item.senderId === user.uid);
+      // Security: Agar manager nahi hai, toh sirf apna data dekhega
+      if (!canManage && currentUser?.id) {
+          data = data.filter((item: any) => item.senderId === currentUser.id);
       }
 
       const todayStr = getTodayFormatted();
@@ -61,17 +82,26 @@ export default function ActivityPlanScreen() {
 
   const displayList = getFilteredData();
 
-  // --- ACTIONS ---
-  const handleAction = (item: any) => {
-      if (typeof updateActivityStatus !== 'function') {
-          Alert.alert("Error", "Update function missing.");
-          return;
-      }
-
+  // --- ACTIONS (Upgraded to useSaaSDB) ---
+  const handleAction = async (item: any) => {
       if (item.status === 'Planned') {
           Alert.alert("Start Journey", "Are you reaching the location?", [
               { text: "Cancel", style: "cancel" },
-              { text: "Yes", onPress: () => updateActivityStatus(item.id, 'Started') }
+              { 
+                  text: "Yes", 
+                  onPress: async () => {
+                      setUpdatingId(item.id);
+                      // 🔥 Naya Update Logic
+                      const res = await updateSaaSData("activity_plans", item.id, { status: 'Started' });
+                      if (res.success) {
+                          // UI ko turant update karo bina database reload kiye (Fast UX)
+                          setActivities(prev => prev.map(a => a.id === item.id ? { ...a, status: 'Started' } : a));
+                      } else {
+                          Alert.alert("Error", "Could not start activity.");
+                      }
+                      setUpdatingId(null);
+                  } 
+              }
           ]);
       } 
       else if (item.status === 'Started') {
@@ -79,40 +109,31 @@ export default function ActivityPlanScreen() {
       }
   };
 
-  // 🔥 UPDATED REDIRECTION LOGIC (PMS, Service, Installation, Demo, Sales)
+  // 🔥 REDIRECTION LOGIC (Same as yours)
   const handleCompletionRedirect = (item: any) => {
       const note = (item.planningNotes || '').toLowerCase();
       const type = (item.type || ''); 
 
-      // 🔥 IMPORTANT: Hum yahan Status 'Completed' nahi karenge.
-      // Hum sirf ID bhejenge. User jab Form Save karega tab status complete hoga.
-      
       const commonParams = {
-          org: item.hospital,      // Auto-fill ke liye
-          hospital: item.hospital, // Backup
-          serial: item.serialNo,   // Agar serial planned tha
-          activityId: item.id      // 🔥 Connection ID
+          org: item.hospital,      
+          hospital: item.hospital, 
+          serial: item.serialNo,   
+          activityId: item.id      // Connection ID
       };
 
-      // 1. INSTALLATION
       if (type.includes('Installation') || note.includes('install')) {
           router.push({ pathname: '/add_installation', params: commonParams } as any);
       } 
-      // 2. PMS
       else if (type.includes('PMS') || note.includes('pms') || note.includes('maintenance')) {
           router.push({ pathname: '/add_pms', params: commonParams } as any);
       }
-      // 3. DEMO
       else if (type.includes('Demo') || note.includes('demo')) {
           router.push({ pathname: '/add_demo', params: commonParams } as any);
       }
-      // 4. SERVICE CALL
       else if (type.includes('Service')) {
           router.push({ pathname: '/add_service_call', params: commonParams } as any);
       } 
-      // 5. SALES (Default)
       else {
-          // Note: Check karein ki aapki file ka naam 'add_sales' hai ya 'add_sales_visit'
           router.push({ pathname: '/add_sales', params: commonParams } as any);
       }
   };
@@ -145,9 +166,16 @@ export default function ActivityPlanScreen() {
               <TouchableOpacity 
                   style={[styles.actionBtn, {backgroundColor: item.status === 'Started' ? '#e91e63' : '#3b5998'}]} 
                   onPress={() => handleAction(item)}
+                  disabled={updatingId === item.id}
               >
-                  <Ionicons name={item.status === 'Started' ? "checkmark-circle" : "play-circle"} size={18} color="white" />
-                  <Text style={styles.btnText}>{item.status === 'Planned' ? 'Start Journey' : 'Complete & Report'}</Text>
+                  {updatingId === item.id ? (
+                      <ActivityIndicator color="white" size="small" />
+                  ) : (
+                      <>
+                          <Ionicons name={item.status === 'Started' ? "checkmark-circle" : "play-circle"} size={18} color="white" />
+                          <Text style={styles.btnText}>{item.status === 'Planned' ? 'Start Journey' : 'Complete & Report'}</Text>
+                      </>
+                  )}
               </TouchableOpacity>
           )}
       </View>
@@ -159,7 +187,13 @@ export default function ActivityPlanScreen() {
         <View style={styles.headerTop}>
              <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
              <Text style={styles.headerTitle}>Activity Plans</Text>
-             <TouchableOpacity onPress={() => router.push('/add_activity' as any)}><Ionicons name="add-circle" size={32} color="#3b5998" /></TouchableOpacity>
+             {/* Refresh Button added for quick data sync */}
+             <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                 <TouchableOpacity onPress={loadData} style={{marginRight: 15}} disabled={isDbLoading}>
+                     <Ionicons name="refresh" size={24} color={isDbLoading ? "gray" : "#3b5998"} />
+                 </TouchableOpacity>
+                 <TouchableOpacity onPress={() => router.push('/add_activity' as any)}><Ionicons name="add-circle" size={32} color="#3b5998" /></TouchableOpacity>
+             </View>
         </View>
 
         <View style={styles.tabContainer}>
@@ -171,18 +205,25 @@ export default function ActivityPlanScreen() {
         </View>
       </View>
 
-      <FlatList 
-        data={displayList}
-        keyExtractor={item => item.id}
-        contentContainerStyle={{padding: 15}}
-        renderItem={renderItem}
-        ListEmptyComponent={
-            <View style={{alignItems:'center', marginTop:100}}>
-                <Ionicons name="calendar-outline" size={50} color="#ccc" />
-                <Text style={{color:'gray', marginTop:10}}>Nothing found in "{filter}" tab.</Text>
-            </View>
-        }
-      />
+      {isDbLoading && activities.length === 0 ? (
+          <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+              <ActivityIndicator size="large" color="#3b5998" />
+              <Text style={{marginTop: 10, color: 'gray'}}>Loading Plans...</Text>
+          </View>
+      ) : (
+          <FlatList 
+            data={displayList}
+            keyExtractor={item => item.id}
+            contentContainerStyle={{padding: 15}}
+            renderItem={renderItem}
+            ListEmptyComponent={
+                <View style={{alignItems:'center', marginTop:100}}>
+                    <Ionicons name="calendar-outline" size={50} color="#ccc" />
+                    <Text style={{color:'gray', marginTop:10}}>Nothing found in "{filter}" tab.</Text>
+                </View>
+            }
+          />
+      )}
     </View>
   );
 }

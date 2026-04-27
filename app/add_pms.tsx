@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     FlatList,
     KeyboardAvoidingView,
@@ -15,36 +17,49 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+
+// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
-// 🔥🔥 1. IMPORTS
-import * as Location from 'expo-location';
-import { addDoc, collection } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+// 🔥 PDF IMPORTS
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 
 export default function AddPMSScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   
-  const { addPMS, orgList, installList, user, updateActivityStatus } = useData();
+  // 🔥 1. Context se sirf User, Profile aur Notifications nikale
+  const { currentUser, updateActivityStatus, companyProfile, addNotification } = useData();
+
+  // 🔥 2. Naya SaaS Engine connect kiya
+  const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded Lists
+  const [orgList, setOrgList] = useState<any[]>([]);
+  const [installList, setInstallList] = useState<any[]>([]);
+  const [pmsList, setPmsList] = useState<any[]>([]);
 
   // --- FORM STATES ---
   const [org, setOrg] = useState('');
+  const [orgId, setOrgId] = useState('');
+
   const [serialNo, setSerialNo] = useState('');
   const [machineName, setMachineName] = useState('');
   const [modelName, setModelName] = useState('');
   
-  // 🔥 NEW AUTO-FILL STATES
   const [department, setDepartment] = useState('');
   const [city, setCity] = useState('');
   const [address, setAddress] = useState('');
 
   // --- DATE STATES ---
   const [pmsDate, setPmsDate] = useState(new Date());
-  const [dueDate, setDueDate] = useState(new Date()); // 🔥 1. New Due Date State
+  const [dueDate, setDueDate] = useState(new Date()); 
   
   const [showPmsDatePicker, setShowPmsDatePicker] = useState(false);
-  const [showDueDatePicker, setShowDueDatePicker] = useState(false); // 🔥 2. New Due Date Picker State
+  const [showDueDatePicker, setShowDueDatePicker] = useState(false); 
 
   const [remarks, setRemarks] = useState('');
   const [pmsType, setPmsType] = useState('Preventive'); 
@@ -54,6 +69,24 @@ export default function AddPMSScreen() {
   const [currentSelection, setCurrentSelection] = useState(''); 
   const [searchText, setSearchText] = useState('');
   const [filteredData, setFilteredData] = useState<any[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // 🔥 4. LOAD DATA ON MOUNT
+  useEffect(() => {
+      const loadData = async () => {
+          if (currentUser?.companyId) {
+              const [orgs, installs, pmsReports] = await Promise.all([
+                  fetchSaaSData("organizations"),
+                  fetchSaaSData("installations"),
+                  fetchSaaSData("pms_reports") // Required for accurate ID Counting
+              ]);
+              setOrgList(orgs);
+              setInstallList(installs);
+              setPmsList(pmsReports);
+          }
+      };
+      loadData();
+  }, [currentUser]);
 
   const formatDate = (rawDate: Date) => {
     let day = rawDate.getDate().toString().padStart(2, '0');
@@ -62,22 +95,22 @@ export default function AddPMSScreen() {
     return `${day}/${month}/${year}`;
   };
 
-  // 🔥 3. Auto-Calculate Next Due Date (3 Months later)
+  // 🔥 Auto-Calculate Next Due Date (3 Months later)
   useEffect(() => {
       const nextDate = new Date(pmsDate);
-      nextDate.setMonth(nextDate.getMonth() + 3); // Add 3 Months
+      nextDate.setMonth(nextDate.getMonth() + 3); 
       setDueDate(nextDate);
   }, [pmsDate]);
 
   useEffect(() => {
       if (params.org && org !== params.org) {
           setOrg(params.org as string);
-          // Auto fill city if coming from params
           if(orgList.length > 0) {
              const found = orgList.find((o:any) => o.orgName === params.org);
              if(found) { 
                  setCity(found.city || ''); 
-                 setAddress(found.address || found.address1 || ''); // Updated check
+                 setAddress(found.address || found.address1 || ''); 
+                 setOrgId(found.id || ''); 
              }
           }
       }
@@ -91,6 +124,7 @@ export default function AddPMSScreen() {
                   setMachineName(machine.productName || machine.machineName || '');
                   setModelName(machine.model || '');
                   setDepartment(machine.department || '');
+                  if(machine.orgId) setOrgId(machine.orgId); 
               }
           }
       }
@@ -105,7 +139,6 @@ export default function AddPMSScreen() {
       });
   };
 
-  // 🔥 LOCATION
   const getCurrentLocation = async () => {
       try {
           let { status } = await Location.requestForegroundPermissionsAsync();
@@ -125,11 +158,137 @@ export default function AddPMSScreen() {
       }
   };
 
+  // 🔥 5. SMART SAAS FY PMS ID GENERATOR
+  const generatePMSId = () => {
+      const targetMonth = pmsDate.getMonth(); 
+      const targetYear = pmsDate.getFullYear();
+      
+      const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+      const fyString = `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`; 
+      const fyStartDateStr = `${fyStartYear}-04-01`;
+      const fyEndDateStr = `${fyStartYear + 1}-03-31`;
+
+      const count = pmsList ? pmsList.filter((c: any) => {
+          const dDate = c.dateIso || c.date; // Use dateIso if available
+          if (!dDate) return false;
+          return dDate >= fyStartDateStr && dDate <= fyEndDateStr;
+      }).length + 1 : 1;
+
+      const prefix = companyProfile?.shortName ? companyProfile.shortName.toUpperCase() : 'PMS';
+      return `${prefix}-PMS-${fyString}-${String(count).padStart(3, '0')}`;
+  };
+
+  // 🔥 PDF GENERATOR
+  const generatePMSPDF = async (pmsData: any) => {
+    try {
+        const logoHTML = companyProfile?.logoUrl 
+            ? `<img src="${companyProfile.logoUrl}" style="height: 60px; margin-bottom: 10px;" />` 
+            : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
+
+        const signatureHTML = companyProfile?.signatureUrl 
+            ? `<img src="${companyProfile.signatureUrl}" style="height: 40px; margin-top: 5px; margin-bottom: 2px;" />` 
+            : `<div style="height: 40px;"></div>`;
+
+        const htmlContent = `
+        <html>
+          <head>
+            <style>
+              body { font-family: 'Helvetica', sans-serif; padding: 30px; border: 2px solid #333; }
+              .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px; }
+              .title { font-size: 22px; font-weight: bold; color: #1a237e; text-transform: uppercase; }
+              .sub-title { font-size: 12px; margin-top: 2px; color: #333; line-height: 1.4; }
+              .box { border: 1px solid #000; padding: 15px; margin-top: 10px; background-color: #fcfcfc; }
+              .row { display: flex; justify-content: space-between; margin-bottom: 5px; }
+              .label { font-weight: bold; color: #444; width: 120px; display: inline-block; }
+              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; }
+              .sign-box { text-align: center; width: 45%; }
+              .sign-line { border-top: 1px solid #000; width: 100%; margin-top: 5px; margin-bottom: 5px; }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              ${logoHTML}
+              ${companyProfile?.logoUrl ? `<div class="title">${companyProfile.companyName}</div>` : ''}
+              <div class="sub-title">${companyProfile?.address || ''}</div>
+              <div class="sub-title">
+                Phone: ${companyProfile?.contactPhone || companyProfile?.phone || '-'} | 
+                Email: ${companyProfile?.contactEmail || companyProfile?.email || '-'}
+              </div>
+            </div>
+
+            <h3 style="text-align: center; text-decoration: underline; margin-bottom: 20px;">PREVENTIVE MAINTENANCE REPORT</h3>
+
+            <div class="row">
+                <div><span class="label">Report No:</span> <b style="font-size:16px;">${pmsData.pmsId}</b></div>
+                <div><span class="label">Date:</span> ${new Date(pmsData.date).toLocaleDateString('en-GB')}</div>
+            </div>
+
+            <div class="box">
+                <div class="row">
+                    <div><span class="label">PMS Type:</span> <b>${pmsData.type}</b></div>
+                </div>
+            </div>
+
+            <div class="box">
+                <div style="font-size:14px; margin-bottom:5px;"><b>Client:</b> ${pmsData.hospitalName}</div>
+                <div style="font-size:14px; margin-bottom:5px;"><b>Address:</b> ${pmsData.address}, ${pmsData.city}</div>
+                <div style="font-size:14px; margin-bottom:5px;"><b>Department:</b> ${pmsData.department || '-'}</div>
+            </div>
+
+            <div class="box">
+                <div class="row"><div><span class="label">Machine:</span> ${pmsData.machine}</div></div>
+                <div class="row"><div><span class="label">Model:</span> ${pmsData.model}</div></div>
+                <div class="row"><div><span class="label">Serial No:</span> <b>${pmsData.serialNo}</b></div></div>
+            </div>
+
+            <div class="box" style="background-color: #e8f5e9;">
+                <div class="row">
+                    <div><span class="label">Next Due Date:</span> <b style="color:#d32f2f; font-size:16px;">${new Date(pmsData.dueDate).toLocaleDateString('en-GB')}</b></div>
+                </div>
+            </div>
+
+            <div class="box">
+                <div style="font-weight:bold; text-decoration:underline;">Engineer Checklist / Remarks:</div>
+                <div style="margin-top:10px; min-height: 60px;">${pmsData.remarks || 'Routine checkup done. Machine working fine.'}</div>
+            </div>
+
+            <div class="footer">
+              <div class="sign-box">
+                <div style="height: 60px;"></div> 
+                <div class="sign-line"></div>
+                <div style="font-weight: bold;">Client Signature & Stamp</div>
+              </div>
+
+              <div class="sign-box">
+                <div style="font-weight: bold; font-size: 12px;">Engineer: ${pmsData.senderName}</div>
+                ${signatureHTML}
+                <div class="sign-line"></div>
+                <div style="font-weight: bold;">Engineer Signature</div>
+              </div>
+            </div>
+          </body>
+        </html>`;
+
+        const { uri } = await Print.printToFileAsync({ html: htmlContent });
+        const cleanName = `${pmsData.pmsId}_${(pmsData.hospitalName || 'Client').replace(/ /g, '_')}.pdf`;
+        // @ts-ignore
+        const newPath = `${FileSystem.cacheDirectory}${cleanName}`;
+
+        try {
+            await FileSystem.copyAsync({ from: uri, to: newPath });
+            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share PMS Report` });
+        } catch (error) {
+            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+        }
+    } catch (error) {
+        Alert.alert("Error", "Could not generate PDF");
+    }
+  };
+
   // --- MODAL LOGIC ---
   const openModal = (type: string) => {
     setCurrentSelection(type);
     setSearchText('');
-    
     let data: any[] = [];
     if (type === 'Org') data = orgList;
     else if (type === 'Serial') data = getMachinesForOrg();
@@ -141,20 +300,14 @@ export default function AddPMSScreen() {
   const handleSearch = (text: string) => {
     setSearchText(text);
     let sourceList: any[] = [];
-    
     if (currentSelection === 'Org') sourceList = orgList;
     else if (currentSelection === 'Serial') sourceList = getMachinesForOrg();
 
     if (text) {
         const newData = sourceList.filter(item => {
             if (typeof item === 'string') return item.toLowerCase().includes(text.toLowerCase());
-            
             if (currentSelection === 'Org') return (item.orgName || item.name || '').toLowerCase().includes(text.toLowerCase());
-            
-            if (currentSelection === 'Serial') {
-                return (item.serialNo || '').toLowerCase().includes(text.toLowerCase()) || 
-                       (item.productName || '').toLowerCase().includes(text.toLowerCase());
-            }
+            if (currentSelection === 'Serial') return (item.serialNo || '').toLowerCase().includes(text.toLowerCase()) || (item.productName || '').toLowerCase().includes(text.toLowerCase());
             return false;
         });
         setFilteredData(newData);
@@ -163,16 +316,13 @@ export default function AddPMSScreen() {
     }
   };
 
-  // 🔥🔥 SMART SELECTION LOGIC (UPDATED) 🔥🔥
   const handleSelect = (item: any) => {
     if (currentSelection === 'Org') { 
         setOrg(item.orgName || item.name);
-        
-        // 🔥 IMPROVED AUTO-FILL (Checks address1 too)
+        setOrgId(item.id || ''); 
         setCity(item.city || item.City || '');       
         setAddress(item.address || item.address1 || item.location || ''); 
         
-        // Reset Machine Data on Org Change
         setSerialNo(''); setMachineName(''); setModelName(''); setDepartment('');
     } 
     else if (currentSelection === 'Serial') { 
@@ -184,69 +334,89 @@ export default function AddPMSScreen() {
     setModalVisible(false);
   };
 
-  // --- SAVE ---
+  // 🔥 6. SAAS SAVE LOGIC
   const handleSave = async () => {
       if (!org || !serialNo) {
           Alert.alert("Error", "Organization and Serial No are required.");
           return;
       }
 
+      setIsSaving(true); 
+
       const locationData = await getCurrentLocation();
-      if (!locationData) return; 
+      if (!locationData) {
+          setIsSaving(false);
+          return; 
+      }
 
+      // Generate Local ID
+      const newPmsId = generatePMSId();
+
+      // Clean Payload
       const newPMS = {
-          id: Date.now().toString(),
-          
-          // 🔥 Save both dates
-          date: pmsDate.toISOString().split('T')[0], // Done Date
-          lastDoneDate: pmsDate.toISOString().split('T')[0], // For legacy support
-          dueDate: dueDate.toISOString().split('T')[0], // 🔥 Next Due Date Saved!
-
+          pmsId: newPmsId, 
+          dateIso: pmsDate.toISOString().split('T')[0], // Added for sorting
+          date: pmsDate.toISOString().split('T')[0], 
+          lastDoneDate: pmsDate.toISOString().split('T')[0], 
+          dueDate: dueDate.toISOString().split('T')[0], 
           hospitalName: org,
-          city: city, // 🔥 Saved
-          address: address, // 🔥 Saved
-          
+          orgId: orgId, 
+          city: city, 
+          address: address, 
           machine: machineName || 'Unknown',
           model: modelName || 'Unknown', 
           serialNo: serialNo,
-          
           department: department, 
-          
           type: pmsType,
           remarks: remarks,
           status: 'Completed', 
-
-          senderId: user?.uid || user?.id || 'guest',
-          senderName: user?.name || 'Unknown', 
-          role: user?.role || 'Employee',
-          timestamp: Date.now(),
           location: locationData
       };
 
-      await addPMS(newPMS);
-
       try {
-          await addDoc(collection(db, "notifications"), {
-              title: "PMS Report Submitted ⚙️",
-              message: `${user?.name} submitted a ${pmsType} report for ${machineName} at ${org}.`,
-              to: "Admin",
-              route: "/pms_schedule",
-              read: false,
-              createdAt: new Date().toISOString(),
-              type: "info"
-          });
-      } catch (e) {
-          console.log("Notification Error:", e);
-      }
+          const res = await addSaaSData("pms_reports", newPMS);
 
-      if (params.activityId && updateActivityStatus) {await updateActivityStatus(params.activityId as string, 'Completed');} 
-      alert("PMS Report Saved Successfully!"); 
-      // Alert.alert("Success", "PMS Report Saved & Admin Notified!");
-      router.back();
+          if (res.success) {
+              // REAL PUSH NOTIFICATION
+              if (addNotification) {
+                  await addNotification({
+                      title: "PMS Report Submitted ⚙️",
+                      message: `${currentUser?.name} submitted ${pmsType} report (${newPmsId}) for ${machineName} at ${org}.`,
+                      to: "Admin",
+                      route: "/pms_schedule",
+                      type: "info"
+                  });
+              }
+
+              if (params.activityId && updateActivityStatus) {
+                  await updateActivityStatus(params.activityId as string, 'Completed');
+              } 
+              
+              setIsSaving(false);
+              
+              // ASK FOR PDF (Pass senderName dynamically since it wasn't saved in payload manually)
+              Alert.alert(
+                  "Success ✅", 
+                  `PMS Report ${newPmsId} Saved Successfully!\nDo you want to share PDF?`,
+                  [
+                      { text: "No", onPress: () => router.back(), style: 'cancel' },
+                      { text: "Yes, Share PDF", onPress: async () => { 
+                          await generatePMSPDF({ ...newPMS, senderName: currentUser?.name });
+                          router.back(); 
+                      }}
+                  ]
+              );
+          } else {
+              Alert.alert("Error", "Could not save PMS report.");
+              setIsSaving(false);
+          }
+      } catch (err) {
+          Alert.alert("Error", "Something went wrong.");
+          setIsSaving(false);
+      }
   };
 
   return (
-    // 🔥 1. Added KeyboardAvoidingView
     <KeyboardAvoidingView 
       style={{ flex: 1 }} 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -258,11 +428,9 @@ export default function AddPMSScreen() {
           <View style={{width:24}} /> 
         </View>
 
-        {/* 🔥 2. Wrapped ScrollView correctly */}
         <ScrollView contentContainerStyle={{padding: 20, paddingBottom: 100}} keyboardShouldPersistTaps="handled">
             
             <View style={styles.row}>
-                {/* DATE */}
                 <View style={styles.col}>
                     <Text style={styles.label}>Done Date</Text>
                     <TouchableOpacity style={styles.dropdown} onPress={() => setShowPmsDatePicker(true)}>
@@ -272,7 +440,6 @@ export default function AddPMSScreen() {
                     {showPmsDatePicker && <DateTimePicker value={pmsDate} mode="date" onChange={(e, d) => { setShowPmsDatePicker(false); if(d) setPmsDate(d); }} />}
                 </View>
 
-                {/* 🔥 NEXT DUE DATE */}
                 <View style={styles.col}>
                     <Text style={styles.label}>Next Due *</Text>
                     <TouchableOpacity style={styles.dropdown} onPress={() => setShowDueDatePicker(true)}>
@@ -283,14 +450,12 @@ export default function AddPMSScreen() {
                 </View>
             </View>
 
-            {/* ORG */}
             <Text style={styles.label}>Organization / Hospital *</Text>
             <TouchableOpacity style={styles.dropdown} onPress={() => openModal('Org')}>
                 <Text style={{color: org ? 'black' : 'gray'}}>{org || 'Select Organization'}</Text>
-                <Ionicons name="search" size={18} color="gray" />
+                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={18} color="gray" />}
             </TouchableOpacity>
 
-            {/* SERIAL DROPDOWN */}
             <Text style={styles.label}>Machine Serial No *</Text>
             <TouchableOpacity style={styles.dropdown} onPress={() => {
                 if(!org) Alert.alert("Wait", "Please select Organization first.");
@@ -305,7 +470,7 @@ export default function AddPMSScreen() {
                 <Ionicons name="caret-down" size={18} color="gray" />
             </TouchableOpacity>
 
-            {/* 🔥🔥 NEW INFO BOX (READ ONLY) 🔥🔥 */}
+            {/* INFO BOX */}
             <View style={styles.infoBox}>
                 <Text style={{fontSize:11, fontWeight:'bold', color:'#555', marginBottom:5}}>ADDITIONAL INFO (Auto-Filled)</Text>
                 <View style={styles.row}>
@@ -319,12 +484,11 @@ export default function AddPMSScreen() {
                     </View>
                 </View>
                 <View style={{marginTop:5}}>
-                    <Text style={styles.subLabel}>Address</Text>
-                    <Text style={styles.infoText} numberOfLines={1}>{address || '-'}</Text>
+                      <Text style={styles.subLabel}>Address</Text>
+                      <Text style={styles.infoText} numberOfLines={1}>{address || '-'}</Text>
                 </View>
             </View>
 
-            {/* MACHINE DETAILS (Read Only) */}
             <View style={styles.row}>
                 <View style={styles.col}>
                     <Text style={styles.label}>Machine Name</Text>
@@ -336,7 +500,6 @@ export default function AddPMSScreen() {
                 </View>
             </View>
 
-            {/* PMS TYPE */}
             <Text style={styles.label}>PMS Type</Text>
             <View style={styles.typeContainer}>
                 {['Preventive', 'Breakdown', 'Installation'].map(t => (
@@ -346,7 +509,6 @@ export default function AddPMSScreen() {
                 ))}
             </View>
 
-            {/* REMARKS */}
             <Text style={styles.label}>Checklist / Remarks</Text>
             <TextInput 
                 style={[styles.inputGray, {height: 100, textAlignVertical: 'top'}]} 
@@ -356,8 +518,8 @@ export default function AddPMSScreen() {
                 onChangeText={setRemarks} 
             />
 
-            <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-                <Text style={styles.saveBtnText}>Save PMS Report</Text>
+            <TouchableOpacity style={[styles.saveButton, isSaving && {backgroundColor:'#ccc'}]} onPress={handleSave} disabled={isSaving}>
+                {isSaving ? <ActivityIndicator color="white" /> : <Text style={styles.saveBtnText}>Save PMS Report</Text>}
             </TouchableOpacity>
             
             <Text style={{textAlign:'center', color:'gray', fontSize:10, marginTop:10}}>
@@ -366,11 +528,15 @@ export default function AddPMSScreen() {
             
         </ScrollView>
 
-        {/* --- IMPROVED LIST UI MODAL --- */}
+        {/* MODAL */}
         <Modal visible={modalVisible} transparent={true} animationType="fade">
           <View style={styles.modalOverlay}>
               <View style={styles.modalContent}>
-                  <Text style={styles.modalTitle}>Select {currentSelection}</Text>
+                  <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:15}}>
+                      <Text style={styles.modalTitle}>Select {currentSelection}</Text>
+                      <TouchableOpacity onPress={() => setModalVisible(false)}><Ionicons name="close" size={24} color="black" /></TouchableOpacity>
+                  </View>
+                  
                   <View style={styles.modalSearchBox}>
                       <Ionicons name="search" size={20} color="gray" />
                       <TextInput style={{flex:1, marginLeft:10}} placeholder="Search..." value={searchText} onChangeText={handleSearch} autoFocus={true} />
@@ -383,7 +549,6 @@ export default function AddPMSScreen() {
                       renderItem={({item}) => (
                           <TouchableOpacity style={styles.modalItem} onPress={() => handleSelect(item)}>
                               {currentSelection === 'Serial' ? (
-                                  // 🔥 SERIAL ITEM UI
                                   <View style={{flexDirection:'row', alignItems:'center'}}>
                                       <View style={[styles.iconBox, {backgroundColor:'#e3f2fd'}]}>
                                           <Ionicons name="pricetag" size={20} color="#3b5998" />
@@ -396,7 +561,6 @@ export default function AddPMSScreen() {
                                       </View>
                                   </View>
                               ) : (
-                                  // 🔥 ORG ITEM UI
                                   <View style={{flexDirection:'row', alignItems:'center'}}>
                                       <View style={[styles.iconBox, {backgroundColor:'#f3e5f5'}]}>
                                           <Ionicons name="business" size={20} color="#8e44ad" />
@@ -411,7 +575,6 @@ export default function AddPMSScreen() {
                       )}
                       ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>No Data Found</Text>}
                   />
-                  <TouchableOpacity style={styles.closeBtn} onPress={() => setModalVisible(false)}><Text style={{color:'red'}}>Close</Text></TouchableOpacity>
               </View>
           </View>
         </Modal>
@@ -434,7 +597,6 @@ const styles = StyleSheet.create({
   activeTypeBtn: { backgroundColor:'#3b5998', borderColor:'#3b5998' },
   typeText: { color:'#555', fontWeight:'bold', fontSize:12 },
   
-  // 🔥 INFO BOX STYLE
   infoBox: { backgroundColor: '#f0f4f8', padding: 10, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#e0e0e0' },
   subLabel: { fontSize:11, color:'gray' },
   infoText: { fontWeight:'bold', color:'#333', fontSize:14 },
@@ -449,8 +611,7 @@ const styles = StyleSheet.create({
   modalItem: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#eee' },
   closeBtn: { marginTop: 15, alignItems:'center', padding: 10 },
 
-  // 🔥 LIST STYLES
-  iconBox: { width: 35, height: 35, borderRadius: 8, justifyContent:'center', alignItems:'center' },
+  iconBox: { width: 35, height: 35, borderRadius: 8, justifyContent:'center', alignItems:'center', backgroundColor:'#e3f2fd' },
   modalMainText: { fontWeight: 'bold', fontSize: 15, color: '#333' },
   modalSubText: { fontSize: 12, color: 'gray' }
 });

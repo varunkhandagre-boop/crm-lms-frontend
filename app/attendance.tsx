@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, FlatList, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useData } from './context/DataContext';
 
@@ -11,12 +11,13 @@ export default function AttendanceScreen() {
   const router = useRouter();
   const contextData = useData();
   
-  // 🔥 FIX 1: Safe Defaults
+  // 🔥 Safe Defaults
   const { attendanceList = [], leaveList = [], holidayList = [], user, userList = [] } = contextData || {}; 
   
   // States
+  // 🔥 CHANGED: 'Year' to 'FY'
   const [currentDate, setCurrentDate] = useState(new Date()); 
-  const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'Year'>('Day'); 
+  const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY'>('Day'); 
   const [isCalendarView, setIsCalendarView] = useState(false); 
   
   const [filterUser, setFilterUser] = useState('All'); 
@@ -26,6 +27,17 @@ export default function AttendanceScreen() {
   const [holidayModalVisible, setHolidayModalVisible] = useState(false); 
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [selectedCalDate, setSelectedCalDate] = useState<string | null>(null);
+
+  // 🔥 PAGINATION STATE (SMART LOAD MORE)
+  const [visibleCount, setVisibleCount] = useState(50); 
+
+  useEffect(() => {
+      if (viewMode === 'Day') {
+          setVisibleCount(500); 
+      } else {
+          setVisibleCount(20);  
+      }
+  }, [viewMode, currentDate, filterUser]);
 
   // 1. DEFINE VARIABLES
   const DEFAULT_QUOTA = 18;
@@ -44,7 +56,6 @@ export default function AttendanceScreen() {
   const formatMonth = (date: Date) => date.toLocaleString('default', { month: 'long', year: 'numeric' });
   const formatFullDate = (date: Date) => date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   
-  // 🔥 FIX 2: Never Return Null (Returns string or empty string)
   const getStandardDate = (dateInput: any): string => {
       if (!dateInput) return "";
       try {
@@ -84,17 +95,25 @@ export default function AttendanceScreen() {
       return d.toLocaleDateString('en-US', { weekday: 'short' });
   };
 
+  // 🔥 CHANGED: FY Navigation
   const changeDate = (direction: number) => {
       const newDate = new Date(currentDate);
       if (viewMode === 'Day') newDate.setDate(newDate.getDate() + direction);
       else if (viewMode === 'Month') newDate.setMonth(newDate.getMonth() + direction);
-      else newDate.setFullYear(newDate.getFullYear() + direction);
+      else if (viewMode === 'FY') newDate.setFullYear(newDate.getFullYear() + direction);
       setCurrentDate(newDate);
   };
 
+  // 🔥 CHANGED: FY Header text
   const getHeaderDateText = () => {
       if (viewMode === 'Day') return formatFullDate(currentDate);
       if (viewMode === 'Month') return formatMonth(currentDate);
+      if (viewMode === 'FY') {
+          const m = currentDate.getMonth(); 
+          const y = currentDate.getFullYear();
+          const startY = m >= 3 ? y : y - 1;
+          return `FY ${startY.toString().slice(-2)}-${(startY + 1).toString().slice(-2)}`;
+      }
       return currentDate.getFullYear().toString();
   };
 
@@ -132,12 +151,22 @@ export default function AttendanceScreen() {
     } else if (viewMode === 'Month') {
         startDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
         endDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-    } else {
-        startDate = new Date(currentDate.getFullYear(), 0, 1);
-        endDate = new Date(currentDate.getFullYear(), 11, 31);
+    } else if (viewMode === 'FY') {
+        // 🔥 CHANGED: FY Boundaries Logic
+        const targetMonth = currentDate.getMonth();
+        const targetYear = currentDate.getFullYear();
+        const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+        
+        startDate = new Date(fyStartYear, 3, 1); // 1st April
+        endDate = new Date(fyStartYear + 1, 2, 31); // 31st March
+
+        // 🔥 SMART FIX: Prevent calculating "Absent" before Jan 1, 2026
+        const APP_LAUNCH_DATE = new Date(2026, 0, 1); // 1st Jan 2026
+        if (startDate < APP_LAUNCH_DATE) {
+            startDate = APP_LAUNCH_DATE;
+        }
     }
 
-    // 🔥 FIX 3: No '!' assertion needed because it returns string now
     const startStr = getStandardDate(startDate);
     const endStr = getStandardDate(endDate);
     const todayStr = getStandardDate(new Date());
@@ -191,14 +220,18 @@ export default function AttendanceScreen() {
                 else if (isSunday) {
                     finalOutput.push({ id: `sun-${u.id}`, date: targetDateStr, type: 'HOLIDAY', senderName: u.name, outTime: 'Sunday Off' });
                 } 
+                // Only mark absent if the day has already started/passed
                 else if (targetDateStr <= todayStr) {
-                    finalOutput.push({ id: `abs-${u.id}`, date: targetDateStr, type: 'ABSENT', senderName: u.name, inTime: '-', outTime: '-', workHrs: '0' });
+                    // Prevent absent before Jan 1, 2026
+                    if (targetDateStr >= "2026-01-01") {
+                        finalOutput.push({ id: `abs-${u.id}`, date: targetDateStr, type: 'ABSENT', senderName: u.name, inTime: '-', outTime: '-', workHrs: '0' });
+                    }
                 }
             });
         }
     } 
     // ---------------------------------------------------------
-    // CASE B: MONTH/YEAR VIEW
+    // CASE B: MONTH/FY VIEW
     // ---------------------------------------------------------
     else {
         const targetUserName = (filterUser === 'All' || !canManage) ? user?.name : filterUser;
@@ -207,7 +240,7 @@ export default function AttendanceScreen() {
         while (loop <= endDate) {
             const dStr = getStandardDate(loop);
             
-            // Stop if Future (allows viewing current month holidays though)
+            // Stop generating dates for the future (unless it's month view showing whole month pattern)
             if (dStr > todayStr && viewMode !== 'Month') break; 
 
             const isSunday = loop.getDay() === 0;
@@ -228,7 +261,10 @@ export default function AttendanceScreen() {
                 finalOutput.push({ id: `sun-${dStr}`, date: dStr, type: 'HOLIDAY', senderName: targetUserName, outTime: 'Sunday Off' });
             } 
             else if (dStr <= todayStr) {
-                finalOutput.push({ id: `abs-${dStr}`, date: dStr, type: 'ABSENT', senderName: targetUserName, inTime: '-', outTime: '-', workHrs: '0' });
+                // Ensure we don't mark absent before 1 Jan 2026 in loops
+                if (dStr >= "2026-01-01") {
+                    finalOutput.push({ id: `abs-${dStr}`, date: dStr, type: 'ABSENT', senderName: targetUserName, inTime: '-', outTime: '-', workHrs: '0' });
+                }
             }
 
             loop.setDate(loop.getDate() + 1);
@@ -239,8 +275,9 @@ export default function AttendanceScreen() {
   };
 
   const finalData = getDisplayData();
+  const displayData = finalData.slice(0, visibleCount);
 
-  // --- 🔥 FIX 4: STATS CALCULATION (Removed '!' and added empty check) ---
+  // --- STATS CALCULATION (USING FULL DATA) ---
   const todayStr = getStandardDate(new Date());
   
   const countStatus = (type: string) => finalData.filter((i: any) => {
@@ -252,12 +289,9 @@ export default function AttendanceScreen() {
   const daysPresent = countStatus('PRESENT');
   const daysShort = countStatus('SHORT');
   const daysAbsent = countStatus('ABSENT');
-  
-  // Leave and Holiday don't strictly need <= today check for counts, usually we count all in view
   const daysLeave = finalData.filter((i: any) => getStatus(i) === 'LEAVE').length;
   const daysHoliday = finalData.filter((i: any) => getStatus(i) === 'HOLIDAY').length;
   const totalExpense = finalData.reduce((acc: number, item: any) => {
-      // Sirf 'ATTENDANCE' wale items ka expense jodo
       if (item.type === 'ATTENDANCE' && item.expenses?.totalAmount) {
           const amt = parseFloat(item.expenses.totalAmount);
           return acc + (isNaN(amt) ? 0 : amt);
@@ -265,30 +299,35 @@ export default function AttendanceScreen() {
       return acc;
   }, 0);
 
-  // Quota
+  // Quota & Leaves Taken (Calculated based on FY boundaries)
   const safeUsersList = Array.isArray(userList) ? userList : [];
   const targetUserObj = safeUsersList.find((u:any) => u.name === targetName);
   
   const userQuota = targetUserObj?.yearlyLeaves || user?.yearlyLeaves || DEFAULT_QUOTA;
-  const currentYearStr = currentDate.getFullYear().toString();
+  
+  // Calculate FY boundaries for leaves checking
+  const targetMonth = currentDate.getMonth();
+  const targetYear = currentDate.getFullYear();
+  const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+  const fyStartDateStr = getStandardDate(new Date(fyStartYear, 3, 1));
+  const fyEndDateStr = getStandardDate(new Date(fyStartYear + 1, 2, 31));
   
   const safeLeavesList = Array.isArray(leaveList) ? leaveList : [];
   const yearlyLeavesTaken = safeLeavesList.filter((l: any) => {
       const d = getStandardDate(l.fromDate);
-      return l.senderName === targetName && l.status === 'Approved' && d && d.startsWith(currentYearStr);
+      return l.senderName === targetName && l.status === 'Approved' && d >= fyStartDateStr && d <= fyEndDateStr;
   }).reduce((acc: number, curr: any) => acc + (parseFloat(curr.days) || 0), 0);
   
   const leaveBalance = userQuota - yearlyLeavesTaken;
   const isLeaveExceeded = leaveBalance < 0;
   const leavePercentage = Math.min((yearlyLeavesTaken / userQuota) * 100, 100);
 
-  // Download Report (Updated with Expenses)
+  // Download Report
   const downloadReport = async () => {
       try {
-          // 1. Header me 'Total Expense' column add kiya
           let csvHeader = "Date,Employee,Status,In Time,Out Time,Work Hrs,Total Expense,Note\n";
-          
           let csvRows = "";
+          // 🔥 Download Full Data (Not Sliced)
           finalData.forEach((item: any) => {
               const date = formatDateDisplay(item.date);
               const name = item.senderName || 'Unknown';
@@ -296,24 +335,15 @@ export default function AttendanceScreen() {
               const inTime = item.inTime || '-';
               const outTime = item.outTime || '-';
               const hrs = item.workHrs || '-';
-              
-              // 2. Yahan Expense nikala (Agar nahi hai to '0')
               const expense = item.expenses?.totalAmount || '0';
-              
               const note = item.location === 'On Leave' ? 'Leave' : (item.outTime === 'Sunday Off' ? 'Sunday' : '-');
-              
-              // 3. Row me Expense variable jod diya
               csvRows += `${date},${name},${status},${inTime},${outTime},${hrs},${expense},${note}\n`;
           });
 
           const fileUri = (FileSystem as any).cacheDirectory + `Attendance_${targetName || 'Report'}.csv`;
           await FileSystem.writeAsStringAsync(fileUri, csvHeader + csvRows, { encoding: 'utf8' });
-          
           if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(fileUri);
-      
-      } catch (error: any) { 
-          Alert.alert("Error", error.message); 
-      }
+      } catch (error: any) { Alert.alert("Error", error.message); }
   };
 
   const handleItemClick = (item: any) => { setSelectedItem(item); setDetailModalVisible(true); };
@@ -466,37 +496,66 @@ export default function AttendanceScreen() {
         )}
 
         <View style={styles.tabContainer}>
-            {['Day', 'Month', 'Year'].map(m => (
+            {/* 🔥 CHANGED: 'Year' replaced with 'FY' */}
+            {['Day', 'Month', 'FY'].map(m => (
                 <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => { setViewMode(m as any); if(m==='Day') setIsCalendarView(false); setCurrentDate(new Date()); }}>
-                    <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m === 'Day' ? 'Daily' : m === 'Month' ? 'Monthly' : 'Yearly'}</Text>
+                    <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m === 'Day' ? 'Daily' : m === 'Month' ? 'Monthly' : 'FY (Yearly)'}</Text>
                 </TouchableOpacity>
             ))}
         </View>
 
-        {/* 🔥 UPDATED: HORIZONTAL SCROLLABLE STATS */}
         <View style={{height: 70, marginBottom: 10}}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingHorizontal: 15, alignItems: 'center'}}>
-                
                 <SummaryItem label="Present" value={daysPresent} color="#e8f5e9" textColor="green" />
                 <SummaryItem label="Absent" value={daysAbsent} color="#ffebee" textColor="#d32f2f" />
                 <SummaryItem label="Leave" value={daysLeave} color="#fff3e0" textColor="#e65100" />
                 <SummaryItem label="Short" value={daysShort} color="#fff8e1" textColor="#ff9800" />
-                
-                {/* Expense Box */}
                 <View style={[styles.summaryBox, { backgroundColor: '#fff8e1', borderColor: '#ffb300', borderWidth: 1 }]}>
                     <Text style={[styles.summaryBoxValue, { color: '#ff6f00', fontSize: 13 }]}>₹{totalExpense}</Text>
                     <Text style={[styles.summaryBoxLabel, { color: '#ff6f00' }]}>Expense</Text>
                 </View>
-
                 <SummaryItem label="Holiday" value={daysHoliday} color="#fce4ec" textColor="#c2185b" />
-                
-                {/* Extra padding at end */}
                 <View style={{width: 10}} />
             </ScrollView>
         </View>
 
         {viewMode === 'Month' && isCalendarView ? renderCalendar() : (
-            <FlatList data={finalData} keyExtractor={(item, index) => item.id || `key-${index}`} renderItem={renderItem} scrollEnabled={false} contentContainerStyle={{paddingHorizontal: 15}} ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>No data for {getHeaderDateText()}</Text>} />
+            <FlatList 
+                data={displayData} 
+                keyExtractor={(item, index) => item.id || `key-${index}`} 
+                renderItem={renderItem} 
+                scrollEnabled={false} 
+                contentContainerStyle={{paddingHorizontal: 15}} 
+                ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>No data for {getHeaderDateText()}</Text>} 
+                
+                ListFooterComponent={
+                    visibleCount < finalData.length ? (
+                        <TouchableOpacity 
+                            onPress={() => setVisibleCount(prev => prev + 20)} 
+                            style={{
+                                padding: 12, 
+                                backgroundColor: '#fff', 
+                                alignItems: 'center', 
+                                marginVertical: 15, 
+                                borderRadius: 8,
+                                borderWidth: 1,
+                                borderColor: '#ddd',
+                                elevation: 1
+                            }}
+                        >
+                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                                👇 Load More Records ({finalData.length - visibleCount} remaining)
+                            </Text>
+                        </TouchableOpacity>
+                    ) : (
+                        finalData.length > 0 ? (
+                            <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
+                                --- End of List ---
+                            </Text>
+                        ) : null
+                    )
+                }
+            />
         )}
       </ScrollView>
 
@@ -615,15 +674,15 @@ const styles = StyleSheet.create({
   tabText: { color: 'gray', fontWeight: '600', fontSize:12 },
   activeTabText: { color: '#3b5998', fontWeight: 'bold' },
   summaryBox: { 
-      width: 85,  // Fixed width taki sab barabar dikhe
-      height: 60, // Fixed height
-      marginRight: 8, // Thoda gap
+      width: 85, 
+      height: 60, 
+      marginRight: 8, 
       paddingVertical: 8, 
       borderRadius: 10, 
       alignItems: 'center', 
-      justifyContent: 'center', // Center content
+      justifyContent: 'center', 
       elevation: 2,
-      backgroundColor: 'white' // Default bg
+      backgroundColor: 'white' 
   }, 
   summaryBoxValue: { fontSize: 14, fontWeight: 'bold', marginBottom: 2 },
   summaryBoxLabel: { fontSize: 9, fontWeight: '600', textAlign:'center' },

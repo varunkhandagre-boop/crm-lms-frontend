@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
+    Alert,
     FlatList,
     Modal,
     ScrollView,
@@ -13,22 +14,35 @@ import {
 } from 'react-native';
 import { useData } from './context/DataContext';
 
+// 🔥 FIREBASE IMPORTS FOR TRACKING
+import { addDoc, arrayUnion, collection, doc, updateDoc } from 'firebase/firestore';
+import { db } from '../firebaseConfig';
+
 export default function PaymentDueList() {
     const router = useRouter();
-    // PaymentList is used for history, DueList is the main data source here
-    const { dueList = [], paymentList = [], currentUser } = useData(); 
+    // 🔥 Added orgList and companyProfile to fetch mobile numbers and company name
+    const { dueList = [], paymentList = [], currentUser, user, orgList = [], companyProfile } = useData(); 
     
     // STATES
-    const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'Year' | 'All'>('All');
+    const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All');
     const [currentDate, setCurrentDate] = useState(new Date());
     const [searchTerm, setSearchTerm] = useState('');
     
     const [selectedItem, setSelectedItem] = useState<any>(null);
 
-    // LOCK ADD BUTTON (Permissions)
-    const canAddDue = ['Admin', 'Accountant', 'Account', 'Manager', 'Hr'].includes(currentUser?.role);
+    const [visibleCount, setVisibleCount] = useState(20);
 
-    // --- HELPER: DATE PARSER ---
+    useEffect(() => {
+        if (viewMode === 'Day') {
+            setVisibleCount(500); 
+        } else {
+            setVisibleCount(20); 
+        }
+    }, [viewMode, currentDate, searchTerm]);
+
+    const roleToCheck = currentUser?.role || user?.role;
+    const canAddDue = ['Admin', 'Accountant', 'Account', 'Manager', 'Hr'].includes(roleToCheck);
+
     const parseDate = (dateStr: string) => {
         if (!dateStr) return new Date(0);
         if (dateStr.includes('T')) return new Date(dateStr);
@@ -38,31 +52,107 @@ export default function PaymentDueList() {
         return new Date(0);
     };
 
-    // --- DATE NAVIGATION ---
     const changeDate = (dir: number) => {
         const d = new Date(currentDate);
         if (viewMode === 'Day') d.setDate(d.getDate() + dir);
         else if (viewMode === 'Month') d.setMonth(d.getMonth() + dir);
-        else if (viewMode === 'Year') d.setFullYear(d.getFullYear() + dir);
+        else if (viewMode === 'FY') d.setFullYear(d.getFullYear() + dir);
         setCurrentDate(d);
     };
 
     const getHeaderDate = () => {
         if (viewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
         if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-        if (viewMode === 'Year') return currentDate.getFullYear().toString();
+        if (viewMode === 'FY') {
+            const currentMonth = currentDate.getMonth(); 
+            const currentYear = currentDate.getFullYear();
+            
+            const fyStartYear = currentMonth >= 3 ? currentYear : currentYear - 1;
+            const fyEndYear = fyStartYear + 1;
+            
+            return `FY ${fyStartYear.toString().slice(-2)}-${fyEndYear.toString().slice(-2)}`;
+        }
         return "All Time";
     };
 
-    // --- FILTER LOGIC ---
+    // 🔥 NEW: HANDLE SEND REMINDER WITH TRACKING
+    const handleSendReminder = async (item: any) => {
+        Alert.alert(
+            "Send Reminder",
+            `Do you want to send a WhatsApp payment reminder to ${item.orgName || item.hospitalName}?`,
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Yes, Send",
+                    onPress: async () => {
+                        try {
+                            let mobile = item.mobile;
+                            if (!mobile) {
+                                const org = orgList.find((o: any) => o.id === item.orgId || o.orgName === item.orgName || o.name === item.orgName);
+                                if (org) mobile = org.mobile || org.phone;
+                            }
+
+                            if (!mobile) {
+                                Alert.alert("Missing Detail", "Mobile number not found.");
+                                return;
+                            }
+
+                            let finalTo = mobile;
+                            if (!finalTo.startsWith('91') && !finalTo.startsWith('+91')) {
+                                finalTo = `91${finalTo.replace(/[^0-9]/g, '')}`; 
+                            }
+
+                            const dueAmt = item.balance !== undefined ? item.balance : item.amount;
+                            const todayStr = new Date().toLocaleDateString('en-GB');
+                            const timestampStr = new Date().toLocaleString('en-GB');
+
+                            // 1. Queue the message
+                            await addDoc(collection(db, 'outbound_messages'), {
+                                type: 'whatsapp',
+                                to: finalTo,
+                                templateName: 'payment_reminder',
+                                variables: {
+                                    customer_name: item.orgName || item.hospitalName,
+                                    amount: String(dueAmt),
+                                    company_name: companyProfile?.companyName || 'Our Company'
+                                },
+                                status: 'pending', 
+                                createdAt: new Date().toISOString(),
+                                retryCount: 0
+                            });
+
+                            // 2. 🔥 Update Tracking in Due Record
+                            const dueRef = doc(db, 'payment_dues', item.id);
+                            await updateDoc(dueRef, {
+                                lastReminderDate: todayStr,
+                                reminderHistory: arrayUnion({
+                                    date: timestampStr,
+                                    sentBy: currentUser?.name || user?.name || 'System'
+                                })
+                            });
+
+                            Alert.alert("Success ✅", "Reminder sent and tracked!");
+                        } catch(e) {
+                            Alert.alert("Error", "Could not track reminder.");
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
     const getData = () => {
-        // Filter out items that are fully collected/paid
-        let filtered = dueList.filter((d:any) => d.status !== 'Collected' && d.status !== 'Paid');
+        let filtered = dueList.filter((d:any) => {
+            const currentBal = d.balance !== undefined ? parseFloat(d.balance) : parseFloat(d.amount);
+            if (currentBal <= 0) return false;
+            if (d.status === 'Collected' || d.status === 'Paid' || d.paymentStatus === 'Paid') return false;
+            return true;
+        });
 
         if (searchTerm) {
             const lowerTerm = searchTerm.toLowerCase();
             filtered = filtered.filter((item:any) => {
-                const fullString = `${item.orgName} ${item.amount} ${item.billNo || item.billRef} ${item.dueDate} ${item.orderId || ''}`.toLowerCase();
+                const fullString = `${item.orgName} ${item.amount} ${item.billNo || item.billRef} ${item.date} ${item.dueDate || ''} ${item.orderId || ''}`.toLowerCase();
                 return fullString.includes(lowerTerm);
             });
         }
@@ -72,110 +162,142 @@ export default function PaymentDueList() {
             const targetMonth = currentDate.getMonth();
             const targetDay = currentDate.getDate();
 
+            const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+            const fyStartDate = new Date(fyStartYear, 3, 1); 
+            const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59);
+
             filtered = filtered.filter((item: any) => {
-                if(!item.dueDate) return false;
-                const itemDate = parseDate(item.dueDate);
-                if (viewMode === 'Year') return itemDate.getFullYear() === targetYear;
+                const dateVal = item.date || item.createdAt;
+                if(!dateVal) return false;
+                
+                const itemDate = parseDate(dateVal);
+                
                 if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
                 if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
+                if (viewMode === 'FY') return itemDate >= fyStartDate && itemDate <= fyEndDate;
                 return true;
             });
         }
-        return filtered.sort((a: any, b: any) => parseDate(a.dueDate).getTime() - parseDate(b.dueDate).getTime());
+        
+        return filtered.sort((a: any, b: any) => {
+            const dateA = a.date || a.createdAt;
+            const dateB = b.date || b.createdAt;
+            return parseDate(dateA).getTime() - parseDate(dateB).getTime();
+        });
     };
 
-    const displayList = getData(); 
+    const fullFilteredList = getData(); 
+    const renderedList = fullFilteredList.slice(0, visibleCount);
     
-    // Calculate Total Pending Amount
-    const totalPending = displayList.reduce((sum: number, item: any) => {
+    const totalPending = fullFilteredList.reduce((sum: number, item: any) => {
         const currentBal = item.balance !== undefined ? item.balance : item.amount;
         return sum + (parseFloat(currentBal) || 0);
     }, 0);
 
     const getOverdueDays = (dateStr: string) => {
         if(!dateStr) return 0;
-        const dueDate = parseDate(dateStr);
-        dueDate.setHours(0,0,0,0);
+        const targetDate = parseDate(dateStr);
+        targetDate.setHours(0,0,0,0);
         const todayDate = new Date();
         todayDate.setHours(0,0,0,0);
-        const diffTime = todayDate.getTime() - dueDate.getTime();
+        const diffTime = todayDate.getTime() - targetDate.getTime();
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         return diffDays > 0 ? diffDays : 0;
     };
 
-    // 🔥 GET PARTY HISTORY LOGIC
-    const getPartyHistory = (partyName: string) => {
-        if (!partyName) return [];
+    const getPartyHistory = (partyItem: any) => {
+        if (!partyItem) return [];
         return paymentList
-            .filter((p: any) => p.orgName === partyName)
+            .filter((p: any) => {
+                if (partyItem.orgId && p.orgId && partyItem.orgId === p.orgId) return true;
+                const targetName = partyItem.orgName || partyItem.hospitalName;
+                return p.orgName === targetName;
+            })
             .sort((a: any, b: any) => parseDate(b.date).getTime() - parseDate(a.date).getTime())
             .slice(0, 5); 
     };
 
-    // 🔥 NAVIGATION TO ADD PAYMENT (The Bridge Logic)
     const handleCollect = (item: any) => {
-        // Determine Current Balance
         const currentDue = item.balance !== undefined ? item.balance : item.amount;
         
-        // Determine Source (Is it a Real Order or Manual Due?)
-        // Agar 'orderId' exist karta hai aur wo 'LMS-' se shuru hota hai, to wo Order hai.
-        // Nahi to wo Manual Due hai.
-        const sourceCollection = item.orderId ? 'orders' : 'payment_dues';
+        let sourceCollection = 'payment_dues';
+        if (item.orderId && typeof item.orderId === 'string' && item.orderId.startsWith('ORD')) {
+            sourceCollection = 'orders';
+        }
 
-        setSelectedItem(null); // Close modal if open
+        setSelectedItem(null); 
 
         router.push({
             pathname: '/add_payment' as any,
             params: { 
-                orgName: item.orgName, 
+                orgName: item.orgName || item.hospitalName, 
+                orgId: item.orgId || '', 
                 amount: currentDue, 
-                billNo: item.billNo || item.billRef,
-                // 🔥 Critical Params for Linking
-                linkedId: item.id,       // Document ID
-                source: sourceCollection // 'orders' or 'payment_dues'
+                billNo: item.billNo || item.poNumber,
+                linkedId: item.id,       
+                source: sourceCollection 
             }
         });
     };
 
     const renderItem = ({ item }: any) => {
-        const daysOverdue = getOverdueDays(item.dueDate);
+        const dateToShow = item.date || item.createdAt;
+        const daysOutstanding = getOverdueDays(dateToShow);
         const displayAmount = item.balance !== undefined ? item.balance : item.amount;
+        
+        const isOrder = item.orderId && typeof item.orderId === 'string' && item.orderId.startsWith('ORD');
 
         return (
             <TouchableOpacity 
-                style={[styles.historyCard, daysOverdue > 0 ? styles.overdueCard : styles.normalCard]}
+                style={[styles.historyCard, daysOutstanding > 0 ? styles.overdueCard : styles.normalCard]}
                 onPress={() => setSelectedItem(item)}
             >
                 <View style={{flex:1}}>
-                    <Text style={styles.hOrg} numberOfLines={1}>{item.orgName}</Text>
+                    <Text style={styles.hOrg} numberOfLines={1}>{item.orgName || item.hospitalName}</Text>
                     <View style={{flexDirection:'row', alignItems:'center', marginTop:4}}>
-                        <Ionicons name="receipt-outline" size={14} color="#555" />
+                        <Ionicons name={isOrder ? "cart-outline" : "receipt-outline"} size={14} color="#555" />
                         <Text style={styles.hSubText}>
-                            {/* Differentiate between Order and Bill */}
-                            {item.orderId ? `Order #${item.orderId}` : `Bill: ${item.billNo || 'N/A'}`}
+                            {isOrder ? `Order #${item.orderId}` : `Bill: ${item.billNo || 'Manual'}`}
                         </Text>
                     </View>
                     <View style={{flexDirection:'row', alignItems:'center', marginTop:4}}>
-                        <Ionicons name="calendar-outline" size={14} color={daysOverdue > 0 ? '#d32f2f' : '#666'} />
-                        <Text style={[styles.dateText, daysOverdue > 0 && {color:'#d32f2f', fontWeight:'bold'}]}>
-                            Due: {item.dueDate} {daysOverdue > 0 ? `(${daysOverdue} days late)` : ''}
+                        <Ionicons name="calendar-outline" size={14} color={daysOutstanding > 0 ? '#d32f2f' : '#666'} />
+                        <Text style={[styles.dateText, daysOutstanding > 0 && {color:'#d32f2f', fontWeight:'bold'}]}>
+                            Date: {dateToShow} {daysOutstanding > 0 ? `(${daysOutstanding} days outstanding)` : ''}
+                        </Text>
+                    </View>
+
+                    {/* 🔥 NEW: LAST REMINDER STATUS ON MAIN CARD */}
+                    <View style={{flexDirection:'row', alignItems:'center', marginTop:5}}>
+                        <Ionicons name="notifications-outline" size={12} color={item.lastReminderDate ? "#2e7d32" : "#999"} />
+                        <Text style={{fontSize:10, color: item.lastReminderDate ? "#2e7d32" : "#999", marginLeft:4, fontStyle:'italic'}}>
+                            {item.lastReminderDate ? `Last Reminded: ${item.lastReminderDate}` : 'No reminders sent yet'}
                         </Text>
                     </View>
                 </View>
                 <View style={{alignItems:'flex-end'}}>
                     <Text style={styles.hAmount}>₹{Number(displayAmount).toLocaleString('en-IN')}</Text>
-                    {(item.balance !== undefined && item.balance < item.amount) && (
+                    
+                    {(displayAmount < item.amount) && (
                         <Text style={{fontSize:10, color:'gray', textDecorationLine:'line-through', marginBottom:2}}>
                             ₹{Number(item.amount).toLocaleString('en-IN')}
                         </Text>
                     )}
-                    <TouchableOpacity 
-                        style={styles.collectBtn}
-                        onPress={() => handleCollect(item)} // Used new function
-                    >
-                        <Text style={styles.collectBtnText}>Collect</Text>
-                        <Ionicons name="arrow-forward" size={10} color="white" />
-                    </TouchableOpacity>
+
+                    <View style={{flexDirection: 'row', gap: 6, marginTop: 5}}>
+                        <TouchableOpacity style={[styles.collectBtn, {backgroundColor: '#25D366'}]} onPress={() => handleSendReminder(item)}>
+                            <Ionicons name="logo-whatsapp" size={12} color="white" />
+                            <Text style={[styles.collectBtnText, {marginLeft: 3}]}>Remind</Text>
+                        </TouchableOpacity>
+                        
+                        <TouchableOpacity 
+                            style={styles.collectBtn}
+                            onPress={() => handleCollect(item)} 
+                        >
+                            <Text style={styles.collectBtnText}>Collect</Text>
+                            <Ionicons name="arrow-forward" size={10} color="white" />
+                        </TouchableOpacity>
+                    </View>
                 </View>
             </TouchableOpacity>
         );
@@ -200,7 +322,7 @@ export default function PaymentDueList() {
 
             <View style={styles.filterBox}>
                 <View style={styles.tabContainer}>
-                    {['Day', 'Month', 'Year', 'All'].map((m) => (
+                    {['Day', 'Month', 'FY', 'All'].map((m) => (
                         <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
                             <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
                         </TouchableOpacity>
@@ -225,7 +347,7 @@ export default function PaymentDueList() {
             </View>
 
             <FlatList 
-                data={displayList}
+                data={renderedList}
                 keyExtractor={item => item.id}
                 renderItem={renderItem}
                 contentContainerStyle={{padding: 15, paddingBottom: 100}}
@@ -234,6 +356,32 @@ export default function PaymentDueList() {
                         <Ionicons name="checkmark-circle-outline" size={60} color="#4caf50" />
                         <Text style={{color:'gray', marginTop:10, fontSize:16}}>No Pending Dues!</Text>
                     </View>
+                }
+                ListFooterComponent={
+                    visibleCount < fullFilteredList.length ? (
+                        <TouchableOpacity 
+                            onPress={() => setVisibleCount(prev => prev + 20)} 
+                            style={{
+                                padding: 12, 
+                                backgroundColor: '#fff', 
+                                alignItems: 'center', 
+                                marginVertical: 10, 
+                                borderRadius: 8, 
+                                borderWidth: 1, 
+                                borderColor: '#ddd'
+                            }}
+                        >
+                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                                👇 Load More Records ({fullFilteredList.length - visibleCount} remaining)
+                            </Text>
+                        </TouchableOpacity>
+                    ) : (
+                        fullFilteredList.length > 0 ? (
+                            <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
+                                --- End of List ---
+                            </Text>
+                        ) : null
+                    )
                 }
             />
 
@@ -254,9 +402,12 @@ export default function PaymentDueList() {
                                     </Text>
                                 </View>
 
-                                <DetailRow label="Customer" value={selectedItem?.orgName} />
+                                <DetailRow label="Customer" value={selectedItem?.orgName || selectedItem?.hospitalName} />
                                 <DetailRow label={selectedItem.orderId ? "Order ID" : "Bill No"} value={selectedItem?.orderId || selectedItem?.billNo || 'N/A'} />
-                                <DetailRow label="Due Date" value={selectedItem?.dueDate} />
+                                
+                                <DetailRow label="Bill Date" value={selectedItem?.date || selectedItem?.createdAt} />
+                                {selectedItem?.dueDate && <DetailRow label="Target Due Date" value={selectedItem.dueDate} />}
+                                
                                 <DetailRow label="Original Amount" value={`₹ ${selectedItem?.amount}`} />
                                 
                                 {selectedItem?.notes ? (
@@ -266,16 +417,31 @@ export default function PaymentDueList() {
                                     </View>
                                 ) : null}
 
+                                {/* 🔥 REMINDER HISTORY SECTION IN MODAL */}
+                                <View style={{marginTop:20, paddingTop:10, borderTopWidth:1, borderTopColor:'#eee'}}>
+                                    <Text style={{fontSize:12, fontWeight:'bold', color:'#e65100', marginBottom:10}}>REMINDER LOGS</Text>
+                                    {selectedItem.reminderHistory && selectedItem.reminderHistory.length > 0 ? (
+                                        selectedItem.reminderHistory.slice().reverse().map((log: any, idx: number) => (
+                                            <View key={idx} style={{flexDirection:'row', justifyContent:'space-between', paddingVertical:4}}>
+                                                <Text style={{fontSize:11, color:'#333'}}>🔔 {log.date}</Text>
+                                                <Text style={{fontSize:11, color:'gray'}}>by {log.sentBy}</Text>
+                                            </View>
+                                        ))
+                                    ) : (
+                                        <Text style={{fontSize:11, color:'gray', fontStyle:'italic'}}>No logs found.</Text>
+                                    )}
+                                </View>
+
                                 <View style={{marginTop:20, paddingTop:10, borderTopWidth:1, borderTopColor:'#eee'}}>
                                     <Text style={{fontSize:12, fontWeight:'bold', color:'#3b5998', marginBottom:10}}>RECENT PAYMENTS FROM PARTY</Text>
-                                    {getPartyHistory(selectedItem.orgName).length > 0 ? (
-                                        getPartyHistory(selectedItem.orgName).map((p: any) => (
+                                    {getPartyHistory(selectedItem).length > 0 ? (
+                                        getPartyHistory(selectedItem).map((p: any) => (
                                             <View key={p.id} style={{flexDirection:'row', justifyContent:'space-between', paddingVertical:6, borderBottomWidth:1, borderBottomColor:'#f0f0f0'}}>
                                                 <View>
                                                     <Text style={{fontSize:12, fontWeight:'bold', color:'#333'}}>₹ {p.amount}</Text>
                                                     <Text style={{fontSize:10, color:'gray'}}>{p.mode} • {p.date}</Text>
                                                 </View>
-                                                {p.billRef === selectedItem.billNo && (
+                                                {p.billRef === (selectedItem.billNo || selectedItem.poNumber) && (
                                                     <View style={{backgroundColor:'#e8f5e9', padding:2, borderRadius:4}}>
                                                         <Text style={{fontSize:9, color:'green'}}>MATCHED BILL</Text>
                                                     </View>
@@ -287,12 +453,25 @@ export default function PaymentDueList() {
                                     )}
                                 </View>
 
-                                <TouchableOpacity 
-                                    style={styles.modalCollectBtn}
-                                    onPress={() => handleCollect(selectedItem)} // Used new function
-                                >
-                                    <Text style={{color:'white', fontWeight:'bold', fontSize:16}}>Collect Payment</Text>
-                                </TouchableOpacity>
+                                <View style={{flexDirection: 'row', gap: 10, marginTop: 25}}>
+                                    <TouchableOpacity 
+                                        style={[styles.modalCollectBtn, {flex: 1, backgroundColor: '#25D366'}]}
+                                        onPress={() => handleSendReminder(selectedItem)} 
+                                    >
+                                        <View style={{flexDirection: 'row', alignItems: 'center', justifyContent:'center'}}>
+                                            <Ionicons name="logo-whatsapp" size={18} color="white" />
+                                            <Text style={{color:'white', fontWeight:'bold', fontSize:14, marginLeft: 5}}>Remind</Text>
+                                        </View>
+                                    </TouchableOpacity>
+
+                                    <TouchableOpacity 
+                                        style={[styles.modalCollectBtn, {flex: 1.5}]}
+                                        onPress={() => handleCollect(selectedItem)} 
+                                    >
+                                        <Text style={{color:'white', fontWeight:'bold', fontSize:14}}>Collect Payment</Text>
+                                    </TouchableOpacity>
+                                </View>
+                                
                                 <View style={{height:20}} />
                             </ScrollView>
                         </View>
@@ -324,7 +503,7 @@ const styles = StyleSheet.create({
     activeTabText: { color: '#3b5998', fontWeight: 'bold' },
     navRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 8, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#eee' },
     navText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
-    searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f0f0', borderRadius: 8, paddingHorizontal: 10, height: 40 },
+    searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f0f0', borderRadius: 8, paddingHorizontal: 10, height: 36 },
     searchInput: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
     summaryRow: { flexDirection:'row', justifyContent:'space-between', marginTop:15, borderTopWidth:1, borderTopColor:'#eee', paddingTop:10 },
     totalLabel: { fontWeight:'bold', color:'#555' },
@@ -346,5 +525,5 @@ const styles = StyleSheet.create({
     receiptRow: { marginBottom: 12, flexDirection:'row', justifyContent:'space-between', alignItems:'center', borderBottomWidth:1, borderBottomColor:'#f0f0f0', paddingBottom:5 },
     receiptLabel: { fontSize: 12, color: 'gray' },
     receiptValue: { fontSize: 14, fontWeight: 'bold', color: '#333' },
-    modalCollectBtn: { backgroundColor:'#27ae60', padding:15, borderRadius:10, alignItems:'center', width:'100%', marginTop:20 }
+    modalCollectBtn: { backgroundColor:'#27ae60', padding:15, borderRadius:10, alignItems:'center', width:'100%', justifyContent:'center' },
 });

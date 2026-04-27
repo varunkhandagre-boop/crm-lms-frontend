@@ -13,24 +13,34 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { useData } from './context/DataContext';
 
-// 🔥🔥 1. FIREBASE IMPORTS ADDED
-import { addDoc, collection } from 'firebase/firestore';
-import { db } from '../firebaseConfig'; // ⚠️ Path check karein
+// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
+import { useData } from './context/DataContext';
 
 export default function AddProductScreen() {
     const router = useRouter();
-    // ✅ Make sure 'addProduct' exists in DataContext
-    const { addProduct, user } = useData(); // Added user to track who added it
+    
+    // 🔥 1. Context se Notification Engine nikala
+    const { addNotification } = useData(); 
+
+    // 🔥 2. Naya SaaS Engine connect kiya
+    const { addSaaSData } = useSaaSDB();
 
     const [loading, setLoading] = useState(false);
     const [name, setName] = useState('');
     const [category, setCategory] = useState('');
     const [series, setSeries] = useState('');
     const [desc, setDesc] = useState('');
+    const [specifications, setSpecifications] = useState(''); 
+    
+    // Price and GST State
+    const [price, setPrice] = useState('');
+    const [gstRate, setGstRate] = useState('');
+    
     const [link, setLink] = useState('');
 
+    // 🔥 3. SAAS SAVE LOGIC
     const handleSave = async () => {
         if (!name || !category || !link) {
             Alert.alert("Missing Fields", "Name, Category and Link are required.");
@@ -39,32 +49,36 @@ export default function AddProductScreen() {
 
         setLoading(true);
         try {
-            await addProduct({
+            // 🔥 4. CLEAN PAYLOAD: Engine injects ID, CompanyID, SenderID & CreatedAt
+            const newProduct = {
                 name,
                 category,
                 series: series || 'General',
                 desc,
-                link, // Google Drive Link
-                createdAt: new Date().toISOString()
-            });
+                specifications,
+                price: Number(price) || 0,     
+                gstRate: Number(gstRate) || 0, 
+                link
+            };
 
-            // 🔥🔥 2. NOTIFICATION TRIGGER ADDED 🔥🔥
-            try {
-                await addDoc(collection(db, "notifications"), {
-                    title: "New Product Added 📦",
-                    message: `New Product: ${name} (${category}) has been added to catalog.`,
-                    to: "All", // 🔥 Everyone should know about new products
-                    route: "/catalog",
-                    read: false,
-                    createdAt: new Date().toISOString(),
-                    type: "success"
-                });
-            } catch (e) {
-                console.log("Notification Error:", e);
+            const result = await addSaaSData("products", newProduct);
+
+            if (result.success) {
+                // 🔥 5. PUSH NOTIFICATION
+                if (addNotification) {
+                    await addNotification({
+                        title: "New Product Added 📦",
+                        message: `New Product: ${name} (${category}) has been added to catalog.`,
+                        to: "All",
+                        route: "/catalog",
+                        type: "success"
+                    });
+                }
+                Alert.alert("Success", "Product added to catalog!");
+                router.back();
+            } else {
+                Alert.alert("Save Failed", "Could not save the product.");
             }
-
-            Alert.alert("Success", "Product added to catalog & Team Notified!");
-            router.back();
         } catch (error: any) {
             console.log("Error details:", error);
             Alert.alert("Save Failed", error.message || "Unknown error occurred");
@@ -96,8 +110,23 @@ export default function AddProductScreen() {
                         <Text style={styles.label}>Series (Optional)</Text>
                         <TextInput style={styles.input} placeholder="e.g. C-Series" value={series} onChangeText={setSeries} />
 
+                        {/* Price & GST Row */}
+                        <View style={{flexDirection: 'row', gap: 10}}>
+                            <View style={{flex: 1}}>
+                                <Text style={styles.label}>Base Price (₹)</Text>
+                                <TextInput style={styles.input} placeholder="e.g. 50000" keyboardType="numeric" value={price} onChangeText={setPrice} />
+                            </View>
+                            <View style={{flex: 1}}>
+                                <Text style={styles.label}>GST Rate (%)</Text>
+                                <TextInput style={styles.input} placeholder="e.g. 18" keyboardType="numeric" value={gstRate} onChangeText={setGstRate} />
+                            </View>
+                        </View>
+
                         <Text style={styles.label}>Description</Text>
                         <TextInput style={[styles.input, {height: 80, textAlignVertical:'top'}]} multiline placeholder="Short description..." value={desc} onChangeText={setDesc} />
+
+                        <Text style={styles.label}>Specifications (For Quotations)</Text>
+                        <TextInput style={[styles.input, {height: 100, textAlignVertical:'top'}]} multiline placeholder="Type specifications line by line..." value={specifications} onChangeText={setSpecifications} />
 
                         <Text style={styles.label}>Catalog / Drive Link *</Text>
                         <TextInput style={styles.input} placeholder="Paste Google Drive Link here..." value={link} onChangeText={setLink} />

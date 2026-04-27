@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     FlatList,
     Linking,
     Modal,
+    ScrollView,
     StyleSheet,
     Text,
     TextInput,
@@ -19,26 +20,27 @@ export default function OrganizationScreen() {
 
   // --- STATES ---
   const [searchText, setSearchText] = useState('');
-  const [itemsPerPage, setItemsPerPage] = useState(10); 
   const [selectedOrg, setSelectedOrg] = useState<any>(null); 
   const [detailsModalVisible, setDetailsModalVisible] = useState(false);
 
-  // --- 🔥 SORTING (A-Z) & SUPER SEARCH ---
+  const [visibleCount, setVisibleCount] = useState(20);
+
+  useEffect(() => {
+      setVisibleCount(20);
+  }, [searchText]);
+
   const getFilteredData = () => {
-    // 1. Safety Check
     let data = orgList ? [...orgList] : [];
 
-    // 2. 🔥 Sorting: Alphabetical (A to Z)
     data.sort((a: any, b: any) => {
         const nameA = (a.name || a.orgName || "").toLowerCase();
         const nameB = (b.name || b.orgName || "").toLowerCase();
         
-        if (nameA < nameB) return -1; // A pehle aayega
-        if (nameA > nameB) return 1;  // B baad me aayega
+        if (nameA < nameB) return -1; 
+        if (nameA > nameB) return 1;  
         return 0;
     });
 
-    // 3. Super Search (Name, City, State, Type, Mobile)
     if (searchText) {
         const term = searchText.toLowerCase();
         data = data.filter((item: any) => {
@@ -53,14 +55,11 @@ export default function OrganizationScreen() {
         });
     }
 
-    // 4. Limit Logic
-    if (itemsPerPage !== -1) {
-        return data.slice(0, itemsPerPage);
-    }
     return data;
   };
 
-  const displayList = getFilteredData();
+  const fullList = getFilteredData(); 
+  const renderedList = fullList.slice(0, visibleCount);
 
   const openDetails = (item: any) => {
       setSelectedOrg(item);
@@ -71,7 +70,6 @@ export default function OrganizationScreen() {
       if(number) Linking.openURL(`tel:${number}`);
   };
 
-  // --- RENDER ITEM ---
   const renderItem = ({ item }: any) => (
     <TouchableOpacity style={styles.card} onPress={() => openDetails(item)}>
         <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center'}}>
@@ -81,33 +79,22 @@ export default function OrganizationScreen() {
                     {item.type} • {item.city}{item.state ? `, ${item.state}` : ''}
                 </Text>
             </View>
-            {/* Initial Circle (A, B, C...) */}
             <View style={styles.initialsCircle}>
                 <Text style={styles.initialsText}>{(item.name || item.orgName || 'O').charAt(0).toUpperCase()}</Text>
             </View>
         </View>
 
-        <View style={styles.divider} />
-        
-        <View style={styles.equipGrid}>
-            <View style={styles.equipCol}>
-                <Text style={styles.equipText}>Ventilator : {item.equipment?.ventilator || 0}</Text>
-                <Text style={styles.equipText}>Compressor : {item.equipment?.compressor || 0}</Text>
-            </View>
-            <View style={styles.equipCol}>
-                <Text style={styles.equipText}>Anesthesia : {item.equipment?.anesthesia || 0}</Text>
-                <Text style={styles.equipText}>Monitor : {item.equipment?.monitor || 0}</Text>
-            </View>
-            <View style={styles.equipCol}>
-                <Text style={styles.equipText}>Bubble : {item.equipment?.bubble || 0}</Text>
-            </View>
-        </View>
+        {item.contactPerson && (
+             <View style={{marginTop: 8, flexDirection: 'row', alignItems: 'center'}}>
+                 <Ionicons name="person-outline" size={14} color="#555" />
+                 <Text style={{fontSize: 12, color: '#555', marginLeft: 5}}>{item.contactPerson} ({item.mobile})</Text>
+             </View>
+        )}
     </TouchableOpacity>
   );
 
   return (
     <View style={styles.container}>
-      {/* HEADER */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
              <View style={{flexDirection:'row', alignItems:'center'}}>
@@ -128,7 +115,6 @@ export default function OrganizationScreen() {
              </View>
         </View>
 
-        {/* SEARCH BAR */}
         <View style={styles.searchRow}>
             <View style={styles.searchBar}>
                 <Ionicons name="search" size={20} color="gray" />
@@ -146,27 +132,15 @@ export default function OrganizationScreen() {
             </View>
         </View>
 
-        {/* LIMIT SELECTOR */}
         <View style={styles.limitContainer}>
-            <Text style={{fontSize:12, color:'gray', marginRight:10}}>Show:</Text>
-            {[10, 25, 50, -1].map((num) => (
-                <TouchableOpacity 
-                    key={num} 
-                    style={[styles.limitBtn, itemsPerPage === num && styles.activeLimitBtn]} 
-                    onPress={() => setItemsPerPage(num)}
-                >
-                    <Text style={[styles.limitText, itemsPerPage === num && styles.activeLimitText]}>
-                        {num === -1 ? 'All' : num}
-                    </Text>
-                </TouchableOpacity>
-            ))}
-            <Text style={{marginLeft:'auto', fontSize:12, color:'gray'}}>Total: {orgList?.length || 0}</Text>
+            <Text style={{marginLeft:'auto', fontSize:12, color:'gray'}}>
+                Total Records: <Text style={{fontWeight:'bold', color:'#3b5998'}}>{fullList.length}</Text>
+            </Text>
         </View>
       </View>
 
-      {/* LIST */}
       <FlatList 
-        data={displayList}
+        data={renderedList}
         keyExtractor={item => item.id}
         renderItem={renderItem}
         contentContainerStyle={styles.contentContainer}
@@ -176,12 +150,30 @@ export default function OrganizationScreen() {
                 <Text style={{color:'gray', marginTop:10}}>No Organization Found</Text>
             </View>
         }
+        // 🔥 FIX: Added paddingBottom: 80 wrapper around the footer
+        ListFooterComponent={
+            <View style={{ paddingBottom: 80 }}>
+                {visibleCount < fullList.length ? (
+                    <TouchableOpacity 
+                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                        style={styles.loadMoreBtn}
+                    >
+                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                            👇 Load More Records ({fullList.length - visibleCount} remaining)
+                        </Text>
+                    </TouchableOpacity>
+                ) : (
+                    fullList.length > 0 ? (
+                        <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
+                            --- End of List ---
+                        </Text>
+                    ) : null
+                )}
+            </View>
+        }
       />
 
-      {/* DETAIL MODAL */}
       <Modal visible={detailsModalVisible} transparent={true} animationType="fade">
-          
-          {/* 👇 KeyboardAvoidingView HATA DIYA (Zarurat nahi hai) */}
           <View style={styles.modalOverlay}>
               <View style={styles.modalContent}>
                   {selectedOrg && (
@@ -193,23 +185,34 @@ export default function OrganizationScreen() {
                               </TouchableOpacity>
                           </View>
 
-                          <DetailRow label="Type" value={selectedOrg.type} icon="briefcase" />
-                          <DetailRow label="Location" value={`${selectedOrg.city}, ${selectedOrg.state || ''}`} icon="location" />
-                          <DetailRow label="Address" value={selectedOrg.address1} icon="map" />
-                          
+                          <ScrollView showsVerticalScrollIndicator={false} style={{maxHeight: '80%'}}>
+                              <DetailRow label="GST Number" value={selectedOrg.gstNumber} icon="document-text" highlight />
+                              <DetailRow label="Type" value={selectedOrg.type} icon="briefcase" />
+                              <DetailRow label="Territory" value={selectedOrg.territory} icon="map" />
+                              <DetailRow label="Total Beds" value={selectedOrg.beds} icon="bed" />
+                              
+                              <View style={styles.divider} />
+                              
+                              <Text style={{fontWeight:'bold', color:'#555', marginBottom:10}}>Address Details:</Text>
+                              <DetailRow label="Address" value={selectedOrg.address1} icon="home" />
+                              <DetailRow label="Location" value={`${selectedOrg.city}, ${selectedOrg.state || ''}`} icon="location" />
+                              <DetailRow label="Pincode" value={selectedOrg.pincode} icon="pin" />
+                              
+                              <View style={styles.divider} />
+                              
+                              <Text style={{fontWeight:'bold', color:'#555', marginBottom:10}}>Contact Details:</Text>
+                              <DetailRow label="Person Name" value={selectedOrg.contactPerson} icon="person" />
+                              <DetailRow label="Designation" value={selectedOrg.designation} icon="id-card" />
+                              
+                              <TouchableOpacity onPress={() => handleCall(selectedOrg.mobile)}>
+                                 <DetailRow label="Mobile" value={selectedOrg.mobile || 'N/A'} icon="call" highlight />
+                              </TouchableOpacity>
+                              
+                              <DetailRow label="Email" value={selectedOrg.email || 'N/A'} icon="mail" />
+                          </ScrollView>
+
                           <View style={styles.divider} />
-                          
-                          <Text style={{fontWeight:'bold', color:'#555', marginBottom:10}}>Contact Person:</Text>
-                          <DetailRow label="Name" value={selectedOrg.contactPerson} icon="person" />
-                          
-                          <TouchableOpacity onPress={() => handleCall(selectedOrg.mobile)}>
-                             <DetailRow label="Mobile" value={selectedOrg.mobile || 'N/A'} icon="call" highlight />
-                          </TouchableOpacity>
-                          
-                          <DetailRow label="Email" value={selectedOrg.email || 'N/A'} icon="mail" />
-                          
-                          <View style={styles.divider} />
-                          
+
                           <TouchableOpacity 
                               style={styles.editBtn} 
                               onPress={() => {
@@ -227,13 +230,11 @@ export default function OrganizationScreen() {
                   )}
               </View>
           </View>
-
       </Modal>
     </View>
   );
 }
 
-// Helper Component
 const DetailRow = ({label, value, icon, highlight}: any) => (
     <View style={{flexDirection:'row', alignItems:'center', marginBottom:12}}>
         <View style={{width:30}}><Ionicons name={icon} size={20} color={highlight ? "green" : "#3b5998"} /></View>
@@ -254,9 +255,9 @@ const styles = StyleSheet.create({
   searchRow: { flexDirection: 'row', paddingHorizontal: 15, justifyContent: 'space-between' },
   searchBar: { flex: 1, backgroundColor: '#f0f0f0', paddingHorizontal: 10, borderRadius: 8, flexDirection:'row', alignItems:'center', height:45, borderWidth:1, borderColor:'#e0e0e0' },
   input: { flex:1, marginLeft:10, fontSize:15, color:'black' },
-  contentContainer: { padding: 15, paddingBottom: 100 },
   
-  // Card Styles
+  contentContainer: { padding: 15, paddingBottom: 120 }, 
+  
   card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 15, elevation: 2, borderLeftWidth:4, borderLeftColor:'#3b5998' },
   orgName: { fontWeight: 'bold', fontSize: 16, marginBottom: 2, color:'#333' },
   subText: { color: 'gray', fontSize: 12, marginBottom: 2 },
@@ -264,20 +265,12 @@ const styles = StyleSheet.create({
   initialsText: { color:'#3b5998', fontWeight:'bold', fontSize:16 },
   
   divider: { height: 1, backgroundColor: '#eee', marginVertical: 10 },
-  equipGrid: { flexDirection: 'row', justifyContent: 'space-between' },
-  equipCol: { flex: 1 },
-  equipText: { fontSize: 11, color: '#555', marginBottom: 3 },
   
-  // Limit Styles
-  limitContainer: { flexDirection:'row', alignItems:'center', paddingHorizontal:15, marginTop:15, paddingBottom:5 },
-  limitBtn: { paddingVertical:4, paddingHorizontal:10, borderRadius:15, backgroundColor:'#e0e0e0', marginRight:8 },
-  activeLimitBtn: { backgroundColor:'#3b5998' },
-  limitText: { fontSize:12, color:'#333' },
-  activeLimitText: { color:'white', fontWeight:'bold' },
+  limitContainer: { flexDirection:'row', alignItems:'center', paddingHorizontal:15, marginTop:10, paddingBottom:5 },
+  loadMoreBtn: { padding: 12, backgroundColor: '#fff', alignItems: 'center', marginVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ddd' },
   
-  // Modal Styles
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
-  modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 25, elevation: 5 },
+  modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 25, elevation: 5, maxHeight: '80%' },
   modalTitle: { fontSize: 20, fontWeight: 'bold', color:'#3b5998', marginBottom:10, flex:1 },
   editBtn: { flexDirection:'row', backgroundColor:'#3b5998', padding:12, borderRadius:8, justifyContent:'center', alignItems:'center', marginTop:10 }
 });

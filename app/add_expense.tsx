@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import DateTimePicker from '@react-native-community/datetimepicker'; // 🔥 Golden Rule
-import * as ImagePicker from 'expo-image-picker'; // Camera
+import DateTimePicker from '@react-native-community/datetimepicker';
+import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
@@ -18,15 +18,19 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { useData } from './context/DataContext';
 
-// 🔥🔥 1. FIREBASE IMPORTS ADDED
-import { addDoc, collection } from 'firebase/firestore';
-import { db } from '../firebaseConfig'; // ⚠️ Path check karein
+// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
+import { useData } from './context/DataContext';
 
 export default function AddExpenseScreen() {
   const router = useRouter();
-  const { addExpense, user } = useData();
+  
+  // 🔥 1. Context se Current User aur Notification Engine nikala
+  const { currentUser, addNotification } = useData();
+  
+  // 🔥 2. Naya SaaS Engine connect kiya
+  const { addSaaSData } = useSaaSDB();
 
   // States
   const [date, setDate] = useState(new Date());
@@ -62,7 +66,7 @@ export default function AddExpenseScreen() {
       // 2. Open Camera
       let result = await ImagePicker.launchCameraAsync({
           mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: false, // Full photo
+          allowsEditing: false, 
           quality: 0.5, // Compress for speed
       });
 
@@ -71,7 +75,7 @@ export default function AddExpenseScreen() {
       }
   };
 
-  // --- SAVE ---
+  // 🔥 3. SAAS SAVE LOGIC
   const handleSave = async () => {
       if (type === 'Select Type' || !amount) {
           Alert.alert("Missing Fields", "Please select Type and enter Amount.");
@@ -80,44 +84,37 @@ export default function AddExpenseScreen() {
 
       setLoading(true);
       try {
+          // 🔥 4. CLEAN PAYLOAD: Engine will auto-add ID, CompanyID, SenderID & CreatedAt
           const newEntry = {
-              id: Date.now().toString(),
-              
               date: formatDate(date),
               dateIso: date.toISOString().split('T')[0],
-              
               type: type,
               amount: parseFloat(amount) || 0, // Ensure amount is a number
               remark: remark,
               imageUri: image,
               status: 'Pending', // Manager Approval Needed
-              
-              // SECURITY METADATA
-              senderId: user?.uid || 'guest',
-              senderName: user?.name || 'Unknown',
-              role: user?.role || 'Employee',
-              createdAt: new Date().toISOString()
+              role: currentUser?.role || 'Employee'
           };
 
-          await addExpense(newEntry);
+          const result = await addSaaSData("expenses", newEntry);
           
-          // 🔥🔥 2. NOTIFICATION TRIGGER ADDED 🔥🔥
-          try {
-              await addDoc(collection(db, "notifications"), {
-                  title: "New Expense Claim 💸",
-                  message: `${user?.name} claimed ₹${amount} for ${type}.`,
-                  to: "Admin",
-                  route: "/expense",
-                  read: false,
-                  createdAt: new Date().toISOString(),
-                  type: "warning"
-              });
-          } catch (e) {
-              console.log("Notification Error:", e);
-          }
+          if (result.success) {
+              // 🔥 5. REAL PUSH NOTIFICATION
+              if (addNotification) {
+                  await addNotification({
+                      title: "New Expense Claim 💸",
+                      message: `${currentUser?.name} claimed ₹${amount} for ${type}.`,
+                      to: "Accountant", // Defaulting to Accountant, or "Admin"
+                      route: "/expense",
+                      type: "warning"
+                  });
+              }
 
-          Alert.alert("Success", "Expense Claim Submitted & Admin Notified!");
-          router.back();
+              Alert.alert("Success", "Expense Claim Submitted & Admin Notified!");
+              router.back();
+          } else {
+              Alert.alert("Error", "Could not submit claim.");
+          }
       } catch (e) {
           Alert.alert("Error", "Could not submit claim.");
           console.error(e);
@@ -144,6 +141,7 @@ export default function AddExpenseScreen() {
         <ScrollView 
             style={styles.contentContainer} 
             contentContainerStyle={{paddingBottom: 100}} 
+            keyboardShouldPersistTaps="handled"
         >
             
             {/* Date Picker */}
@@ -206,8 +204,12 @@ export default function AddExpenseScreen() {
                 )}
             </View>
 
-            {/* Save */}
-            <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={loading}>
+            {/* SAVE BUTTON WITH BLUR EFFECT */}
+            <TouchableOpacity 
+                style={[styles.saveBtn, loading && { opacity: 0.6 }]} 
+                onPress={handleSave} 
+                disabled={loading}
+            >
                 {loading ? <ActivityIndicator color="white"/> : <Text style={styles.saveBtnText}>Submit Claim</Text>}
             </TouchableOpacity>
             

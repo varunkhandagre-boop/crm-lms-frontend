@@ -4,6 +4,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     FlatList,
     Image,
@@ -17,29 +18,44 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+
+// 🔥 SAAS IMPORTS
+import * as Location from 'expo-location';
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
-// 🔥🔥 1. IMPORTS
-import * as Location from 'expo-location';
-import { addDoc, collection, doc, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+// 🔥 PDF IMPORTS
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 
 export default function AddServiceCallScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   
-  const { addServiceCall, sparePartsList, orgList, installList, user, updateActivityStatus } = useData();
+  // 🔥 1. Context se sirf user aur notification nikala
+  const { currentUser, updateActivityStatus, companyProfile, addNotification } = useData();
   
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded Lists
+  const [orgList, setOrgList] = useState<any[]>([]);
+  const [installList, setInstallList] = useState<any[]>([]);
+  const [sparePartsList, setSparePartsList] = useState<any[]>([]);
+  const [serviceCallList, setServiceCallList] = useState<any[]>([]);
+
   // --- FORM STATES ---
   const [org, setOrg] = useState('');
+  const [orgId, setOrgId] = useState('');
+
   const [serialNo, setSerialNo] = useState('');
   const [machineName, setMachineName] = useState('');
   const [modelName, setModelName] = useState('');
 
-  // 🔥 AUTO-FILL STATES
   const [department, setDepartment] = useState('');
   const [city, setCity] = useState('');
-  const [address, setAddress] = useState(''); // Added Address State
+  const [address, setAddress] = useState('');
 
   const [installDate, setInstallDate] = useState('');
 
@@ -68,16 +84,35 @@ export default function AddServiceCallScreen() {
 
   const serviceOptions = ['Free', 'Paid', 'AMC', 'CMC', 'Under Warranty', 'Others'];
 
+  // 🔥 4. LOAD DATA ON MOUNT
+  useEffect(() => {
+      const loadData = async () => {
+          if (currentUser?.companyId) {
+              const [orgs, installs, parts, calls] = await Promise.all([
+                  fetchSaaSData("organizations"),
+                  fetchSaaSData("installations"),
+                  fetchSaaSData("spare_parts"),
+                  fetchSaaSData("service_calls")
+              ]);
+              setOrgList(orgs);
+              setInstallList(installs);
+              setSparePartsList(parts);
+              setServiceCallList(calls);
+          }
+      };
+      loadData();
+  }, [currentUser]);
+
   // AUTO FILL ORG (From Param)
   useEffect(() => {
-      if (params.org) {
+      if (params.org && org !== params.org) {
           setOrg(params.org as string);
           if(orgList.length > 0) {
               const foundOrg = orgList.find((o:any) => (o.orgName === params.org || o.name === params.org));
               if(foundOrg) selectOrganization(foundOrg);
           }
       }
-      if (params.serial) {
+      if (params.serial && serialNo !== params.serial) {
           const serial = params.serial as string;
           setSerialNo(serial);
            if (installList.length > 0) {
@@ -87,6 +122,7 @@ export default function AddServiceCallScreen() {
                   setModelName(machine.model || '');
                   setDepartment(machine.department || '');
                   setInstallDate(machine.date || '');
+                  if(machine.orgId) setOrgId(machine.orgId);
               }
           }
       }
@@ -108,7 +144,6 @@ export default function AddServiceCallScreen() {
       });
   };
 
-  // 🔥 LOCATION
   const getCurrentLocation = async () => {
       try {
           let { status } = await Location.requestForegroundPermissionsAsync();
@@ -128,7 +163,159 @@ export default function AddServiceCallScreen() {
       }
   };
 
-  // --- MODAL LOGIC ---
+  // 🔥 5. SMART FY TICKET ID GENERATOR
+  const generateSequentialTicketId = () => {
+      const targetMonth = callDate.getMonth(); 
+      const targetYear = callDate.getFullYear();
+      
+      const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+      const fyString = `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`; 
+      const fyStartDateStr = `${fyStartYear}-04-01`;
+      const fyEndDateStr = `${fyStartYear + 1}-03-31`;
+
+      const count = serviceCallList ? serviceCallList.filter((c: any) => {
+          const dDate = c.dateIso || c.date; 
+          if (!dDate) return false;
+          return dDate >= fyStartDateStr && dDate <= fyEndDateStr;
+      }).length + 1 : 1;
+
+      const prefix = companyProfile?.shortName ? companyProfile.shortName.toUpperCase() : 'LMS';
+      return `${prefix}-SER-${fyString}-${String(count).padStart(3, '0')}`;
+  };
+
+  const generateServicePDF = async (ticketData: any) => {
+    try {
+        const logoHTML = companyProfile?.logoUrl 
+            ? `<img src="${companyProfile.logoUrl}" style="height: 60px; margin-bottom: 10px;" />` 
+            : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
+
+        const signatureHTML = companyProfile?.signatureUrl 
+            ? `<img src="${companyProfile.signatureUrl}" style="height: 40px; margin-top: 5px; margin-bottom: 2px;" />` 
+            : `<div style="height: 40px;"></div>`;
+
+        let partsHTML = '';
+        if (ticketData.partsUsed && ticketData.partsUsed.length > 0) {
+            const rows = ticketData.partsUsed.map((p: any, i: number) => `
+                <tr>
+                    <td style="padding:5px; border:1px solid #ddd; text-align:center;">${i + 1}</td>
+                    <td style="padding:5px; border:1px solid #ddd;">${p.partName} (${p.partNo || '-'})</td>
+                    <td style="padding:5px; border:1px solid #ddd; text-align:center;">${p.usedQty}</td>
+                </tr>
+            `).join('');
+
+            partsHTML = `
+                <div style="margin-top: 15px;">
+                    <div style="font-weight:bold; margin-bottom:5px;">Spare Parts Consumed:</div>
+                    <table style="width:100%; border-collapse:collapse;">
+                        <tr style="background:#eee;">
+                            <th style="padding:5px; border:1px solid #000; width:10%;">#</th>
+                            <th style="padding:5px; border:1px solid #000; width:70%;">Part Name</th>
+                            <th style="padding:5px; border:1px solid #000; width:20%;">Qty</th>
+                        </tr>
+                        ${rows}
+                    </table>
+                </div>
+            `;
+        } else {
+            partsHTML = `<div style="margin-top: 15px; font-style:italic; color:#555;">No spare parts used.</div>`;
+        }
+
+        const htmlContent = `
+        <html>
+          <head>
+            <style>
+              body { font-family: 'Helvetica', sans-serif; padding: 30px; border: 2px solid #333; }
+              .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px; }
+              .title { font-size: 22px; font-weight: bold; color: #1a237e; text-transform: uppercase; }
+              .sub-title { font-size: 12px; margin-top: 2px; color: #333; line-height: 1.4; }
+              .box { border: 1px solid #000; padding: 15px; margin-top: 10px; background-color: #fcfcfc; }
+              .row { display: flex; justify-content: space-between; margin-bottom: 5px; }
+              .label { font-weight: bold; color: #444; width: 120px; display: inline-block; }
+              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; }
+              .sign-box { text-align: center; width: 45%; }
+              .sign-line { border-top: 1px solid #000; width: 100%; margin-top: 5px; margin-bottom: 5px; }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              ${logoHTML}
+              ${companyProfile?.logoUrl ? `<div class="title">${companyProfile.companyName}</div>` : ''}
+              <div class="sub-title">${companyProfile?.address || ''}</div>
+              <div class="sub-title">
+                Phone: ${companyProfile?.contactPhone || companyProfile?.phone || '-'} | 
+                Email: ${companyProfile?.contactEmail || companyProfile?.email || '-'}
+              </div>
+            </div>
+
+            <h3 style="text-align: center; text-decoration: underline;">SERVICE REPORT</h3>
+
+            <div class="box">
+                <div class="row">
+                    <div><span class="label">Ticket No:</span> <b>${ticketData.scrId}</b></div>
+                    <div><span class="label">Date:</span> ${new Date(ticketData.date).toLocaleDateString('en-GB')}</div>
+                </div>
+                <div class="row">
+                    <div><span class="label">Status:</span> <b>${ticketData.status}</b></div>
+                    <div><span class="label">Type:</span> ${ticketData.serviceType}</div>
+                </div>
+            </div>
+
+            <div class="box">
+                <div style="font-size:14px; margin-bottom:5px;"><b>Client:</b> ${ticketData.hospitalName}</div>
+                <div style="font-size:14px; margin-bottom:5px;"><b>Address:</b> ${ticketData.address}, ${ticketData.city}</div>
+                <div style="font-size:14px; margin-bottom:5px;"><b>Department:</b> ${ticketData.department || '-'}</div>
+            </div>
+
+            <div class="box">
+                <div class="row"><div><span class="label">Machine:</span> ${ticketData.machine}</div></div>
+                <div class="row"><div><span class="label">Model:</span> ${ticketData.model}</div></div>
+                <div class="row"><div><span class="label">Serial No:</span> <b>${ticketData.serialNo}</b></div></div>
+                <div class="row"><div><span class="label">Installed On:</span> ${ticketData.installationDate || '-'}</div></div>
+            </div>
+
+            <div class="box">
+                <div style="font-weight:bold; text-decoration:underline;">Problem Reported:</div>
+                <div style="margin-top:5px; margin-bottom:15px;">${ticketData.remark}</div>
+
+                <div style="font-weight:bold; text-decoration:underline;">Action Taken / Resolution:</div>
+                <div style="margin-top:5px;">${ticketData.resolutionNote || 'Work in progress / Pending for parts.'}</div>
+            </div>
+
+            ${partsHTML}
+
+            <div class="footer">
+              <div class="sign-box">
+                <div style="height: 60px;"></div> 
+                <div class="sign-line"></div>
+                <div style="font-weight: bold;">Customer Sign & Stamp</div>
+              </div>
+
+              <div class="sign-box">
+                <div style="font-weight: bold; font-size: 12px;">Engineer: ${ticketData.senderName}</div>
+                ${signatureHTML}
+                <div class="sign-line"></div>
+                <div style="font-weight: bold;">Engineer Signature</div>
+              </div>
+            </div>
+          </body>
+        </html>`;
+
+        const { uri } = await Print.printToFileAsync({ html: htmlContent });
+        const cleanName = `Service_${ticketData.scrId}.pdf`;
+        // @ts-ignore
+        const newPath = `${FileSystem.cacheDirectory}${cleanName}`;
+
+        try {
+            await FileSystem.copyAsync({ from: uri, to: newPath });
+            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Report` });
+        } catch (error) {
+            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+        }
+    } catch (error) {
+        Alert.alert("Error", "Could not generate PDF");
+    }
+  };
+
   const openModal = (type: string) => {
     setCurrentSelection(type);
     setSearchText('');
@@ -161,14 +348,11 @@ export default function AddServiceCallScreen() {
     }
   };
 
-  // 🔥🔥 SMART SELECTION LOGIC 🔥🔥
   const selectOrganization = (item: any) => {
       setOrg(item.orgName || item.name);
-      
-      // Auto-Fill Logic
+      setOrgId(item.id || ''); 
       setCity(item.city || item.City || item.district || ''); 
       setAddress(item.address || item.address1 || item.location || '');
-      
       setErrors(prev => ({...prev, org: false})); 
       setSerialNo(''); setMachineName(''); setModelName(''); setDepartment(''); setInstallDate('');
   };
@@ -183,7 +367,6 @@ export default function AddServiceCallScreen() {
         setModelName(item.model || '');
         setDepartment(item.department || '');
         setInstallDate(item.date || '');
-        
         setErrors(prev => ({...prev, serial: false}));
     }
     else if (currentSelection === 'Service Type') { setServiceType(item); }
@@ -202,33 +385,7 @@ export default function AddServiceCallScreen() {
       setNewMachineModalVisible(false);
   };
 
-  const generateSequentialTicketId = async () => {
-      try {
-          const currentYear = new Date().getFullYear();
-          const counterRef = doc(db, 'settings', 'ticket_counter');
-          
-          const docSnap = await getDoc(counterRef);
-          let newCount = 1;
-
-          if (docSnap.exists()) {
-              const data = docSnap.data();
-              if (data.year === currentYear) {
-                  newCount = (data.count || 0) + 1;
-              } else {
-                  newCount = 1; 
-              }
-          }
-
-          await setDoc(counterRef, { count: newCount, year: currentYear }, { merge: true });
-          return `${currentYear}-${String(newCount).padStart(2, '0')}`;
-
-      } catch (error) {
-          console.error("Error generating ID:", error);
-          return `${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
-      }
-  };
-
-  // --- SAVE ---
+  // 🔥 6. SAAS SAVE LOGIC
   const handleSave = async () => {
       if (!org || !serialNo || !remark) {
           Alert.alert("Error", "Organization, Serial No, and Problem are required.");
@@ -243,26 +400,22 @@ export default function AddServiceCallScreen() {
           return; 
       }
 
-      const newTicketId = await generateSequentialTicketId();
+      const newTicketId = generateSequentialTicketId();
       const partsSummary = usedParts.map(p => `${p.partName} (${p.usedQty})`).join(', ');
 
       const newCall = {
-          id: Date.now().toString(),
           scrId: newTicketId, 
           date: callDate.toISOString().split('T')[0],
+          dateIso: callDate.toISOString().split('T')[0],
           hospitalName: org,
-          
-          // 🔥 Saved Address/City
+          orgId: orgId,
           city: city, 
           address: address,
-          
           machine: machineName || 'Unknown',
           model: modelName || 'Unknown', 
           serialNo: serialNo,
-          
           department: department,
           installationDate: installDate,
-          
           serviceType: serviceType, 
           status: status === 'Closed' ? 'Resolved' : 'Open',
           resolutionNote: status === 'Closed' ? resolutionNote : '',
@@ -271,38 +424,50 @@ export default function AddServiceCallScreen() {
           imageUri: image,
           partsUsed: usedParts, 
           partsText: partsSummary,
-
-          senderId: user?.uid || user?.id || 'guest',
-          senderName: user?.name || 'Unknown', 
-          role: user?.role || 'Employee',
-          timestamp: Date.now(),
           location: locationData
       };
 
-      await addServiceCall(newCall); 
-      
       try {
-          await addDoc(collection(db, "notifications"), {
-              title: `Service Ticket #${newTicketId} 🛠️`,
-              message: `${user?.name} created a service call for ${org} (${status}).`,
-              to: "Admin",
-              route: "/service_call",
-              read: false,
-              createdAt: new Date().toISOString(),
-              type: "alert"
-          });
-      } catch (e) {
-          console.log("Notification Error:", e);
-      }
+          const res = await addSaaSData("service_calls", newCall);
+          
+          if (res.success) {
+              if (addNotification) {
+                  await addNotification({
+                      title: `Service Ticket #${newTicketId} 🛠️`,
+                      message: `${currentUser?.name} created a service call for ${org} (${status}).`,
+                      to: "Admin",
+                      route: "/service_call",
+                      type: "alert"
+                  });
+              }
 
-      if (params.activityId && updateActivityStatus) {await updateActivityStatus(params.activityId as string, 'Completed');}
-      
-      setIsSaving(false);
-      Alert.alert("Success", `Ticket ${newTicketId} Created & Admin Notified!`);
-      router.back();
+              if (params.activityId && updateActivityStatus) {
+                  await updateActivityStatus(params.activityId as string, 'Completed');
+              }
+              
+              setIsSaving(false);
+              
+              Alert.alert(
+                  "Success ✅", 
+                  `Ticket #${newTicketId} Created!\nShare PDF?`,
+                  [
+                      { text: "No", onPress: () => router.back(), style: 'cancel' },
+                      { text: "Yes, Share PDF", onPress: async () => { 
+                          await generateServicePDF({...newCall, senderName: currentUser?.name});
+                          router.back(); 
+                      }}
+                  ]
+              );
+          } else {
+              Alert.alert("Error", "Could not save service ticket.");
+              setIsSaving(false);
+          }
+      } catch (err) {
+          Alert.alert("Error", "Something went wrong.");
+          setIsSaving(false);
+      }
   };
 
-  // ... Parts & Camera
   const handleAddPart = (part: any) => {
       if (usedParts.find(p => p.id === part.id)) return Alert.alert("Already Added");
       setUsedParts([...usedParts, { ...part, usedQty: '1' }]);
@@ -319,7 +484,6 @@ export default function AddServiceCallScreen() {
   };
 
   return (
-    // 🔥 1. Added KeyboardAvoidingView
     <KeyboardAvoidingView 
       style={{ flex: 1 }} 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -331,10 +495,8 @@ export default function AddServiceCallScreen() {
           <View style={{width:24}} /> 
         </View>
 
-        {/* 🔥 2. Wrapped ScrollView correctly */}
         <ScrollView contentContainerStyle={{padding: 20, paddingBottom: 100}} keyboardShouldPersistTaps="handled">
             
-            {/* Status Toggle */}
             <View style={styles.statusToggleContainer}>
                 <Text style={styles.label}>Ticket Status:</Text>
                 <View style={styles.toggleWrapper}>
@@ -343,7 +505,6 @@ export default function AddServiceCallScreen() {
                 </View>
             </View>
 
-            {/* DATE */}
             <Text style={styles.label}>Call Date</Text>
             <TouchableOpacity style={styles.dropdown} onPress={() => setShowDatePicker(true)}>
                 <Text style={{color: '#333'}}>{formatDate(callDate)}</Text>
@@ -351,14 +512,12 @@ export default function AddServiceCallScreen() {
             </TouchableOpacity>
             {showDatePicker && <DateTimePicker value={callDate} mode="date" onChange={(e, d) => { setShowDatePicker(false); if(d) setCallDate(d); }} />}
 
-            {/* ORG */}
             <Text style={styles.label}>Organization *</Text>
             <TouchableOpacity style={[styles.dropdown, errors.org && styles.errorBorder]} onPress={() => openModal('Org')}>
                 <Text style={{color: org ? 'black' : 'gray'}}>{org || 'Select Organization'}</Text>
-                <Ionicons name="search" size={18} color="gray" />
+                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={18} color="gray" />}
             </TouchableOpacity>
 
-            {/* SERIAL DROPDOWN */}
             <Text style={styles.label}>Machine Serial No *</Text>
             <TouchableOpacity style={[styles.dropdown, errors.serial && styles.errorBorder]} onPress={() => {
                 if(!org) Alert.alert("Wait", "Please select Organization first.");
@@ -373,7 +532,6 @@ export default function AddServiceCallScreen() {
                 <Ionicons name="caret-down" size={18} color="gray" />
             </TouchableOpacity>
 
-            {/* MACHINE & MODEL */}
             <View style={styles.row}>
                 <View style={styles.col}>
                     <Text style={styles.label}>Machine Name</Text>
@@ -385,7 +543,6 @@ export default function AddServiceCallScreen() {
                 </View>
             </View>
 
-            {/* 🔥🔥 AUTO-FILL INFO BOX 🔥🔥 */}
             <View style={{backgroundColor:'#f0f4f8', padding:10, borderRadius:8, marginBottom:10, borderWidth:1, borderColor:'#dbeafe'}}>
                 <Text style={{fontWeight:'bold', color:'#3b5998', fontSize:12, marginBottom:5}}>ADDITIONAL INFO (Auto-Filled)</Text>
                 <View style={styles.row}>
@@ -414,7 +571,6 @@ export default function AddServiceCallScreen() {
                 <Ionicons name="caret-down" size={18} color="gray" />
             </TouchableOpacity>
 
-            {/* PROBLEM & IMAGE */}
             <Text style={styles.label}>Upload Photo</Text>
             <View style={styles.cameraContainer}>
                 <TouchableOpacity style={styles.cameraBtn} onPress={pickImage}>
@@ -427,7 +583,6 @@ export default function AddServiceCallScreen() {
             <Text style={styles.label}>Problem Reported *</Text>
             <TextInput style={[styles.inputGray, {height: 60}, errors.remark && styles.errorBorder]} multiline placeholder="Describe issue..." value={remark} onChangeText={setRemark} />
 
-            {/* PARTS */}
             <Text style={styles.sectionHeader}>Spare Parts</Text>
             <View style={styles.partsContainer}>
                 {usedParts.map((part, index) => (
@@ -460,7 +615,7 @@ export default function AddServiceCallScreen() {
             
         </ScrollView>
 
-        {/* --- MODALS (Search, New Machine, Parts) --- */}
+        {/* --- MODALS --- */}
         <Modal visible={modalVisible} transparent={true} animationType="fade">
           <View style={styles.modalOverlay}>
               <View style={styles.modalContent}>
@@ -519,8 +674,11 @@ export default function AddServiceCallScreen() {
                               )}
                           </TouchableOpacity>
                       )}
-                      ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>No matches found</Text>}
+                      ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>No Data Found</Text>}
                   />
+                  <TouchableOpacity style={styles.closeBtn} onPress={() => setModalVisible(false)}>
+                      <Text style={{color:'red', fontWeight:'bold'}}>Close</Text>
+                  </TouchableOpacity>
               </View>
           </View>
         </Modal>
@@ -552,7 +710,7 @@ export default function AddServiceCallScreen() {
                       renderItem={({item}) => (
                           <TouchableOpacity style={styles.partItem} onPress={() => handleAddPart(item)}>
                               <View><Text style={{fontWeight:'bold'}}>{item.partName}</Text><Text style={{fontSize:12, color:'gray'}}>PN: {item.partNo}</Text></View>
-                              <View style={{backgroundColor:'#e8f5e9', padding:5, borderRadius:4}}><Text style={{fontSize:11, color:'green'}}>Avail: {item.myStock}</Text></View>
+                              <View style={{backgroundColor:'#e8f5e9', padding:5, borderRadius:4}}><Text style={{fontSize:11, color:'green'}}>Avail: {item.myStock || 0}</Text></View>
                           </TouchableOpacity>
                       )}
                   />
@@ -597,10 +755,8 @@ const styles = StyleSheet.create({
   modalText: { fontSize: 16, color: '#333' },
   addNewItem: { flexDirection:'row', alignItems:'center', padding:15, backgroundColor:'#e8f5e9', borderRadius:8, marginBottom:10 },
   partItem: { flexDirection:'row', justifyContent:'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eee', alignItems:'center' },
-  closeBtn: { marginTop: 15, alignItems:'center', padding: 10 },
-  
-  // 🔥 NEW STYLES FOR LIST ITEM
-  iconBox: { width: 35, height: 35, borderRadius: 8, justifyContent:'center', alignItems:'center' },
+  closeBtn: { marginTop: 15, alignItems: 'center', padding: 10 },
+  iconBox: { width: 35, height: 35, borderRadius: 8, justifyContent:'center', alignItems:'center', backgroundColor:'#e3f2fd' },
   modalMainText: { fontWeight: 'bold', fontSize: 15, color: '#333' },
   modalSubText: { fontSize: 12, color: 'gray' }
 });

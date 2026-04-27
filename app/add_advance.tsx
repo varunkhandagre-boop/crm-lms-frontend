@@ -1,37 +1,39 @@
 import { Ionicons } from '@expo/vector-icons';
-import DateTimePicker from '@react-native-community/datetimepicker'; // 🔥 Golden Rule: Calendar
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
-import { useData } from './context/DataContext';
 
-// 🔥🔥 1. FIREBASE IMPORTS ADDED
-import { addDoc, collection } from 'firebase/firestore';
-import { db } from '../firebaseConfig'; // ⚠️ Path check karein
+// 🔥 SAAS IMPORTS (No direct Firebase DB imports needed for writing data)
+import { useSaaSDB } from '../hooks/useSaaSDB'; // Path check kar lijiye
+import { useData } from './context/DataContext';
 
 export default function AddAdvanceScreen() {
   const router = useRouter();
   
-  // 🔥 GET DATA & USER INFO
-  const { addAdvance, user } = useData();
+  // 🔥 1. Context se Current User & Notification Engine nikala
+  const { currentUser, addNotification } = useData();
+  
+  // 🔥 2. Naya SaaS Engine connect kiya
+  const { addSaaSData } = useSaaSDB();
 
   // STATES
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // 🔥 DATE PICKER STATE
+  // DATE PICKER STATE
   const [date, setDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
 
@@ -51,44 +53,38 @@ export default function AddAdvanceScreen() {
 
       setLoading(true);
       try {
+          // 🔥 3. CLEAN PAYLOAD: Engine will auto-add ID, CompanyID, SenderID & CreatedAt
           const newEntry = {
-              id: Date.now().toString(),
-              
-              date: formatDate(date), // Display Date
-              dateIso: date.toISOString().split('T')[0], // Sorting Date
-              
+              date: formatDate(date), 
+              dateIso: date.toISOString().split('T')[0], 
               amount: amount,
               reason: reason,
-              status: 'Pending', // Default Pending
-              
-              // SECURITY METADATA
-              senderId: user?.uid || 'guest',
-              senderName: user?.name || 'Unknown',
-              role: user?.role || 'Employee',
-              createdAt: new Date().toISOString()
+              status: 'Pending', 
+              role: currentUser?.role || 'Employee',
           };
 
-          await addAdvance(newEntry);
-          
-          // 🔥🔥 2. NOTIFICATION TRIGGER ADDED 🔥🔥
-          try {
-              await addDoc(collection(db, "notifications"), {
-                  title: "New Advance Request 💰",
-                  message: `${user?.name} requested ₹${amount} advance.`,
-                  to: "Admin",
-                  route: "/advance", // Click karne par Advance page khulega
-                  read: false,
-                  createdAt: new Date().toISOString(),
-                  type: "warning"
-              });
-          } catch (e) {
-              console.log("Notification Error:", e);
-          }
+          // 🔥 4. Save to Database via SaaS Hook
+          const result = await addSaaSData("advances", newEntry);
 
-          Alert.alert("Success", "Advance Request Sent & Admin Notified!");
-          router.back();
+          if (result.success) {
+              // 🔥 5. REAL PUSH NOTIFICATION
+              if (addNotification) {
+                  await addNotification({
+                      title: "New Advance Request 💰",
+                      message: `${currentUser?.name} requested ₹${amount} advance.`,
+                      to: "Accountant", // Aap isko "Admin" bhi rakh sakte hain
+                      route: "/advance", 
+                      type: "warning"
+                  });
+              }
+
+              Alert.alert("Success", "Advance Request Sent & Admin Notified!");
+              router.back();
+          } else {
+              Alert.alert("Error", "Could not submit request.");
+          }
       } catch (e) {
-          Alert.alert("Error", "Could not submit request.");
+          Alert.alert("Error", "Something went wrong.");
       } finally {
           setLoading(false);
       }
@@ -113,9 +109,10 @@ export default function AddAdvanceScreen() {
         <ScrollView 
             style={styles.contentContainer} 
             contentContainerStyle={{paddingBottom: 100}} 
+            keyboardShouldPersistTaps="handled"
         >
             
-            {/* 🔥 DATE PICKER */}
+            {/* DATE PICKER */}
             <Text style={styles.label}>Date Required</Text>
             <TouchableOpacity style={styles.inputBox} onPress={() => setShowDatePicker(true)}>
                 <Text style={{flex:1, color:'#333'}}>{formatDate(date)}</Text>
@@ -150,8 +147,12 @@ export default function AddAdvanceScreen() {
                 placeholder="Why do you need advance?"
             />
 
-            {/* Submit */}
-            <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={loading}>
+            {/* SUBMIT BUTTON WITH LOADER */}
+            <TouchableOpacity 
+                style={[styles.saveBtn, loading && { opacity: 0.6 }]} 
+                onPress={handleSave} 
+                disabled={loading}
+            >
                 {loading ? <ActivityIndicator color="white" /> : <Text style={styles.saveBtnText}>Submit Request</Text>}
             </TouchableOpacity>
 

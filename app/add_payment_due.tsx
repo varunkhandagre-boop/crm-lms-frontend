@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -16,223 +16,286 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+
+// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
-// 🔥🔥 1. FIREBASE IMPORTS ADDED
-import { addDoc, collection } from 'firebase/firestore';
-import { db } from '../firebaseConfig'; // ⚠️ Path check karein
-
-export default function AddPaymentDue() {
+export default function AddPaymentDueScreen() {
     const router = useRouter();
-    // ✅ Change 1: use 'addDue' instead of 'addWithMeta'
-    const { addDue, orgList, currentUser } = useData();
+    
+    // 🔥 1. Context se sirf user aur Notification engine
+    const { currentUser, addNotification } = useData();
+
+    // 🔥 2. Naya SaaS Engine
+    const { fetchSaaSData, addSaaSData } = useSaaSDB();
+
+    // 🔥 3. Lazy Loaded Organization List
+    const [orgList, setOrgList] = useState<any[]>([]);
+
+    // --- FORM STATES ---
+    const [selectedOrg, setSelectedOrg] = useState<any>(null);
+    const [billNo, setBillNo] = useState('');
+    const [amount, setAmount] = useState('');
+    const [notes, setNotes] = useState('');
+    
+    // BILL DATE STATES
+    const [billDate, setBillDate] = useState(new Date());
+    const [showBillDatePicker, setShowBillDatePicker] = useState(false);
+
+    // DUE DATE STATES
+    const [dueDate, setDueDate] = useState(new Date());
+    const [showDatePicker, setShowDatePicker] = useState(false);
 
     const [loading, setLoading] = useState(false);
-    const [selectedOrg, setSelectedOrg] = useState<any>(null);
-    const [showOrgModal, setShowOrgModal] = useState(false);
-    const [searchOrg, setSearchOrg] = useState('');
 
-    const [amount, setAmount] = useState('');
-    const [billNo, setBillNo] = useState('');
-    const [dueDate, setDueDate] = useState(new Date());
-    const [notes, setNotes] = useState('');
-    const [showPicker, setShowPicker] = useState(false);
+    // --- MODAL STATES FOR ORGANIZATION SEARCH ---
+    const [modalVisible, setModalVisible] = useState(false);
+    const [searchText, setSearchText] = useState('');
+    const [filteredOrgs, setFilteredOrgs] = useState<any[]>([]);
 
-    const handleSubmit = async () => {
-        if (!selectedOrg || !amount || !billNo) {
-            Alert.alert("Missing Fields", "Please Select Customer, Amount and Bill Number.");
-            return;
+    // 🔥 4. LOAD DATA ON MOUNT
+    useEffect(() => {
+        const loadData = async () => {
+            if (currentUser?.companyId) {
+                const orgs = await fetchSaaSData("organizations");
+                setOrgList(orgs);
+                setFilteredOrgs(orgs);
+            }
+        };
+        loadData();
+    }, [currentUser]);
+
+    const handleSearch = (text: string) => {
+        setSearchText(text);
+        if (text) {
+            const lowerText = text.toLowerCase();
+            const newData = orgList.filter((item: any) => {
+                const orgName = (item.orgName || item.name || '').toLowerCase();
+                const city = (item.city || '').toLowerCase();
+                return orgName.includes(lowerText) || city.includes(lowerText);
+            });
+            setFilteredOrgs(newData);
+        } else {
+            setFilteredOrgs(orgList);
         }
+    };
+
+    const handleSelectOrg = (org: any) => {
+        setSelectedOrg(org);
+        setModalVisible(false);
+        setSearchText('');
+    };
+
+    // 🔥 5. SAAS SAVE LOGIC
+    const handleSaveDue = async () => {
+        if (!selectedOrg) return Alert.alert("Missing", "Please select a Client/Organization.");
+        if (!amount || isNaN(Number(amount))) return Alert.alert("Missing", "Please enter a valid Amount.");
+        if (!billNo) return Alert.alert("Missing", "Please enter Bill No / Ref No.");
 
         setLoading(true);
+
+        const dueAmount = parseFloat(amount);
+        const formattedDueDate = dueDate.toLocaleDateString('en-GB'); 
+        const formattedBillDate = billDate.toLocaleDateString('en-GB'); 
+
+        // Generate Unique DUE ID
+        const uniqueDueId = `DUE-${Date.now().toString().slice(-6)}`;
+
+        // 🔥 CLEAN PAYLOAD: Engine injects senderId, senderName, companyId & createdAt
+        const newDue = {
+            orgId: selectedOrg.id,                     
+            orgName: selectedOrg.orgName || selectedOrg.name,
+            billNo: billNo,
+            billDate: formattedBillDate,               
+            amount: dueAmount,
+            balance: dueAmount,                        
+            dueDate: formattedDueDate,
+            date: formattedDueDate, // Fallback for older sorting                 
+            notes: notes,
+            status: 'Pending',
+            paymentStatus: 'Unpaid',
+            type: 'Manual',
+            orderId: uniqueDueId,
+            role: currentUser?.role || 'Employee'                             
+        };
+
         try {
-            // ✅ Change 2: Calling the simple addDue function
-            await addDue({
-                orgId: selectedOrg.id,
-                orgName: selectedOrg.name,
-                amount: parseFloat(amount),
-                billNo,
-                dueDate: dueDate.toISOString().split('T')[0],
-                notes,
-                status: 'Pending',
-                type: 'Due',
-                // Tracking who added it
-                addedByUid: currentUser?.uid || 'unknown',
-                addedByName: currentUser?.name || 'Admin'
-            });
-
-            // 🔥🔥 2. NOTIFICATION TRIGGER ADDED 🔥🔥
-            try {
-                await addDoc(collection(db, "notifications"), {
-                    title: "New Payment Due 💰",
-                    message: `${currentUser?.name} added a due of ₹${amount} for ${selectedOrg.name}.`,
-                    to: "Admin",
-                    route: "/payment_duelist",
-                    read: false,
-                    createdAt: new Date().toISOString(),
-                    type: "alert"
-                });
-            } catch (e) {
-                console.log("Notification Error:", e);
-            }
-
-            Alert.alert("Success", "Payment Due added & Admin Notified!");
-            router.back();
+            const result = await addSaaSData("payment_dues", newDue);
             
+            if (result.success) {
+                // 🔥 REAL PUSH NOTIFICATION
+                if (addNotification) {
+                    await addNotification({
+                        title: "Manual Due Added 📝",
+                        message: `₹${dueAmount} due added for ${newDue.orgName} by ${currentUser?.name}.`,
+                        to: "Accountant", // Admin ya Accountant ko bhejein
+                        route: "/payment_duelist",
+                        type: "warning"
+                    });
+                }
+                Alert.alert("Success", `New Due Added Successfully! ID: ${uniqueDueId}`);
+                router.back();
+            } else {
+                Alert.alert("Error", "Could not save due entry.");
+            }
         } catch (error: any) {
-            // ✅ Change 3: Better Error Message
-            console.log("Submit Error:", error);
-            Alert.alert("Error", "Failed: " + (error.message || "Unknown Error"));
+            Alert.alert("Error", "Something went wrong.");
         } finally {
             setLoading(false);
         }
     };
 
-    const onChangeDate = (event: any, selectedDate?: Date) => {
-        if (Platform.OS === 'android') {
-            setShowPicker(false);
-        }
-        if (selectedDate) {
-            setDueDate(selectedDate);
-        }
-    };
-
-    const filteredOrgs = orgList.filter((o:any) => o.name.toLowerCase().includes(searchOrg.toLowerCase()));
-
     return (
         <View style={styles.container}>
+            {/* HEADER */}
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()}>
+                <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
                     <Ionicons name="arrow-back" size={24} color="#333" />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Add New Payment Due</Text>
+                <Text style={styles.headerTitle}>Add Manual Due</Text>
                 <View style={{ width: 24 }} />
             </View>
 
-            {/* 🔥 Added KeyboardAvoidingView wrapper */}
-            <KeyboardAvoidingView 
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
-                style={{flex: 1}}
-            >
-                <ScrollView 
-                    contentContainerStyle={styles.scrollContainer} 
-                    showsVerticalScrollIndicator={false}
-                    keyboardShouldPersistTaps="handled"
-                >
-                    <View style={styles.formCard}>
-                        
-                        <Text style={styles.label}>Customer / Organization Name *</Text>
-                        <TouchableOpacity style={styles.selector} onPress={() => setShowOrgModal(true)}>
-                            <Text style={[styles.selectorValue, !selectedOrg && {color:'#999'}]}>
-                                {selectedOrg ? selectedOrg.name : "Select Customer..."}
+            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+                <ScrollView contentContainerStyle={styles.formContainer} keyboardShouldPersistTaps="handled">
+
+                    {/* 1. SELECT ORGANIZATION */}
+                    <Text style={styles.label}>Select Client / Organization *</Text>
+                    <TouchableOpacity style={styles.dropdown} onPress={() => setModalVisible(true)}>
+                        <View>
+                            <Text style={{ fontSize: 16, fontWeight: selectedOrg ? 'bold' : 'normal', color: selectedOrg ? '#333' : 'gray' }}>
+                                {selectedOrg ? (selectedOrg.orgName || selectedOrg.name) : "Tap to select Client"}
                             </Text>
-                            <Ionicons name="caret-down" size={20} color="#3b5998" />
-                        </TouchableOpacity>
+                            {selectedOrg?.city ? <Text style={{ fontSize: 12, color: 'gray', marginTop: 2 }}>📍 {selectedOrg.city}</Text> : null}
+                        </View>
+                        <Ionicons name="search" size={20} color="#3b5998" />
+                    </TouchableOpacity>
 
-                        <Text style={styles.label}>Pending Amount (₹) *</Text>
-                        <TextInput 
-                            style={styles.input} 
-                            placeholder="0.00" 
-                            keyboardType="numeric"
-                            value={amount}
-                            onChangeText={setAmount}
+                    {/* 2. BILL / REF NUMBER */}
+                    <Text style={styles.label}>Bill No / Invoice No *</Text>
+                    <TextInput 
+                        style={styles.input}
+                        placeholder="e.g. INV-2024-001"
+                        value={billNo}
+                        onChangeText={setBillNo}
+                    />
+
+                    {/* 3. BILL DATE */}
+                    <Text style={styles.label}>Bill Date (Invoice Date) *</Text>
+                    <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowBillDatePicker(true)}>
+                        <Ionicons name="document-text-outline" size={20} color="#e67e22" />
+                        <Text style={styles.dateText}>{billDate.toLocaleDateString('en-GB')}</Text>
+                    </TouchableOpacity>
+                    {showBillDatePicker && (
+                        <DateTimePicker
+                            value={billDate}
+                            mode="date"
+                            display="default"
+                            onChange={(event, selectedDate) => {
+                                setShowBillDatePicker(false);
+                                if (selectedDate) setBillDate(selectedDate);
+                            }}
                         />
+                    )}
 
-                        <Text style={styles.label}>Invoice / Bill Number *</Text>
-                        <TextInput 
-                            style={styles.input} 
-                            placeholder="INV-2025-001" 
-                            value={billNo}
-                            onChangeText={setBillNo}
+                    {/* 4. AMOUNT */}
+                    <Text style={styles.label}>Due Amount (₹) *</Text>
+                    <TextInput 
+                        style={styles.inputAmount}
+                        placeholder="0.00"
+                        keyboardType="numeric"
+                        value={amount}
+                        onChangeText={setAmount}
+                    />
+
+                    {/* 5. DUE DATE */}
+                    <Text style={styles.label}>Payment Due Date *</Text>
+                    <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowDatePicker(true)}>
+                        <Ionicons name="calendar-outline" size={20} color="#3b5998" />
+                        <Text style={styles.dateText}>{dueDate.toLocaleDateString('en-GB')}</Text>
+                    </TouchableOpacity>
+                    {showDatePicker && (
+                        <DateTimePicker
+                            value={dueDate}
+                            mode="date"
+                            display="default"
+                            onChange={(event, selectedDate) => {
+                                setShowDatePicker(false);
+                                if (selectedDate) setDueDate(selectedDate);
+                            }}
                         />
+                    )}
 
-                        <Text style={styles.label}>Due Date *</Text>
-                        <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowPicker(true)}>
-                            <Text style={styles.dateText}>{dueDate.toDateString()}</Text>
-                            <Ionicons name="calendar-outline" size={20} color="#3b5998" />
-                        </TouchableOpacity>
+                    {/* 6. NOTES */}
+                    <Text style={styles.label}>Remarks / Notes (Optional)</Text>
+                    <TextInput 
+                        style={[styles.input, { height: 80, textAlignVertical: 'top' }]}
+                        placeholder="Enter any specific details about this pending payment..."
+                        multiline
+                        value={notes}
+                        onChangeText={setNotes}
+                    />
 
-                        {showPicker && Platform.OS === 'ios' && (
-                            <DateTimePicker
-                                value={dueDate}
-                                mode="date"
-                                display="spinner"
-                                onChange={onChangeDate}
-                                style={{height: 120, marginTop: 10}}
-                            />
+                    {/* SUBMIT BUTTON */}
+                    <TouchableOpacity 
+                        style={[styles.submitBtn, loading && { opacity: 0.7 }]} 
+                        onPress={handleSaveDue}
+                        disabled={loading}
+                    >
+                        {loading ? (
+                            <ActivityIndicator color="white" />
+                        ) : (
+                            <>
+                                <Ionicons name="save-outline" size={20} color="white" style={{marginRight: 8}} />
+                                <Text style={styles.submitBtnText}>Save Due Entry</Text>
+                            </>
                         )}
+                    </TouchableOpacity>
 
-                        <Text style={styles.label}>Additional Notes (Optional)</Text>
-                        <TextInput 
-                            style={[styles.input, styles.textArea]} 
-                            placeholder="Any specific instruction..." 
-                            multiline
-                            numberOfLines={4}
-                            value={notes}
-                            onChangeText={setNotes}
-                        />
-
-                        <TouchableOpacity 
-                            style={[styles.submitBtn, loading && { backgroundColor: '#ccc' }]} 
-                            onPress={handleSubmit}
-                            disabled={loading}
-                        >
-                            {loading ? (
-                                <ActivityIndicator color="white" />
-                            ) : (
-                                <>
-                                    <Ionicons name="save-outline" size={20} color="white" style={{ marginRight: 10 }} />
-                                    <Text style={styles.submitBtnText}>Save Payment Due</Text>
-                                </>
-                            )}
-                        </TouchableOpacity>
-
-                    </View>
-                    <View style={{height: 50}} />
                 </ScrollView>
             </KeyboardAvoidingView>
 
-            {showPicker && Platform.OS === 'android' && (
-                <DateTimePicker
-                    value={dueDate}
-                    mode="date"
-                    display="default"
-                    onChange={onChangeDate}
-                />
-            )}
-
-            <Modal visible={showOrgModal} animationType="slide">
+            {/* ========================================== */}
+            {/* 🔥 ORGANIZATION SEARCH MODAL 🔥 */}
+            {/* ========================================== */}
+            <Modal visible={modalVisible} animationType="slide">
                 <View style={styles.modalContainer}>
                     <View style={styles.modalHeader}>
-                        <Text style={styles.modalTitle}>Select Customer</Text>
-                        <TouchableOpacity onPress={() => setShowOrgModal(false)}>
-                            <Ionicons name="close-circle" size={30} color="#d32f2f"/>
+                        <TouchableOpacity onPress={() => setModalVisible(false)}>
+                            <Ionicons name="arrow-back" size={24} color="#333" />
                         </TouchableOpacity>
+                        <TextInput 
+                            style={styles.searchInput} 
+                            placeholder="Search Hospital/Client..." 
+                            value={searchText}
+                            onChangeText={handleSearch}
+                            autoFocus
+                        />
+                        {searchText.length > 0 && (
+                            <TouchableOpacity onPress={() => handleSearch('')}>
+                                <Ionicons name="close-circle" size={20} color="gray" />
+                            </TouchableOpacity>
+                        )}
                     </View>
                     
-                    <View style={styles.searchBox}>
-                        <Ionicons name="search" size={20} color="gray" />
-                        <TextInput 
-                            style={styles.modalSearchInput} 
-                            placeholder="Search Customer..." 
-                            value={searchOrg} 
-                            onChangeText={setSearchOrg} 
-                            autoFocus 
-                        />
-                    </View>
-
-                    <FlatList
+                    <FlatList 
                         data={filteredOrgs}
                         keyExtractor={item => item.id}
-                        contentContainerStyle={{paddingBottom: 50}}
+                        contentContainerStyle={{ paddingBottom: 20 }}
                         renderItem={({item}) => (
-                            <TouchableOpacity style={styles.orgItem} onPress={() => { setSelectedOrg(item); setShowOrgModal(false); }}>
-                                <Text style={styles.orgName}>{item.name}</Text>
-                                <Text style={styles.orgCity}>{item.city}</Text>
+                            <TouchableOpacity style={styles.orgItem} onPress={() => handleSelectOrg(item)}>
+                                <View style={styles.orgIcon}>
+                                    <Ionicons name="business" size={20} color="#3b5998" />
+                                </View>
+                                <View style={{flex: 1}}>
+                                    <Text style={styles.orgName}>{item.orgName || item.name}</Text>
+                                    <Text style={styles.orgCity}>{item.city || 'No City'} {item.contactPerson ? `• ${item.contactPerson}` : ''}</Text>
+                                </View>
                             </TouchableOpacity>
                         )}
                         ListEmptyComponent={
-                            <Text style={{textAlign:'center', marginTop:20, color:'gray'}}>No customers found.</Text>
+                            <Text style={{textAlign:'center', marginTop:30, color:'gray'}}>No clients found.</Text>
                         }
                     />
                 </View>
@@ -243,86 +306,31 @@ export default function AddPaymentDue() {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#f8f9fa' },
-    header: { 
-        flexDirection: 'row', 
-        justifyContent: 'space-between', 
-        padding: 15, 
-        paddingTop: 50, 
-        backgroundColor: 'white', 
-        elevation: 2, 
-        alignItems: 'center' 
-    },
+    container: { flex: 1, backgroundColor: '#f4f6f8' },
+    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 4, alignItems:'center' },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
-    scrollContainer: { padding: 20 },
-    formCard: { 
-        backgroundColor: 'white', 
-        padding: 20, 
-        borderRadius: 15, 
-        elevation: 3, 
-        shadowColor: '#000', 
-        shadowOffset: { width: 0, height: 2 }, 
-        shadowOpacity: 0.1, 
-        shadowRadius: 4 
-    },
-    label: { fontSize: 13, fontWeight: 'bold', color: '#555', marginBottom: 8, marginTop: 10 },
-    input: { 
-        backgroundColor: '#f9f9f9', 
-        borderWidth: 1, 
-        borderColor: '#eee', 
-        borderRadius: 10, 
-        padding: 12, 
-        fontSize: 15, 
-        color: '#333' 
-    },
-    selector: { 
-        backgroundColor: '#f0f4ff', 
-        borderWidth: 1, 
-        borderColor: '#d1d9ff', 
-        borderRadius: 10, 
-        padding: 12, 
-        flexDirection: 'row', 
-        justifyContent: 'space-between', 
-        alignItems: 'center' 
-    },
-    selectorValue: { fontSize: 15, fontWeight: 'bold', color: '#3b5998' },
-    textArea: { height: 100, textAlignVertical: 'top' },
-    datePickerBtn: { 
-        flexDirection: 'row', 
-        justifyContent: 'space-between', 
-        alignItems: 'center', 
-        backgroundColor: '#f9f9f9', 
-        borderWidth: 1, 
-        borderColor: '#eee', 
-        borderRadius: 10, 
-        padding: 12 
-    },
-    dateText: { fontSize: 15, color: '#333' },
-    submitBtn: { 
-        backgroundColor: '#3b5998', 
-        flexDirection: 'row', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        padding: 15, 
-        borderRadius: 12, 
-        marginTop: 30, 
-        elevation: 2 
-    },
+    backBtn: { paddingRight: 10 },
+    
+    formContainer: { padding: 20, paddingBottom: 100 },
+    label: { fontSize: 13, fontWeight: 'bold', color: '#555', marginTop: 15, marginBottom: 5 },
+    
+    input: { backgroundColor: 'white', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 12, fontSize: 15, color: '#333' },
+    inputAmount: { backgroundColor: '#fff8e1', borderWidth: 1, borderColor: '#ffc107', borderRadius: 8, padding: 12, fontSize: 18, fontWeight: 'bold', color: '#d32f2f' },
+    
+    dropdown: { backgroundColor: '#e3f2fd', borderWidth: 1, borderColor: '#90caf9', borderRadius: 8, padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    
+    datePickerBtn: { backgroundColor: 'white', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 12, flexDirection: 'row', alignItems: 'center' },
+    dateText: { fontSize: 15, color: '#333', marginLeft: 10, fontWeight: 'bold' },
+    
+    submitBtn: { backgroundColor: '#d32f2f', padding: 15, borderRadius: 10, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 30, elevation: 3 },
     submitBtnText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
-    modalContainer: { flex: 1, backgroundColor: 'white', padding: 20, paddingTop: 50 },
-    modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-    modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#333' },
-    searchBox: { 
-        flexDirection:'row', 
-        alignItems:'center', 
-        backgroundColor: '#f0f2f5', 
-        paddingHorizontal: 12, 
-        borderRadius: 10, 
-        marginBottom: 20,
-        height: 50
-    },
-    modalSearchInput: { flex: 1, marginLeft: 10, fontSize: 16 },
-    orgItem: { padding: 15, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
-    orgName: { fontWeight: 'bold', fontSize: 16, color: '#333' },
-    orgCity: { color: 'gray', fontSize: 12 }
+
+    // Modal Styles
+    modalContainer: { flex: 1, backgroundColor: 'white', paddingTop: 40 },
+    modalHeader: { flexDirection: 'row', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#eee', backgroundColor:'#f9f9f9' },
+    searchInput: { flex: 1, marginLeft: 10, fontSize: 16, backgroundColor: '#fff', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#ddd' },
+    orgItem: { flexDirection: 'row', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+    orgIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#e3f2fd', justifyContent: 'center', alignItems: 'center', marginRight: 15 },
+    orgName: { fontSize: 16, fontWeight: 'bold', color: '#333' },
+    orgCity: { fontSize: 12, color: 'gray', marginTop: 2 }
 });

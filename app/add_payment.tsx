@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -17,10 +16,11 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
-// PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -29,15 +29,22 @@ export default function AddPaymentScreen() {
     const router = useRouter();
     const params = useLocalSearchParams(); 
     
-    // 🔥 UPDATED: Added 'companyProfile' here
-    const { addPayment, orgList, currentUser, paymentList, orderList = [], companyProfile } = useData();
+    // 🔥 1. Context se sirf basic User/Notification engine
+    const { currentUser, companyProfile, addNotification } = useData();
+
+    // 🔥 2. SaaS Engine connect kiya
+    const { fetchSaaSData, addSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+
+    // 🔥 3. Lazy Loaded States
+    const [orgList, setOrgList] = useState<any[]>([]);
+    const [orderList, setOrderList] = useState<any[]>([]);
+    const [dueList, setDueList] = useState<any[]>([]);
+    const [paymentList, setPaymentList] = useState<any[]>([]);
 
     const [loading, setLoading] = useState(false);
     
-    // FORM STATES
     const [date, setDate] = useState(new Date());
     const [pdcDate, setPdcDate] = useState(new Date());
-    
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showPdcDatePicker, setShowPdcDatePicker] = useState(false);
 
@@ -45,7 +52,6 @@ export default function AddPaymentScreen() {
     const [showOrgModal, setShowOrgModal] = useState(false);
     const [searchOrg, setSearchOrg] = useState('');
 
-    // ORDER SELECTION STATES
     const [pendingOrders, setPendingOrders] = useState<any[]>([]);
     const [selectedOrder, setSelectedOrder] = useState<any>(null);
     const [showOrderModal, setShowOrderModal] = useState(false);
@@ -56,13 +62,33 @@ export default function AddPaymentScreen() {
     const [mode, setMode] = useState('Cash'); 
     const [bankName, setBankName] = useState('');
     const [refNumber, setRefNumber] = useState(''); 
-    
     const [billRef, setBillRef] = useState('');
     const [notes, setNotes] = useState('');
 
-    // --- EFFECT: AUTO-FILL FROM DUE LIST ---
+    const [filteredOrgs, setFilteredOrgs] = useState<any[]>([]);
+
+    // 🔥 4. LOAD DATA ON MOUNT
     useEffect(() => {
-        if (params.orgName) {
+        const loadData = async () => {
+            if (currentUser?.companyId) {
+                const [orgs, orders, dues, payments] = await Promise.all([
+                    fetchSaaSData("organizations"),
+                    fetchSaaSData("orders"),
+                    fetchSaaSData("payment_dues"),
+                    fetchSaaSData("payment_collections") // Used for generating Receipt No
+                ]);
+                setOrgList(orgs);
+                setOrderList(orders);
+                setDueList(dues);
+                setPaymentList(payments);
+                setFilteredOrgs(orgs);
+            }
+        };
+        loadData();
+    }, [currentUser]);
+
+    useEffect(() => {
+        if (params.orgName && orgList.length > 0) {
             const org = orgList.find((o: any) => o.name === params.orgName || o.orgName === params.orgName);
             if (org) setSelectedOrg(org);
             else setSelectedOrg({ name: params.orgName });
@@ -71,62 +97,114 @@ export default function AddPaymentScreen() {
                 setTotalDue(params.amount as string);
                 setAmount(params.amount as string); 
             }
-            
             if (params.billNo) setBillRef(params.billNo as string);
 
-            if (params.linkedId && params.source === 'orders') {
+            if (params.linkedId && orderList.length > 0) {
                 const linkedOrder = orderList.find((o:any) => o.id === params.linkedId);
+                
                 if (linkedOrder) {
-                    setSelectedOrder(linkedOrder);
+                    setSelectedOrder({ ...linkedOrder, collectionName: 'orders' });
                 } else {
-                    setSelectedOrder({ id: params.linkedId, orderId: 'Linked Order', amount: params.amount });
+                    const isManual = params.source === 'payment_dues';
+                    setSelectedOrder({ 
+                        id: params.linkedId, 
+                        orderId: isManual ? 'Manual Due' : 'Linked Order', 
+                        amount: params.amount,
+                        collectionName: params.source || 'payment_dues'
+                    });
                 }
             }
         }
     }, [params, orgList, orderList]);
-    // --- EFFECT: Fetch Pending Orders when Org Changes ---
-    useEffect(() => {
-        if (selectedOrg) {
-            const orgName = selectedOrg.name || selectedOrg.orgName;
-            
-            // 1. Dropdown List ke liye Orders Filter karo
-            const orders = orderList.filter((o: any) => {
-                const isOrgMatch = o.hospitalName === orgName;
-                const isApproved = o.status === 'Approved' || o.status === 'Completed' || o.status === 'Dispatched';
-                const hasBalance = (o.balance !== undefined ? o.balance > 0 : true);
-                const isNotPaid = o.paymentStatus !== 'Paid';
 
-                return isOrgMatch && isApproved && isNotPaid && hasBalance;
+    // ==========================================
+    // 🔥 BULLETPROOF ORDER & MANUAL DUE MATCHER
+    // ==========================================
+    useEffect(() => {
+        if (selectedOrg && orderList.length > 0 && dueList.length > 0) {
+            const targetOrgName = (selectedOrg.name || selectedOrg.orgName || "").trim().toLowerCase();
+            
+            // 1. Get SYSTEM ORDERS
+            const validOrders = orderList.filter((o: any) => {
+                const isIdMatch = o.orgId && selectedOrg.id && o.orgId === selectedOrg.id;
+                const isNameMatch = ((o.hospitalName || "").trim().toLowerCase() === targetOrgName) || 
+                                    ((o.orgName || "").trim().toLowerCase() === targetOrgName);
+                if (!isIdMatch && !isNameMatch) return false;
+
+                const bal = o.balance !== undefined ? parseFloat(o.balance) : parseFloat(o.amount || '0');
+                if (bal <= 0 || o.paymentStatus === 'Paid') return false;
+                return true;
+            }).map((o:any) => ({...o, collectionName: 'orders'}));
+
+            // 2. Get MANUAL DUES
+            const validManualDues = dueList.filter((d: any) => {
+                if (d.type !== 'Manual') return false;
+
+                const isIdMatch = d.orgId && selectedOrg.id && d.orgId === selectedOrg.id;
+                const isNameMatch = ((d.hospitalName || "").trim().toLowerCase() === targetOrgName) || 
+                                    ((d.orgName || "").trim().toLowerCase() === targetOrgName);
+                if (!isIdMatch && !isNameMatch) return false;
+
+                const bal = d.balance !== undefined ? parseFloat(d.balance) : parseFloat(d.amount || '0');
+                if (bal <= 0 || d.paymentStatus === 'Paid') return false;
+                return true;
+            }).map((d:any) => ({...d, collectionName: 'payment_dues'})); 
+
+            // 3. MERGE BOTH LISTS
+            const combinedList = [...validOrders, ...validManualDues];
+
+            combinedList.sort((a: any, b: any) => {
+                const idA = a.orderId || '';
+                const idB = b.orderId || '';
+                return idB.localeCompare(idA);
             });
 
-            setPendingOrders(orders);
+            setPendingOrders(combinedList);
             
-            // 2. Agar Specific Link nahi hai, to Total Due Auto-Calculate karo
             if (!params.linkedId) {
-                setSelectedOrder(null);
-                
-                // 🔥 FIXED CODE HERE (Types Added)
-                const totalOrderDue = orderList
-                    .filter((o: any) => 
-                        (o.hospitalName === orgName || o.orgId === selectedOrg.id) && 
-                        (o.balance === undefined || o.balance > 0) &&
-                        (o.status === 'Approved' || o.status === 'Completed' || o.status === 'Dispatched')
-                    )
-                    .reduce((sum: number, o: any) => {
-                        // Agar balance hai to wo lo, nahi to pura amount
+                if (!selectedOrder || selectedOrder.orderId === 'General') {
+                    const totalOrderDue = combinedList.reduce((sum: number, o: any) => {
                         const val = o.balance !== undefined ? o.balance : o.amount;
                         return sum + parseFloat(val || 0);
                     }, 0);
-
-                setTotalDue(String(totalOrderDue));
+                    setTotalDue(totalOrderDue > 0 ? String(totalOrderDue) : '');
+                }
             }
+        } else {
+            setPendingOrders([]);
+            setTotalDue('');
         }
-    }, [selectedOrg, orderList]);
+    }, [selectedOrg, orderList, dueList]);
 
+    const handleSearch = (text: string) => {
+        setSearchOrg(text);
+        if (text) {
+            const lowerText = text.toLowerCase();
+            const newData = orgList.filter((item: any) => {
+                const orgName = (item.orgName || item.name || '').toLowerCase();
+                const city = (item.city || '').toLowerCase();
+                return orgName.includes(lowerText) || city.includes(lowerText);
+            });
+            setFilteredOrgs(newData);
+        } else {
+            setFilteredOrgs(orgList);
+        }
+    };
+
+    const handleSelectOrg = (org: any) => {
+        setSelectedOrg(org);
+        setShowOrgModal(false); 
+        setSearchOrg('');       
+    };
+    
     const handleSelectOrder = (order: any) => {
         if (order === 'General') {
             setSelectedOrder(null);
-            setTotalDue(''); 
+            const totalOrderDue = pendingOrders.reduce((sum: number, o: any) => {
+                const val = o.balance !== undefined ? o.balance : o.amount;
+                return sum + parseFloat(val || 0);
+            }, 0);
+            setTotalDue(totalOrderDue > 0 ? String(totalOrderDue) : ''); 
         } else {
             setSelectedOrder(order);
             const dueAmt = order.balance !== undefined ? order.balance : order.amount;
@@ -157,17 +235,15 @@ export default function AddPaymentScreen() {
         return `${day}/${month}/${year}`;
     };
 
-    // 🔥🔥 UPDATED DYNAMIC PDF GENERATOR 🔥🔥
+    // 🔥 RECEIPT GENERATOR (Untouched)
     const generateAndShareReceipt = async (paymentData: any) => {
         try {
-            // Customer Address
             let orgAddr = paymentData.orgAddress || '';
             if (!orgAddr) {
                 const org = orgList.find((o: any) => o.name === paymentData.orgName || o.orgName === paymentData.orgName);
                 if (org) orgAddr = org.address || org.city || '';
             }
 
-            // Payment Mode Table HTML
             let paymentDetailsHTML = `<div><b>${paymentData.mode}</b></div>`;
             if (paymentData.mode !== 'Cash') {
                 paymentDetailsHTML += `
@@ -179,24 +255,9 @@ export default function AddPaymentScreen() {
                 }
             }
 
-            // --- 1. Dynamic Logo Logic ---
-            const logoHTML = companyProfile?.logoUrl 
-                ? `<img src="${companyProfile.logoUrl}" style="height: 60px; margin-bottom: 10px;" />` 
-                : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
-
-            // --- 2. Dynamic Signature Logic ---
-            const signatureHTML = companyProfile?.signatureUrl 
-                ? `<img src="${companyProfile.signatureUrl}" style="height: 50px; margin-top: 10px;" />` 
-                : `<div style="font-weight: bold; margin-top: 30px;">Authorized Signatory</div>`;
-
-            // --- 3. Dynamic Bank Footer (Our Company Bank) ---
-            const companyBankHTML = companyProfile?.bankDetails1?.accountNo 
-                ? `<div style="margin-top: 20px; font-size: 10px; border: 1px dashed #ccc; padding: 10px; background:#f5f5f5;">
-                    <b>Our Bank Details:</b> ${companyProfile.bankDetails1.bankName} | 
-                    A/C: ${companyProfile.bankDetails1.accountNo} | 
-                    IFSC: ${companyProfile.bankDetails1.ifsc}
-                   </div>` 
-                : '';
+            const logoHTML = companyProfile?.logoUrl ? `<img src="${companyProfile.logoUrl}" style="height: 60px; margin-bottom: 10px;" />` : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
+            const signatureHTML = companyProfile?.signatureUrl ? `<img src="${companyProfile.signatureUrl}" style="height: 50px; margin-top: 10px;" />` : `<div style="font-weight: bold; margin-top: 30px;">Authorized Signatory</div>`;
+            const companyBankHTML = companyProfile?.bankDetails1?.accountNo ? `<div style="margin-top: 20px; font-size: 10px; border: 1px dashed #ccc; padding: 10px; background:#f5f5f5;"><b>Our Bank Details:</b> ${companyProfile.bankDetails1.bankName} | A/C: ${companyProfile.bankDetails1.accountNo} | IFSC: ${companyProfile.bankDetails1.ifsc}</div>` : '';
 
             const htmlContent = `
             <html>
@@ -215,22 +276,15 @@ export default function AddPaymentScreen() {
                   .amount-box { display: inline-block; border: 2px solid #000; padding: 8px 25px; font-weight: bold; font-size: 18px; }
                   .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; }
                   .sign-box { text-align: center; }
-                  .sign-line { border-top: 1px solid #000; width: 150px; margin-bottom: 5px; }
                 </style>
               </head>
               <body>
                 <div class="header">
                   ${logoHTML}
                   ${companyProfile?.logoUrl ? `<div class="title">${companyProfile.companyName}</div>` : ''}
-                  
-                  <div class="sub-title">${companyProfile?.address}</div>
-<div class="sub-title">
-    Phone: ${companyProfile?.contactPhone || companyProfile?.phone} | 
-    Email: ${companyProfile?.contactEmail || companyProfile?.email || '-'}
-</div>
-<div class="sub-title">
-    ${companyProfile?.gstNumber ? `GSTIN: ${companyProfile.gstNumber}` : ''}
-</div>
+                  <div class="sub-title">${companyProfile?.address || ''}</div>
+                  <div class="sub-title">Phone: ${companyProfile?.contactPhone || companyProfile?.phone || '-'} | Email: ${companyProfile?.contactEmail || companyProfile?.email || companyProfile?.companyEmail || '-'}</div>
+                  <div class="sub-title">${companyProfile?.gstNumber ? `GSTIN: ${companyProfile.gstNumber}` : ''}</div>
                 </div>
 
                 <h3 style="text-align: center; text-decoration: underline; margin-bottom: 20px;">PAYMENT RECEIPT</h3>
@@ -252,34 +306,21 @@ export default function AddPaymentScreen() {
                   </p>
                   <table class="split-table">
                     <tr>
-                      <td>
-                          <span class="label" style="text-decoration: underline;">Payment Mode Details:</span><br>
-                          ${paymentDetailsHTML}
-                      </td>
-                      <td style="padding-left: 20px;">
-                          <span class="label" style="text-decoration: underline;">Against Bill / Invoice No:</span><br>
-                          <span style="font-size: 15px; font-weight:500;">${paymentData.billRef || 'On Account'}</span>
-                      </td>
+                      <td><span class="label" style="text-decoration: underline;">Payment Mode:</span><br>${paymentDetailsHTML}</td>
+                      <td style="padding-left: 20px;"><span class="label" style="text-decoration: underline;">Against:</span><br><span style="font-size: 15px; font-weight:500;">${paymentData.billRef || paymentData.orderRef || 'On Account'}</span></td>
                     </tr>
                   </table>
                 </div>
-
                 <div class="amount-wrapper">
                     <div style="font-weight:bold; margin-bottom:5px;">Total Payment Received</div>
                     <div class="amount-box">₹ ${paymentData.amount}/-</div>
                 </div>
-
                 ${companyBankHTML}
-
                 <div class="footer">
-                  <div style="font-size:10px; max-width:250px; color:#333;">
-                    *Subject to realisation of Cheque/DD.<br>
-                    *This is a computer generated receipt.
-                  </div>
+                  <div style="font-size:10px; max-width:250px; color:#333;">*Computer Generated Receipt.</div>
                   <div class="sign-box">
                     <div style="margin-bottom: 10px; font-size:12px;">For, ${companyProfile?.companyName}</div>
                     ${signatureHTML}
-                    ${!companyProfile?.signatureUrl ? '<div class="sign-line"></div><div style="font-weight: bold;">Accountant Sign</div>' : ''}
                   </div>
                 </div>
               </body>
@@ -309,35 +350,47 @@ export default function AddPaymentScreen() {
 
     const remainingAmount = getRemainingBalance();
 
+    // 🔥 6. SAAS SAVE & SYNC LOGIC
     const handleSubmit = async () => {
         if (!selectedOrg || !amount) {
             Alert.alert("Missing Fields", "Please Select Customer and Amount.");
             return;
         }
+        
         setLoading(true);
         
         const finalOrgName = selectedOrg.name || selectedOrg.orgName || "";
         const finalOrgAddress = selectedOrg.address || selectedOrg.city || ""; 
 
-        const currentYear = new Date().getFullYear();
-        const count = paymentList ? paymentList.filter((p: any) => p.date && p.date.startsWith(String(currentYear))).length + 1 : 1;
-        
-        // 🔥 SHORT NAME FROM PROFILE (Prefix)
-        const prefix = companyProfile?.shortName ? companyProfile.shortName.toUpperCase() : 'LMS';
-        const receiptNo = `${prefix}-PR-${currentYear}-${String(count).padStart(3, '0')}`;
+        // SMART FINANCIAL YEAR LOGIC
+        const targetMonth = date.getMonth(); 
+        const targetYear = date.getFullYear();
+        const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+        const fyString = `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`; 
+        const fyStartDateStr = `${fyStartYear}-04-01`;
+        const fyEndDateStr = `${fyStartYear + 1}-03-31`;
 
+        const count = paymentList ? paymentList.filter((p: any) => {
+            const pDate = p.date || (p.createdAt ? p.createdAt.split('T')[0] : '');
+            if (!pDate) return false;
+            return pDate >= fyStartDateStr && pDate <= fyEndDateStr;
+        }).length + 1 : 1;
+
+        const prefix = companyProfile?.shortName ? companyProfile.shortName.toUpperCase() : 'LMS';
+        const receiptNo = `${prefix}-PR-${fyString}-${String(count).padStart(3, '0')}`;
+
+        const linkedOrderId = selectedOrder ? selectedOrder.id : null;
+        const linkedOrderRef = selectedOrder ? (selectedOrder.orderId || selectedOrder.billNo) : null;
+
+        // Clean payload for SaaS Engine
         const paymentData = {
             date: date.toISOString().split('T')[0],
-            orgId: selectedOrg.id,
+            orgId: selectedOrg.id || '',
             orgName: finalOrgName,
             orgAddress: finalOrgAddress,
-            
-            // Link Data
-            orderId: selectedOrder ? selectedOrder.id : null,
-            orderRef: selectedOrder ? selectedOrder.orderId : null,
-            
+            orderId: linkedOrderId,
+            orderRef: linkedOrderRef,
             billRef: billRef, 
-
             totalDueSnapshot: parseFloat(totalDue || '0'), 
             amount: parseFloat(amount),                    
             remainingBalance: (totalDue && parseFloat(totalDue) > 0) ? parseFloat(remainingAmount as string) : 0, 
@@ -347,65 +400,73 @@ export default function AddPaymentScreen() {
             pdcDate: (mode !== 'Cash') ? formatDate(pdcDate) : "", 
             notes, receiptNo,
             status: 'Collected',
-            senderId: currentUser?.id, userName: currentUser?.name, role: currentUser?.role, createdAt: new Date().toISOString()
         };
 
         try {
-            // 1. Add to Payment Collections History
-            await addPayment(paymentData);
+            // 1. ADD PAYMENT RECORD
+            const paymentResult = await addSaaSData("payment_collections", paymentData);
             
-            const payAmount = parseFloat(amount);
+            if (paymentResult.success) {
+                const payAmount = parseFloat(amount);
 
-            // 2. UPDATE LOGIC (Merge Order & Manual Due)
-            if (params.linkedId && params.source) {
-                const sourceCollection = params.source as string; 
-                const linkedId = params.linkedId as string;
+                // 2. UPDATE ORDER/DUE BALANCE
+                if (selectedOrder && selectedOrder.id) {
+                    let collectionName = 'orders'; 
+                    if (selectedOrder.collectionName) collectionName = selectedOrder.collectionName;
+                    else if (selectedOrder.orderId === 'Manual Due') collectionName = 'payment_dues';
 
-                const docRef = doc(db, sourceCollection, linkedId);
-                const docSnap = await getDoc(docRef);
-                if (docSnap.exists()) {
-                    const data = docSnap.data();
-                    const currentBalance = data.balance !== undefined ? parseFloat(data.balance) : parseFloat(data.amount);
+                    const currentBalance = selectedOrder.balance !== undefined ? parseFloat(selectedOrder.balance) : parseFloat(selectedOrder.amount);
                     const newBalance = currentBalance - payAmount;
-                    
-                    if (sourceCollection === 'orders') {
-                        const payStatus = newBalance <= 0 ? 'Paid' : 'Partial';
-                        await updateDoc(docRef, {
-                            balance: newBalance,
-                            paymentStatus: payStatus,
-                            lastPaymentDate: new Date().toISOString()
-                        });
-                    } else {
-                        const newStatus = newBalance <= 0 ? 'Paid' : 'Partial';
-                        await updateDoc(docRef, {
-                            balance: newBalance,
-                            status: newStatus,
-                            lastPaymentDate: new Date().toISOString()
-                        });
+                    const finalStatus = newBalance <= 0 ? 'Paid' : 'Partial';
+                    const mainDocStatus = collectionName === 'orders' ? selectedOrder.status : (newBalance <= 0 ? 'Collected' : 'Partial');
+
+                    // Update main collection (Order or Due)
+                    await updateSaaSData(collectionName, selectedOrder.id, {
+                        balance: newBalance,
+                        paymentStatus: finalStatus,
+                        status: mainDocStatus,
+                        lastPaymentDate: new Date().toISOString()
+                    });
+
+                    // 3. CASCADING DUES UPDATE (If linked to an order)
+                    if (collectionName === 'orders' && selectedOrder.orderId) {
+                        try {
+                            const relatedDues = dueList.filter((d:any) => d.orderId === selectedOrder.orderId);
+                            const duePromises = relatedDues.map((d:any) => {
+                                return updateSaaSData('payment_dues', d.id, {
+                                    balance: newBalance,
+                                    status: newBalance <= 0 ? 'Collected' : 'Pending',
+                                    lastPaymentDate: new Date().toISOString()
+                                });
+                            });
+                            await Promise.all(duePromises);
+                        } catch (e) { console.log("Sync Error:", e); }
                     }
                 }
-            } 
-            else if (selectedOrder && selectedOrder.id) {
-                const currentBalance = selectedOrder.balance !== undefined ? parseFloat(selectedOrder.balance) : parseFloat(selectedOrder.amount);
-                const newBalance = currentBalance - payAmount;
-                let newStatus = selectedOrder.paymentStatus || 'Pending';
-                if (newBalance <= 0) newStatus = 'Paid';
-                else newStatus = 'Partial';
 
-                const orderRef = doc(db, 'orders', selectedOrder.id);
-                await updateDoc(orderRef, {
-                    balance: newBalance,
-                    paymentStatus: newStatus,
-                    lastPaymentDate: new Date().toISOString()
-                });
+                // 4. NOTIFICATION
+                if (addNotification) {
+                    await addNotification({
+                        title: "Payment Received 💰",
+                        message: `₹${paymentData.amount} received from ${paymentData.orgName}. Receipt: ${receiptNo}`,
+                        to: "Admin",
+                        type: "success",
+                        route: "/payment_collections"
+                    });
+                }
+
+                Alert.alert("Success ✅", "Payment Saved & Linked! Share Receipt?", [
+                    { text: "No", onPress: () => router.back(), style: 'cancel' },
+                    { text: "Yes, Share PDF", onPress: async () => { await generateAndShareReceipt(paymentData); router.back(); }}
+                ]);
+            } else {
+                 Alert.alert("Error", "Failed to save payment data.");
             }
-
-            Alert.alert("Success ✅", "Payment Saved & Linked! Share Receipt?", [
-                { text: "No", onPress: () => router.back(), style: 'cancel' },
-                { text: "Yes, Share PDF", onPress: async () => { await generateAndShareReceipt(paymentData); router.back(); }}
-            ]);
-        } catch (error: any) { Alert.alert("Error", "Failed: " + error.message); } 
-        finally { setLoading(false); }
+        } catch (error: any) { 
+            Alert.alert("Error", "Failed: " + error.message); 
+        } finally { 
+            setLoading(false); 
+        }
     };
 
     const onChangeDate = (event: any, selectedDate?: Date) => {
@@ -417,8 +478,6 @@ export default function AddPaymentScreen() {
         if (Platform.OS === 'android') setShowPdcDatePicker(false);
         if (selectedDate) setPdcDate(selectedDate);
     };
-
-    const filteredOrgs = orgList.filter((o:any) => (o.name || '').toLowerCase().includes(searchOrg.toLowerCase()) || (o.orgName || '').toLowerCase().includes(searchOrg.toLowerCase()) || (o.city || '').toLowerCase().includes(searchOrg.toLowerCase()));
 
     return (
         <View style={styles.container}>
@@ -447,10 +506,9 @@ export default function AddPaymentScreen() {
                                 <Text style={[styles.selectorValue, !selectedOrg && {color:'#999'}]}>{selectedOrg ? (selectedOrg.name || selectedOrg.orgName) : "Choose Party..."}</Text>
                                 {selectedOrg && <Text style={{fontSize:11, color:'gray', marginTop:2}}>{selectedOrg.city} • {selectedOrg.contactPerson}</Text>}
                             </View>
-                            <Ionicons name="search" size={20} color="#3b5998" />
+                            {isDbLoading ? <ActivityIndicator size="small" color="#3b5998"/> : <Ionicons name="search" size={20} color="#3b5998" />}
                         </TouchableOpacity>
 
-                        {/* ORDER LINK DROPDOWN */}
                         {selectedOrg && (
                             <>
                                 <Text style={[styles.label, {color:'#d32f2f'}]}>Link to System Order (Optional)</Text>
@@ -475,12 +533,7 @@ export default function AddPaymentScreen() {
                         <Text style={styles.sectionTitle}>Payment Details</Text>
                         
                         <Text style={styles.label}>Against Bill No / Invoice Ref (Manual)</Text>
-                        <TextInput 
-                            style={styles.input} 
-                            placeholder="e.g. GST-INV-001" 
-                            value={billRef} 
-                            onChangeText={setBillRef} 
-                        />
+                        <TextInput style={styles.input} placeholder="e.g. GST-INV-001" value={billRef} onChangeText={setBillRef} />
                         {selectedOrder && (
                             <Text style={{fontSize:10, color:'gray', marginLeft:5, marginTop:2}}>
                                 Linked ID: {selectedOrder.id}
@@ -515,7 +568,6 @@ export default function AddPaymentScreen() {
                             <View style={styles.bankBox}>
                                 <TextInput style={styles.input} value={bankName} onChangeText={setBankName} placeholder="Bank Name" />
                                 <TextInput style={[styles.input, {marginTop:10}]} value={refNumber} onChangeText={setRefNumber} placeholder={mode === 'Cheque' ? 'Cheque No' : 'Transaction Ref No'} />
-                                
                                 <Text style={[styles.label, {marginTop:10}]}>Instrument Date</Text>
                                 <TouchableOpacity style={[styles.input, {justifyContent:'center'}]} onPress={() => setShowPdcDatePicker(true)}>
                                     <Text style={{color: '#333'}}>{formatDate(pdcDate)}</Text>
@@ -534,7 +586,7 @@ export default function AddPaymentScreen() {
                 </ScrollView>
             </KeyboardAvoidingView>
 
-            {/* ORG MODAL */}
+            {/* ORGANIZATION MODAL */}
             <Modal visible={showOrgModal} animationType="slide">
                 <View style={styles.modalContainer}>
                     <View style={styles.modalHeader}>
@@ -543,16 +595,19 @@ export default function AddPaymentScreen() {
                     </View>
                     <View style={styles.searchBox}>
                         <Ionicons name="search" size={20} color="gray" />
-                        <TextInput style={styles.searchInputModal} placeholder="Search Name..." value={searchOrg} onChangeText={setSearchOrg} autoFocus />
+                        <TextInput style={styles.searchInputModal} placeholder="Search Name..." value={searchOrg} onChangeText={handleSearch} autoFocus />
                     </View>
                     <FlatList
                         data={filteredOrgs}
                         keyExtractor={item => item.id}
                         renderItem={({item}) => (
-                            <TouchableOpacity style={styles.orgItem} onPress={() => { setSelectedOrg(item); setShowOrgModal(false); }}>
+                            <TouchableOpacity style={styles.orgItem} onPress={() => handleSelectOrg(item)}>
+                                <View style={styles.orgIcon}>
+                                    <Ionicons name="business" size={20} color="#3b5998" />
+                                </View>
                                 <View style={{flex:1}}>
                                     <Text style={styles.orgName}>{item.name || item.orgName}</Text>
-                                    <Text style={styles.orgSubText}>{item.city ? `📍 ${item.city}` : ''}</Text>
+                                    <Text style={styles.orgSubText}>{item.city ? `📍 ${item.city}` : ''} {item.contactPerson ? `• ${item.contactPerson}` : ''}</Text>
                                 </View>
                                 <Ionicons name="chevron-forward" size={18} color="#ccc" />
                             </TouchableOpacity>
@@ -561,12 +616,12 @@ export default function AddPaymentScreen() {
                 </View>
             </Modal>
 
-            {/* ORDER MODAL */}
+            {/* ORDER SELECTION MODAL */}
             <Modal visible={showOrderModal} transparent animationType="fade">
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContentSmall}>
                         <Text style={styles.modalTitleSmall}>Select Bill / Order</Text>
-                        <Text style={{color:'gray', fontSize:12, marginBottom:10}}>Linking helps in incentive calculation.</Text>
+                        <Text style={{color:'gray', fontSize:12, marginBottom:10}}>Linking helps in balance calculation.</Text>
                         
                         <ScrollView style={{maxHeight: 300}}>
                             <TouchableOpacity style={styles.modalItem} onPress={() => handleSelectOrder('General')}>
@@ -592,14 +647,12 @@ export default function AddPaymentScreen() {
                                 </Text>
                             )}
                         </ScrollView>
-
                         <TouchableOpacity style={styles.closeBtnSmall} onPress={() => setShowOrderModal(false)}>
                             <Text style={{color:'red'}}>Cancel</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
             </Modal>
-
         </View>
     );
 }
@@ -614,9 +667,7 @@ const styles = StyleSheet.create({
     input: { backgroundColor: '#f9f9f9', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#eee', fontSize: 15, color: '#333' },
     selector: { backgroundColor: '#f0f4ff', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#d1d9ff', flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
     selectorValue: { fontSize: 15, fontWeight: 'bold', color: '#3b5998' },
-    
     orderSelector: { backgroundColor: '#fff3e0', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#ffe0b2', flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
-
     dateRow: { flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
     dateBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f4ff', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#d1d9ff' },
     dateText: { marginLeft: 10, fontSize: 14, color: '#3b5998', fontWeight: 'bold' },
@@ -629,16 +680,15 @@ const styles = StyleSheet.create({
     saveBtnText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
     calcBox: { flexDirection:'row', justifyContent:'space-between', backgroundColor:'#ffebee', padding:10, borderRadius:8, marginTop:5 },
     calcText: { fontSize:12, color:'#333' },
-    
-    modalContainer: { flex: 1, backgroundColor: 'white', padding: 20, paddingTop: 50 },
-    modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+    modalContainer: { flex: 1, backgroundColor: 'white', paddingTop: 40 },
+    modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#eee', backgroundColor:'#f9f9f9' },
     modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#333' },
-    searchBox: { flexDirection:'row', alignItems:'center', backgroundColor: '#f0f2f5', paddingHorizontal: 10, borderRadius: 10, marginBottom: 15, height: 50 },
+    searchBox: { flexDirection:'row', alignItems:'center', backgroundColor: '#f0f2f5', paddingHorizontal: 10, borderRadius: 10, margin: 15, height: 50 },
     searchInputModal: { flex: 1, marginLeft: 10, fontSize: 16 },
     orgItem: { padding: 15, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', flexDirection:'row', alignItems:'center', justifyContent:'space-between' },
+    orgIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#e3f2fd', justifyContent: 'center', alignItems: 'center', marginRight: 15 },
     orgName: { fontWeight: 'bold', fontSize: 16 },
     orgSubText: { color: 'gray', fontSize: 12, marginTop: 2 },
-
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding:20 },
     modalContentSmall: { width: '90%', backgroundColor: 'white', borderRadius: 15, padding: 20, maxHeight: '60%' },
     modalTitleSmall: { fontSize: 18, fontWeight: 'bold', marginBottom: 5, color:'#3b5998', textAlign:'center' },

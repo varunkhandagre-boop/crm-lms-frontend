@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { addDoc, collection } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -18,17 +17,34 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS (Direct Firebase writes removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+
+// 🔥 PDF IMPORTS
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 
 export default function AddDemoScreen() {
   const router = useRouter();
   const params = useLocalSearchParams(); 
   
-  const { addDemo, orgList, user, updateActivityStatus, productList = [] } = useData();
+  // 🔥 1. Context se sirf zaroori functions aur user details nikale
+  const { currentUser, updateActivityStatus, companyProfile, addNotification } = useData();
+
+  // 🔥 2. Naya SaaS Engine connect kiya
+  const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded Lists (Taki app fast rahe)
+  const [orgList, setOrgList] = useState<any[]>([]);
+  const [productList, setProductList] = useState<any[]>([]);
+  const [demoList, setDemoList] = useState<any[]>([]);
 
   // --- STATES ---
   const [hospital, setHospital] = useState('');
+  const [orgId, setOrgId] = useState('');
   const [department, setDepartment] = useState('');
   
   // AUTO-FILL STATES
@@ -60,30 +76,41 @@ export default function AddDemoScreen() {
   const [searchText, setSearchText] = useState('');
   const [filteredData, setFilteredData] = useState<any[]>([]);
 
-  // 🔥 1. GET UNIQUE PRODUCT NAMES
+  // 🔥 4. LOAD DATA ON MOUNT
+  useEffect(() => {
+      const loadData = async () => {
+          if (currentUser?.companyId) {
+              const [orgs, prods, demos] = await Promise.all([
+                  fetchSaaSData("organizations"),
+                  fetchSaaSData("products"),
+                  fetchSaaSData("demos") // Required for accurate ID Counting
+              ]);
+              setOrgList(orgs);
+              setProductList(prods);
+              setDemoList(demos);
+          }
+      };
+      loadData();
+  }, [currentUser]);
+
   const getUniqueProductNames = () => {
       const names = productList.map((p: any) => p.name);
       return [...new Set(names), 'Other'];
   };
 
-  // 🔥 2. GET MODELS FOR SELECTED PRODUCT
   const getModelOptions = () => {
       if (!product || product === 'Other') return ['Other'];
-      
       const models = productList
           .filter((p: any) => p.name === product && p.model)
           .map((p: any) => p.model);
-          
       return [...new Set(models), 'Other'];
   };
 
   useEffect(() => {
-      if (params.hospital) {
+      if (params.hospital && orgList.length > 0) {
           setHospital(params.hospital as string);
-          if(orgList.length > 0) {
-             const found = orgList.find((o:any) => (o.orgName === params.hospital || o.name === params.hospital));
-             if(found) selectOrganization(found);
-          }
+          const found = orgList.find((o:any) => (o.orgName === params.hospital || o.name === params.hospital));
+          if(found) selectOrganization(found);
       }
   }, [params, orgList]);
 
@@ -94,7 +121,135 @@ export default function AddDemoScreen() {
     return `${day}/${month}/${year}`;
   };
 
-  // 🔥 LOCATION LOGIC
+  // 🔥 5. SMART SAAS FY DEMO ID GENERATOR
+  const generateDemoId = () => {
+      const targetMonth = demoDate.getMonth(); 
+      const targetYear = demoDate.getFullYear();
+      
+      const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+      const fyString = `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`;
+      const fyStartDateStr = `${fyStartYear}-04-01`;
+      const fyEndDateStr = `${fyStartYear + 1}-03-31`;
+
+      // Sirf apni company ke is FY ke demos gino
+      const count = demoList ? demoList.filter((d: any) => {
+          const dDate = d.dateIso || d.date; // Support legacy format if any
+          if (!dDate) return false;
+          return dDate >= fyStartDateStr && dDate <= fyEndDateStr;
+      }).length + 1 : 1;
+
+      const prefix = companyProfile?.shortName ? companyProfile.shortName.toUpperCase() : 'LMS';
+      return `${prefix}-DEMO-${fyString}-${String(count).padStart(3, '0')}`;
+  };
+
+  // 🔥 PDF GENERATOR (Untouched - Works Perfectly)
+  const generateDemoPDF = async (demoData: any) => {
+    try {
+        const logoHTML = companyProfile?.logoUrl 
+            ? `<img src="${companyProfile.logoUrl}" style="height: 60px; margin-bottom: 10px;" />` 
+            : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
+
+        const signatureHTML = companyProfile?.signatureUrl 
+            ? `<img src="${companyProfile.signatureUrl}" style="height: 40px; margin-top: 5px; margin-bottom: 2px;" />` 
+            : `<div style="height: 40px;"></div>`;
+
+        const htmlContent = `
+        <html>
+          <head>
+            <style>
+              body { font-family: 'Helvetica', sans-serif; padding: 30px; border: 2px solid #333; }
+              .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px; }
+              .title { font-size: 22px; font-weight: bold; color: #1a237e; text-transform: uppercase; }
+              .sub-title { font-size: 12px; margin-top: 2px; color: #333; line-height: 1.4; }
+              .box { border: 1px solid #000; padding: 15px; margin-top: 10px; background-color: #fcfcfc; }
+              .row { display: flex; justify-content: space-between; margin-bottom: 5px; }
+              .label { font-weight: bold; color: #444; width: 130px; display: inline-block; }
+              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; }
+              .sign-box { text-align: center; width: 45%; }
+              .sign-line { border-top: 1px solid #000; width: 100%; margin-top: 5px; margin-bottom: 5px; }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              ${logoHTML}
+              ${companyProfile?.logoUrl ? `<div class="title">${companyProfile.companyName}</div>` : ''}
+              <div class="sub-title">${companyProfile?.address || ''}</div>
+              <div class="sub-title">
+                Phone: ${companyProfile?.contactPhone || companyProfile?.phone || '-'} | 
+                Email: ${companyProfile?.contactEmail || companyProfile?.email || '-'}
+              </div>
+            </div>
+
+            <h3 style="text-align: center; text-decoration: underline; margin-bottom: 20px;">PRODUCT DEMO REPORT</h3>
+
+            <div class="box">
+                <div class="row">
+                    <div><span class="label">Report No:</span> <b style="font-size:16px;">${demoData.demoId}</b></div>
+                    <div><span class="label">Date:</span> ${demoData.displayDate}</div>
+                </div>
+                <div class="row" style="margin-top: 5px;">
+                    <div><span class="label">Duration:</span> ${demoData.duration || '1'} Days</div>
+                </div>
+            </div>
+
+            <div class="box">
+                <div style="font-size:14px; margin-bottom:5px;"><b>Client:</b> ${demoData.hospital}</div>
+                <div style="font-size:14px; margin-bottom:5px;"><b>Address:</b> ${demoData.address}, ${demoData.city}</div>
+                <div style="font-size:14px;"><b>Department:</b> ${demoData.department || '-'}</div>
+            </div>
+
+            <div class="box">
+                <div class="row"><div><span class="label">Contact Person:</span> <b>${demoData.contactPerson}</b></div></div>
+                <div class="row"><div><span class="label">Designation:</span> ${demoData.designation || '-'}</div></div>
+                <div class="row"><div><span class="label">Mobile:</span> ${demoData.contactNumber || '-'}</div></div>
+            </div>
+
+            <div class="box">
+                <div style="font-weight:bold; margin-bottom:10px; text-decoration:underline;">Product Details</div>
+                <div class="row"><div><span class="label">Product Name:</span> <b>${demoData.product}</b></div></div>
+                <div class="row"><div><span class="label">Model:</span> ${demoData.model}</div></div>
+                <div class="row"><div><span class="label">Serial No:</span> ${demoData.serialNo || 'N/A'}</div></div>
+            </div>
+
+            <div class="box">
+                <div style="font-weight:bold; margin-bottom:5px; text-decoration:underline;">Demo Outcome / Remarks:</div>
+                <div style="margin-top:5px; min-height: 50px;">${demoData.result || 'Demo completed successfully.'}</div>
+                ${demoData.notes ? `<div style="margin-top:10px; font-style:italic; font-size:12px;">Internal Note: ${demoData.notes}</div>` : ''}
+            </div>
+
+            <div class="footer">
+              <div class="sign-box">
+                <div style="height: 60px;"></div> 
+                <div class="sign-line"></div>
+                <div style="font-weight: bold;">Client Signature & Stamp</div>
+              </div>
+
+              <div class="sign-box">
+                <div style="font-weight: bold; font-size: 12px;">Given By: ${demoData.senderName}</div>
+                ${signatureHTML}
+                <div class="sign-line"></div>
+                <div style="font-weight: bold;">Engineer Signature</div>
+              </div>
+            </div>
+          </body>
+        </html>`;
+
+        const { uri } = await Print.printToFileAsync({ html: htmlContent });
+        const cleanName = `${demoData.demoId}_${demoData.hospital.replace(/ /g, '_')}.pdf`;
+        // @ts-ignore
+        const newPath = `${FileSystem.cacheDirectory}${cleanName}`;
+
+        try {
+            await FileSystem.copyAsync({ from: uri, to: newPath });
+            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Demo Report` });
+        } catch (error) {
+            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+        }
+    } catch (error) {
+        Alert.alert("Error", "Could not generate PDF");
+    }
+  };
+
   const getCurrentLocation = async () => {
       try {
           let { status } = await Location.requestForegroundPermissionsAsync();
@@ -116,6 +271,7 @@ export default function AddDemoScreen() {
 
   const selectOrganization = (orgItem: any) => {
       setHospital(orgItem.orgName || orgItem.name || '');
+      setOrgId(orgItem.id || ''); 
       setAddress(orgItem.address || orgItem.address1 || orgItem.location || ''); 
       setCity(orgItem.city || '');
       setContactPerson(orgItem.contactPerson || '');
@@ -125,7 +281,6 @@ export default function AddDemoScreen() {
       setModalVisible(false);
   };
 
-  // --- MODAL FUNCTIONS ---
   const openModal = (type: string, data: any[]) => {
       setCurrentModalType(type);
       setFilteredData(data);
@@ -160,11 +315,14 @@ export default function AddDemoScreen() {
   const handleSelect = (item: any) => {
       if (currentModalType === 'Hospital') {
           if(typeof item !== 'string') selectOrganization(item);
-          else setHospital(item);
+          else {
+              setHospital(item);
+              setOrgId(''); 
+          }
       } 
       else if (currentModalType === 'Product') {
           setProduct(item);
-          setModel(''); // 🔥 Reset Model
+          setModel(''); 
       }
       else if (currentModalType === 'Model') {
           setModel(item);
@@ -172,7 +330,7 @@ export default function AddDemoScreen() {
       setModalVisible(false);
   };
 
-  // --- SUBMIT LOGIC ---
+  // 🔥 6. SAAS SAVE LOGIC
   const handleSubmit = async () => {
     if (!hospital || !product || !contactPerson) {
       Alert.alert("Missing Fields", "Hospital, Product Name and Contact Person are required.");
@@ -188,65 +346,72 @@ export default function AddDemoScreen() {
           return; 
       }
 
+      // Generate New Local ID
+      const newDemoId = generateDemoId();
+
+      // Payload (Cleaned up, Engine injects the rest)
       const newDemo = {
-        id: Date.now().toString(),
-        date: demoDate.toISOString().split('T')[0],
+        demoId: newDemoId, 
+        dateIso: demoDate.toISOString().split('T')[0], // Added Date ISO for robust sorting/querying
         displayDate: formatDate(demoDate),
-        
         hospital: hospital,
+        orgId: orgId, 
         address: address, 
         city: city,       
         department: department,
-        
         product: product,
         model: model,
         serialNo: serialNo,
-
         contactPerson: contactPerson,
         designation: designation, 
         contactNumber: contactNumber,
         email: email,
-
         duration: duration,
         result: result,
         notes: notes,
-        
         status: 'Completed',
-
-        senderId: user?.uid || 'guest',
-        senderName: user?.name || 'Unknown',
-        role: user?.role || 'Employee',
-        timestamp: Date.now(),
-
         location: locationData
       };
 
-      await addDemo(newDemo);
+      const resultRes = await addSaaSData("demos", newDemo);
       
-      try {
-          await addDoc(collection(db, "notifications"), {
-              title: "New Demo Report 📋",
-              message: `${user?.name} submitted a demo report for ${product} at ${hospital}.`,
-              to: "Admin",
-              route: "/demo",
-              read: false,
-              createdAt: new Date().toISOString(),
-              type: "info"
-          });
-      } catch (e) {}
-      
-      if (params.activityId && updateActivityStatus) {
-          await updateActivityStatus(params.activityId as string, 'Completed');
+      if (resultRes.success) {
+          // Push Notification
+          if (addNotification) {
+              await addNotification({
+                  title: "New Demo Report 📋",
+                  message: `${currentUser?.name} submitted a demo report (${newDemoId}) for ${product} at ${hospital}.`,
+                  to: "Admin",
+                  route: "/demo",
+                  type: "info"
+              });
+          }
+          
+          if (params.activityId && updateActivityStatus) {
+              await updateActivityStatus(params.activityId as string, 'Completed');
+          }
+
+          // PDF Prompt
+          Alert.alert(
+              "Success ✅", 
+              `Demo Report ${newDemoId} Saved!\nDo you want to share PDF?`, 
+              [
+                { text: "No", onPress: () => router.back(), style: 'cancel' },
+                { text: "Yes, Share PDF", onPress: async () => { 
+                    // Add senderName manually since generateDemoPDF expects it before a DB fetch happens
+                    await generateDemoPDF({...newDemo, senderName: currentUser?.name});
+                    router.back();
+                }}
+              ]
+          );
+      } else {
+          Alert.alert("Error", "Could not save demo.");
       }
 
-      setLoading(false);
-      Alert.alert("Success", "Demo Report Saved & Admin Notified!", [
-        { text: "OK", onPress: () => router.back() }
-      ]);
-
     } catch (error) {
+      Alert.alert("Error", "Something went wrong.");
+    } finally {
       setLoading(false);
-      Alert.alert("Error", "Could not save demo.");
     }
   };
 
@@ -269,7 +434,7 @@ export default function AddDemoScreen() {
                 <Text style={styles.label}>Organization / Hospital *</Text>
                 <TouchableOpacity style={styles.selector} onPress={() => openModal('Hospital', orgList)}>
                     <Text style={{color: hospital ? '#333' : '#999', flex:1}}>{hospital || 'Select Organization'}</Text>
-                    <Ionicons name="search" size={20} color="gray" />
+                    {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
                 </TouchableOpacity>
 
                 <View style={styles.row}>
@@ -318,11 +483,10 @@ export default function AddDemoScreen() {
             {/* SECTION 3: PRODUCT INFO */}
             <Text style={styles.sectionHeader}>📦 Product Details</Text>
             <View style={styles.card}>
-                {/* 🔥 PRODUCT DROPDOWN */}
                 <Text style={styles.label}>Product Name *</Text>
                 <TouchableOpacity style={styles.selector} onPress={() => openModal('Product', getUniqueProductNames())}>
                     <Text style={{color: product ? '#333' : '#999', flex:1}}>{product || 'Select Product'}</Text>
-                    <Ionicons name="cube-outline" size={20} color="gray" />
+                    {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="cube-outline" size={20} color="gray" />}
                 </TouchableOpacity>
 
                 {product === 'Other' && (
@@ -335,7 +499,6 @@ export default function AddDemoScreen() {
 
                 <View style={styles.row}>
                     <View style={{flex:1, marginRight:10}}>
-                        {/* 🔥 MODEL DROPDOWN */}
                         <Text style={styles.label}>Model Name</Text>
                         <TouchableOpacity style={styles.selector} onPress={() => {
                             if(!product) Alert.alert("Wait", "Select Product First");
@@ -369,7 +532,11 @@ export default function AddDemoScreen() {
                 <TextInput style={[styles.input, {height:60, textAlignVertical:'top'}]} placeholder="Internal team notes..." multiline value={notes} onChangeText={setNotes} />
             </View>
 
-            <TouchableOpacity style={styles.btn} onPress={handleSubmit} disabled={loading}>
+            <TouchableOpacity 
+                style={[styles.btn, loading && { opacity: 0.6 }]} 
+                onPress={handleSubmit} 
+                disabled={loading}
+            >
                 {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>SAVE DEMO</Text>}
             </TouchableOpacity>
             
@@ -377,7 +544,7 @@ export default function AddDemoScreen() {
                 📍 Location will be captured automatically.
             </Text>
             
-            <View style={{height: 50}} />
+            <View style={{height: 100}} />
 
         </ScrollView>
 

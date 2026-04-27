@@ -1,9 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker'; // 🔥 NEW: DatePicker Import
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   FlatList,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -12,21 +18,37 @@ import {
 } from 'react-native';
 import { useData } from './context/DataContext';
 
-// 🔥 FIREBASE IMPORTS FOR EMPLOYEES
-import { collection, getDocs, query } from 'firebase/firestore';
+// 🔥 FIREBASE & PDF IMPORTS (Added doc, updateDoc)
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import { collection, doc, getDocs, query, updateDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 
 export default function InstallationListScreen() {
   const router = useRouter();
-  const { installList, user } = useData();
+  const { installList, user, companyProfile } = useData(); 
 
   // --- STATES ---
   const [searchText, setSearchText] = useState('');
-  const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'Year' | 'All'>('Year');
+  // 🔥 CHANGED: 'Year' to 'FY'
+  const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
   
   const [selectedItem, setSelectedItem] = useState<any>(null); 
   const [modalVisible, setModalVisible] = useState(false);
+  const [generatingPdf, setGeneratingPdf] = useState(false); 
+
+  // 🔥 ADMIN EDIT STATES 🔥
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editData, setEditData] = useState<any>({});
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  // 🔥 NEW STATES FOR EDIT DATE PICKER 🔥
+  const [showEditInstallDate, setShowEditInstallDate] = useState(false);
+  const [showEditExpiryDate, setShowEditExpiryDate] = useState(false);
+  const [editInstallDateObj, setEditInstallDateObj] = useState(new Date());
+  const [editExpiryDateObj, setEditExpiryDateObj] = useState(new Date());
 
   // --- NEW: EMPLOYEE FILTER STATES ---
   const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
@@ -34,8 +56,23 @@ export default function InstallationListScreen() {
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
+  // 🔥 PAGINATION STATE (SMART LOAD MORE)
+  const [visibleCount, setVisibleCount] = useState(20);
+
   // 🔥 Role Check
   const isAdmin = ['Admin', 'Manager', 'Hr', 'Account', 'Accountant'].includes(user?.role || '');
+  
+  // 🔥 STRICT ADMIN FOR EDIT
+  const isStrictAdmin = user?.role === 'Admin' || user?.role === 'Manager';
+
+  // 🔥 RESET PAGINATION ON FILTER CHANGE
+  useEffect(() => {
+      if (viewMode === 'Day') {
+          setVisibleCount(500); 
+      } else {
+          setVisibleCount(20); 
+      }
+  }, [viewMode, currentDate, searchText, selectedEmployee]);
 
   // --- FETCH EMPLOYEES (ADMIN ONLY) ---
   useEffect(() => {
@@ -78,51 +115,159 @@ export default function InstallationListScreen() {
     return isNaN(d.getTime()) ? 0 : d.getTime();
   };
 
+  // Helper to format Date Object to String for Edit inputs
+  const formatDateStr = (rawDate: Date) => {
+      let day = rawDate.getDate().toString().padStart(2, '0');
+      let month = (rawDate.getMonth() + 1).toString().padStart(2, '0');
+      let year = rawDate.getFullYear();
+      return `${year}-${month}-${day}`; 
+  };
+
+  // 🔥 CHANGED: FY Navigation
   const changeDate = (dir: number) => {
     const d = new Date(currentDate);
     if (viewMode === 'Day') d.setDate(d.getDate() + dir);
     else if (viewMode === 'Month') d.setMonth(d.getMonth() + dir);
-    else if (viewMode === 'Year') d.setFullYear(d.getFullYear() + dir);
+    else if (viewMode === 'FY') d.setFullYear(d.getFullYear() + dir);
     setCurrentDate(d);
   };
 
+  // 🔥 CHANGED: Header Title logic for Financial Year
   const getHeaderDate = () => {
     if (viewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-    if (viewMode === 'Year') return currentDate.getFullYear().toString();
+    if (viewMode === 'FY') {
+        const m = currentDate.getMonth(); 
+        const y = currentDate.getFullYear();
+        const startY = m >= 3 ? y : y - 1;
+        return `FY ${startY.toString().slice(-2)}-${(startY + 1).toString().slice(-2)}`;
+    }
     return "All Time";
+  };
+
+  // 🔥 PDF GENERATOR FOR LIST ITEM
+  const generatePDF = async (item: any) => {
+    setGeneratingPdf(true);
+    try {
+        const logoHTML = companyProfile?.logoUrl 
+            ? `<img src="${companyProfile.logoUrl}" style="height: 60px; margin-bottom: 10px;" />` 
+            : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
+
+        const signatureHTML = companyProfile?.signatureUrl 
+            ? `<img src="${companyProfile.signatureUrl}" style="height: 40px; margin-top: 5px; margin-bottom: 2px;" />` 
+            : `<div style="height: 40px;"></div>`;
+
+        const htmlContent = `
+        <html>
+          <head>
+            <style>
+              body { font-family: 'Helvetica', sans-serif; padding: 30px; border: 2px solid #333; }
+              .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px; }
+              .title { font-size: 22px; font-weight: bold; color: #1a237e; text-transform: uppercase; }
+              .sub-title { font-size: 12px; margin-top: 2px; color: #333; line-height: 1.4; }
+              .box { border: 1px solid #000; padding: 15px; margin-top: 10px; background-color: #fcfcfc; }
+              .table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+              .table th, .table td { padding: 10px; border: 1px solid #000; text-align: left; font-size: 12px; }
+              .table th { background-color: #eee; }
+              .footer { margin-top: 50px; display: flex; justify-content: space-between; align-items: flex-end; }
+              .sign-box { text-align: center; width: 45%; }
+              .sign-line { border-top: 1px solid #000; width: 100%; margin-top: 5px; margin-bottom: 5px; }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              ${logoHTML}
+              ${companyProfile?.logoUrl ? `<div class="title">${companyProfile.companyName}</div>` : ''}
+              <div class="sub-title">${companyProfile?.address || ''}</div>
+              <div class="sub-title">
+                Phone: ${companyProfile?.contactPhone || companyProfile?.phone || '-'} | 
+                Email: ${companyProfile?.contactEmail || companyProfile?.email || '-'}
+              </div>
+            </div>
+
+            <h3 style="text-align: center; text-decoration: underline;">INSTALLATION REPORT</h3>
+
+            <div class="box">
+              <div style="font-size: 14px;"><b>Client Name:</b> ${item.orgName || item.hospital}</div>
+              <div style="font-size: 14px;"><b>Address:</b> ${item.address || ''}, ${item.city || ''}</div>
+              <div style="font-size: 14px;"><b>Contact:</b> ${item.contactPerson || '-'} (${item.mobile || '-'})</div>
+              <div style="font-size: 14px; margin-top:5px;"><b>Department:</b> ${item.department || '-'}</div>
+              <div style="font-size: 14px;"><b>Installation Date:</b> ${item.date}</div>
+            </div>
+
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th style="width: 40%;">Product / Model</th>
+                        <th style="width: 30%;">Serial No.</th>
+                        <th style="width: 30%;">Warranty Expiry</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>
+                            <b>${item.product || item.productName}</b><br>
+                            <span style="color:#555;">Model: ${item.model || '-'}</span>
+                        </td>
+                        <td><b>${item.serialNo}</b></td>
+                        <td>${item.warrantyExpiry || '-'}</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div style="margin-top: 20px; font-size: 12px; color: #555;">
+                <b>Engineer Remarks:</b> ${item.note || 'Installation completed successfully.'}
+            </div>
+
+            <div class="footer">
+              <div class="sign-box">
+                <div style="height: 60px;"></div> 
+                <div class="sign-line"></div>
+                <div style="font-weight: bold;">Client Signature & Stamp</div>
+              </div>
+
+              <div class="sign-box">
+                <div style="font-weight: bold; font-size: 12px;">Installed By: ${item.engineer || item.senderName}</div>
+                ${signatureHTML}
+                <div class="sign-line"></div>
+                <div style="font-weight: bold;">Engineer Signature</div>
+              </div>
+            </div>
+          </body>
+        </html>`;
+
+        const { uri } = await Print.printToFileAsync({ html: htmlContent });
+        const cleanName = `Installation_${(item.orgName || 'Client').replace(/ /g, '_')}_${Date.now()}.pdf`;
+        // @ts-ignore
+        const newPath = `${FileSystem.cacheDirectory}${cleanName}`;
+
+        try {
+            await FileSystem.copyAsync({ from: uri, to: newPath });
+            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Report` });
+        } catch (error) {
+            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+        }
+    } catch (error) {
+        Alert.alert("Error", "Could not generate PDF");
+    } finally {
+        setGeneratingPdf(false);
+    }
   };
 
   // --- SORTING & FILTER LOGIC ---
   const getSortedAndFilteredData = () => {
     let data = installList ? [...installList] : [];
 
-    // 1. Admin Employee Filter (Based on your Firebase Data)
     if (isAdmin && selectedEmployee !== 'All') {
-      
-      // Naam ko lowercase aur trim karein taaki matching pakki ho
       const targetName = selectedEmployeeName ? selectedEmployeeName.toLowerCase().trim() : '';
-
       data = data.filter((item: any) => {
-        // A. ID Check (Agar ID match ho jaye)
         if (item.senderId === selectedEmployee) return true;
-
-        // B. Name Check (Yahan Data Match Hoga)
-        
-        // 1. Check Engineer (Jaise: "Niraj")
         if (item.engineer && item.engineer.toLowerCase().trim() === targetName) return true;
-
-        // 2. Check Sender Name (Jaise: "Satish Dhote")
         if (item.senderName && item.senderName.toLowerCase().trim() === targetName) return true;
-
-        // 3. Check User Name (Backup)
         if (item.userName && item.userName.toLowerCase().trim() === targetName) return true;
-
         return false;
       });
     } 
-    
-    // 2. Regular Employee Filter (Agar Admin nahi hai)
     else if (!isAdmin) {
       data = data.filter((item: any) => 
           item.senderId === user?.uid || 
@@ -148,10 +293,15 @@ export default function InstallationListScreen() {
       });
     }
 
+    // 🔥 CHANGED: FY Boundaries added
     if (viewMode !== 'All') {
       const targetYear = currentDate.getFullYear();
       const targetMonth = currentDate.getMonth();
       const targetDay = currentDate.getDate();
+
+      const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+      const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // 1st April
+      const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // 31st March
 
       data = data.filter((item: any) => {
         const dateField = item.createdAt || item.date;
@@ -159,10 +309,11 @@ export default function InstallationListScreen() {
         const ts = parseDate(dateField);
         if (ts === 0) return false;
         const itemDate = new Date(ts);
+        const itemTime = itemDate.getTime();
 
-        if (viewMode === 'Year') return itemDate.getFullYear() === targetYear;
         if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
         if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
+        if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
         return true;
       });
     }
@@ -176,11 +327,74 @@ export default function InstallationListScreen() {
     return data;
   };
 
-  const displayList = getSortedAndFilteredData();
+  const fullList = getSortedAndFilteredData(); 
+  const renderedList = fullList.slice(0, visibleCount);
 
   const openDetails = (item: any) => {
     setSelectedItem(item);
     setModalVisible(true);
+  };
+
+  // 🔥 1. OPEN EDIT MODAL FUNCTION WITH DATE PARSER
+  const openEditModal = (item: any) => {
+      // Parse existing dates so the calendar doesn't show 1970
+      const installTs = parseDate(item.date);
+      if (installTs > 0) setEditInstallDateObj(new Date(installTs));
+      else setEditInstallDateObj(new Date());
+
+      const expiryTs = parseDate(item.warrantyExpiry);
+      if (expiryTs > 0) setEditExpiryDateObj(new Date(expiryTs));
+      else setEditExpiryDateObj(new Date());
+
+      setEditData({
+          id: item.id,
+          orgId: item.orgId || '', 
+          hospital: item.hospital || item.orgName || '',
+          city: item.city || '',
+          department: item.department || '',
+          engineer: item.engineer || item.senderName || '',
+          product: item.product || item.productName || '',
+          model: item.model || '',
+          serialNo: item.serialNo || '',
+          date: item.date || '',
+          warrantyExpiry: item.warrantyExpiry || '',
+          note: item.note || ''
+      });
+      setEditModalVisible(true);
+  };
+
+  // 🔥 2. SAVE EDITED DATA TO FIREBASE
+  const handleSaveEdit = async () => {
+      if (!editData.id) return;
+      if (!editData.hospital || !editData.serialNo) {
+          Alert.alert("Error", "Hospital Name and Serial No are mandatory.");
+          return;
+      }
+      setIsSavingEdit(true);
+      try {
+          const docRef = doc(db, "installations", editData.id);
+          await updateDoc(docRef, {
+              hospital: editData.hospital,
+              orgName: editData.hospital, 
+              orgId: editData.orgId || '', 
+              city: editData.city,
+              department: editData.department,
+              engineer: editData.engineer,
+              product: editData.product,
+              productName: editData.product, 
+              model: editData.model,
+              serialNo: editData.serialNo,
+              date: editData.date,
+              warrantyExpiry: editData.warrantyExpiry,
+              note: editData.note
+          });
+          Alert.alert("Success", "Installation details updated!");
+          setEditModalVisible(false);
+      } catch (error: any) {
+          Alert.alert("Error", "Could not update installation. " + error.message);
+      } finally {
+          setIsSavingEdit(false);
+      }
   };
 
   const getWarrantyStatus = (expiryDate: string) => {
@@ -209,22 +423,26 @@ export default function InstallationListScreen() {
         <View style={styles.cardHeader}>
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Text style={styles.hospitalName}>{item.orgName || item.hospital}</Text>
+              <Text style={styles.hospitalName} numberOfLines={1}>{item.orgName || item.hospital}</Text>
               {isNewEntry && (
                 <View style={styles.newBadge}>
                   <Text style={styles.newBadgeText}>🆕 NEW</Text>
                 </View>
               )}
+              {/* 🔥 EDIT BUTTON FOR ADMIN ONLY */}
+              {isStrictAdmin && (
+                  <TouchableOpacity style={{marginLeft: 10}} onPress={() => openEditModal(item)}>
+                      <Ionicons name="create" size={18} color="#d32f2f" />
+                  </TouchableOpacity>
+              )}
             </View>
             
-            {/* 🔥 CITY ADDED HERE */}
             {item.city ? (
                 <Text style={{fontSize: 11, color: 'gray', marginBottom: 3}}>
                     <Ionicons name="location-outline" size={11} color="gray" /> {item.city}
                 </Text>
             ) : null}
 
-            {/* 🔥 PRODUCT & MODEL */}
             <Text style={styles.productName}>{item.product || item.productName}</Text>
             {item.model ? <Text style={{fontSize:11, color:'gray', marginTop:2}}>Model: {item.model}</Text> : null}
             
@@ -272,7 +490,7 @@ export default function InstallationListScreen() {
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Installation Reports</Text>
         </View>
-        <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_installation')}>
+        <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_installation' as any)}>
           <Ionicons name="add" size={20} color="white" />
           <Text style={styles.addBtnText}>New</Text>
         </TouchableOpacity>
@@ -281,7 +499,8 @@ export default function InstallationListScreen() {
       {/* FILTER UI */}
       <View style={{ backgroundColor: 'white', paddingBottom: 10 }}>
         <View style={styles.tabContainer}>
-          {['Day', 'Month', 'Year', 'All'].map((m) => (
+          {/* 🔥 CHANGED: 'Year' to 'FY' */}
+          {['Day', 'Month', 'FY', 'All'].map((m) => (
             <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
               <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
             </TouchableOpacity>
@@ -327,14 +546,14 @@ export default function InstallationListScreen() {
             )}
           </View>
           <Text style={{ textAlign: 'right', fontSize: 12, color: 'gray', marginTop: 5 }}>
-            Total: <Text style={{ fontWeight: 'bold', color: 'green' }}>{displayList.length}</Text> Records
+            Total: <Text style={{ fontWeight: 'bold', color: 'green' }}>{fullList.length}</Text> Records
           </Text>
         </View>
       </View>
 
       {/* LIST */}
       <FlatList
-        data={displayList}
+        data={renderedList}
         keyExtractor={item => item.id}
         renderItem={renderItem}
         contentContainerStyle={{ padding: 5, paddingBottom: 50 }}
@@ -344,13 +563,122 @@ export default function InstallationListScreen() {
             <Text style={{ textAlign: 'center', marginTop: 10, color: 'gray' }}>No Installations Found</Text>
           </View>
         }
+        // 🔥 LOAD MORE BUTTON WRAPPED WITH VIEW FOR BOTTOM PADDING
+        ListFooterComponent={
+            <View style={{ paddingBottom: 80 }}>
+                {visibleCount < fullList.length ? (
+                    <TouchableOpacity 
+                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                        style={styles.loadMoreBtn}
+                    >
+                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                            👇 Load More Records ({fullList.length - visibleCount} remaining)
+                        </Text>
+                    </TouchableOpacity>
+                ) : (
+                    fullList.length > 0 ? (
+                        <Text style={styles.endListText}>--- End of List ---</Text>
+                    ) : null
+                )}
+            </View>
+        }
       />
+
+      {/* ========================================== */}
+      {/* 🔥 ADMIN EDIT MODAL WITH CALENDAR 🔥 */}
+      {/* ========================================== */}
+      <Modal visible={editModalVisible} transparent animationType="slide">
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                  <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:15}}>
+                      <Text style={styles.modalTitle}>Edit Installation</Text>
+                      <TouchableOpacity onPress={() => setEditModalVisible(false)}>
+                          <Ionicons name="close-circle" size={28} color="#d32f2f" />
+                      </TouchableOpacity>
+                  </View>
+
+                  <ScrollView showsVerticalScrollIndicator={false}>
+                      <Text style={styles.inputLabel}>Client / Hospital Name *</Text>
+                      <TextInput style={styles.editInput} value={editData.hospital} onChangeText={t => setEditData({...editData, hospital: t})} />
+
+                      <Text style={styles.inputLabel}>City</Text>
+                      <TextInput style={styles.editInput} value={editData.city} onChangeText={t => setEditData({...editData, city: t})} />
+
+                      <Text style={styles.inputLabel}>Department</Text>
+                      <TextInput style={styles.editInput} value={editData.department} onChangeText={t => setEditData({...editData, department: t})} />
+
+                      <Text style={styles.inputLabel}>Product / Machine Name</Text>
+                      <TextInput style={styles.editInput} value={editData.product} onChangeText={t => setEditData({...editData, product: t})} />
+
+                      <Text style={styles.inputLabel}>Model</Text>
+                      <TextInput style={styles.editInput} value={editData.model} onChangeText={t => setEditData({...editData, model: t})} />
+
+                      <Text style={styles.inputLabel}>Serial No *</Text>
+                      <TextInput style={styles.editInput} value={editData.serialNo} onChangeText={t => setEditData({...editData, serialNo: t})} />
+
+                      {/* 🔥 NEW: CALENDAR FOR INSTALLATION DATE */}
+                      <Text style={styles.inputLabel}>Installation Date</Text>
+                      <TouchableOpacity style={styles.editDateBtn} onPress={() => setShowEditInstallDate(true)}>
+                          <Text style={{color: '#333'}}>{editData.date}</Text>
+                          <Ionicons name="calendar" size={18} color="gray" />
+                      </TouchableOpacity>
+                      {showEditInstallDate && (
+                          <DateTimePicker 
+                              value={editInstallDateObj} 
+                              mode="date" 
+                              onChange={(e, d) => { 
+                                  setShowEditInstallDate(false); 
+                                  if(d) { 
+                                      setEditInstallDateObj(d); 
+                                      setEditData({...editData, date: formatDateStr(d)}); 
+                                  }
+                              }} 
+                          />
+                      )}
+
+                      {/* 🔥 NEW: CALENDAR FOR WARRANTY EXPIRY */}
+                      <Text style={styles.inputLabel}>Warranty Expiry</Text>
+                      <TouchableOpacity style={styles.editDateBtn} onPress={() => setShowEditExpiryDate(true)}>
+                          <Text style={{color: '#333'}}>{editData.warrantyExpiry}</Text>
+                          <Ionicons name="calendar" size={18} color="gray" />
+                      </TouchableOpacity>
+                      {showEditExpiryDate && (
+                          <DateTimePicker 
+                              value={editExpiryDateObj} 
+                              mode="date" 
+                              onChange={(e, d) => { 
+                                  setShowEditExpiryDate(false); 
+                                  if(d) { 
+                                      setEditExpiryDateObj(d); 
+                                      setEditData({...editData, warrantyExpiry: formatDateStr(d)}); 
+                                  }
+                              }} 
+                          />
+                      )}
+
+                      <Text style={styles.inputLabel}>Engineer Assigned</Text>
+                      <TextInput style={styles.editInput} value={editData.engineer} onChangeText={t => setEditData({...editData, engineer: t})} />
+
+                      <Text style={styles.inputLabel}>Remarks / Notes</Text>
+                      <TextInput style={[styles.editInput, {height: 60, textAlignVertical: 'top'}]} multiline value={editData.note} onChangeText={t => setEditData({...editData, note: t})} />
+                  </ScrollView>
+
+                  <TouchableOpacity 
+                      style={[styles.saveEditBtn, isSavingEdit && {opacity: 0.6}]} 
+                      onPress={handleSaveEdit}
+                      disabled={isSavingEdit}
+                  >
+                      {isSavingEdit ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Save Changes</Text>}
+                  </TouchableOpacity>
+              </View>
+          </KeyboardAvoidingView>
+      </Modal>
 
       {/* DETAILS MODAL */}
       <Modal visible={modalVisible} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <Text style={styles.modalTitle}>Installation Details</Text>
               <TouchableOpacity onPress={() => setModalVisible(false)}>
                 <Ionicons name="close-circle" size={30} color="#d32f2f" />
@@ -358,25 +686,25 @@ export default function InstallationListScreen() {
             </View>
 
             {selectedItem && (
-              <View>
-                <DetailRow label="Hospital" value={selectedItem.orgName || selectedItem.hospital} icon="business" />
-                {/* 🔥 CITY ADDED HERE TOO */}
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <View style={styles.sectionHeaderBox}>
+                    <Text style={styles.sectionHeaderText}>🏢 Client Info</Text>
+                </View>
+                <DetailRow label="Hospital" value={selectedItem.orgName || selectedItem.hospital} icon="business" highlight />
                 <DetailRow label="City" value={selectedItem.city} icon="location" />
-                
                 <DetailRow label="Department" value={selectedItem.department || 'N/A'} icon="medkit" />
                 <DetailRow label="Engineer" value={selectedItem.engineer} icon="construct" />
 
-                <View style={styles.divider} />
-
-                <Text style={styles.sectionHeader}>Machine Details</Text>
+                <View style={styles.sectionHeaderBox}>
+                    <Text style={styles.sectionHeaderText}>⚙️ Machine Info</Text>
+                </View>
                 <DetailRow label="Product" value={selectedItem.product || selectedItem.productName} icon="cube" />
-                {/* 🔥 MODEL ADDED HERE TOO */}
                 <DetailRow label="Model" value={selectedItem.model} icon="hardware-chip" />
                 <DetailRow label="Serial No" value={selectedItem.serialNo} icon="barcode" highlight />
 
-                <View style={styles.divider} />
-
-                <Text style={styles.sectionHeader}>Warranty Info</Text>
+                <View style={styles.sectionHeaderBox}>
+                    <Text style={styles.sectionHeaderText}>📅 Warranty Info</Text>
+                </View>
                 <DetailRow label="Installed On" value={selectedItem.date} icon="calendar" />
                 <DetailRow label="Warranty Expiry" value={selectedItem.warrantyExpiry} icon="hourglass" color="#d32f2f" />
 
@@ -389,7 +717,25 @@ export default function InstallationListScreen() {
                     <Text style={styles.noteText}>{selectedItem.note}</Text>
                   </View>
                 ) : null}
-              </View>
+
+                {/* 🔥 SHARE PDF BUTTON */}
+                <TouchableOpacity 
+                    style={styles.pdfBtn}
+                    onPress={() => generatePDF(selectedItem)}
+                    disabled={generatingPdf}
+                >
+                    {generatingPdf ? (
+                        <ActivityIndicator color="#1565c0" size="small" />
+                    ) : (
+                        <>
+                            <Ionicons name="document-text-outline" size={20} color="#1565c0" />
+                            <Text style={styles.pdfBtnText}>Share Report PDF</Text>
+                        </>
+                    )}
+                </TouchableOpacity>
+
+                <View style={{height: 20}} />
+              </ScrollView>
             )}
           </View>
         </View>
@@ -485,16 +831,31 @@ const styles = StyleSheet.create({
 
   // Modal Styles
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { width: '100%', backgroundColor: 'white', borderRadius: 15, padding: 25, elevation: 5 },
+  modalContent: { width: '100%', backgroundColor: 'white', borderRadius: 15, padding: 25, maxHeight: '85%', elevation: 5 }, 
   modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
-  sectionHeader: { fontSize: 14, fontWeight: 'bold', color: '#555', marginTop: 10, marginBottom: 10, textDecorationLine: 'underline' },
+  
+  sectionHeaderBox: { backgroundColor: '#e3f2fd', padding: 6, borderRadius: 6, marginTop: 10, marginBottom: 10 },
+  sectionHeaderText: { fontSize: 12, fontWeight: 'bold', color: '#1565c0' },
 
   noteBox: { backgroundColor: '#f9f9f9', padding: 10, borderRadius: 8, marginTop: 15, borderWidth: 1, borderColor: '#eee' },
   noteLabel: { fontSize: 12, fontWeight: 'bold', color: '#3b5998', marginBottom: 5 },
   noteText: { fontSize: 13, color: '#333', fontStyle: 'italic' },
 
+  pdfBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#e3f2fd', padding: 12, borderRadius: 8, marginTop: 20, borderWidth: 1, borderColor: '#2196f3' },
+  pdfBtnText: { color: '#1565c0', fontWeight: 'bold', marginLeft: 8 },
+
   pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
   pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation: 10 },
   pickerHeader: { fontWeight: 'bold', fontSize: 16, marginBottom: 10, color: '#3b5998', textAlign: 'center' },
   pickerItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eee', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+
+  // EDIT MODAL STYLES 🔥
+  inputLabel: { fontSize: 12, color: 'gray', marginTop: 10, marginBottom: 5, fontWeight: 'bold' },
+  editInput: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, fontSize: 14, color: '#333', backgroundColor: '#f9f9f9' },
+  editDateBtn: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 12, backgroundColor: '#f9f9f9' },
+  saveEditBtn: { backgroundColor: '#d32f2f', padding: 15, borderRadius: 8, alignItems: 'center', marginTop: 20 },
+  btnText: { color: 'white', fontWeight: 'bold' },
+
+  loadMoreBtn: { padding: 12, backgroundColor: '#fff', alignItems: 'center', marginVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ddd' },
+  endListText: { textAlign: 'center', padding: 20, color: '#aaa', fontSize: 12, fontStyle: 'italic' },
 });

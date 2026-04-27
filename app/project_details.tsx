@@ -24,26 +24,39 @@ import { addDoc, collection, deleteDoc, doc, increment, onSnapshot, query, updat
 import { db } from '../firebaseConfig';
 import { useData } from './context/DataContext';
 
+const CloseButton = ({onPress}: any) => (
+    <TouchableOpacity onPress={onPress}>
+        <Ionicons name="close" size={28} color="black" />
+    </TouchableOpacity>
+);
+
+const DetailRow = ({label, value}:any) => (
+    <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:8, borderBottomWidth:1, borderBottomColor:'#f0f0f0', paddingBottom:5}}>
+        <Text style={{color:'gray'}}>{label}</Text>
+        <Text style={{fontWeight:'bold', color:'#333'}}>{value}</Text>
+    </View>
+);
+
 export default function ProjectDetailsScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { id } = params; 
+  
+  const rawId = params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId; 
+
   const { user } = useData();
 
   const [project, setProject] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<'Overview' | 'Expenses' | 'Order'>('Overview'); 
   const [loading, setLoading] = useState(true);
   
-  // 🔥 SUPER SEARCH STATE
   const [searchText, setSearchText] = useState('');
 
-  // LIST STATES
   const [expensesList, setExpensesList] = useState<any[]>([]);
   const [paymentsList, setPaymentsList] = useState<any[]>([]);
   const [itemsList, setItemsList] = useState<any[]>([]);
   const [combinedHistory, setCombinedHistory] = useState<any[]>([]);
 
-  // MODAL STATES
   const [expenseModalVisible, setExpenseModalVisible] = useState(false);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [itemModalVisible, setItemModalVisible] = useState(false);
@@ -58,7 +71,6 @@ export default function ProjectDetailsScreen() {
   const [selectedDetailItem, setSelectedDetailItem] = useState<any>(null);
   const [detailType, setDetailType] = useState(''); 
 
-  // FORM STATES
   const [expAmount, setExpAmount] = useState('');
   const [expNote, setExpNote] = useState('');
   const [expCategory, setExpCategory] = useState('Civil/Vendor');
@@ -73,16 +85,37 @@ export default function ProjectDetailsScreen() {
 
   const [isSaving, setIsSaving] = useState(false);
 
+  // 🔥 PROJECT EDIT STATES (Order Value & Description Edit)
+  const [editProjectModalVisible, setEditProjectModalVisible] = useState(false);
+  const [editTotalValue, setEditTotalValue] = useState('');
+  const [editDescription, setEditDescription] = useState(''); // 🔥 New State for Description
+  const [isUpdatingProject, setIsUpdatingProject] = useState(false);
+
+  const [visibleCount, setVisibleCount] = useState(20);
+
+  useEffect(() => {
+      setVisibleCount(20);
+  }, [searchText]);
+
   const categories = ['Civil/Vendor', 'Labor Wages', 'Food/Daily', 'Travel', 'Local Purchase', 'Other'];
   const payModes = ['Bank Transfer', 'Cheque', 'Cash', 'UPI'];
 
-  // 1. FETCH DATA
   useEffect(() => {
       if (!id) return;
-      const unsubProject = onSnapshot(doc(db, "projects", id as string), (docSnap) => {
-          if (docSnap.exists()) setProject({ id: docSnap.id, ...docSnap.data() });
-          setLoading(false);
+      
+      const qProject = query(collection(db, "projects"), where("id", "==", id as string));
+      
+      const unsubProject = onSnapshot(qProject, (querySnapshot) => {
+          if (!querySnapshot.empty) {
+              const docSnap = querySnapshot.docs[0];
+              setProject({ ...docSnap.data(), docId: docSnap.id });
+              setLoading(false);
+          } else {
+              Alert.alert("Data Error", `Project not found for ID: ${id}`);
+              router.back();
+          }
       });
+
       const qExp = query(collection(db, "project_expenses"), where("projectId", "==", id));
       const unsubExpenses = onSnapshot(qExp, (s) => setExpensesList(s.docs.map(d => ({ id: d.id, ...d.data(), type: 'Expense' }))));
       
@@ -95,14 +128,12 @@ export default function ProjectDetailsScreen() {
       return () => { unsubProject(); unsubExpenses(); unsubPayments(); unsubItems(); };
   }, [id]);
 
-  // 2. COMBINE HISTORY
   useEffect(() => {
       const history = [...expensesList, ...paymentsList, ...itemsList];
       history.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setCombinedHistory(history);
   }, [expensesList, paymentsList, itemsList]);
 
-  // 🔥 FILTER LOGIC (SEARCH)
   const filterList = (list: any[]) => {
     if (!searchText) return list;
     const lower = searchText.toLowerCase();
@@ -115,7 +146,6 @@ export default function ProjectDetailsScreen() {
     );
   };
 
-  // 🔥 UPDATED EXCEL FUNCTION (With TypeScript Fix)
   const exportToExcel = async () => {
       try {
           let csvContent = "Date,Type,Category/Mode,Description,Amount/Qty,Added By\n";
@@ -130,8 +160,6 @@ export default function ProjectDetailsScreen() {
           });
 
           const fileName = `${project.name.replace(/\s+/g, '_')}_Report.csv`;
-          
-          // 🔥 FIXED LINE HERE 👇
           const dir = (FileSystem as any).cacheDirectory || (FileSystem as any).documentDirectory;
           const fileUri = dir + fileName;
 
@@ -147,14 +175,23 @@ export default function ProjectDetailsScreen() {
           Alert.alert("Note", "File generated but sharing failed. Check permissions.");
       }
   };
-  // HANDLERS (Same as before)
+
   const handleAddExpense = async () => {
       if (!expAmount || !expNote) return Alert.alert("Missing", "Details required.");
       setIsSaving(true);
       try {
           const amount = parseFloat(expAmount);
-          await addDoc(collection(db, "project_expenses"), { projectId: id, amount, category: expCategory, note: expNote, date: new Date().toISOString(), addedBy: user?.name });
-          await updateDoc(doc(db, "projects", id as string), { totalExpense: increment(amount) });
+          await addDoc(collection(db, "project_expenses"), { 
+              projectId: id, 
+              orgId: project?.orgId || '',       
+              orgName: project?.client || '',    
+              amount, 
+              category: expCategory, 
+              note: expNote, 
+              date: new Date().toISOString(), 
+              addedBy: user?.name 
+          });
+          await updateDoc(doc(db, "projects", project.docId), { totalExpense: increment(amount) });
           setExpenseModalVisible(false); setExpAmount(''); setExpNote('');
       } catch (e:any) { Alert.alert("Error", e.message); }
       setIsSaving(false);
@@ -165,8 +202,17 @@ export default function ProjectDetailsScreen() {
       setIsSaving(true);
       try {
           const amount = parseFloat(payAmount);
-          await addDoc(collection(db, "project_payments"), { projectId: id, amount, mode: payMode, note: payNote, date: new Date().toISOString(), addedBy: user?.name });
-          await updateDoc(doc(db, "projects", id as string), { totalReceived: increment(amount) });
+          await addDoc(collection(db, "project_payments"), { 
+              projectId: id, 
+              orgId: project?.orgId || '',       
+              orgName: project?.client || '',    
+              amount, 
+              mode: payMode, 
+              note: payNote, 
+              date: new Date().toISOString(), 
+              addedBy: user?.name 
+          });
+          await updateDoc(doc(db, "projects", project.docId), { totalReceived: increment(amount) });
           setPaymentModalVisible(false); setPayAmount(''); setPayNote('');
       } catch (e:any) { Alert.alert("Error", e.message); }
       setIsSaving(false);
@@ -176,7 +222,17 @@ export default function ProjectDetailsScreen() {
       if (!itemName) return Alert.alert("Missing", "Name required.");
       setIsSaving(true);
       try {
-          await addDoc(collection(db, "project_items"), { projectId: id, name: itemName, qty: itemQty || '1', value: itemValue || '0', status: 'Pending', addedBy: user?.name, date: new Date().toISOString() });
+          await addDoc(collection(db, "project_items"), { 
+              projectId: id, 
+              orgId: project?.orgId || '',       
+              orgName: project?.client || '',    
+              name: itemName, 
+              qty: itemQty || '1', 
+              value: itemValue || '0', 
+              status: 'Pending', 
+              addedBy: user?.name, 
+              date: new Date().toISOString() 
+          });
           setItemModalVisible(false); setItemName(''); setItemQty(''); setItemValue('');
       } catch (e:any) { Alert.alert("Error", e.message); }
       setIsSaving(false);
@@ -195,23 +251,55 @@ export default function ProjectDetailsScreen() {
   const openDetailsPopup = (item: any) => { setSelectedDetailItem(item); setDetailType(item.type); setDetailModalVisible(true); };
   
   const deleteItem = async (col: string, itemId: string) => {
-    Alert.alert("Delete", "Are you sure?", [{ text: "Cancel" }, { text: "Delete", onPress: async () => { await deleteDoc(doc(db, col, itemId)); setDetailModalVisible(false); } }]);
+      Alert.alert("Delete", "Are you sure?", [
+          { text: "Cancel" }, 
+          { text: "Delete", onPress: async () => { 
+              await deleteDoc(doc(db, col, itemId)); 
+              setDetailModalVisible(false); 
+          } }
+      ]);
+  };
+
+  // 🔥 UPDATE PROJECT LOGIC (Value + Description)
+  const openEditProject = () => {
+      setEditTotalValue(project.totalValue?.toString() || '0');
+      setEditDescription(project.description || ''); // 🔥 Initialize with existing desc
+      setEditProjectModalVisible(true);
+  };
+
+  const handleUpdateProjectDetails = async () => {
+      if (!editTotalValue) {
+          Alert.alert("Error", "Order Value cannot be empty");
+          return;
+      }
+      setIsUpdatingProject(true);
+      try {
+          await updateDoc(doc(db, "projects", project.docId), { 
+              totalValue: Number(editTotalValue),
+              description: editDescription // 🔥 Update description in Firebase
+          });
+          setEditProjectModalVisible(false);
+          Alert.alert("Success", "Project details updated successfully! ✅");
+      } catch (error: any) {
+          Alert.alert("Error", "Could not update project details. " + error.message);
+      } finally {
+          setIsUpdatingProject(false);
+      }
   };
 
   if (loading) return <View style={styles.center}><ActivityIndicator size="large" color="#1565c0" /></View>;
   if (!project) return <View style={styles.center}><Text>Project not found.</Text></View>;
 
-  // RENDER TABS
   const renderTabContent = () => {
       const profit = (project.totalReceived || 0) - (project.totalExpense || 0);
       const pendingAmount = (project.totalValue || 0) - (project.totalReceived || 0);
 
       if (activeTab === 'Overview') {
-          // 🔥 SEARCH IN OVERVIEW
           const displayHistory = filterList(combinedHistory);
+          const renderedHistory = displayHistory.slice(0, visibleCount);
 
           return (
-              <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+              <ScrollView style={styles.content} showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom: 100}}>
                   <View style={styles.card}>
                       <View style={{flexDirection:'row', justifyContent:'space-between'}}>
                           <Text style={styles.cardLabel}>Financials</Text>
@@ -221,8 +309,21 @@ export default function ProjectDetailsScreen() {
                           </TouchableOpacity>
                       </View>
                       <View style={{flexDirection:'row', justifyContent:'space-between', marginTop:10}}>
-                          <View><Text style={styles.subLabel}>Order Value</Text><Text style={[styles.bigValue, {color:'#1565c0'}]}>₹ {project.totalValue?.toLocaleString()}</Text></View>
-                          <View style={{alignItems:'flex-end'}}><Text style={styles.subLabel}>Balance</Text><Text style={[styles.bigValue, {color:'#ff9800'}]}>₹ {pendingAmount.toLocaleString()}</Text></View>
+                          <View>
+                              <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                                  <Text style={styles.subLabel}>Order Value</Text>
+                                  {(user?.role === 'Admin' || user?.role === 'Manager' || user?.role === 'Accountant' || user?.role === 'Account') && (
+                                      <TouchableOpacity onPress={openEditProject} style={{marginLeft: 8, padding: 2}}>
+                                          <Ionicons name="pencil" size={14} color="#1565c0" />
+                                      </TouchableOpacity>
+                                  )}
+                              </View>
+                              <Text style={[styles.bigValue, {color:'#1565c0'}]}>₹ {project.totalValue?.toLocaleString()}</Text>
+                          </View>
+                          <View style={{alignItems:'flex-end'}}>
+                              <Text style={styles.subLabel}>Balance</Text>
+                              <Text style={[styles.bigValue, {color:'#ff9800'}]}>₹ {pendingAmount.toLocaleString()}</Text>
+                          </View>
                       </View>
                       <View style={styles.divider} />
                       <View style={{flexDirection:'row', justifyContent:'space-between'}}>
@@ -231,15 +332,28 @@ export default function ProjectDetailsScreen() {
                       </View>
                   </View>
 
+                  {/* 🔥 PROJECT DESCRIPTION / ORDER DETAILS CARD */}
+                  {project.description ? (
+                      <View style={styles.card}>
+                          <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
+                              <Text style={styles.cardLabel}>Order Description / Scope</Text>
+                              {(user?.role === 'Admin' || user?.role === 'Manager') && (
+                                  <TouchableOpacity onPress={openEditProject}>
+                                      <Ionicons name="pencil" size={14} color="#1565c0" />
+                                  </TouchableOpacity>
+                              )}
+                          </View>
+                          <Text style={{color: '#333', marginTop: 8, lineHeight: 20}}>{project.description}</Text>
+                      </View>
+                  ) : null}
+
                   <View style={[styles.card, {backgroundColor: profit >= 0 ? '#e8f5e9' : '#ffebee'}]}>
                       <Text style={styles.cardLabel}>Net Profit / Loss</Text>
                       <Text style={[styles.profitValue, {color: profit >= 0 ? 'green' : 'red'}]}>{profit >= 0 ? '+' : ''} ₹ {profit.toLocaleString()}</Text>
                   </View>
                   
-                  {/* 🔥 ADVANCED ACTIVITY LOG */}
                   <Text style={styles.sectionTitle}>Activity Timeline</Text>
-                  {displayHistory.map((item, index) => {
-                      // Styling based on Type
+                  {renderedHistory.map((item, index) => {
                       let cardColor = '#fff';
                       let borderColor = '#eee';
                       let iconName = 'ellipse';
@@ -275,7 +389,25 @@ export default function ProjectDetailsScreen() {
                         </TouchableOpacity>
                       );
                   })}
-                  <View style={{height:50}} />
+                  
+                  {visibleCount < displayHistory.length && (
+                      <TouchableOpacity 
+                          onPress={() => setVisibleCount(prev => prev + 20)} 
+                          style={{
+                              padding: 12, 
+                              backgroundColor: '#fff', 
+                              alignItems: 'center', 
+                              marginVertical: 10, 
+                              borderRadius: 8,
+                              borderWidth: 1,
+                              borderColor: '#ddd'
+                          }}
+                      >
+                          <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                              👇 Load More Records ({displayHistory.length - visibleCount} remaining)
+                          </Text>
+                      </TouchableOpacity>
+                  )}
               </ScrollView>
           );
       }
@@ -283,18 +415,23 @@ export default function ProjectDetailsScreen() {
       if (activeTab === 'Expenses') return (
           <View style={{flex:1}}>
               <View style={styles.actionRow}><Text style={styles.rowTitle}>Site Expenses</Text><TouchableOpacity style={styles.smallBtn} onPress={() => setExpenseModalVisible(true)}><Ionicons name="add" size={18} color="white" /><Text style={styles.btnTxt}>Add Expense</Text></TouchableOpacity></View>
-              <FlatList data={filterList(expensesList)} keyExtractor={i=>i.id} renderItem={({item}) => (
-                  <TouchableOpacity style={styles.listItem} onPress={() => openDetailsPopup(item)}>
-                      <View style={[styles.iconBox, {backgroundColor:'#ff9800'}]}><Ionicons name="receipt" size={18} color="white" /></View>
-                      <View style={{flex:1, marginLeft:10}}><Text style={styles.listTitle}>{item.category}</Text><Text style={styles.listSub} numberOfLines={1}>{item.note}</Text><Text style={styles.listDate}>{new Date(item.date).toLocaleDateString('en-GB')}</Text></View>
-                      <Text style={[styles.amountText, {color:'#d32f2f'}]}>- ₹{item.amount}</Text>
-                  </TouchableOpacity>
-              )} />
+              <FlatList 
+                  data={filterList(expensesList)} 
+                  keyExtractor={i=>i.id} 
+                  contentContainerStyle={{paddingBottom: 100}} 
+                  renderItem={({item}) => (
+                      <TouchableOpacity style={styles.listItem} onPress={() => openDetailsPopup(item)}>
+                          <View style={[styles.iconBox, {backgroundColor:'#ff9800'}]}><Ionicons name="receipt" size={18} color="white" /></View>
+                          <View style={{flex:1, marginLeft:10}}><Text style={styles.listTitle}>{item.category}</Text><Text style={styles.listSub} numberOfLines={1}>{item.note}</Text><Text style={styles.listDate}>{new Date(item.date).toLocaleDateString('en-GB')}</Text></View>
+                          <Text style={[styles.amountText, {color:'#d32f2f'}]}>- ₹{item.amount}</Text>
+                      </TouchableOpacity>
+                  )} 
+              />
           </View>
       );
 
       if (activeTab === 'Order') return (
-          <ScrollView style={{flex:1}} showsVerticalScrollIndicator={false}>
+          <ScrollView style={{flex:1}} showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom: 100}}>
               <View style={styles.actionRow}><Text style={styles.rowTitle}>Payments</Text><TouchableOpacity style={[styles.smallBtn, {backgroundColor:'#4caf50'}]} onPress={() => setPaymentModalVisible(true)}><Ionicons name="cash" size={18} color="white" /><Text style={styles.btnTxt}>Receive</Text></TouchableOpacity></View>
               {filterList(paymentsList).map((item:any) => (
                   <TouchableOpacity key={item.id} style={styles.listItem} onPress={() => openDetailsPopup(item)}>
@@ -313,17 +450,9 @@ export default function ProjectDetailsScreen() {
                       </TouchableOpacity>
                   </TouchableOpacity>
               ))}
-              <View style={{height:50}} />
           </ScrollView>
       );
   };
-
-  // 🔥 DARK BOLD X BUTTON
-  const CloseButton = ({onPress}: any) => (
-      <TouchableOpacity onPress={onPress}>
-          <Ionicons name="close" size={28} color="black" style={{fontWeight:'bold'}} />
-      </TouchableOpacity>
-  );
 
   return (
     <View style={styles.container}>
@@ -343,7 +472,6 @@ export default function ProjectDetailsScreen() {
         </View>
       </View>
 
-      {/* 🔥 SEARCH BAR IS BACK */}
       <View style={styles.searchBar}>
           <Ionicons name="search" size={20} color="gray" />
           <TextInput style={{flex:1, marginLeft:10}} placeholder="Search expenses, payments, items..." value={searchText} onChangeText={setSearchText} />
@@ -352,76 +480,132 @@ export default function ProjectDetailsScreen() {
 
       <View style={styles.tabContainer}>
           {['Overview', 'Expenses', 'Order'].map((t) => (
-              <TouchableOpacity key={t} style={[styles.tab, activeTab === t && styles.activeTab]} onPress={() => setActiveTab(t as any)}>
-                  <Text style={[styles.tabText, activeTab === t && styles.activeTabText]}>{t === 'Order' ? 'Order/Pay' : t}</Text>
-              </TouchableOpacity>
+            <TouchableOpacity key={t} style={[styles.tab, activeTab === t && styles.activeTab]} onPress={() => setActiveTab(t as any)}>
+                <Text style={[styles.tabText, activeTab === t && styles.activeTabText]}>{t === 'Order' ? 'Order/Pay' : t}</Text>
+            </TouchableOpacity>
           ))}
       </View>
 
       <View style={styles.content}>{renderTabContent()}</View>
 
-      {/* MODALS WITH DARK X */}
-      <Modal visible={expenseModalVisible} transparent animationType="slide"><View style={styles.modalOverlay}><View style={styles.modalContent}>
-          <View style={{flexDirection:'row', justifyContent:'space-between'}}><Text style={styles.modalTitle}>Add Expense</Text><CloseButton onPress={()=>setExpenseModalVisible(false)}/></View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:15}}>{categories.map(c=><TouchableOpacity key={c} style={[styles.chip, expCategory===c&&styles.activeChip]} onPress={()=>setExpCategory(c)}><Text style={[styles.chipText, expCategory===c&&{color:'white'}]}>{c}</Text></TouchableOpacity>)}</ScrollView>
-          <TextInput style={styles.input} placeholder="Amount (₹)" keyboardType="numeric" value={expAmount} onChangeText={setExpAmount} />
-          <TextInput style={[styles.input, {height:60}]} placeholder="Note" multiline value={expNote} onChangeText={setExpNote} />
-          <TouchableOpacity onPress={handleAddExpense} style={styles.saveBtn} disabled={isSaving}><Text style={{color:'white'}}>Save</Text></TouchableOpacity>
-      </View></View></Modal>
-
-      <Modal visible={paymentModalVisible} transparent animationType="slide"><View style={styles.modalOverlay}><View style={styles.modalContent}>
-          <View style={{flexDirection:'row', justifyContent:'space-between'}}><Text style={styles.modalTitle}>Receive Payment</Text><CloseButton onPress={()=>setPaymentModalVisible(false)}/></View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:15}}>{payModes.map(m=><TouchableOpacity key={m} style={[styles.chip, payMode===m&&{backgroundColor:'#4caf50'}]} onPress={()=>setPayMode(m)}><Text style={[styles.chipText, payMode===m&&{color:'white'}]}>{m}</Text></TouchableOpacity>)}</ScrollView>
-          <TextInput style={styles.input} placeholder="Amount (₹)" keyboardType="numeric" value={payAmount} onChangeText={setPayAmount} />
-          <TextInput style={[styles.input, {height:60}]} placeholder="Note" multiline value={payNote} onChangeText={setPayNote} />
-          <TouchableOpacity onPress={handleAddPayment} style={[styles.saveBtn, {backgroundColor:'#4caf50'}]} disabled={isSaving}><Text style={{color:'white'}}>Receive</Text></TouchableOpacity>
-      </View></View></Modal>
-
-      <Modal visible={itemModalVisible} transparent animationType="slide"><View style={styles.modalOverlay}><View style={styles.modalContent}>
-          <View style={{flexDirection:'row', justifyContent:'space-between'}}><Text style={styles.modalTitle}>Add Item</Text><CloseButton onPress={()=>setItemModalVisible(false)}/></View>
-          <TextInput style={styles.input} placeholder="Item Name" value={itemName} onChangeText={setItemName} />
-          <View style={{flexDirection:'row'}}>
-              <TextInput style={[styles.input, {flex:1, marginRight:5}]} placeholder="Qty (e.g. 5)" value={itemQty} onChangeText={setItemQty} />
-              <TextInput style={[styles.input, {flex:1, marginLeft:5}]} placeholder="Value ₹ (Opt)" keyboardType="numeric" value={itemValue} onChangeText={setItemValue} />
-          </View>
-          <TouchableOpacity onPress={handleAddItem} style={[styles.saveBtn, {backgroundColor:'#1565c0'}]} disabled={isSaving}><Text style={{color:'white'}}>Add Item</Text></TouchableOpacity>
-      </View></View></Modal>
-
-      <Modal visible={deliveryModalVisible} transparent animationType="slide"><View style={styles.modalOverlay}><View style={styles.modalContent}>
-          <View style={{flexDirection:'row', justifyContent:'space-between'}}><Text style={styles.modalTitle}>Mark Delivered</Text><CloseButton onPress={()=>setDeliveryModalVisible(false)}/></View>
-          <TextInput style={styles.input} placeholder="Delivery Mode (Courier/Hand)" value={deliveryMode} onChangeText={setDeliveryMode} />
-          <TouchableOpacity style={styles.input} onPress={()=>setShowDatePicker(true)}><Text>{deliveryDate.toLocaleDateString()}</Text></TouchableOpacity>
-          {showDatePicker && <DateTimePicker value={deliveryDate} mode="date" onChange={(e,d)=>{setShowDatePicker(false);if(d)setDeliveryDate(d)}} />}
-          <TouchableOpacity onPress={confirmDelivery} style={[styles.saveBtn, {backgroundColor:'#4caf50'}]} disabled={isSaving}><Text style={{color:'white'}}>Confirm</Text></TouchableOpacity>
-      </View></View></Modal>
-
-      <Modal visible={detailModalVisible} transparent animationType="fade"><View style={styles.modalOverlay}><View style={styles.modalContent}>
-          <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:10}}><Text style={styles.modalTitle}>{detailType} Details</Text><CloseButton onPress={()=>setDetailModalVisible(false)}/></View>
-          {selectedDetailItem && (
-              <View>
-                  <DetailRow label="Added By" value={selectedDetailItem.addedBy} />
-                  <DetailRow label="Date" value={new Date(selectedDetailItem.date).toLocaleDateString('en-GB')} />
-                  {detailType==='Item' && <><DetailRow label="Item" value={selectedDetailItem.name} /><DetailRow label="Qty" value={selectedDetailItem.qty} /><DetailRow label="Value" value={selectedDetailItem.value ? `₹${selectedDetailItem.value}` : '-'} /></>}
-                  {(detailType==='Expense' || detailType==='Payment') && <View style={{backgroundColor:'#eee', padding:10, borderRadius:8, marginVertical:10, alignItems:'center'}}><Text style={{fontSize:24, fontWeight:'bold', color: detailType==='Expense'?'red':'green'}}>₹ {selectedDetailItem.amount}</Text></View>}
-                  <Text style={styles.label}>Notes</Text><Text style={{backgroundColor:'#f9f9f9', padding:10, borderRadius:8}}>{selectedDetailItem.note || selectedDetailItem.mode || selectedDetailItem.category || 'No Details'}</Text>
-                  {selectedDetailItem.status === 'Delivered' && <View style={{marginTop:15, backgroundColor:'#e8f5e9', padding:10}}><Text style={{color:'green', fontWeight:'bold'}}>✅ Delivered via {selectedDetailItem.deliveryMode}</Text><Text style={{fontSize:11}}>on {new Date(selectedDetailItem.deliveryDate).toLocaleDateString()}</Text></View>}
-                  <TouchableOpacity style={{alignSelf:'center', marginTop:20}} onPress={()=>{
-                      const col = detailType==='Expense'?'project_expenses':detailType==='Payment'?'project_payments':'project_items';
-                      deleteItem(col, selectedDetailItem.id); 
-                  }}><Text style={{color:'red', fontWeight:'bold'}}>Delete Entry</Text></TouchableOpacity>
+      {/* MODALS */}
+      <Modal visible={expenseModalVisible} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                  <View style={{flexDirection:'row', justifyContent:'space-between'}}><Text style={styles.modalTitle}>Add Expense</Text><CloseButton onPress={()=>setExpenseModalVisible(false)}/></View>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:15}}>{categories.map(c=><TouchableOpacity key={c} style={[styles.chip, expCategory===c&&styles.activeChip]} onPress={()=>setExpCategory(c)}><Text style={[styles.chipText, expCategory===c&&{color:'white'}]}>{c}</Text></TouchableOpacity>)}</ScrollView>
+                  <TextInput style={styles.input} placeholder="Amount (₹)" keyboardType="numeric" value={expAmount} onChangeText={setExpAmount} />
+                  <TextInput style={[styles.input, {height:60, textAlignVertical: 'top'}]} placeholder="Note" multiline value={expNote} onChangeText={setExpNote} />
+                  <TouchableOpacity onPress={handleAddExpense} style={styles.saveBtn} disabled={isSaving}><Text style={{color:'white'}}>Save</Text></TouchableOpacity>
               </View>
-          )}
-      </View></View></Modal>
+          </View>
+      </Modal>
+
+      <Modal visible={paymentModalVisible} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                  <View style={{flexDirection:'row', justifyContent:'space-between'}}><Text style={styles.modalTitle}>Receive Payment</Text><CloseButton onPress={()=>setPaymentModalVisible(false)}/></View>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:15}}>{payModes.map(m=><TouchableOpacity key={m} style={[styles.chip, payMode===m&&{backgroundColor:'#4caf50'}]} onPress={()=>setPayMode(m)}><Text style={[styles.chipText, payMode===m&&{color:'white'}]}>{m}</Text></TouchableOpacity>)}</ScrollView>
+                  <TextInput style={styles.input} placeholder="Amount (₹)" keyboardType="numeric" value={payAmount} onChangeText={setPayAmount} />
+                  <TextInput style={[styles.input, {height:60, textAlignVertical: 'top'}]} placeholder="Note" multiline value={payNote} onChangeText={setPayNote} />
+                  <TouchableOpacity onPress={handleAddPayment} style={[styles.saveBtn, {backgroundColor:'#4caf50'}]} disabled={isSaving}><Text style={{color:'white'}}>Receive</Text></TouchableOpacity>
+              </View>
+          </View>
+      </Modal>
+
+      <Modal visible={itemModalVisible} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                  <View style={{flexDirection:'row', justifyContent:'space-between'}}><Text style={styles.modalTitle}>Add Item</Text><CloseButton onPress={()=>setItemModalVisible(false)}/></View>
+                  <TextInput style={styles.input} placeholder="Item Name" value={itemName} onChangeText={setItemName} />
+                  <View style={{flexDirection:'row'}}>
+                      <TextInput style={[styles.input, {flex:1, marginRight:5}]} placeholder="Qty (e.g. 5)" value={itemQty} onChangeText={setItemQty} />
+                      <TextInput style={[styles.input, {flex:1, marginLeft:5}]} placeholder="Value ₹ (Opt)" keyboardType="numeric" value={itemValue} onChangeText={setItemValue} />
+                  </View>
+                  <TouchableOpacity onPress={handleAddItem} style={[styles.saveBtn, {backgroundColor:'#1565c0'}]} disabled={isSaving}><Text style={{color:'white'}}>Add Item</Text></TouchableOpacity>
+              </View>
+          </View>
+      </Modal>
+
+      <Modal visible={deliveryModalVisible} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                  <View style={{flexDirection:'row', justifyContent:'space-between'}}><Text style={styles.modalTitle}>Mark Delivered</Text><CloseButton onPress={()=>setDeliveryModalVisible(false)}/></View>
+                  <TextInput style={styles.input} placeholder="Delivery Mode (Courier/Hand)" value={deliveryMode} onChangeText={setDeliveryMode} />
+                  <TouchableOpacity style={styles.input} onPress={()=>setShowDatePicker(true)}><Text>{deliveryDate.toLocaleDateString()}</Text></TouchableOpacity>
+                  {showDatePicker && <DateTimePicker value={deliveryDate} mode="date" onChange={(e,d)=>{setShowDatePicker(false);if(d)setDeliveryDate(d)}} />}
+                  <TouchableOpacity onPress={confirmDelivery} style={[styles.saveBtn, {backgroundColor:'#4caf50'}]} disabled={isSaving}><Text style={{color:'white'}}>Confirm</Text></TouchableOpacity>
+              </View>
+          </View>
+      </Modal>
+
+      <Modal visible={detailModalVisible} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                  <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:10}}><Text style={styles.modalTitle}>{detailType} Details</Text><CloseButton onPress={()=>setDetailModalVisible(false)}/></View>
+                  {selectedDetailItem && (
+                      <View>
+                          <DetailRow label="Added By" value={selectedDetailItem.addedBy} />
+                          <DetailRow label="Date" value={new Date(selectedDetailItem.date).toLocaleDateString('en-GB')} />
+                          {detailType==='Item' && <><DetailRow label="Item" value={selectedDetailItem.name} /><DetailRow label="Qty" value={selectedDetailItem.qty} /><DetailRow label="Value" value={selectedDetailItem.value ? `₹${selectedDetailItem.value}` : '-'} /></>}
+                          {(detailType==='Expense' || detailType==='Payment') && <View style={{backgroundColor:'#eee', padding:10, borderRadius:8, marginVertical:10, alignItems:'center'}}><Text style={{fontSize:24, fontWeight:'bold', color: detailType==='Expense'?'red':'green'}}>₹ {selectedDetailItem.amount}</Text></View>}
+                          <Text style={styles.label}>Notes</Text><Text style={{backgroundColor:'#f9f9f9', padding:10, borderRadius:8}}>{selectedDetailItem.note || selectedDetailItem.mode || selectedDetailItem.category || 'No Details'}</Text>
+                          {selectedDetailItem.status === 'Delivered' && <View style={{marginTop:15, backgroundColor:'#e8f5e9', padding:10}}><Text style={{color:'green', fontWeight:'bold'}}>✅ Delivered via {selectedDetailItem.deliveryMode}</Text><Text style={{fontSize:11}}>on {new Date(selectedDetailItem.deliveryDate).toLocaleDateString()}</Text></View>}
+                          <TouchableOpacity style={{alignSelf:'center', marginTop:20}} onPress={()=>{
+                              const col = detailType==='Expense'?'project_expenses':detailType==='Payment'?'project_payments':'project_items';
+                              deleteItem(col, selectedDetailItem.id); 
+                          }}><Text style={{color:'red', fontWeight:'bold'}}>Delete Entry</Text></TouchableOpacity>
+                      </View>
+                  )}
+              </View>
+          </View>
+      </Modal>
+
+      {/* 🔥 EDIT PROJECT ORDER VALUE & DESCRIPTION MODAL */}
+      <Modal visible={editProjectModalVisible} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                  <View style={{flexDirection:'row', justifyContent:'space-between'}}>
+                      <Text style={styles.modalTitle}>Update Project Details</Text>
+                      <CloseButton onPress={() => setEditProjectModalVisible(false)}/>
+                  </View>
+                  
+                  <Text style={styles.label}>Order Value (₹)</Text>
+                  <TextInput 
+                      style={styles.input} 
+                      placeholder="Enter new amount" 
+                      keyboardType="numeric" 
+                      value={editTotalValue} 
+                      onChangeText={setEditTotalValue} 
+                  />
+
+                  <Text style={styles.label}>Order Details / Description</Text>
+                  <TextInput 
+                      style={[styles.input, {height: 80, textAlignVertical: 'top'}]} 
+                      multiline 
+                      placeholder="Add notes about new items or changes..." 
+                      value={editDescription} 
+                      onChangeText={setEditDescription} 
+                  />
+
+                  <TouchableOpacity 
+                      onPress={handleUpdateProjectDetails} 
+                      style={[styles.saveBtn, {backgroundColor:'#1565c0', marginTop: 10}]} 
+                      disabled={isUpdatingProject}
+                  >
+                      {isUpdatingProject ? (
+                          <ActivityIndicator color="white" />
+                      ) : (
+                          <Text style={{color:'white', fontWeight: 'bold', textAlign: 'center'}}>Save Changes</Text>
+                      )}
+                  </TouchableOpacity>
+              </View>
+          </View>
+      </Modal>
 
     </View>
   );
 }
-
-const DetailRow = ({label, value}:any) => (
-    <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:8, borderBottomWidth:1, borderBottomColor:'#f0f0f0', paddingBottom:5}}>
-        <Text style={{color:'gray'}}>{label}</Text><Text style={{fontWeight:'bold', color:'#333'}}>{value}</Text>
-    </View>
-);
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },

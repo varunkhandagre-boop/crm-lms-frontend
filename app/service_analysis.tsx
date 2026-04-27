@@ -28,7 +28,8 @@ export default function AnalysisScreen() {
 
     // 🔥 FILTERS
     const [reportType, setReportType] = useState('All'); 
-    const [viewMode, setViewMode] = useState<'Month' | 'Year' | 'All'>('All'); 
+    // 🔥 CHANGED: 'Year' to 'FY'
+    const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY'); 
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [searchText, setSearchText] = useState('');
 
@@ -42,7 +43,16 @@ export default function AnalysisScreen() {
     const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
     const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
+    // 🔥 PAGINATION STATE (SMART LOAD MORE)
+    const [visibleCount, setVisibleCount] = useState(20);
+
     const isAdmin = ['Admin', 'Manager', 'Account'].includes(user?.role || '');
+
+    // 🔥 RESET PAGINATION ON FILTER CHANGE
+    useEffect(() => {
+        if (viewMode === 'Day') setVisibleCount(500);
+        else setVisibleCount(20);
+    }, [reportType, viewMode, selectedDate, searchText, selectedEmployee]);
 
     // --- 🔥 ROBUST DATE PARSER ---
     const parseDate = (dateStr: any) => {
@@ -102,7 +112,8 @@ export default function AnalysisScreen() {
                 reportType: 'Installation',
                 displayDate: i.date || i.installationDate || i.createdAt,
                 hospital: i.hospital || i.orgName || i.hospitalName || "Unknown Client",
-                engineer: i.engineer || i.senderName || i.userName || "Admin", // ✅ Engineer pehle lega
+                orgId: i.orgId || '', 
+                engineer: i.engineer || i.senderName || i.userName || "Admin",
                 engineerId: i.senderId || i.userId || i.uid, 
                 details: `Model: ${i.model || '-'} (${i.product || '-'})`,
                 machineDisplay: i.productName || i.product || i.model || '-',
@@ -116,8 +127,9 @@ export default function AnalysisScreen() {
             allData = [...allData, ...pmsList.map((i:any) => ({
                 ...i,
                 reportType: 'PMS',
-                displayDate: i.status === 'Done' || i.status === 'Completed' ? (i.date || i.createdAt) : (i.nextServiceDate || i.scheduledDate || i.dueDate),
+                displayDate: i.status === 'Done' || i.status === 'Completed' ? (i.date || i.createdAt) : (i.nextServiceDate || i.scheduledDate || i.dueDate || i.computedDueDate),
                 hospital: i.hospitalName || i.hospital || "Unknown", 
+                orgId: i.orgId || '', 
                 engineer: i.userName || i.engineer || "Admin",
                 engineerId: i.userId || i.engineerId || i.uid || i.senderId, 
                 details: `Cycle: ${i.currentPmsNumber || '-'}/${i.totalPms || '-'}`,
@@ -134,6 +146,7 @@ export default function AnalysisScreen() {
                 reportType: 'Breakdown',
                 displayDate: i.date || i.ticketDate || i.createdAt,
                 hospital: i.hospitalName || i.customerName || "Unknown",
+                orgId: i.orgId || '', 
                 engineer: i.resolvedBy || i.userName || i.assignedTo || "Admin",
                 engineerId: i.resolvedById || i.userId || i.assignedToId || i.senderId, 
                 details: i.remark || i.complaint || i.issue || "No Issue Listed", 
@@ -150,14 +163,9 @@ export default function AnalysisScreen() {
                 reportType: 'Demo',
                 displayDate: i.demoDate || i.date || i.createdAt,
                 hospital: i.hospitalName || i.doctorName || i.hospital || "Unknown",
-                
-                // 🔥 NAME LOGIC: Pehle Demonstrator, nahi to UserName, nahi to SenderName
+                orgId: i.orgId || '', 
                 engineer: i.demonstrator || i.userName || i.senderName || "Admin",
-                
-                // 🔥 ID LOGIC: Filter ke liye ye sabse zaroori hai
-                // Agar DemonstratorId nahi hai, to UserId lelo, wo bhi nahi to SenderId lelo
                 engineerId: i.demonstratorId || i.userId || i.senderId || i.uid, 
-                
                 details: `Result: ${i.result || 'Pending'}`,
                 machineDisplay: i.product || i.machineName || i.machine || '-',
                 serialDisplay: '-',
@@ -167,22 +175,20 @@ export default function AnalysisScreen() {
 
         // --- FILTER LOGIC ---
         
-        // 1. Employee Filter (Improved)
+        // 1. Employee Filter
         if (isAdmin && selectedEmployee !== 'All') {
             const targetName = selectedEmployeeName.toLowerCase().trim();
-            
             allData = allData.filter(i => 
                 (i.engineerId === selectedEmployee) || 
                 (i.senderId === selectedEmployee) ||
-                // 🔥 Name check ko safe banaya hai
-                (i.engineer && i.engineer.toLowerCase().trim() === targetName) || 
-                (i.senderName && i.senderName.toLowerCase().trim() === targetName)
+                ((i.engineer || '').toLowerCase().trim() === targetName) || 
+                ((i.senderName || '').toLowerCase().trim() === targetName)
             );
         } else if (!isAdmin) {
             allData = allData.filter(i => 
                 i.engineerId === user?.uid || 
                 i.senderId === user?.uid ||
-                (i.engineer && i.engineer.toLowerCase() === user?.name?.toLowerCase())
+                ((i.engineer || '').toLowerCase() === (user?.name || '').toLowerCase())
             ); 
         }
 
@@ -196,28 +202,39 @@ export default function AnalysisScreen() {
             const lower = searchText.toLowerCase();
             allData = allData.filter(i => {
                 const dateStr = (i.displayDate || '').toLowerCase();
-                const row = `${dateStr} ${i.hospital} ${i.engineer} ${i.status} ${i.reportType} ${i.details} ${i.serialDisplay} ${i.machineDisplay}`.toLowerCase();
+                const row = `${dateStr} ${i.hospital || ''} ${i.engineer || ''} ${i.status || ''} ${i.reportType || ''} ${i.details || ''} ${i.serialDisplay || ''} ${i.machineDisplay || ''}`.toLowerCase();
                 return row.includes(lower);
             });
         }
 
-        // 4. Date View Filter
+        // 4. Date View Filter (🔥 FY Logic added)
         if (viewMode !== 'All') {
             const targetYear = selectedDate.getFullYear();
             const targetMonth = selectedDate.getMonth();
+            const targetDay = selectedDate.getDate();
+
+            // 🔥 FY Boundaries Logic
+            const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+            let fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // 1st April
+            const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // 31st March
+
+            // 🔥 NEW: Apply App Launch Date (Jan 1, 2026) Limit
+            const APP_LAUNCH_DATE = new Date(2026, 0, 1).getTime();
+            if (fyStartDate < APP_LAUNCH_DATE) {
+                fyStartDate = APP_LAUNCH_DATE;
+            }
 
             allData = allData.filter(item => {
                 const ts = parseDate(item.displayDate);
                 if (!ts) return false; 
 
                 const d = new Date(ts);
+                const itemTime = d.getTime();
                 
-                if (viewMode === 'Year') {
-                    return d.getFullYear() === targetYear;
-                }
-                if (viewMode === 'Month') {
-                    return d.getFullYear() === targetYear && d.getMonth() === targetMonth;
-                }
+                if (viewMode === 'Month') return d.getFullYear() === targetYear && d.getMonth() === targetMonth;
+                if (viewMode === 'Day') return d.getFullYear() === targetYear && d.getMonth() === targetMonth && d.getDate() === targetDay;
+                if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
+                
                 return true;
             });
         }
@@ -231,10 +248,12 @@ export default function AnalysisScreen() {
 
 
     // HELPERS
+    // 🔥 CHANGED: FY Date Shift
     const changeDate = (dir: number) => {
         const d = new Date(selectedDate);
-        if (viewMode === 'Month') d.setMonth(d.getMonth() + dir);
-        else d.setFullYear(d.getFullYear() + dir);
+        if (viewMode === 'Day') d.setDate(d.getDate() + dir);
+        else if (viewMode === 'Month') d.setMonth(d.getMonth() + dir);
+        else if (viewMode === 'FY') d.setFullYear(d.getFullYear() + dir);
         setSelectedDate(d);
     };
 
@@ -245,9 +264,16 @@ export default function AnalysisScreen() {
         return new Date(ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
     };
 
+    // 🔥 CHANGED: FY Header Text Logic
     const getHeaderDate = () => {
+        if (viewMode === 'Day') return selectedDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
         if (viewMode === 'Month') return selectedDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-        if (viewMode === 'Year') return selectedDate.getFullYear().toString();
+        if (viewMode === 'FY') {
+            const m = selectedDate.getMonth(); 
+            const y = selectedDate.getFullYear();
+            const startY = m >= 3 ? y : y - 1;
+            return `FY ${startY.toString().slice(-2)}-${(startY + 1).toString().slice(-2)}`;
+        }
         return "All Records";
     };
 
@@ -265,6 +291,9 @@ export default function AnalysisScreen() {
         setSelectedItem(item);
         setDetailModalVisible(true);
     };
+
+    // 🔥 SLICE FOR LIST (Rendered Data)
+    const renderedList = filteredData.slice(0, visibleCount);
 
     const renderItem = ({ item }: any) => {
         const isDone = ['Done', 'Completed', 'Closed', 'Installed', 'Successful', 'Resolved'].includes(item.status);
@@ -330,7 +359,8 @@ export default function AnalysisScreen() {
                 {/* 2. CONTROLS */}
                 <View style={styles.controlsContainer}>
                     <View style={styles.toggleRow}>
-                        {['Month', 'Year', 'All'].map((m) => (
+                        {/* 🔥 CHANGED: 'Year' to 'FY' */}
+                        {['Day', 'Month', 'FY', 'All'].map((m) => (
                             <TouchableOpacity key={m} style={[styles.toggleBtn, viewMode === m && styles.activeToggle]} onPress={() => setViewMode(m as any)}>
                                 <Text style={[styles.toggleText, viewMode === m && {color:'#333', fontWeight:'bold'}]}>{m}</Text>
                             </TouchableOpacity>
@@ -363,7 +393,7 @@ export default function AnalysisScreen() {
                         <TextInput 
                             style={styles.input} 
                             placeholder="Search Hospital, Serial..." 
-                            value={searchText}
+                            value={searchText} 
                             onChangeText={setSearchText} 
                         />
                         {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close" size={18} color="gray" /></TouchableOpacity>}
@@ -376,17 +406,48 @@ export default function AnalysisScreen() {
                 </View>
 
                 <FlatList 
-                    data={filteredData}
+                    data={renderedList}
                     keyExtractor={(item, index) => index.toString()}
                     renderItem={renderItem}
-                    contentContainerStyle={{ padding: 15 }}
+                    contentContainerStyle={{ padding: 15, paddingBottom: 100 }}
                     ListEmptyComponent={
                         <View style={{ alignItems: 'center', marginTop: 50 }}>
                             <Ionicons name="folder-open-outline" size={40} color="#ccc" />
                             <Text style={{ color: 'gray', marginTop: 10 }}>No reports found.</Text>
                         </View>
                     }
+                    // 🔥 LOAD MORE BUTTON WITH VIEW WRAPPER
+                    ListFooterComponent={
+                        <View style={{ paddingBottom: 80 }}>
+                            {visibleCount < filteredData.length ? (
+                                <TouchableOpacity 
+                                    onPress={() => setVisibleCount(prev => prev + 20)} 
+                                    style={{
+                                        padding: 12, 
+                                        backgroundColor: '#fff', 
+                                        alignItems: 'center', 
+                                        marginVertical: 10, 
+                                        borderRadius: 8,
+                                        borderWidth: 1,
+                                        borderColor: '#ddd',
+                                        elevation: 1
+                                    }}
+                                >
+                                    <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                                        👇 Load More Records ({filteredData.length - visibleCount} remaining)
+                                    </Text>
+                                </TouchableOpacity>
+                            ) : (
+                                filteredData.length > 0 ? (
+                                    <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
+                                        --- End of List ---
+                                    </Text>
+                                ) : null
+                            )}
+                        </View>
+                    }
                 />
+
             </View>
 
             {/* DETAIL POPUP */}
@@ -401,7 +462,7 @@ export default function AnalysisScreen() {
                         </View>
 
                         {selectedItem && (
-                            <ScrollView style={{maxHeight: 400}}>
+                            <ScrollView style={{maxHeight: 400}} showsVerticalScrollIndicator={false}>
                                 <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:10}}>
                                     <Text style={{fontWeight:'bold', fontSize:16}}>{formatDate(selectedItem.displayDate)}</Text>
                                     <Text style={{fontWeight:'bold', color: 'green'}}>{selectedItem.status}</Text>
@@ -425,7 +486,7 @@ export default function AnalysisScreen() {
                                     <View style={[styles.infoBox, {backgroundColor:'#f3e5f5'}]}>
                                         <Text style={{fontWeight:'bold', color:'#8e44ad', marginBottom:5}}>🔄 PMS Cycle</Text>
                                         <Text>Cycle: {selectedItem.currentPmsNumber} / {selectedItem.totalPms}</Text>
-                                        <Text>Next Due: {formatDate(selectedItem.nextServiceDate)}</Text>
+                                        <Text>Next Due: {formatDate(selectedItem.nextServiceDate || selectedItem.computedDueDate)}</Text>
                                     </View>
                                 )}
 
@@ -472,7 +533,7 @@ export default function AnalysisScreen() {
                               style={styles.pickerItem} 
                               onPress={() => { 
                                   setSelectedEmployee(item.id); 
-                                  setSelectedEmployeeName(item.name);
+                                  setSelectedEmployeeName(item.name); 
                                   setShowEmployeePicker(false); 
                               }}
                             >
@@ -500,14 +561,14 @@ const DetailRow = ({label, value}: any) => (
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f5f5f5' },
-    header: { backgroundColor: '#3b5998', paddingTop: 50, padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    header: { backgroundColor: '#3b5998', paddingTop: 50, padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     headerTitle: { color: 'white', fontSize: 20, fontWeight: 'bold' },
 
     filterContainer: { backgroundColor: 'white', paddingVertical: 12, paddingHorizontal: 10, elevation: 2 },
     typeBtn: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20, backgroundColor: '#f0f0f0', marginRight: 8, borderWidth:1, borderColor:'#eee' },
     typeBtnText: { fontWeight: 'bold', fontSize: 13, color: '#555' },
 
-    controlsContainer: { padding: 15 },
+    controlsContainer: { padding: 15, backgroundColor: 'white' },
     toggleRow: { flexDirection: 'row', backgroundColor: '#e0e0e0', borderRadius: 8, padding: 3, marginBottom: 10 },
     toggleBtn: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
     activeToggle: { backgroundColor: 'white', elevation: 2 },
@@ -516,13 +577,13 @@ const styles = StyleSheet.create({
     // Admin Employee Button Style
     employeeFilterBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#e8f5e9', paddingHorizontal:12, paddingVertical:10, borderRadius:8, borderWidth:1, borderColor:'#2e7d32', marginBottom:10 },
 
-    dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'white', padding: 10, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#ddd' },
+    dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'white', padding: 8, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#ddd' },
     dateNavText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
 
     searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', borderRadius: 8, paddingHorizontal: 10, height: 40, borderWidth:1, borderColor:'#ddd' },
     input: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
 
-    countStrip: { flexDirection:'row', justifyContent:'space-between', paddingHorizontal:15, marginBottom:5 },
+    countStrip: { flexDirection:'row', justifyContent:'flex-end', paddingHorizontal:15, paddingVertical: 5 },
 
     card: { backgroundColor: 'white', padding: 12, borderRadius: 10, marginBottom: 10, elevation: 2, borderLeftWidth: 5 },
     cardTitle: { fontSize: 15, fontWeight: 'bold', color: '#333' },

@@ -47,6 +47,14 @@ export default function SparePartsScreen() {
   const [selectedEmpId, setSelectedEmpId] = useState('');
   const [issueQty, setIssueQty] = useState('');
 
+  // 🔥 PAGINATION STATE (SMART LOAD MORE)
+  const [visibleCount, setVisibleCount] = useState(20);
+
+  // 🔥 RESET PAGINATION ON FILTER CHANGE
+  useEffect(() => {
+      setVisibleCount(20);
+  }, [activeTab, stockSubTab, searchText]);
+
   // Admin Check
   const userRole = (user?.role || '').toLowerCase();
   const isAdmin = userRole.includes('admin') || userRole.includes('manager') || userRole.includes('store');
@@ -101,6 +109,18 @@ export default function SparePartsScreen() {
 
   const catalogList = getCatalogList();
   const employeeStockList = getEmployeeStock();
+
+  // 🔥 Determine Current List for Pagination
+  let currentList: any[] = [];
+  if (activeTab === 'Parts') {
+      currentList = employeeStockList;
+  } else if (activeTab === 'StockList') {
+      if (stockSubTab === 'OfficeStock') currentList = machinesList;
+      else currentList = catalogList;
+  }
+
+  // 🔥 SLICE FOR LIST (Rendered Data)
+  const renderedList = currentList.slice(0, visibleCount);
 
   // --- ADD MACHINE ---
   const handleAddMachine = async () => {
@@ -193,6 +213,63 @@ export default function SparePartsScreen() {
       setMachineDetailVisible(true);
   };
 
+  // --- RENDER ITEMS ---
+  const renderStockItem = ({item}: any) => (
+      <TouchableOpacity style={styles.stockCard} onPress={() => openPartDetails(item)}>
+          <View style={{flex:1}}>
+              <Text style={styles.itemName}>{item.partName}</Text>
+              <Text style={styles.itemSub}>PN: {item.partNo}</Text>
+          </View>
+          <View style={{alignItems:'flex-end'}}>
+              <View style={styles.empBadge}>
+                  <Ionicons name="person" size={10} color="#1b5e20" />
+                  <Text style={styles.empName}>{item.empName}</Text>
+              </View>
+              <Text style={styles.qtyText}>Qty: {item.empQty}</Text>
+          </View>
+      </TouchableOpacity>
+  );
+
+  const renderMachineItem = ({item}: any) => (
+      <TouchableOpacity style={styles.machineCard} onPress={() => openMachineDetails(item)}>
+          <View style={{flexDirection:'row', alignItems:'center', flex:1}}>
+              <View style={styles.iconBox}>
+                  <Ionicons name="print-outline" size={22} color="#0d47a1" />
+              </View>
+              <View style={{marginLeft:10, flex:1}}>
+                  <Text style={styles.itemName}>{item.name}</Text>
+                  <Text style={styles.qtyLabel}>
+                      Qty: <Text style={styles.bigStockText}>{item.quantity}</Text>
+                  </Text>
+              </View>
+          </View>
+          {isAdmin && (
+              <TouchableOpacity onPress={() => handleDeleteMachine(item.id)} style={{padding:5}}>
+                  <Ionicons name="trash-outline" size={20} color="#d32f2f" />
+              </TouchableOpacity>
+          )}
+      </TouchableOpacity>
+  );
+
+  const renderCatalogItem = ({item}: any) => (
+      <TouchableOpacity style={styles.card} onPress={() => openPartDetails(item)}>
+          <View style={styles.cardHeader}>
+              <View style={{flex:1}}>
+                  <Text style={styles.partName}>{item.partName}</Text>
+                  <Text style={styles.partNo}>PN: {item.partNo}</Text>
+              </View>
+              <View style={styles.priceTag}>
+                  <Text style={styles.priceText}>₹{item.price}</Text>
+              </View>
+          </View>
+          <Text style={styles.modelText} numberOfLines={1}>For: {item.compatibleModels}</Text>
+          <View style={{flexDirection:'row', marginTop:8, alignItems:'center'}}>
+              <Text style={{fontSize:12, color:'#555'}}>Office Stock: </Text>
+              <Text style={styles.bigStockTextOrange}>{item.officeStock || 0}</Text>
+          </View>
+      </TouchableOpacity>
+  );
+
   return (
     <View style={styles.container}>
         {/* HEADER */}
@@ -238,104 +315,57 @@ export default function SparePartsScreen() {
             {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={18} color="gray"/></TouchableOpacity>}
         </View>
 
-        {/* TAB 1: EMPLOYEE SPARES */}
-        {activeTab === 'Parts' && (
-            <FlatList 
-                data={employeeStockList}
-                keyExtractor={item => item.uniqueId}
-                contentContainerStyle={{padding:15}}
-                ListEmptyComponent={<Text style={styles.emptyText}>No Stock with Employees.</Text>}
-                renderItem={({item}) => (
-                    <TouchableOpacity style={styles.stockCard} onPress={() => openPartDetails(item)}>
-                        <View style={{flex:1}}>
-                            <Text style={styles.itemName}>{item.partName}</Text>
-                            <Text style={styles.itemSub}>PN: {item.partNo}</Text>
-                        </View>
-                        <View style={{alignItems:'flex-end'}}>
-                            <View style={styles.empBadge}>
-                                <Ionicons name="person" size={10} color="#1b5e20" />
-                                <Text style={styles.empName}>{item.empName}</Text>
-                            </View>
-                            <Text style={styles.qtyText}>Qty: {item.empQty}</Text>
-                        </View>
-                    </TouchableOpacity>
-                )}
-            />
-        )}
-
-        {/* TAB 2: STOCK LIST */}
+        {/* TAB 2 SUB TABS */}
         {activeTab === 'StockList' && (
-            <View style={{flex:1}}>
-                <View style={styles.subTabContainer}>
-                    <TouchableOpacity style={[styles.subTab, stockSubTab === 'OfficeStock' && styles.activeSubTab]} onPress={() => setStockSubTab('OfficeStock')}>
-                        <Text style={[styles.subTabText, stockSubTab === 'OfficeStock' && styles.activeSubTabText]}>Office Stock List</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.subTab, stockSubTab === 'SpareList' && styles.activeSubTab]} onPress={() => setStockSubTab('SpareList')}>
-                        <Text style={[styles.subTabText, stockSubTab === 'SpareList' && styles.activeSubTabText]}>Spare Part List</Text>
-                    </TouchableOpacity>
-                </View>
-
-                {/* A. OFFICE MACHINES */}
-                {stockSubTab === 'OfficeStock' && (
-                    <FlatList 
-                        data={machinesList}
-                        keyExtractor={item => item.id}
-                        contentContainerStyle={{padding:15}}
-                        ListEmptyComponent={<Text style={styles.emptyText}>No Machines Added.</Text>}
-                        renderItem={({item}) => (
-                            <TouchableOpacity style={styles.machineCard} onPress={() => openMachineDetails(item)}>
-                                <View style={{flexDirection:'row', alignItems:'center', flex:1}}>
-                                    <View style={styles.iconBox}>
-                                        <Ionicons name="print-outline" size={22} color="#0d47a1" />
-                                    </View>
-                                    <View style={{marginLeft:10, flex:1}}>
-                                        <Text style={styles.itemName}>{item.name}</Text>
-                                        {/* 🔥 UPDATED STYLE: Big Bold Colorful */}
-                                        <Text style={styles.qtyLabel}>
-                                            Qty: <Text style={styles.bigStockText}>{item.quantity}</Text>
-                                        </Text>
-                                    </View>
-                                </View>
-                                {isAdmin && (
-                                    <TouchableOpacity onPress={() => handleDeleteMachine(item.id)} style={{padding:5}}>
-                                        <Ionicons name="trash-outline" size={20} color="#d32f2f" />
-                                    </TouchableOpacity>
-                                )}
-                            </TouchableOpacity>
-                        )}
-                    />
-                )}
-
-                {/* B. SPARE PART LIST (Catalog) */}
-                {stockSubTab === 'SpareList' && (
-                    <FlatList 
-                        data={catalogList}
-                        keyExtractor={item => item.id}
-                        contentContainerStyle={{padding:15}}
-                        ListEmptyComponent={<Text style={styles.emptyText}>No Parts Found</Text>}
-                        renderItem={({item}) => (
-                            <TouchableOpacity style={styles.card} onPress={() => openPartDetails(item)}>
-                                <View style={styles.cardHeader}>
-                                    <View style={{flex:1}}>
-                                        <Text style={styles.partName}>{item.partName}</Text>
-                                        <Text style={styles.partNo}>PN: {item.partNo}</Text>
-                                    </View>
-                                    <View style={styles.priceTag}>
-                                        <Text style={styles.priceText}>₹{item.price}</Text>
-                                    </View>
-                                </View>
-                                <Text style={styles.modelText} numberOfLines={1}>For: {item.compatibleModels}</Text>
-                                <View style={{flexDirection:'row', marginTop:8, alignItems:'center'}}>
-                                    <Text style={{fontSize:12, color:'#555'}}>Office Stock: </Text>
-                                    {/* 🔥 UPDATED STYLE: Big Bold Colorful */}
-                                    <Text style={styles.bigStockTextOrange}>{item.officeStock || 0}</Text>
-                                </View>
-                            </TouchableOpacity>
-                        )}
-                    />
-                )}
+            <View style={styles.subTabContainer}>
+                <TouchableOpacity style={[styles.subTab, stockSubTab === 'OfficeStock' && styles.activeSubTab]} onPress={() => setStockSubTab('OfficeStock')}>
+                    <Text style={[styles.subTabText, stockSubTab === 'OfficeStock' && styles.activeSubTabText]}>Office Stock List</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.subTab, stockSubTab === 'SpareList' && styles.activeSubTab]} onPress={() => setStockSubTab('SpareList')}>
+                    <Text style={[styles.subTabText, stockSubTab === 'SpareList' && styles.activeSubTabText]}>Spare Part List</Text>
+                </TouchableOpacity>
             </View>
         )}
+
+        {/* MAIN LIST */}
+        <FlatList 
+            data={renderedList}
+            keyExtractor={(item, index) => item.uniqueId || item.id || index.toString()}
+            contentContainerStyle={{padding:15, paddingBottom: 100}}
+            ListEmptyComponent={<Text style={styles.emptyText}>No Items Found.</Text>}
+            renderItem={
+                activeTab === 'Parts' ? renderStockItem : 
+                (stockSubTab === 'OfficeStock' ? renderMachineItem : renderCatalogItem)
+            }
+            // 🔥 LOAD MORE BUTTON FOOTER
+            ListFooterComponent={
+                visibleCount < currentList.length ? (
+                    <TouchableOpacity 
+                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                        style={{
+                            padding: 12, 
+                            backgroundColor: '#fff', 
+                            alignItems: 'center', 
+                            marginVertical: 15, 
+                            borderRadius: 8,
+                            borderWidth: 1,
+                            borderColor: '#ddd',
+                            elevation: 1
+                        }}
+                    >
+                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                            👇 Load More Records ({currentList.length - visibleCount} remaining)
+                        </Text>
+                    </TouchableOpacity>
+                ) : (
+                    currentList.length > 0 ? (
+                        <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
+                            --- End of List ---
+                        </Text>
+                    ) : null
+                )
+            }
+        />
 
         {/* --- ADD MACHINE MODAL --- */}
         <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => setModalVisible(false)}>
@@ -378,7 +408,6 @@ export default function SparePartsScreen() {
                             
                             <Text style={styles.sectionHeader}>STOCK STATUS</Text>
                             <View style={styles.stockRow}>
-                                {/* 🔥 DYNAMIC LABEL */}
                                 <View style={[styles.myStockBox, {padding:15}]}>
                                     <Text style={styles.myStockLabel}>
                                         {selectedPart.empName ? `${selectedPart.empName.toUpperCase()}'S STOCK` : 'MY STOCK'}
@@ -420,7 +449,6 @@ export default function SparePartsScreen() {
                     <ScrollView showsVerticalScrollIndicator={false}>
                         {selectedMachine && (
                             <View>
-                                {/* 'full' prop removed for flexible wrapping */}
                                 <DetailRow label="Item Name" value={selectedMachine.name} /> 
                                 <DetailRow label="Quantity" value={selectedMachine.quantity} />
                                 <DetailRow label="Added By" value={selectedMachine.addedBy || 'Admin'} />
@@ -499,9 +527,9 @@ const DetailRow = ({label, value, full, color}: any) => (
             fontWeight:'bold', 
             fontSize: 15, 
             color: color || '#333', 
-            flex: 1, // 🔥 This makes text take available space and wrap
+            flex: 1, 
             textAlign: full ? 'left' : 'right',
-            flexWrap: 'wrap' // 🔥 Important for wrapping
+            flexWrap: 'wrap' 
         }}>
             {value}
         </Text>
@@ -565,12 +593,12 @@ const styles = StyleSheet.create({
       padding: 20
   },
   modalContent: { 
-      width: '90%', // 🔥 Fixes width overflow
+      width: '90%', 
       backgroundColor: 'white', 
       borderRadius: 15, 
       padding: 20, 
       elevation:10,
-      maxHeight: '80%' // 🔥 Fixes height overflow
+      maxHeight: '80%'
   },
   detailsContent: { width: '90%', backgroundColor: 'white', borderRadius: 15, padding: 25, elevation: 5, maxHeight: '80%' },
   

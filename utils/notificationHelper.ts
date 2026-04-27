@@ -1,44 +1,92 @@
+import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
-// 1. Permission Setup (Same as before)
-export const setupNotificationPermissions = async () => {
+// ==========================================
+// 1. Foreground Notification Settings
+// ==========================================
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
+
+// ==========================================
+// 2. Generate Expo Push Token
+// ==========================================
+export async function registerForPushNotificationsAsync() {
+  let token;
+
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync('default', {
+      name: 'Attendance Alerts',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#FF231F7C',
+    });
+  }
+
+  if (Device.isDevice) {
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
+    
     if (existingStatus !== 'granted') {
-        const { status } = await Notifications.requestPermissionsAsync();
-        finalStatus = status;
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
     }
     
-    if (Platform.OS === 'android') {
-        await Notifications.setNotificationChannelAsync('default', {
-            name: 'Attendance Alerts',
-            importance: Notifications.AndroidImportance.MAX,
-            vibrationPattern: [0, 250, 250, 250],
-            lightColor: '#FF231F7C',
-        });
+    if (finalStatus !== 'granted') {
+      console.log('Failed to get push token for push notification!');
+      return null; // Stop here if permission denied
     }
-    return finalStatus === 'granted';
+
+    try {
+        // 🔥 Replace this with your actual Expo Project ID
+        token = (await Notifications.getExpoPushTokenAsync({
+             projectId: 'fabfded8-69a3-4648-9d6f-63e2a0c5f618', 
+        })).data;
+        console.log("🔔 EXPO PUSH TOKEN:", token);
+    } catch (e) {
+        console.log("Token Error:", e);
+    }
+  } else {
+    console.log('Must use physical device for Push Notifications');
+  }
+
+  return token;
+}
+
+// ==========================================
+// 3. Initial Permission Caller
+// ==========================================
+export const setupNotificationPermissions = async () => {
+    const token = await registerForPushNotificationsAsync();
+    return token;
 };
 
-// 🔥 HELPER: Check if Date is in Holiday List
+// ==========================================
+// 4. Holiday Check Helper
+// ==========================================
 const isHoliday = (dateObj: Date, holidayList: any[]) => {
     if (!holidayList || holidayList.length === 0) return false;
 
-    // Local Date String (YYYY-MM-DD) banana zaruri hai
-    // Kyunki Firebase me date string format me hai
     const offset = dateObj.getTimezoneOffset() * 60000;
     const localDate = new Date(dateObj.getTime() - offset);
     const dateStr = localDate.toISOString().split('T')[0];
 
-    // Check karein ki ye date list me hai ya nahi
     return holidayList.some((h: any) => h.date === dateStr);
 };
 
-// 2. Schedule Logic (Updated with Holiday Check)
+// ==========================================
+// 5. Local Attendance Reminders (Untouched)
+// ==========================================
 export const manageAttendanceReminders = async (
     status: 'LOGIN_PENDING' | 'LOGGED_IN' | 'COMPLETED', 
-    holidayList: any[] = [] // 👈 Yaha humne holidayList receive kiya
+    holidayList: any[] = [] 
 ) => {
     
     await Notifications.dismissAllNotificationsAsync();
@@ -49,7 +97,6 @@ export const manageAttendanceReminders = async (
     // 🛑 CHECK 1: Aaj ke liye check (Sunday OR Holiday)
     if (now.getDay() === 0 || isHoliday(now, holidayList)) {
         console.log("Aaj Chutti hai (Sunday/Holiday) 🌴, No Reminder today!");
-        // Aaj ka reminder skip, but niche Case C (Kal ka alarm) chalega
     } else {
         // --- CASE A: Login Reminder ---
         if (status === 'LOGIN_PENDING') {
@@ -100,7 +147,7 @@ export const manageAttendanceReminders = async (
     // 🛑 CHECK 2: Kal ke liye check (Sunday OR Holiday)
     if (tomorrow.getDay() === 0 || isHoliday(tomorrow, holidayList)) {
         console.log("Kal Chutti hai (Sunday/Holiday) 🌴, Alarm skip kiya.");
-        return; // Kal alarm set mat karo
+        return; 
     }
     
     await Notifications.scheduleNotificationAsync({
@@ -112,3 +159,35 @@ export const manageAttendanceReminders = async (
         trigger: { type: 'date', date: tomorrow } as any,
     });
 };
+
+// ==========================================
+// 6. 🔥 SEND REAL PUSH NOTIFICATION
+// ==========================================
+export async function sendExpoPushNotification(expoPushToken: string, title: string, body: string, data: any = {}) {
+  const message = {
+    to: expoPushToken,
+    sound: 'default',
+    title: title,
+    body: body,
+    data: data,
+  };
+
+  try {
+    const response = await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Accept-encoding': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(message),
+    });
+    
+    // 🔥 NEW: Expo का जवाब (Response) प्रिंट करना
+    const responseData = await response.json();
+    console.log("🚀 Expo Push Response:", responseData);
+    
+  } catch (error) {
+    console.error("❌ Error sending push notification:", error);
+  }
+}

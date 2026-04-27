@@ -44,21 +44,21 @@ Notifications.setNotificationHandler({
 export default function HomeScreen() {
   const router = useRouter();
   
+  // 🔥 UPDATED: Added expenseList, advanceList, orderList
   const { 
       activeSection, setActiveSection, 
       currentUser, logout, 
       shouldOpenSidebar, setShouldOpenSidebar,
       taskList, leadList, pmsList, dueList, courierList, 
       serviceCallList, salesVisitList, attendanceList,
+      leaveList, expenseList, advanceList, orderList, cardRequestList,// New Additions
+      installList, demoList, paymentList,
       appPermissions, notificationCount, companyProfile 
   } = useData();
   
   const [sidebarVisible, setSidebarVisible] = useState(false); 
   const [expoPushToken, setExpoPushToken] = useState('');
-  // ... purana expoPushToken wala code ...
 
-  // 👇👇 IS CODE BLOCK KO YAHAN PASTE KAREIN 👇👇
-  
   // 🔥 DYNAMIC BRANDING STATE
   const [branding, setBranding] = useState({
       name: 'LMS', // Default Name
@@ -69,13 +69,11 @@ export default function HomeScreen() {
   useEffect(() => {
       const loadBranding = async () => {
           if (companyProfile?.shortName) {
-              // Agar Context ready hai to wahan se lo
               setBranding({
                   name: companyProfile.shortName,
                   logo: companyProfile.logoUrl || null
               });
           } else {
-              // Agar Internet slow hai, to Local Storage se lo
               try {
                   const savedProfile = await AsyncStorage.getItem('companyProfileLocal');
                   if (savedProfile) {
@@ -101,11 +99,15 @@ export default function HomeScreen() {
 
   const today = new Date().toISOString().split('T')[0];
   const currentMonth = today.slice(0, 7); 
+  
+  const isBoss = ['Admin', 'Manager'].includes(currentUser?.role);
+  const isHRBoss = ['Admin', 'Manager', 'Hr', 'Account', 'Accountant'].includes(currentUser?.role);
 
   // --- 🔥 COUNTS LOGIC ---
+
   const pendingTaskCount = taskList ? taskList.filter((t:any) => {
       if (t.status !== 'Pending') return false;
-      if (['Admin', 'Manager'].includes(currentUser?.role)) return true;
+      if (isBoss) return true;
       return t.to === currentUser?.name;
   }).length : 0;
 
@@ -122,55 +124,112 @@ export default function HomeScreen() {
   const pendingServiceCount = serviceCallList ? serviceCallList.filter((s: any) => {
       const isStatusOpen = s.status === 'Open' || s.status === 'Assigned';
       if (!isStatusOpen) return false;
-      if (['Admin', 'Manager'].includes(currentUser?.role)) return true;
+      if (isBoss) return true;
       return s.senderId === currentUser?.uid || s.senderId === currentUser?.id;
   }).length : 0;
 
   const pmsDueCount = pmsList ? pmsList.filter((p:any) => {
       const isDue = p.nextServiceDate && p.nextServiceDate.startsWith(currentMonth) && p.status !== 'Done';
       if (!isDue) return false;
-      if (['Admin', 'Manager'].includes(currentUser?.role)) return true;
+      if (isBoss) return true;
       return p.senderId === currentUser?.uid;
   }).length : 0;
 
   const pendingLeadCount = leadList ? leadList.filter((l:any) => {
        const isToday = l.nextFollowUp === today && l.status !== 'Closed';
        if (!isToday) return false;
-       if (['Admin', 'Manager'].includes(currentUser?.role)) return true;
+       if (isBoss) return true;
        return l.senderId === currentUser?.uid;
   }).length : 0;
 
+  // 🔥 NEW: TODAY'S ACTIVITY COUNTS (सिर्फ आज का काम दिखाएगा)
+  // हमने 'todayStr' हटा दिया है क्योंकि 'today' पहले से ऊपर बना हुआ है
+  const todayInstallCount = installList ? installList.filter((i: any) => {
+      const itemDate = i.date || (i.createdAt ? i.createdAt.split('T')[0] : '');
+      return itemDate === today && (isBoss || i.senderId === currentUser?.id);
+  }).length : 0;
+
+  const todayDemoCount = demoList ? demoList.filter((d: any) => {
+      const itemDate = d.date || (d.createdAt ? d.createdAt.split('T')[0] : '');
+      return itemDate === today && (isBoss || d.senderId === currentUser?.id);
+  }).length : 0;
+
+  const todayPaymentCount = paymentList ? paymentList.filter((p: any) => {
+      const itemDate = p.date || (p.createdAt ? p.createdAt.split('T')[0] : '');
+      return itemDate === today && (isBoss || p.senderId === currentUser?.id);
+  }).length : 0;
+
+  // 🔥 SMART DSR COUNT: सिर्फ 'आज' के फॉलो-अप या जो पेंडिंग (Overdue) हैं, वही दिखाएगा!
   const getSalesFollowUpCount = () => {
-      const isBoss = ['Admin', 'Manager'].includes(currentUser?.role);
+      const todayStr = new Date().toISOString().split('T')[0]; // आज की तारीख (YYYY-MM-DD)
+
       const activeVisits = salesVisitList ? salesVisitList.filter((v:any) => {
           const outcome = (v.outcome || '').toLowerCase();
           const isClosed = outcome.includes('order closed') || outcome.includes('lost') || outcome.includes('not interested');
           const isMine = isBoss || v.senderId === currentUser?.uid;
-          return !isClosed && isMine;
+          
+          // चेक करें कि क्या नेक्स्ट फॉलो-अप आज है या आज से पहले का छूट गया है?
+          const isDueToday = v.nextFollowUp && v.nextFollowUp === todayStr;
+          
+          return !isClosed && isMine && isDueToday;
       }).length : 0;
+
       const activeLeads = leadList ? leadList.filter((l:any) => {
           const status = (l.status || '').toLowerCase();
           const isClosed = status.includes('converted') || status.includes('lost') || status.includes('drop');
           const isMine = isBoss || l.senderId === currentUser?.uid;
-          return !isClosed && isMine;
+          
+          // चेक करें कि क्या नेक्स्ट फॉलो-अप आज है या आज से पहले का छूट गया है?
+          const isDueToday = l.nextFollowUp && l.nextFollowUp === todayStr;
+
+          return !isClosed && isMine && isDueToday;
       }).length : 0;
+
       return activeVisits + activeLeads;
   };
   const salesFollowUpCount = getSalesFollowUpCount();
-  // 🔥 PENDING LEAVE COUNT
-const pendingLeaveCount = useData().leaveList ? useData().leaveList.filter((l: any) => {
-    const status = l.status || 'Pending';
-    // Admin sabki dekhega, User sirf apni
-    const isBoss = ['Admin', 'Manager', 'Hr'].includes(currentUser?.role);
-    if (isBoss) return status === 'Pending';
-    return status === 'Pending' && l.senderId === currentUser?.uid;
-}).length : 0;
+
+  // 🔥 NEW: HR COUNTS LOGIC
+  const pendingLeaveCount = leaveList ? leaveList.filter((l: any) => {
+      const status = l.status || 'Pending';
+      if (status !== 'Pending') return false;
+      if (isHRBoss) return true;
+      return l.senderId === currentUser?.uid;
+  }).length : 0;
+
+  const pendingExpenseCount = expenseList ? expenseList.filter((e: any) => {
+      const status = e.status || 'Pending';
+      if (status !== 'Pending') return false;
+      if (isHRBoss) return true;
+      return e.senderId === currentUser?.uid;
+  }).length : 0;
+
+  const pendingAdvanceCount = advanceList ? advanceList.filter((a: any) => {
+      const status = a.status || 'Pending';
+      if (status !== 'Pending') return false;
+      if (isHRBoss) return true;
+      return a.senderId === currentUser?.uid;
+  }).length : 0;
+
+  // 🔥 NEW: SALES ORDER COUNT
+  const pendingOrderCount = orderList ? orderList.filter((o: any) => {
+      const status = o.status || 'Pending';
+      if (status !== 'Pending') return false;
+      if (isBoss) return true;
+      return o.senderId === currentUser?.uid;
+  }).length : 0;
+
+  const pendingCardCount = cardRequestList ? cardRequestList.filter((c: any) => {
+      if (c.status !== 'Pending') return false;
+      if (isBoss) return true; // Admin/Manager ko sabke pending dikhenge
+      return c.senderId === currentUser?.id || c.userId === currentUser?.id;
+  }).length : 0;
 
   // --- ⏰ LOGIC: TODAY'S ATTENDANCE STATUS ---
   const todayStr = new Date().toISOString().split('T')[0];
-  const myEntry = attendanceList.find((a: any) => 
+  const myEntry = attendanceList ? attendanceList.find((a: any) => 
       a.date === todayStr && a.userName === currentUser?.name
-  );
+  ) : null;
 
   let statusText = "Not Marked";
   let statusIcon = "ellipse-outline";
@@ -273,132 +332,78 @@ const pendingLeaveCount = useData().leaveList ? useData().leaveList.filter((l: a
   };
 
   const canSee = (moduleKey: string) => {
-    // 1. Admin Sab Kuch Dekhega (God Mode)
     if (currentUser?.role === 'Admin') return true; 
-    
-    // 'common' modules sabko dikhenge
     if (moduleKey === 'common') return true;
 
-    // 2. Role Mapping (🔥 FIX: Spelling & Case Mismatch Handle)
-    // Sabse pehle role ko small letters me convert karo taaki matching aasan ho
     let rawRole = (currentUser?.role || '').toLowerCase(); 
-    
-    // Default fallback value
     let userRole = 'Sales Executive'; 
 
-    // Ab Keywords check karke EXACT Database Key set karo
-    if (rawRole.includes('sales')) {
-        userRole = 'Sales Executive';
-    } 
-    else if (rawRole.includes('engineer') || rawRole.includes('service')) {
-        userRole = 'Service Engineer';
-    } 
-    else if (rawRole.includes('account')) {
-        userRole = 'Accountant';
-    } 
-    else if (rawRole.includes('store') || rawRole.includes('back office')) {
-        userRole = 'Store Keeper';
-    } 
-    else if (rawRole.includes('hr')) {
-        userRole = 'Hr';
-    } 
-    else if (rawRole.includes('manager')) {
-        userRole = 'Manager';
-    }
-    // Agar koi aur role hai jo upar match nahi hua, to original role hi use karo (Capitalize karke)
-    else if (currentUser?.role) {
-        userRole = currentUser.role;
-    }
+    if (rawRole.includes('sales')) userRole = 'Sales Executive';
+    else if (rawRole.includes('engineer') || rawRole.includes('service')) userRole = 'Service Engineer';
+    else if (rawRole.includes('account')) userRole = 'Accountant';
+    else if (rawRole.includes('store') || rawRole.includes('back office')) userRole = 'Store Keeper';
+    else if (rawRole.includes('hr')) userRole = 'Hr';
+    else if (rawRole.includes('manager')) userRole = 'Manager';
+    else if (currentUser?.role) userRole = currentUser.role;
 
-    // ---------------------------------------------------------
-    // 3. 🔥 MAIN UPDATE: MERGE LOGIC (Role + User)
-    // ---------------------------------------------------------
-    
-    // Step A: Role (Group) ki permission nikalo
-    // Ab 'userRole' wahi spelling hai jo Admin panel ne save ki hai
     const rolePerms = appPermissions?.[userRole] || {};
-
-    // Step B: Specific User ki permission nikalo (ID ya Email se)
     const userSpecificPerms = appPermissions?.[currentUser?.id] || appPermissions?.[currentUser?.email] || {};
 
-    // Step C: Check Final Permission
-    // Logic: Agar User ke liye True/False set hai, to wo maano.
     if (userSpecificPerms[moduleKey] !== undefined) {
-        return userSpecificPerms[moduleKey] === true; // User Override
+        return userSpecificPerms[moduleKey] === true; 
     }
-
-    // Agar User ke liye kuch nahi set hai, to Role wala maano.
     return rolePerms[moduleKey] === true; 
-};
+  };
   
   const sidebarItems = [
-      // Web Key: "asset_history" (Machine Kundali)
       { id: '1', title: 'Serial Number', icon: 'pricetag', route: '/serial_number', module: 'asset_history' }, 
-      
-      // Web Key: "attendance"
       { id: '7', title: 'Attendance Report', icon: 'person', route: '/attendance', module: 'attendance' },
-      
-      // Web Key: "spares"
       { id: '5', title: 'Spare Part Book', icon: 'book', route: '/spare_parts', module: 'spares' },
-      
-      // Web Key: "catalogs" (Product Master ke liye catalogs use karein)
       { id: '100', title: 'Product Master', icon: 'cube', route: '/product_master', module: 'catalogs' },
-      { id: '99', title: 'sales Calculation', icon: 'calculator', route: '/sales_team_report', module: 'sales_team_report' },
-      { id: '90', title: 'Company Profile', icon: 'business', route: '/company_profile', module: 'company_profile' },
-      { id: '92', title: 'Admin Control', icon: 'settings', route: '/manage_team', module: 'users' },       
+      { id: '96', title: 'Personal Notes', icon: 'journal', route: '/personal_notes', module: 'personal_notes' },
+      { id: '99', title: 'Sales Calculation', icon: 'calculator', route: '/sales_team_report', module: 'sales_team_report' },
+      { id: '93', title: 'Activity Timeline', icon: 'time', route: '/employee_timeline', module: 'users' },
+      { id: '92', title: 'Admin Control', icon: 'settings', route: '/manage_team', module: 'users' },
+      { id: '90', title: 'Company Profile', icon: 'business', route: '/company_profile', module: 'company_profile' },       
   ];
 
+  // 🔥 UPDATED HR ITEMS (Added Counts)
   const allHrItems = [
       { title: "Attendance", icon: "finger-print", color: "#4caf50", route: '/dayin', module: 'attendance' },
       { title: "Travel Log", icon: "bicycle", color: "#ff9800", route: '/travel', module: 'travel' },
-      { title: "Advance", icon: "wallet", color: "#9c27b0", route: '/advance', module: 'advance' },
-      { title: "Expenses", icon: "receipt", color: "#f44336", route: '/expense', module: 'expenses' },
+      { title: "Advance", icon: "wallet", color: "#9c27b0", route: '/advance', count: pendingAdvanceCount, module: 'advance' },
+      { title: "Expenses", icon: "receipt", color: "#f44336", route: '/expense', count: pendingExpenseCount, module: 'expenses' },
       { title: "Leaves", icon: "calendar", color: "#2196f3", route: '/leave', module: 'leave', count: pendingLeaveCount },
-      
-      // Cards ke liye shayad web me key nahi thi, filhal 'settings' ya 'common' rakhein
-      { title: "Cards", icon: "card", color: "#795548", route: '/visiting_card', module: 'common' }, 
-      
+      { title: "Cards", icon: "card", color: "#795548", route: '/visiting_card', module: 'common', count: pendingCardCount }, 
       { title: "Courier", icon: "cube", color: "#e67e22", route: '/courier', count: pendingCourierCount, module: 'courier' },
-      
-      // Tasks web list me nahi tha, ise 'dashboard' ya 'common' se link karein
       { title: "Task List", icon: "checkbox", color: "#e91e63", route: '/tasks', count: pendingTaskCount, module: 'dashboard' }, 
   ];
 
   const allActivityItems = [
       { title: "Visits DSR", icon: "briefcase", color: "#3b5998", route: '/sales', count: salesFollowUpCount, module: 'visits' },
-      { title: "Installation", icon: "construct", color: "#795548", route: '/installation', module: 'installation' },
-      { title: "Demo Report", icon: "play-circle", color: "#00bcd4", route: '/demo', module: 'demos' },
-      
-      // Web Key: "tickets" (Service Call ke liye)
+      { title: "Installation", icon: "construct", color: "#795548", route: '/installation', count: todayInstallCount, module: 'installation' }, // 🔥 Count added
+      { title: "Demo Report", icon: "play-circle", color: "#00bcd4", route: '/demo', count: todayDemoCount, module: 'demos' }, // 🔥 Count added
       { title: "Service Call", icon: "settings", color: "#607d8b", route: '/service_call', count: pendingServiceCount, module: 'tickets' }, 
-      
       { title: "PMS Report", icon: "shield-checkmark", color: "#4caf50", route: '/pms_schedule', count: pmsDueCount, module: 'pms' },
-      
-      // Web Key: "service_reports" (Analysis ke liye)
       { title: "Service Analysis", icon: "pie-chart", color: "#673ab7", route: '/service_analysis', module: 'service_reports' },
-      
-      // Projects Web list me nahi tha, filhal 'common' ya 'organizations' use karein
+      { title: "Quotations", icon: "document-text", color: "#1565c0", route: '/quotations', module: 'quotations' },
       { title: "Project Report", icon: "business", color: "#607d8b", route: '/projects', module: 'organizations' } 
   ];
-  // ✅ SALES ITEMS (Is code ko paste karein)
+  
+  // 🔥 UPDATED SALES ITEMS (Added Orders Count)
   const allSalesItems = [
-      // Web Key: "orders"
-      { title: "Order Booking", icon: "cart", color: "#ff9800", route: '/orders', module: 'orders' },
-      
-      // Web Key: "sales_analysis"
+      { title: "Order Booking", icon: "cart", color: "#ff9800", route: '/orders', count: pendingOrderCount, module: 'orders' },
       { title: "Dashboard", icon: "stats-chart", color: "#4caf50", route: '/sales_analysis', module: 'sales_analysis' },
-      
-      // Web Key: "payment_coll"
-      { title: "Collect Payment", icon: "cash", color: "#27ae60", route: '/payment_collection', module: 'payment_coll' },
-      
-      // Web Key: "payment_due"
+      { title: "Collect Payment", icon: "cash", color: "#27ae60", route: '/payment_collection', count: todayPaymentCount, module: 'payment_coll' }, // 🔥 Count added
       { title: "Pending Dues", icon: "time", color: "#c0392b", route: '/payment_duelist', count: pendingDueCount, module: 'payment_due' },
-      
   ];
 
   const filterItems = (items: any[]) => {
-    return items.filter(i => canSee(i.module));
-};
+    return items.filter(i => {
+        if (i.module === 'personal_notes') return true;
+        return canSee(i.module);
+    });
+  };
 
   const visibleHR = filterItems(allHrItems);
   const visibleActivity = filterItems(allActivityItems);
@@ -409,14 +414,12 @@ const pendingLeaveCount = useData().leaveList ? useData().leaveList.filter((l: a
       <View style={styles.container}>
           <View style={styles.header}>
               <TouchableOpacity onPress={() => setSidebarVisible(true)}><Ionicons name="menu" size={28} color="#333" /></TouchableOpacity>
-              {/* 🔥 UPDATED DYNAMIC HEADER LOGO */}
               <View style={{flexDirection:'row', alignItems:'center'}}>
                   {branding.logo ? (
                       <Image source={{ uri: branding.logo }} style={{width: 40, height: 40, resizeMode:'contain', marginRight: 10}} />
                   ) : (
                       <Image source={require('../assets/images/icon.png')} style={{width: 40, height: 40, resizeMode:'contain', marginRight: 10}} />
                   )}
-                  {/* Ab yahan LMS nahi, balki apka Company Short Name dikhega */}
                   <Text style={styles.headerTitle}>{branding.name}</Text>
               </View>
               <View style={{flexDirection:'row', alignItems:'center'}}>
@@ -425,7 +428,6 @@ const pendingLeaveCount = useData().leaveList ? useData().leaveList.filter((l: a
                       {notificationCount > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{notificationCount}</Text></View>}
                   </TouchableOpacity>
                   
-                  {/* 🔥 CLICKABLE PROFILE AVATAR (Navigates to /profile) */}
                   <TouchableOpacity onPress={() => router.push('/profile')}>
                         <View style={styles.headerAvatar}>
                           {getUserImage() 
@@ -517,7 +519,6 @@ const pendingLeaveCount = useData().leaveList ? useData().leaveList.filter((l: a
               <View style={styles.modalOverlay}>
                   <View style={styles.sidebarContainer}>
                       <View style={styles.sidebarHeader}>
-                          {/* 🔥 CLICKABLE SIDEBAR AVATAR */}
                           <TouchableOpacity onPress={() => { setSidebarVisible(false); router.push('/profile'); }}>
                               <View style={styles.sidebarAvatar}>
                                    {getUserImage() 
@@ -541,7 +542,7 @@ const pendingLeaveCount = useData().leaveList ? useData().leaveList.filter((l: a
                           )}
                           ListFooterComponent={() => (
                                     <View>
-                                                                            
+                                                                                                    
                                     </View>
                                   )}
                       />
@@ -573,7 +574,18 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
   headerAvatar: { width: 35, height: 35, borderRadius: 20, backgroundColor:'#3b5998', justifyContent:'center', alignItems:'center', overflow:'hidden' },
   bellBtn: { marginRight: 15, position: 'relative' },
-  badge: { position: 'absolute', top: -5, right: -5, backgroundColor: 'red', borderRadius: 10, width: 18, height: 18, justifyContent: 'center', alignItems: 'center' },
+  badge: { 
+      position: 'absolute', 
+      top: -5, 
+      right: -8, 
+      backgroundColor: '#D32F2F', 
+      borderRadius: 10, 
+      minWidth: 18, 
+      height: 18, 
+      justifyContent: 'center', 
+      alignItems: 'center',
+      paddingHorizontal: 4 // स्ट्रेच करने के लिए
+  },
   badgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
   scrollContent: { padding: 15, paddingBottom: 150, flexGrow: 1 }, 
   dashboardBanner: { backgroundColor: '#3b5998', borderRadius: 12, padding: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, elevation: 4 },
@@ -586,7 +598,20 @@ const styles = StyleSheet.create({
   menuItem: { width: '31%', alignItems: 'center', marginBottom: 5, marginRight: '2%' },
   iconCircle: { width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center', marginBottom: 8, elevation: 2, position:'relative' },
   menuText: { fontSize: 11, color: '#333', textAlign: 'center', fontWeight:'600', height: 30 },
-  menuBadge: { position: 'absolute', top: -5, right: -5, backgroundColor: 'red', width: 20, height: 20, borderRadius: 10, justifyContent: 'center', alignItems: 'center', borderWidth:1.5, borderColor:'white' },
+  menuBadge: { 
+      position: 'absolute', 
+      top: -6, 
+      right: -10, // बैज को थोड़ा और बाहर किया ताकि आइकन ना छुपे
+      backgroundColor: '#D32F2F', 
+      minWidth: 22, // कम से कम इतना चौड़ा रहेगा 
+      height: 20, 
+      borderRadius: 10, 
+      justifyContent: 'center', 
+      alignItems: 'center', 
+      borderWidth: 1.5, 
+      borderColor: 'white',
+      paddingHorizontal: 5 // 🚀 यही मैजिक है! नंबर बड़ा होने पर डिब्बे को खींचेगा
+  },
   menuBadgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
   modalOverlay: { flex: 1, flexDirection: 'row' },
   sidebarContainer: { width: '75%', backgroundColor: 'white', padding: 20, paddingTop: 50, elevation: 5, justifyContent: 'space-between' },

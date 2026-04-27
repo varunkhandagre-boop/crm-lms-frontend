@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useMemo, useState } from 'react';
-import { Alert, FlatList, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useData } from './context/DataContext';
 
 export default function TaskScreen() {
@@ -20,7 +20,8 @@ export default function TaskScreen() {
   const [employeeModalVisible, setEmployeeModalVisible] = useState(false);
 
   // DATE FILTER STATES
-  const [dateViewMode, setDateViewMode] = useState<'Day' | 'Month' | 'Year' | 'All'>('Year');
+  // 🔥 CHANGED: 'Year' to 'FY'
+  const [dateViewMode, setDateViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const [taskModalVisible, setTaskModalVisible] = useState(false);
@@ -28,17 +29,30 @@ export default function TaskScreen() {
   const [selectedTask, setSelectedTask] = useState<any>(null);
   const [completionNote, setCompletionNote] = useState('');
 
+  // 🔥 LOADING STATE FOR COMPLETE BUTTON
+  const [isCompleting, setIsCompleting] = useState(false);
+
+  // 🔥 PAGINATION STATE (SMART LOAD MORE)
+  const [visibleCount, setVisibleCount] = useState(20);
+
+  // 🔥 RESET PAGINATION ON FILTER CHANGE
+  useEffect(() => {
+      if (dateViewMode === 'Day' && activeStatus === 'Pending' && !searchText) {
+          setVisibleCount(500); // Day view me sab dikha do
+      } else {
+          setVisibleCount(20); // Baki views me Load More use karo
+      }
+  }, [taskViewMode, activeStatus, searchText, priorityFilter, selectedEmployee, dateViewMode, currentDate]);
+
   // --- CHECK ADMIN ROLE ---
   const isAdminOrManager = ['Admin', 'Manager'].includes(currentUser?.role);
 
   // --- GENERATE EMPLOYEE LIST ---
   const employeeList = useMemo(() => {
       const names = new Set(['All']);
-      // Add users from userList
       if (userList) userList.forEach((u: any) => {
           if(u.name) names.add(u.name);
       });
-      // Fallback: Add names found in tasks
       if (taskList) {
           taskList.forEach((t: any) => {
               if (t.to && t.to !== 'Self') names.add(t.to);
@@ -49,30 +63,21 @@ export default function TaskScreen() {
   }, [taskList, userList]);
 
   // --- COUNTS ---
-  
-  // 1. My/Received Pending Count
   const myPendingCount = taskList.filter((t: any) => {
       if (isAdminOrManager) {
-           // Admin sees tasks for selected user
            const matchesUser = selectedEmployee === 'All' ? true : t.to === selectedEmployee;
            return matchesUser && t.status === 'Pending';
       }
-      // Normal user sees only their tasks
       return (t.to === 'Self' || t.to === currentUser?.name) && t.status === 'Pending';
   }).length;
 
-  // 2. Given/Assigned Pending Count
   const givenPendingCount = taskList.filter((t: any) => {
       if (isAdminOrManager) {
-          // Admin sees tasks assigned BY selected user
           if (selectedEmployee !== 'All') {
               return t.from === selectedEmployee && t.to !== 'Self' && t.status === 'Pending';
           }
-          // If All, maybe show total pending assigned tasks? Or keep it specific.
-          // Let's show all assigned tasks if All is selected.
           return t.from && t.from !== 'Self' && t.status === 'Pending';
       }
-      // Normal user sees tasks they assigned
       return t.from === currentUser?.name && t.to !== 'Self' && t.to !== currentUser?.name && t.status === 'Pending';
   }).length;
 
@@ -103,19 +108,25 @@ export default function TaskScreen() {
       }
   };
 
-  // --- DATE NAVIGATION ---
+  // --- 🔥 CHANGED: FY DATE NAVIGATION ---
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
       if (dateViewMode === 'Day') d.setDate(d.getDate() + dir);
       else if (dateViewMode === 'Month') d.setMonth(d.getMonth() + dir);
-      else if (dateViewMode === 'Year') d.setFullYear(d.getFullYear() + dir);
+      else if (dateViewMode === 'FY') d.setFullYear(d.getFullYear() + dir);
       setCurrentDate(d);
   };
 
+  // --- 🔥 CHANGED: FY HEADER TEXT ---
   const getHeaderDate = () => {
       if (dateViewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
       if (dateViewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      if (dateViewMode === 'Year') return currentDate.getFullYear().toString();
+      if (dateViewMode === 'FY') {
+          const m = currentDate.getMonth(); 
+          const y = currentDate.getFullYear();
+          const startY = m >= 3 ? y : y - 1;
+          return `FY ${startY.toString().slice(-2)}-${(startY + 1).toString().slice(-2)}`;
+      }
       return "All Time";
   };
 
@@ -134,24 +145,19 @@ export default function TaskScreen() {
       let data = taskList ? [...taskList] : [];
 
       if (taskViewMode === 'MyTasks') {
-          // --- RECEIVED MODE ---
           if (isAdminOrManager) {
               if (selectedEmployee !== 'All') data = data.filter((t: any) => t.to === selectedEmployee);
           } else {
               data = data.filter((t: any) => t.to === 'Self' || t.to === currentUser?.name);
           }
       } else {
-          // --- ASSIGNED (GIVEN) MODE ---
           if (isAdminOrManager) {
               if (selectedEmployee !== 'All') {
-                  // Admin wants to see tasks given BY "Ravi"
                   data = data.filter((t: any) => t.from === selectedEmployee && t.to !== 'Self');
               } else {
-                  // Admin wants to see ALL assigned tasks
                   data = data.filter((t: any) => t.from && t.to !== 'Self'); 
               }
           } else {
-              // Normal user: Show tasks assigned BY ME
               data = data.filter((t: any) => t.from === currentUser?.name && t.to !== 'Self' && t.to !== currentUser?.name);
           }
       }
@@ -172,14 +178,20 @@ export default function TaskScreen() {
           const targetMonth = currentDate.getMonth();
           const targetDay = currentDate.getDate();
 
+          // 🔥 FY Boundaries Logic
+          const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // 1st April
+          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // 31st March
+
           data = data.filter((item: any) => {
               const dateField = item.status === 'Completed' ? item.completedAt : (item.dueDate || item.createdAt);
               if(!dateField) return false;
               const itemDate = parseDate(dateField);
+              const itemTime = itemDate.getTime();
               
-              if (dateViewMode === 'Year') return itemDate.getFullYear() === targetYear;
               if (dateViewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
               if (dateViewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
+              if (dateViewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
               return true;
           });
       }
@@ -195,7 +207,8 @@ export default function TaskScreen() {
       return data;
   };
 
-  const displayList = getFilteredData();
+  const displayList = getFilteredData(); 
+  const renderedList = displayList.slice(0, visibleCount);
 
   const handleOpenTask = (task: any) => {
       setSelectedTask(task);
@@ -206,6 +219,7 @@ export default function TaskScreen() {
   const handleCompleteTask = async () => {
       if (!completionNote.trim()) return Alert.alert("Note Required", "Please enter what action you took.");
       
+      setIsCompleting(true); 
       try {
           if (typeof completeTask === 'function') {
               await completeTask(selectedTask.id, completionNote);
@@ -225,6 +239,8 @@ export default function TaskScreen() {
           }
       } catch (error) {
           Alert.alert("Error", "Update Failed");
+      } finally {
+          setIsCompleting(false); 
       }
   };
 
@@ -267,7 +283,8 @@ export default function TaskScreen() {
 
       <View style={{backgroundColor:'white', paddingBottom:10, marginBottom:5}}>
           <View style={styles.tabContainer}>
-              {['Day', 'Month', 'Year', 'All'].map((m) => (
+              {/* 🔥 CHANGED: 'Year' to 'FY' */}
+              {['Day', 'Month', 'FY', 'All'].map((m) => (
                   <TouchableOpacity key={m} style={[styles.dateTab, dateViewMode === m && styles.activeDateTab]} onPress={() => setDateViewMode(m as any)}>
                       <Text style={[styles.dateTabText, dateViewMode === m && styles.activeDateTabText]}>{m}</Text>
                   </TouchableOpacity>
@@ -319,11 +336,14 @@ export default function TaskScreen() {
                   </TouchableOpacity>
               ))}
           </View>
+          
+          <Text style={{textAlign:'right', fontSize:12, color:'gray', paddingRight:15, marginTop:5}}>
+              Total: <Text style={{fontWeight:'bold', color:'#3b5998'}}>{displayList.length}</Text>
+          </Text>
       </View>
 
       <FlatList 
-        data={displayList}
-        // 🔥 KEY FIX: Unique key combination
+        data={renderedList}
         keyExtractor={(item, index) => (item.id || index.toString()) + index}
         contentContainerStyle={styles.listPadding}
         ListEmptyComponent={
@@ -383,7 +403,37 @@ export default function TaskScreen() {
                 </TouchableOpacity>
             );
         }}
-      />
+        
+        ListFooterComponent={
+          <View style={{ paddingBottom: 80 }}>
+              {visibleCount < displayList.length ? (
+                  <TouchableOpacity 
+                      onPress={() => setVisibleCount(prev => prev + 20)} 
+                      style={{
+                          padding: 12, 
+                          backgroundColor: '#fff', 
+                          alignItems: 'center', 
+                          marginVertical: 10, 
+                          borderRadius: 8,
+                          borderWidth: 1,
+                          borderColor: '#ddd',
+                          elevation: 1
+                      }}
+                  >
+                      <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                          👇 Load More Tasks ({displayList.length - visibleCount} remaining)
+                      </Text>
+                  </TouchableOpacity>
+              ) : (
+                  displayList.length > 0 ? (
+                      <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
+                          --- End of List ---
+                      </Text>
+                  ) : null
+              )}
+          </View>
+      }
+    />
 
       {/* TASK DETAIL MODAL */}
       <Modal visible={taskModalVisible} transparent animationType="slide">
@@ -424,6 +474,7 @@ export default function TaskScreen() {
                           <View style={styles.descriptionBox}>
                               <Text style={styles.descriptionText}>{selectedTask.remark || 'No description provided.'}</Text>
                           </View>
+                          
                           {selectedTask.status === 'Pending' ? (
                               <View style={styles.actionSection}>
                                   <Text style={styles.sectionHeading}>Your Response</Text>
@@ -433,9 +484,14 @@ export default function TaskScreen() {
                                       placeholder="What have you done for this task?" 
                                       value={completionNote} 
                                       onChangeText={setCompletionNote} 
+                                      editable={!isCompleting} 
                                   />
-                                  <TouchableOpacity style={styles.completeBtn} onPress={handleCompleteTask}>
-                                      <Text style={styles.completeBtnText}>Mark as Done</Text>
+                                  <TouchableOpacity 
+                                      style={[styles.completeBtn, isCompleting && { opacity: 0.6 }]} 
+                                      onPress={handleCompleteTask}
+                                      disabled={isCompleting}
+                                  >
+                                      {isCompleting ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.completeBtnText}>Mark as Done</Text>}
                                   </TouchableOpacity>
                               </View>
                           ) : selectedTask.status === 'Completed' ? (

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -27,30 +27,37 @@ export default function ProductMasterScreen() {
     const { productList = [], addProduct, user } = useData();
     
     // --- FORM STATES ---
-    const [name, setName] = useState('');   // Product Name
-    const [model, setModel] = useState(''); // Model Name
-    const [series, setSeries] = useState(''); // Series
+    const [name, setName] = useState('');
+    const [model, setModel] = useState('');
+    const [series, setSeries] = useState('');
     const [desc, setDesc] = useState('');
+    const [specifications, setSpecifications] = useState('');
     
-    // Media Links
+    // 🔥 NEW: Price and GST State
+    const [price, setPrice] = useState('');
+    const [gstRate, setGstRate] = useState('');
+    
     const [catalogs, setCatalogs] = useState<{title: string, url: string}[]>([]);
     const [videos, setVideos] = useState<{title: string, url: string}[]>([]);
 
-    // Temp Inputs
     const [linkTitle, setLinkTitle] = useState('');
     const [linkUrl, setLinkUrl] = useState('');
     const [linkType, setLinkType] = useState<'Catalog' | 'Video'>('Catalog');
 
-    // UI States
     const [searchText, setSearchText] = useState('');
     const [modalVisible, setModalVisible] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null); 
 
+    const [visibleCount, setVisibleCount] = useState(20);
+
+    useEffect(() => {
+        setVisibleCount(20);
+    }, [searchText]);
+
     const canEdit = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr'].includes(user?.role || '');
 
-    // --- LINK HANDLERS ---
     const addLinkToList = () => {
         if(!linkTitle.trim() || !linkUrl.trim()) return Alert.alert("Required", "Enter both Title and Link.");
         const newLink = { title: linkTitle, url: linkUrl };
@@ -71,7 +78,6 @@ export default function ProductMasterScreen() {
         }
     };
 
-    // --- ACTIONS ---
     const handleOpenLink = (url: string) => {
         if (url) Linking.openURL(url).catch(() => Alert.alert("Error", "Invalid Link"));
         else Alert.alert("No Link", "Link not available.");
@@ -82,7 +88,6 @@ export default function ProductMasterScreen() {
         try { await Share.share({ message: `📄 ${type}: ${title}\n🔗 ${url}` }); } catch (error) {}
     };
 
-    // --- SAVE / UPDATE ---
     const handleSave = async () => {
         if (!name.trim() || !model.trim()) return Alert.alert("Missing Fields", "Product Name and Model Name are required.");
         
@@ -91,7 +96,10 @@ export default function ProductMasterScreen() {
             name: name.trim(),
             model: model.trim(),
             series: series.trim(),
-            description: desc.trim(), 
+            description: desc.trim(),
+            specifications: specifications.trim(),
+            price: Number(price) || 0,     // 🔥 NEW: Save Price
+            gstRate: Number(gstRate) || 0, // 🔥 NEW: Save GST
             catalogs: catalogs, 
             videos: videos,
             updatedBy: user?.name, 
@@ -123,6 +131,9 @@ export default function ProductMasterScreen() {
         setModel(item.model || '');
         setSeries(item.series || '');
         setDesc(item.description || '');
+        setSpecifications(item.specifications || '');
+        setPrice(item.price ? item.price.toString() : '');       // 🔥 NEW: Load Price
+        setGstRate(item.gstRate ? item.gstRate.toString() : ''); // 🔥 NEW: Load GST
         
         const oldCat = item.catalogLink ? [{title: 'Main Catalog', url: item.catalogLink}] : [];
         const oldVid = item.videoLink ? [{title: 'Demo Video', url: item.videoLink}] : [];
@@ -135,7 +146,8 @@ export default function ProductMasterScreen() {
 
     const closeModal = () => {
         setModalVisible(false); setEditingId(null);
-        setName(''); setModel(''); setSeries(''); setDesc(''); setCatalogs([]); setVideos([]);
+        setName(''); setModel(''); setSeries(''); setDesc(''); setSpecifications(''); setCatalogs([]); setVideos([]);
+        setPrice(''); setGstRate(''); // 🔥 Clear Temp Data
         setLinkTitle(''); setLinkUrl('');
     };
 
@@ -146,7 +158,6 @@ export default function ProductMasterScreen() {
         ]);
     };
 
-    // --- RENDER ITEM ---
     const renderItem = ({ item }: any) => {
         const isExpanded = expandedId === item.id;
         const displayCatalogs = item.catalogs || (item.catalogLink ? [{title: 'Brochure', url: item.catalogLink}] : []);
@@ -167,9 +178,22 @@ export default function ProductMasterScreen() {
 
                 {isExpanded && (
                     <View style={styles.detailsBox}>
-                        {item.description ? <Text style={styles.descText}>{item.description}</Text> : null}
+                        
+                        {/* 🔥 NEW: Show Price & GST */}
+                        <View style={styles.priceRow}>
+                            <Text style={styles.priceText}>₹ {item.price ? item.price.toLocaleString() : '0'}</Text>
+                            <Text style={styles.gstBadge}>GST: {item.gstRate || 0}%</Text>
+                        </View>
 
-                        {/* CATALOGS */}
+                        {item.description ? <Text style={styles.descText}>{item.description}</Text> : null}
+                        
+                        {item.specifications ? (
+                            <View style={styles.specsBox}>
+                                <Text style={styles.specsTitle}>Quotations Specifications:</Text>
+                                <Text style={styles.specsText}>{item.specifications}</Text>
+                            </View>
+                        ) : null}
+
                         {displayCatalogs.length > 0 && (
                             <View style={styles.section}>
                                 <Text style={styles.sectionLabel}>DOCUMENTS ({displayCatalogs.length})</Text>
@@ -190,7 +214,6 @@ export default function ProductMasterScreen() {
                             </View>
                         )}
 
-                        {/* VIDEOS */}
                         {displayVideos.length > 0 && (
                             <View style={styles.section}>
                                 <Text style={styles.sectionLabel}>VIDEOS ({displayVideos.length})</Text>
@@ -229,13 +252,14 @@ export default function ProductMasterScreen() {
         );
     };
     
-    // 🔥 SEARCH & SORT: Name or Model (Alphabetical A-Z)
     const filteredList = productList
         .filter((p: any) => 
             p.name?.toLowerCase().includes(searchText.toLowerCase()) || 
             p.model?.toLowerCase().includes(searchText.toLowerCase())
         )
         .sort((a: any, b: any) => a.name.localeCompare(b.name));
+
+    const renderedList = filteredList.slice(0, visibleCount);
 
     return (
         <View style={styles.container}>
@@ -253,16 +277,46 @@ export default function ProductMasterScreen() {
                 <Ionicons name="search" size={22} color="gray" />
                 <TextInput style={styles.searchInput} placeholder="Search Name or Model..." value={searchText} onChangeText={setSearchText} />
             </View>
+                        
+            <Text style={{textAlign:'right', fontSize:12, color:'gray', paddingRight:15, marginBottom:5}}>
+                Total: <Text style={{fontWeight:'bold', color:'#3b5998'}}>{filteredList.length}</Text>
+            </Text>
 
             <FlatList 
-                data={filteredList}
+                data={renderedList}
                 keyExtractor={item => item.id}
                 renderItem={renderItem}
-                contentContainerStyle={{padding: 15}}
+                contentContainerStyle={{padding: 15, paddingBottom: 100}}
                 ListEmptyComponent={<Text style={{textAlign:'center', marginTop:50, color:'gray'}}>No products found.</Text>}
+                
+                ListFooterComponent={
+                    visibleCount < filteredList.length ? (
+                        <TouchableOpacity 
+                            onPress={() => setVisibleCount(prev => prev + 20)} 
+                            style={{
+                                padding: 12, 
+                                backgroundColor: '#fff', 
+                                alignItems: 'center', 
+                                marginVertical: 10, 
+                                borderRadius: 8,
+                                borderWidth: 1,
+                                borderColor: '#ddd'
+                            }}
+                        >
+                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                                👇 Load More Records ({filteredList.length - visibleCount} remaining)
+                            </Text>
+                        </TouchableOpacity>
+                    ) : (
+                        filteredList.length > 0 ? (
+                            <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
+                                --- End of List ---
+                            </Text>
+                        ) : null
+                    )
+                }
             />
 
-            {/* MODAL (Fixed Structure) */}
             <Modal visible={modalVisible} transparent={true} animationType="slide">
                 <KeyboardAvoidingView 
                     behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
@@ -278,15 +332,23 @@ export default function ProductMasterScreen() {
                             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom:20}}>
                                 
                                 <Text style={styles.label}>Product Details</Text>
-                                
                                 <TextInput style={styles.inputBig} placeholder="Product Name (e.g. Ventilator) *" value={name} onChangeText={setName} />
                                 
                                 <View style={{flexDirection:'row', gap:10}}>
                                     <TextInput style={[styles.inputBig, {flex:1}]} placeholder="Model Name (e.g. CVENT) *" value={model} onChangeText={setModel} />
                                     <TextInput style={[styles.inputBig, {flex:0.6}]} placeholder="Series" value={series} onChangeText={setSeries} />
                                 </View>
+
+                                {/* 🔥 NEW: Price & GST Row in Edit Modal */}
+                                <View style={{flexDirection:'row', gap:10}}>
+                                    <TextInput style={[styles.inputBig, {flex:1}]} placeholder="Price (₹)" keyboardType="numeric" value={price} onChangeText={setPrice} />
+                                    <TextInput style={[styles.inputBig, {flex:0.6}]} placeholder="GST (%)" keyboardType="numeric" value={gstRate} onChangeText={setGstRate} />
+                                </View>
                                 
-                                <TextInput style={[styles.inputBig, {height:60}]} multiline placeholder="Description / Features..." value={desc} onChangeText={setDesc} />
+                                <TextInput style={[styles.inputBig, {height:60, textAlignVertical:'top'}]} multiline placeholder="Description / Features..." value={desc} onChangeText={setDesc} />
+
+                                <Text style={styles.label}>Specifications (For Quotations)</Text>
+                                <TextInput style={[styles.inputBig, {height:80, textAlignVertical:'top'}]} multiline placeholder="Enter specs (15 inch, Touchscreen...)" value={specifications} onChangeText={setSpecifications} />
 
                                 <View style={styles.divider}/>
                                 
@@ -344,7 +406,7 @@ const styles = StyleSheet.create({
     headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
     addIconBtn: { backgroundColor:'#3b5998', padding:10, borderRadius:25 },
 
-    searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', margin: 15, paddingHorizontal: 15, borderRadius: 10, height: 50, borderWidth:1, borderColor:'#ddd' },
+    searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', margin: 15, marginBottom: 5, paddingHorizontal: 15, borderRadius: 10, height: 50, borderWidth:1, borderColor:'#ddd' },
     searchInput: { flex:1, marginLeft:10, fontSize:16 },
 
     card: { backgroundColor: 'white', borderRadius: 12, marginBottom: 12, padding: 15, elevation: 2 },
@@ -355,8 +417,18 @@ const styles = StyleSheet.create({
     prodModel: { fontSize: 13, color: '#555', marginTop:3, fontWeight:'600' },
 
     detailsBox: { marginTop: 15, paddingTop: 15, borderTopWidth: 1, borderTopColor: '#eee' },
+    
+    // 🔥 NEW: Price and GST Styles
+    priceRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 10 },
+    priceText: { fontSize: 18, fontWeight: 'bold', color: '#e53935' },
+    gstBadge: { backgroundColor: '#ffebee', color: '#c62828', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, fontSize: 12, fontWeight: 'bold', overflow: 'hidden' },
+
     descText: { fontSize: 14, color: '#444', marginBottom: 15, lineHeight: 20 },
     
+    specsBox: { backgroundColor: '#f1f8e9', padding: 10, borderRadius: 8, marginBottom: 15, borderWidth: 1, borderColor: '#c5e1a5' },
+    specsTitle: { fontSize: 12, fontWeight: 'bold', color: '#558b2f', marginBottom: 4 },
+    specsText: { fontSize: 13, color: '#33691e', lineHeight: 18 },
+
     section: { marginBottom: 15 },
     sectionLabel: { fontSize:12, fontWeight:'bold', color:'#888', marginBottom:8, letterSpacing:1 },
     linkRow: { flexDirection:'row', justifyContent:'space-between', alignItems:'center', backgroundColor:'#f9f9f9', padding:12, borderRadius:8, marginBottom:8, borderWidth:1, borderColor:'#f0f0f0' },

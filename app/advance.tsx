@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-// Firebase Imports
 import { collection, doc, getDocs, query, writeBatch } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
@@ -24,7 +23,8 @@ export default function EmployeeAdvanceScreen() {
   const { advanceList = [], updateAdvanceStatus, user, addNotification, refreshData } = useData();
 
   // STATES
-  const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'Year' | 'All'>('All'); 
+  // 🔥 CHANGED: 'Year' to 'FY'
+  const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All'); 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [searchText, setSearchText] = useState('');
   
@@ -32,12 +32,27 @@ export default function EmployeeAdvanceScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [isSettling, setIsSettling] = useState(false);
 
+  // 🔥 NEW STATE FOR APPROVE/REJECT LOADING
+  const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
+
   // EMPLOYEE FILTER
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All'); 
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
+  // 🔥 PAGINATION STATE (SMART LOAD MORE)
+  const [visibleCount, setVisibleCount] = useState(20); 
+
   const canManage = ['Admin', 'Manager', 'Account', 'Accountant' ,'Hr'].includes(user?.role || '');
+
+  // 🔥 RESET PAGINATION ON FILTER CHANGE
+  useEffect(() => {
+      if (viewMode === 'Day') {
+          setVisibleCount(100); // Day view me sab dikha do
+      } else {
+          setVisibleCount(20); // Baki views me Load More use karo
+      }
+  }, [viewMode, currentDate, selectedEmployeeName, searchText]);
 
   // 0. FETCH EMPLOYEES
   useEffect(() => {
@@ -72,18 +87,25 @@ export default function EmployeeAdvanceScreen() {
       return new Date(dateStr);
   };
 
+  // 🔥 CHANGED: FY Navigation
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
       if (viewMode === 'Day') d.setDate(d.getDate() + dir);
       else if (viewMode === 'Month') d.setMonth(d.getMonth() + dir);
-      else if (viewMode === 'Year') d.setFullYear(d.getFullYear() + dir);
+      else if (viewMode === 'FY') d.setFullYear(d.getFullYear() + dir);
       setCurrentDate(d);
   };
 
+  // 🔥 CHANGED: Header Title logic for Financial Year
   const getHeaderDate = () => {
       if (viewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
       if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      if (viewMode === 'Year') return currentDate.getFullYear().toString();
+      if (viewMode === 'FY') {
+          const m = currentDate.getMonth(); 
+          const y = currentDate.getFullYear();
+          const startY = m >= 3 ? y : y - 1;
+          return `FY ${startY.toString().slice(-2)}-${(startY + 1).toString().slice(-2)}`;
+      }
       return "All Time";
   };
 
@@ -108,13 +130,19 @@ export default function EmployeeAdvanceScreen() {
         const targetMonth = currentDate.getMonth();
         const targetDay = currentDate.getDate();
 
+        // 🔥 FY Boundaries Logic
+        const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+        const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // 1st April
+        const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // 31st March
+
         data = data.filter(item => {
             if(!item.date) return false;
             const itemDate = parseDate(item.date);
+            const itemTime = itemDate.getTime();
             
-            if (viewMode === 'Year') return itemDate.getFullYear() === targetYear;
             if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
             if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
+            if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
             return true;
         });
     }
@@ -132,17 +160,17 @@ export default function EmployeeAdvanceScreen() {
     return data;
   };
 
-  const displayList = getFilteredData();
-
-  // 🔥🔥 DUAL CALCULATION LOGIC 🔥🔥
+  const fullFilteredList = getFilteredData(); // 🔥 Full Data (For Calculations)
   
-  // 1. Outstanding (Current Due): Only Approved (Not Settled)
-  const outstandingAmount = displayList
+  // 🔥 SLICE DATA FOR FLATLIST (For Performance)
+  const renderedList = fullFilteredList.slice(0, visibleCount);
+
+  // 🔥🔥 DUAL CALCULATION LOGIC (Always uses Full Data) 🔥🔥
+  const outstandingAmount = fullFilteredList
       .filter((item: any) => item.status === 'Approved')
       .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
 
-  // 2. Total History (Total Taken): Approved + Settled (Sab kuch jo reject nahi hua)
-  const totalHistoryAmount = displayList
+  const totalHistoryAmount = fullFilteredList
       .filter((item: any) => item.status === 'Approved' || item.status === 'Settled')
       .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
 
@@ -174,7 +202,7 @@ export default function EmployeeAdvanceScreen() {
       try {
           const batch = writeBatch(db);
           // Only settle 'Approved' items
-          const itemsToSettle = displayList.filter(item => item.status === 'Approved');
+          const itemsToSettle = fullFilteredList.filter(item => item.status === 'Approved');
 
           itemsToSettle.forEach((item) => {
               const ref = doc(db, "advances", item.id);
@@ -196,23 +224,31 @@ export default function EmployeeAdvanceScreen() {
       setModalVisible(true);
   };
 
+  // 🔥 UPDATED STATUS HANDLER (WITH LOADING)
   const handleStatusUpdate = async (status: string) => {
       if(updateAdvanceStatus) {
-          await updateAdvanceStatus(selectedItem.id, status);
-          
-          const targetUserId = selectedItem.senderId || selectedItem.userId;
-          if (addNotification && targetUserId && targetUserId !== user?.uid) {
-              await addNotification({
-                  title: `Advance ${status}`, 
-                  message: `Your advance request of ₹${selectedItem.amount} has been ${status}.`,
-                  type: status === 'Approved' ? 'success' : 'alert',
-                  userId: targetUserId, 
-                  to: selectedItem.senderName,
-                  route: '/advance'
-              });
+          setUpdatingStatus(status); // Start Loading
+          try {
+              await updateAdvanceStatus(selectedItem.id, status);
+              
+              const targetUserId = selectedItem.senderId || selectedItem.userId;
+              if (addNotification && targetUserId && targetUserId !== user?.uid) {
+                  await addNotification({
+                      title: `Advance ${status}`, 
+                      message: `Your advance request of ₹${selectedItem.amount} has been ${status}.`,
+                      type: status === 'Approved' ? 'success' : 'alert',
+                      userId: targetUserId, 
+                      to: selectedItem.senderName,
+                      route: '/advance'
+                  });
+              }
+              setModalVisible(false);
+              Alert.alert("Updated", `Request marked as ${status}`);
+          } catch (error) {
+              Alert.alert("Error", "Could not update status.");
+          } finally {
+              setUpdatingStatus(null); // Stop Loading
           }
-          setModalVisible(false);
-          Alert.alert("Updated", `Request marked as ${status}`);
       }
   };
 
@@ -295,7 +331,8 @@ export default function EmployeeAdvanceScreen() {
 
       <View style={{backgroundColor:'white', paddingBottom:10}}>
           <View style={styles.tabContainer}>
-              {['Day', 'Month', 'Year', 'All'].map((m) => (
+              {/* 🔥 CHANGED: 'Year' to 'FY' */}
+              {['Day', 'Month', 'FY', 'All'].map((m) => (
                   <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
                       <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
                   </TouchableOpacity>
@@ -335,53 +372,96 @@ export default function EmployeeAdvanceScreen() {
       </View>
 
       <FlatList 
-        data={displayList}
+        data={renderedList}
         keyExtractor={item => item.id}
         renderItem={renderItem}
-        contentContainerStyle={{padding: 15}}
+        contentContainerStyle={{padding: 15, paddingBottom: 50}} // 🔥 Safe padding added
         ListEmptyComponent={
             <Text style={{textAlign:'center', marginTop:50, color:'gray'}}>No advance records found.</Text>
+        }
+        // 🔥 LOAD MORE BUTTON WRAPPED IN VIEW
+        ListFooterComponent={
+            <View style={{ paddingBottom: 80 }}>
+                {visibleCount < fullFilteredList.length ? (
+                    <TouchableOpacity 
+                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                        style={{
+                            padding: 12, 
+                            backgroundColor: '#fff', 
+                            alignItems: 'center', 
+                            marginVertical: 10, 
+                            borderRadius: 8,
+                            borderWidth: 1,
+                            borderColor: '#ddd'
+                        }}
+                    >
+                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                            👇 Load More Records ({fullFilteredList.length - visibleCount} remaining)
+                        </Text>
+                    </TouchableOpacity>
+                ) : (
+                    fullFilteredList.length > 0 ? (
+                        <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
+                            --- End of List ---
+                        </Text>
+                    ) : null
+                )}
+            </View>
         }
       />
 
       {/* DETAILS MODAL */}
-      <Modal visible={modalVisible} transparent={true} animationType="fade">
+      <Modal visible={modalVisible} transparent={true} animationType="slide">
           <View style={styles.modalOverlay}>
-              <View style={styles.modalContent}>
-                  <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:15}}>
-                      <Text style={styles.modalTitle}>Request Details</Text>
-                      <TouchableOpacity onPress={() => setModalVisible(false)}><Ionicons name="close-circle" size={28} color="#d32f2f" /></TouchableOpacity>
-                  </View>
+            <View style={styles.modalContent}>
+                <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:15}}>
+                    <Text style={styles.modalTitle}>Request Details</Text>
+                    <TouchableOpacity onPress={() => setModalVisible(false)}><Ionicons name="close-circle" size={28} color="#d32f2f" /></TouchableOpacity>
+                </View>
 
-                  {selectedItem && (
-                      <ScrollView>
-                          {canManage && <View style={{backgroundColor:'#e3f2fd', padding:10, borderRadius:8, marginBottom:10}}><Text style={{color:'#1565c0', fontWeight:'bold', textAlign:'center'}}>👤 {selectedItem.senderName}</Text></View>}
-                          
-                          <DetailRow label="Date" value={selectedItem.date} icon="calendar" />
-                          <DetailRow label="Status" value={selectedItem.status} icon="information-circle" />
-                          <View style={styles.divider} />
-                          <DetailRow label="Amount" value={`₹ ${selectedItem.amount}`} icon="cash" highlight />
-                          
-                          {/* Show Paid Label if Settled */}
-                          {selectedItem.status === 'Settled' && (
-                              <Text style={{textAlign:'center', color:'green', fontWeight:'bold', marginBottom:10}}>( PAID / SETTLED )</Text>
-                          )}
+                {selectedItem && (
+                    <ScrollView>
+                        {canManage && <View style={{backgroundColor:'#e3f2fd', padding:10, borderRadius:8, marginBottom:10}}><Text style={{color:'#1565c0', fontWeight:'bold', textAlign:'center'}}>👤 {selectedItem.senderName}</Text></View>}
+                        
+                        <DetailRow label="Date" value={selectedItem.date} icon="calendar" />
+                        <DetailRow label="Status" value={selectedItem.status} icon="information-circle" />
+                        <View style={styles.divider} />
+                        <DetailRow label="Amount" value={`₹ ${selectedItem.amount}`} icon="cash" highlight />
+                        
+                        {/* Show Paid Label if Settled */}
+                        {selectedItem.status === 'Settled' && (
+                            <Text style={{textAlign:'center', color:'green', fontWeight:'bold', marginBottom:10}}>( PAID / SETTLED )</Text>
+                        )}
 
-                          <View style={styles.divider} />
-                          <Text style={{fontSize:12, color:'gray', marginBottom:5}}>Reason:</Text>
-                          <View style={styles.noteBox}>
-                              <Text style={{fontSize:14, color:'#333'}}>{selectedItem.reason}</Text>
-                          </View>
+                        <View style={styles.divider} />
+                        <Text style={{fontSize:12, color:'gray', marginBottom:5}}>Reason:</Text>
+                        <View style={styles.noteBox}>
+                            <Text style={{fontSize:14, color:'#333'}}>{selectedItem.reason}</Text>
+                        </View>
 
-                          {canManage && selectedItem.status === 'Pending' && (
-                              <View style={styles.actionContainer}>
-                                  <TouchableOpacity style={styles.rejectBtn} onPress={() => handleStatusUpdate('Rejected')}><Text style={styles.btnText}>Reject</Text></TouchableOpacity>
-                                  <TouchableOpacity style={styles.approveBtn} onPress={() => handleStatusUpdate('Approved')}><Text style={styles.btnText}>Approve</Text></TouchableOpacity>
-                              </View>
-                          )}
-                      </ScrollView>
-                  )}
-              </View>
+                        {/* 🔥 UPDATED ACTION BUTTONS WITH BLUR & LOADING */}
+                        {canManage && selectedItem.status === 'Pending' && (
+                            <View style={styles.actionContainer}>
+                                <TouchableOpacity 
+                                    style={[styles.rejectBtn, updatingStatus !== null && { opacity: 0.6 }]} 
+                                    onPress={() => handleStatusUpdate('Rejected')}
+                                    disabled={updatingStatus !== null}
+                                >
+                                    {updatingStatus === 'Rejected' ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.btnText}>Reject</Text>}
+                                </TouchableOpacity>
+                                
+                                <TouchableOpacity 
+                                    style={[styles.approveBtn, updatingStatus !== null && { opacity: 0.6 }]} 
+                                    onPress={() => handleStatusUpdate('Approved')}
+                                    disabled={updatingStatus !== null}
+                                >
+                                    {updatingStatus === 'Approved' ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.btnText}>Approve</Text>}
+                                </TouchableOpacity>
+                            </View>
+                        )}
+                    </ScrollView>
+                )}
+            </View>
           </View>
       </Modal>
 
@@ -440,7 +520,7 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
   card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 15, elevation: 2 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom:5 },
-  date: { fontWeight:'bold', color:'gray' },
+  date: { fontWeight:'bold', color:'gray', fontSize:13 },
   statusBadge: { paddingHorizontal:8, paddingVertical:4, borderRadius:4 },
   statusText: { fontSize:10, fontWeight:'bold' },
   amount: { fontSize:20, fontWeight:'bold', color:'#333', marginVertical:5 },

@@ -3,7 +3,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
 import { initializeApp } from "firebase/app";
 import { createUserWithEmailAndPassword, getAuth, signOut } from "firebase/auth";
-import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, orderBy, query, setDoc, updateDoc } from "firebase/firestore";
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, orderBy, query, setDoc, updateDoc, where } from "firebase/firestore";
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -22,7 +22,6 @@ import {
     View
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
-// MapView ke sath 'Polyline' bhi import karein
 import { db, firebaseConfig } from '../firebaseConfig';
 
 export default function ManageTeamScreen() {
@@ -36,17 +35,14 @@ export default function ManageTeamScreen() {
             {/* HEADER */}
             <View style={styles.header}>
                 <TouchableOpacity 
-    onPress={() => {
-        if (router.canGoBack()) {
-            router.back(); // Agar piche jane ki jagah hai to jao
-        } else {
-            router.replace('/'); // Agar nahi hai, to Home/Dashboard par bhej do
-        }
-    }} 
-    style={{padding:5}}
->
-    <Ionicons name="arrow-back" size={24} color="white" />
-</TouchableOpacity>
+                    onPress={() => {
+                        if (router.canGoBack()) router.back();
+                        else router.replace('/');
+                    }} 
+                    style={{padding:5}}
+                >
+                    <Ionicons name="arrow-back" size={24} color="white" />
+                </TouchableOpacity>
                 <Text style={styles.headerTitle}>Admin Control</Text>
                 <View style={{width:30}}/>
             </View>
@@ -82,7 +78,7 @@ export default function ManageTeamScreen() {
 }
 
 // ====================================================================
-// 1️⃣ USERS TAB (Fixed: Added Missing Fields)
+// 1️⃣ USERS TAB (🔥 SMART PAGINATION ADDED)
 // ====================================================================
 const UsersTab = () => {
     const [users, setUsers] = useState<any[]>([]);
@@ -90,6 +86,9 @@ const UsersTab = () => {
     const [modalVisible, setModalVisible] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [editData, setEditData] = useState<any>(null);
+
+    // 🔥 Pagination State
+    const [visibleCount, setVisibleCount] = useState(15);
 
     const [formData, setFormData] = useState({
         name: "", email: "", mobile: "", role: "Sales Executive",
@@ -121,6 +120,9 @@ const UsersTab = () => {
         } catch (e) { Alert.alert("Error", "Could not load users"); }
         setLoading(false);
     };
+
+    // 🔥 SLICED DATA FOR PERFORMANCE
+    const renderedUsers = users.slice(0, visibleCount);
 
     const handleSave = async () => {
         if(!formData.email || !formData.name) return Alert.alert("Missing Info", "Name & Email required");
@@ -216,7 +218,7 @@ const UsersTab = () => {
     return (
         <View style={{flex:1}}>
             <FlatList 
-                data={users}
+                data={renderedUsers}
                 keyExtractor={item => item.id}
                 contentContainerStyle={{paddingBottom: 80}}
                 renderItem={({item}) => {
@@ -241,6 +243,34 @@ const UsersTab = () => {
                         </TouchableOpacity>
                     );
                 }}
+                
+                // 🔥 LOAD MORE BUTTON
+                ListFooterComponent={
+                    visibleCount < users.length ? (
+                        <TouchableOpacity 
+                            onPress={() => setVisibleCount(prev => prev + 15)} 
+                            style={{
+                                padding: 12, 
+                                backgroundColor: '#e3f2fd', 
+                                alignItems: 'center', 
+                                marginVertical: 10, 
+                                borderRadius: 8,
+                                borderWidth: 1,
+                                borderColor: '#90caf9'
+                            }}
+                        >
+                            <Text style={{fontWeight:'bold', color:'#1565c0'}}>
+                                👇 Show More Users ({users.length - visibleCount} remaining)
+                            </Text>
+                        </TouchableOpacity>
+                    ) : (
+                        users.length > 0 ? (
+                            <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12}}>
+                                --- End of Users ---
+                            </Text>
+                        ) : null
+                    )
+                }
             />
             
             <TouchableOpacity style={styles.fab} onPress={openAdd}>
@@ -295,7 +325,6 @@ const UsersTab = () => {
                                 <View style={{flex:1}}><Text style={styles.label}>Blood Group</Text><TextInput style={styles.input} value={formData.bloodGroup} onChangeText={t=>setFormData({...formData, bloodGroup:t})} /></View>
                             </View>
 
-                            {/* 🔥 ADDED: Personal Email Here */}
                             <Text style={styles.label}>Personal Email</Text>
                             <TextInput style={styles.input} value={formData.personalEmail} onChangeText={t=>setFormData({...formData, personalEmail:t})} keyboardType="email-address" placeholder="Optional" />
                             
@@ -303,7 +332,6 @@ const UsersTab = () => {
                             <Text style={styles.label}>Current Address</Text>
                             <TextInput style={styles.input} value={formData.address} onChangeText={t=>setFormData({...formData, address:t})} placeholder="Full Address" multiline />
                             
-                            {/* 🔥 ADDED: State Here */}
                             <Text style={styles.label}>State</Text>
                             <TextInput style={styles.input} value={formData.state} onChangeText={t=>setFormData({...formData, state:t})} placeholder="State" />
 
@@ -339,88 +367,76 @@ const UsersTab = () => {
 };
 
 // ====================================================================
-// 2️⃣ PERMISSIONS TAB (🔥 FIXED: Users ID/Email Logic)
+// 2️⃣ PERMISSIONS TAB 
 // ====================================================================
 const PermissionsTab = () => {
-    // Modes: 'Role' ya 'User'
+    // 🔥 FIX: Local State for Instant UI Update
+    const [autoEnabled, setAutoEnabled] = useState(true); 
     const [editMode, setEditMode] = useState<'Role' | 'User'>('Role');
-    
-    // Data (Admin Added)
-    const roles = ["Admin", "Sales Executive", "Service Engineer", "Manager", "Accountant", "Store Keeper", "Hr"];
+    const [roles, setRoles] = useState(["Admin", "Sales Executive", "Service Engineer", "Manager", "Accountant", "Store Keeper", "Hr"]);
     const [users, setUsers] = useState<any[]>([]);
     
-    // Selection
     const [selectedTarget, setSelectedTarget] = useState("Sales Executive"); 
     const [permissions, setPermissions] = useState<any>({});
     
     const allModules = [
         { category: "📊 DASHBOARD & BASICS", items: [{ key: "dashboard", label: "Main Dashboard" }, { key: "calendar", label: "Calendar" }, { key: "map_view", label: "Live Map" }] },
-        { category: "📞 SALES & LEADS", items: [{ key: "leads", label: "Leads Master" }, { key: "orders", label: "Order Booking" }, { key: "visits", label: "Visits" }, { key: "demos", label: "Demos" }, { key: "sales_analysis", label: "Analysis" }, { key: "catalogs", label: "Catalogs" }, { key: "sales_team_report", label: "Sales Calc" }] },
+        { category: "📞 SALES & LEADS", items: [{ key: "leads", label: "Leads Master" }, { key: "quotations", label: "Quotations / Estimates" }, { key: "orders", label: "Order Booking" }, { key: "visits", label: "Visits" }, { key: "demos", label: "Demos" }, { key: "sales_analysis", label: "Analysis" }, { key: "catalogs", label: "Catalogs" }, { key: "sales_team_report", label: "Sales Calc" }] },
         { category: "🛠️ SERVICE & SUPPORT", items: [{ key: "tickets", label: "Service Tickets" }, { key: "service_reports", label: "Service Analysis" }, { key: "pms", label: "PMS Schedule" }, { key: "installation", label: "Installation" }, { key: "amc_cmc", label: "AMC / CMC" }, { key: "spares", label: "Spare Parts" }] },
-        { category: "📦 OPERATIONS", items: [{ key: "courier", label: "Courier" }, { key: "organizations", label: "Projects" }, { key: "asset_history", label: "Machine Kundali" }, { key: "company_profile", label: "Company Profile" }] },
+        { category: "📦 OPERATIONS", items: [{ key: "courier", label: "Courier" }, { key: "organizations", label: "Projects" }, { key: "asset_history", label: "Machine/OrgName Details" }, { key: "company_profile", label: "Company Profile" }] },
         { category: "💰 FINANCE", items: [{ key: "payment_due", label: "Payment Dues" }, { key: "payment_coll", label: "Collections" }, { key: "expenses", label: "Expense Claims" }, { key: "advance", label: "Advance" }] },
         { category: "📝 HR & TEAM", items: [{ key: "attendance", label: "Attendance" }, { key: "leave", label: "Leaves" }, { key: "travel", label: "Travel Logs" }] },
         { category: "⚙️ ADMIN CONTROL", items: [{ key: "users", label: "Manage Users" }, { key: "settings", label: "App Settings" }] }
     ];
 
     useEffect(() => {
-        // 1. Permissions Load karein
+        // 🔥 Fetch initial Automation status directly from Database
+        getDoc(doc(db, "settings", "automation")).then(snap => {
+            if(snap.exists()){
+                setAutoEnabled(snap.data().enabled !== false);
+            }
+        });
+
         getDoc(doc(db, "settings", "permissions")).then(s => { 
             if(s.exists()) {
                 setPermissions(s.data()); 
             }
         });
 
-        // 2. Users Load karein (🔥 UPDATE: Capture ID also)
         getDocs(query(collection(db, "users"))).then(snap => {
             const userList = snap.docs.map(d => ({
-                id: d.id, // 🔥 IMPORTANT: ID hi Email hai
+                id: d.id, 
                 ...d.data()
             }));
             setUsers(userList);
         });
     }, []);
 
-    // 🔥 HELPER: Smart Check (Specific User -> Role Fallback -> Default False)
     const getSwitchValue = (key: string) => {
         if (editMode === 'Role') {
             return permissions[selectedTarget]?.[key] === true;
         } else {
-            // User Mode Logic:
-            
-            // 1. Check Specific Override (using Email/ID)
             const userSpecific = permissions[selectedTarget]?.[key];
             if (userSpecific !== undefined) {
                 return userSpecific === true;
             }
-
-            // 2. Fallback to Role
             const currentUser = users.find(u => u.id === selectedTarget || u.email === selectedTarget);
             const userRole = currentUser ? currentUser.role : null;
-            
             if (userRole) {
                 return permissions[userRole]?.[key] === true;
             }
-            
             return false;
         }
     };
 
     const togglePerm = (key: string) => {
         const currentValue = getSwitchValue(key); 
-
-        // State update karo
         setPermissions((prev: any) => {
             const newPerms = { ...prev };
-            
-            // Agar target ka object nahi hai to banao
             if (!newPerms[selectedTarget]) {
                 newPerms[selectedTarget] = {};
             }
-
-            // Value flip karo
             newPerms[selectedTarget][key] = !currentValue;
-            
             return newPerms;
         });
     };
@@ -436,7 +452,65 @@ const PermissionsTab = () => {
 
     return (
         <View style={{flex:1}}>
-            {/* Mode Toggle */}
+            
+            {/* 🔥 AUTOMATION MASTER SWITCH */}
+            <View style={{
+                flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', 
+                backgroundColor: '#fff', padding: 15, marginBottom: 15, 
+                borderRadius: 10, elevation: 2, borderLeftWidth: 5, borderLeftColor: '#f57f17'
+            }}>
+                <View style={{flex: 1}}>
+                    <Text style={{fontSize: 16, fontWeight: 'bold', color: '#333'}}>
+                        Auto WhatsApp & Email
+                    </Text>
+                    <Text style={{fontSize: 12, color: 'gray', marginTop: 2}}>
+                        Turn OFF during false entries or testing.
+                    </Text>
+                </View>
+                <Switch
+                    trackColor={{ false: "#767577", true: "#81b0ff" }}
+                    thumbColor={autoEnabled ? "#1565c0" : "#f4f3f4"}
+                    value={autoEnabled} 
+                    onValueChange={(newValue) => {
+                        // 🔥 POPUP CONFIRMATION ADDED HERE
+                        Alert.alert(
+                            "Confirm Action ⚠️",
+                            `Are you sure you want to turn ${newValue ? 'ON' : 'OFF'} Auto WhatsApp & Email?`,
+                            [
+                                { 
+                                    text: "Cancel", 
+                                    style: "cancel" 
+                                },
+                                {
+                                    text: `Yes, Turn ${newValue ? 'ON' : 'OFF'}`,
+                                    style: newValue ? "default" : "destructive",
+                                    onPress: async () => {
+                                        // 1. Instant UI Update
+                                        setAutoEnabled(newValue); 
+                                        try {
+                                            // 2. Update Database in Background
+                                            const ref = doc(db, "settings", "automation");
+                                            const snap = await getDoc(ref);
+                                            if (snap.exists()) {
+                                                await updateDoc(ref, { enabled: newValue });
+                                            } else {
+                                                await setDoc(ref, { enabled: newValue });
+                                            }
+                                        } catch (e) {
+                                            // 3. Revert back if database save fails
+                                            setAutoEnabled(!newValue); 
+                                            Alert.alert("Error", "Could not change setting.");
+                                        }
+                                    }
+                                }
+                            ]
+                        );
+                    }}
+                />
+            </View>
+
+            <Text style={{marginBottom:10, fontWeight:'bold', color:'#555'}}>Select {editMode === 'Role' ? "Role" : "Employee"} to Edit:</Text>
+            
             <View style={{flexDirection:'row', backgroundColor:'white', borderRadius:10, padding:5, marginBottom:15, elevation:2}}>
                 <TouchableOpacity onPress={() => { setEditMode('Role'); setSelectedTarget(roles[0]); }} style={{flex:1, padding:10, borderRadius:8, backgroundColor: editMode === 'Role' ? '#2c3e50' : 'transparent', alignItems:'center'}}>
                     <Text style={{color: editMode === 'Role' ? 'white' : '#555', fontWeight:'bold'}}>By Role (Group)</Text>
@@ -444,7 +518,6 @@ const PermissionsTab = () => {
                 <TouchableOpacity 
                     onPress={() => { 
                         setEditMode('User'); 
-                        // Default first user select karo agar list me hai
                         if(users.length > 0) setSelectedTarget(users[0].id || users[0].email); 
                     }} 
                     style={{flex:1, padding:10, borderRadius:8, backgroundColor: editMode === 'User' ? '#2c3e50' : 'transparent', alignItems:'center'}}>
@@ -452,9 +525,6 @@ const PermissionsTab = () => {
                 </TouchableOpacity>
             </View>
 
-            {/* List Selection */}
-            <Text style={{marginBottom:10, fontWeight:'bold', color:'#555'}}>Select {editMode === 'Role' ? "Role" : "Employee"} to Edit:</Text>
-            
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:10, maxHeight:50}}>
                 {editMode === 'Role' ? (
                     roles.map(r => (
@@ -463,11 +533,9 @@ const PermissionsTab = () => {
                         </TouchableOpacity>
                     ))
                 ) : (
-                    // 🔥 UPDATED USER LIST LOGIC (Fixing user selection)
                     users.map((u, i) => (
                         <TouchableOpacity 
                             key={i} 
-                            // Yahan ensure karein ki hum EMAIL/ID hi set kar rahe hain
                             onPress={() => setSelectedTarget(u.id || u.email)} 
                             style={[
                                 styles.roleChip, 
@@ -475,7 +543,6 @@ const PermissionsTab = () => {
                                 {paddingHorizontal:15, paddingVertical:8, marginRight:10}
                             ]}
                         >
-                            {/* Naam dikhayein, ID nahi */}
                             <Text style={{color: selectedTarget === (u.id || u.email) ? 'white' : '#333'}}>
                                 {u.name}
                             </Text>
@@ -484,7 +551,6 @@ const PermissionsTab = () => {
                 )}
             </ScrollView>
 
-            {/* Switches */}
             <ScrollView style={{flex:1, backgroundColor:'white', borderRadius:10, padding:10}} showsVerticalScrollIndicator={false}>
                 {editMode === 'User' && (
                     <Text style={{backgroundColor:'#fff3e0', padding:10, marginBottom:10, fontSize:12, color:'#e67e22', borderRadius:5}}>
@@ -510,7 +576,6 @@ const PermissionsTab = () => {
                 ))}
             </ScrollView>
             
-            {/* Save Button */}
             <View style={{alignItems: 'center', marginTop: 15, marginBottom: 60}}>
                 <TouchableOpacity style={styles.smallSaveBtn} onPress={savePerms}>
                     <Text style={{color:'white', fontWeight:'bold', fontSize: 14}}>
@@ -612,7 +677,10 @@ const HolidaysTab = () => {
 };
 
 // ====================================================================
-// 4️⃣ TRACKING TAB (🔥 DATE PICKER + PATH LINE + AUTO START/END)
+// 4️⃣ TRACKING TAB (🔥 QUERY OPTIMIZED - DATA LIMIT)
+// ====================================================================
+// ====================================================================
+// 4️⃣ TRACKING TAB (🔥 FIXED: VISIBILITY & PERFORMANCE)
 // ====================================================================
 const TrackingTab = () => {
     const [locations, setLocations] = useState<any[]>([]);
@@ -624,6 +692,7 @@ const TrackingTab = () => {
     const [mapDate, setMapDate] = useState(new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
 
+    // 1. Users Fetch Karo
     useEffect(() => {
         const fetchUsers = async () => {
             try {
@@ -635,42 +704,55 @@ const TrackingTab = () => {
         fetchUsers();
     }, []);
 
-    // Date Change hone pe data fetch karein
+    // 2. Data Fetch Karo (Jab Date ya User change ho)
     useEffect(() => {
         fetchLocations();
-    }, [mapDate, selectedUser]); // Reload when date or user changes
+    }, [mapDate, selectedUser]); 
 
     const fetchLocations = async () => {
         setLoading(true);
         try {
-            // Hum saara data leke JS me filter karenge (kyunki complex query index maangta hai)
-            let q = query(collection(db, "location_logs"), orderBy("timestamp", "asc")); // ASC for path line
+            // 1. आज की तारीख का स्ट्रिंग बनाएं (YYYY-MM-DD)
+            const year = mapDate.getFullYear();
+            const month = String(mapDate.getMonth() + 1).padStart(2, '0');
+            const day = String(mapDate.getDate()).padStart(2, '0');
+            const dateQuery = `${year}-${month}-${day}`; // e.g., "2024-02-16"
+
+            console.log("🔍 Fetching data for:", dateQuery);
+
+            // 🔥 OPTIMIZED QUERY: 
+            // हम 'timestamp' की जगह सीधे 'date' फील्ड से फिल्टर करेंगे।
+            // इससे सिर्फ वही 50-60 डॉक्यूमेंट आएंगे जो उस दिन के हैं। 1000 नहीं आएंगे।
+            
+            let q = query(
+                collection(db, "location_logs"), 
+                where("date", "==", dateQuery) 
+            );
+
             const snap = await getDocs(q);
             
+            console.log("✅ Reads Used:", snap.size); // इससे पता चलेगा कि कितने Read खर्च हुए
+
             let data: any[] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-            // 1. 📅 DATE FILTER
-            const dateStr = mapDate.toISOString().split('T')[0]; // YYYY-MM-DD
-            data = data.filter(d => {
-                if (d.date) return d.date === dateStr;
-                if (d.timestamp) return d.timestamp.startsWith(dateStr); 
-                return false;
-            });
-
-            // 2. 👤 USER FILTER
+            // 2. User Filter (Client Side)
             if (selectedUser !== "All") {
                 data = data.filter(d => d.userName === selectedUser || d.name === selectedUser);
             }
 
+            // 3. Sort by Time (Path बनाने के लिए)
+            data.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
             setLocations(data);
             
-            if (data.length === 0) {
-                // Silent return, no alert needed repeatedly
-                console.log("No data for this date");
-            }
         } catch (e: any) {
-            console.log("Map Error:", e);
-            Alert.alert("Error", "Could not load map data.");
+            console.log("🚨 Map Error:", e);
+            // अगर Quota Error है तो यूजर को बताएं
+            if(e.message.includes("quota")) {
+                Alert.alert("Quota Exceeded", "आज की लिमिट खत्म हो गई है। कल ट्राई करें या Plan अपग्रेड करें।");
+            } else {
+                Alert.alert("Error", "Could not fetch location logs.");
+            }
         }
         setLoading(false);
     };
@@ -734,24 +816,33 @@ const TrackingTab = () => {
             <View style={{flex: 1}}>
                 {loading && <ActivityIndicator size="large" color="#3b5998" style={{position:'absolute', top: 20, alignSelf:'center', zIndex:10}} />}
                 
+                {/* Agar Google Maps key nahi hai to PROVIDER_GOOGLE hata dein, 
+                    by default Apple/Google maps use hoga.
+                */}
                 <MapView
                     style={{flex: 1}}
-                    provider={PROVIDER_GOOGLE}
+                    provider={PROVIDER_GOOGLE} 
                     initialRegion={{
+                        // Default India Region (Agar data na ho)
                         latitude: 20.5937, 
                         longitude: 78.9629,
                         latitudeDelta: 15,
                         longitudeDelta: 15,
                     }}
-                    // Auto Zoom to fit markers (Optional)
-                    onMapReady={() => {}} 
+                    // Data aate hi map ko us par focus karein
+                    region={locations.length > 0 ? {
+                        latitude: locations[locations.length-1].latitude,
+                        longitude: locations[locations.length-1].longitude,
+                        latitudeDelta: 0.05,
+                        longitudeDelta: 0.05,
+                    } : undefined}
                 >
                     {/* 📍 DRAW PATH LINE */}
                     {locations.length > 1 && (
                         <Polyline
                             coordinates={locations.map(l => ({ latitude: l.latitude, longitude: l.longitude }))}
                             strokeColor="#3498db" // Blue Path
-                            strokeWidth={3}
+                            strokeWidth={4}
                         />
                     )}
 
@@ -759,15 +850,15 @@ const TrackingTab = () => {
                     {locations.map((loc, index) => {
                         if (!loc.latitude || !loc.longitude) return null;
 
-                        // 🧠 LOGIC: First = Start (Green), Last = End (Red), Others = Path (Small Blue)
-                        let pinColor = 'cyan'; // Default Path
+                        // Start = Green, End = Red, Visits = Orange, Path = Small Dot
+                        let pinColor = 'cyan'; 
                         let title = "Path";
                         let zIndex = 1;
 
                         if (index === 0) { 
-                            pinColor = 'green'; title = "Start / Login"; zIndex = 10;
+                            pinColor = 'green'; title = "Start"; zIndex = 10;
                         } else if (index === locations.length - 1) {
-                            pinColor = 'red'; title = "End / Logout"; zIndex = 10;
+                            pinColor = 'red'; title = "Current/End"; zIndex = 10;
                         } else if (['Order','Lead','Visit'].includes(loc.type)) {
                             pinColor = 'orange'; title = loc.type; zIndex = 5;
                         }
@@ -776,22 +867,30 @@ const TrackingTab = () => {
                             <Marker
                                 key={index}
                                 coordinate={{ latitude: loc.latitude, longitude: loc.longitude }}
-                                title={`${title} (${loc.userName || "Emp"})`}
+                                title={`${title}: ${loc.userName}`}
                                 description={new Date(loc.timestamp).toLocaleTimeString()}
                                 pinColor={pinColor}
                                 zIndex={zIndex}
-                                // Agar path point hai to thoda chhota dikhayein (Optional customization requires custom Image)
+                                // Path points ke liye custom image use kar sakte hain taaki map bhara na lage
+                                // image={pinColor === 'cyan' ? require('../assets/dot.png') : undefined} 
                             />
                         );
                     })}
                 </MapView>
+                
+                {/* Overlay agar koi data na ho */}
+                {locations.length === 0 && !loading && (
+                     <View style={{position:'absolute', bottom: 20, alignSelf:'center', backgroundColor:'rgba(255,255,255,0.9)', padding:10, borderRadius:8}}>
+                         <Text style={{color:'gray', fontSize:12}}>No logs found for this date.</Text>
+                     </View>
+                )}
             </View>
 
             {/* LEGEND */}
             <View style={{backgroundColor: 'white', padding: 8, flexDirection: 'row', justifyContent: 'space-around', borderTopWidth: 1, borderColor: '#eee'}}>
-                <Text style={{fontSize: 10, color: 'green', fontWeight:'bold'}}>● START (First)</Text>
+                <Text style={{fontSize: 10, color: 'green', fontWeight:'bold'}}>● START</Text>
                 <Text style={{fontSize: 10, color: 'cyan', fontWeight:'bold'}}>● PATH</Text>
-                <Text style={{fontSize: 10, color: 'red', fontWeight:'bold'}}>● END (Last)</Text>
+                <Text style={{fontSize: 10, color: 'red', fontWeight:'bold'}}>● END</Text>
                 <Text style={{fontSize: 10, color: 'orange', fontWeight:'bold'}}>● VISITS</Text>
             </View>
         </View>

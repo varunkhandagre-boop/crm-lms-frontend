@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     FlatList,
     KeyboardAvoidingView,
@@ -15,20 +16,28 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { useData } from './context/DataContext';
 
-// 🔥🔥 1. IMPORTS UPDATED (Location Added)
-import * as Location from 'expo-location'; // 📍 Added Location
-import { addDoc, collection } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+// 🔥 SAAS IMPORTS
+import * as Location from 'expo-location';
+import { useSaaSDB } from '../hooks/useSaaSDB'; // Apna correct path verify kar lein
+import { useData } from './context/DataContext';
 
 export default function AddActivityScreen() {
   const router = useRouter();
-  const { addActivityPlan, orgList, user } = useData();
+  
+  // 🔥 1. Context se sirf user details aur Notification engine nikala
+  const { currentUser, addNotification } = useData();
+  
+  // 🔥 2. Naya SaaS Engine connect kiya
+  const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy loaded list state
+  const [orgList, setOrgList] = useState<any[]>([]);
 
   // DATES
   const [date, setDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   
   // --- NEW FIELDS ---
   const [organization, setOrganization] = useState('');
@@ -58,6 +67,17 @@ export default function AddActivityScreen() {
     'Conference/Exhibitions': ['Conference', 'Exhibitions', 'Medical Fair']
   };
 
+  // 🔥 4. LOAD ORGANIZATIONS ON MOUNT
+  useEffect(() => {
+      const loadOrganizations = async () => {
+          if (currentUser?.companyId) {
+              const data = await fetchSaaSData("organizations");
+              setOrgList(data);
+          }
+      };
+      loadOrganizations();
+  }, [currentUser]);
+
   // DATE FORMATTER
   const formatDate = (rawDate: Date) => {
     let day = rawDate.getDate().toString().padStart(2, '0');
@@ -66,7 +86,7 @@ export default function AddActivityScreen() {
     return `${day}/${month}/${year}`;
   };
 
-  // 🔥🔥 2. GET CURRENT LOCATION FUNCTION (NEW) 🔥🔥
+  // GET CURRENT LOCATION FUNCTION 
   const getCurrentLocation = async () => {
       try {
           let { status } = await Location.requestForegroundPermissionsAsync();
@@ -141,7 +161,7 @@ export default function AddActivityScreen() {
       setModalVisible(false);
   };
 
-  // 🔥 Made Async for Notification
+  // 🔥 5. SAAS SAVE LOGIC
   const handleSave = async () => {
       if (!organization || !city || !contactPerson) {
           Alert.alert("Missing Info", "Organization, City, and Contact Person are required.");
@@ -152,9 +172,14 @@ export default function AddActivityScreen() {
           return;
       }
 
-      // 📍 3. CAPTURE LOCATION BEFORE SAVING
+      setIsSaving(true);
+
+      // 📍 CAPTURE LOCATION BEFORE SAVING
       const locationData = await getCurrentLocation();
-      if (!locationData) return; // Stop if location fails
+      if (!locationData) {
+          setIsSaving(false);
+          return;
+      }
 
       let finalType: any = 'Sales Visit';
       if (selectedPurpose === 'Installation') finalType = 'Installation';
@@ -163,51 +188,41 @@ export default function AddActivityScreen() {
       else if (selectedActivity === 'Service') finalType = 'Field Service';
       else if (selectedActivity === 'Sales') finalType = 'Sales Visit';
 
+      // 🔥 CLEAN PAYLOAD: Engine will auto-add ID, CompanyID, SenderID & CreatedAt
       const newPlan = {
-          id: Date.now().toString(),
-          
           date: formatDate(date),
           dateIso: date.toISOString().split('T')[0],
-          
           hospital: organization,
           address, city, state, 
           contactPerson, contactNumber, email,
-          
           type: finalType,
           activity: selectedActivity,
           purpose: selectedPurpose,
-          
           status: 'Planned',
           planningNotes: planningNotes,
-
-          senderId: user?.uid || 'guest',
-          senderName: user?.name || 'Unknown',
-          role: user?.role || 'Employee',
-          createdAt: new Date().toISOString(),
-
-          // 🔥 Added Location
           location: locationData
       };
 
-      await addActivityPlan(newPlan);
+      const result = await addSaaSData("activity_plans", newPlan);
 
-      // NOTIFICATION
-      try {
-          await addDoc(collection(db, "notifications"), {
-              title: "New Activity Planned 📅",
-              message: `${user?.name} planned a ${selectedActivity} at ${organization}.`,
-              to: "Admin",
-              route: "/activity_plan",
-              read: false,
-              createdAt: new Date().toISOString(),
-              type: "info"
-          });
-      } catch (e) {
-          console.log("Notification Error:", e);
+      if (result.success) {
+          // REAL PUSH NOTIFICATION
+          if (addNotification) {
+              await addNotification({
+                  title: "New Activity Planned 📅",
+                  message: `${currentUser?.name} planned a ${selectedActivity} at ${organization}.`,
+                  to: "Admin",
+                  route: "/activity_plan",
+                  type: "info"
+              });
+          }
+          Alert.alert("Success", "Activity Planned & Admin Notified!");
+          router.back();
+      } else {
+          Alert.alert("Error", "Could not save the plan. Try again.");
       }
-
-      Alert.alert("Success", "Activity Planned & Admin Notified!");
-      router.back();
+      
+      setIsSaving(false);
   };
 
   return (
@@ -225,6 +240,7 @@ export default function AddActivityScreen() {
         <ScrollView 
             style={styles.contentContainer}
             contentContainerStyle={{paddingBottom: 100}} 
+            keyboardShouldPersistTaps="handled"
         >
             {/* Date */}
             <View style={styles.row}>
@@ -256,7 +272,7 @@ export default function AddActivityScreen() {
             <Text style={styles.label}>Organization Name *</Text>
             <TouchableOpacity style={styles.inputBox} onPress={() => openModal('Organization')}>
                 <Text style={{flex:1, color: organization ? 'black' : 'gray'}}>{organization || 'Select Organization'}</Text>
-                <Ionicons name="search" size={20} color="gray" />
+                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
             </TouchableOpacity>
 
             <Text style={styles.label}>Address</Text>
@@ -313,8 +329,8 @@ export default function AddActivityScreen() {
                 onChangeText={setPlanningNotes}
             />
 
-            <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-                <Text style={styles.saveBtnText}>Save Plan</Text>
+            <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={isSaving}>
+                {isSaving ? <ActivityIndicator color="white" /> : <Text style={styles.saveBtnText}>Save Plan</Text>}
             </TouchableOpacity>
             
             <Text style={{textAlign:'center', color:'gray', fontSize:10, marginTop:10}}>

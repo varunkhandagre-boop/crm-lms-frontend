@@ -15,16 +15,17 @@ import { useData } from './context/DataContext';
 
 export default function SalesTeamReport() {
     const router = useRouter();
-    const { userList = [], orderList = [], paymentList = [], currentUser } = useData();
+    const { userList = [], orderList = [], paymentList = [], currentUser, user } = useData();
+    const activeUser = currentUser || user;
 
     // --- STATES ---
-    const [viewMode, setViewMode] = useState<'Month' | 'Year'>('Month');
+    const [viewMode, setViewMode] = useState<'Month' | 'FY'>('Month');
     const [currentDate, setCurrentDate] = useState(new Date());
     
     const [selectedUserId, setSelectedUserId] = useState('All');
     const [showUserPicker, setShowUserPicker] = useState(false);
 
-    // Global Defaults (Agar kisi ka target set nahi hai to ye use hoga)
+    // Global Defaults
     const [rules, setRules] = useState({
         baseTarget: '1000000', // 10 Lakh Default
         tier1Percent: '1',
@@ -34,7 +35,7 @@ export default function SalesTeamReport() {
 
     const [incentiveData, setIncentiveData] = useState<any[]>([]);
     
-    // 🔥 POPUP STATES
+    // POPUP STATES
     const [detailModalVisible, setDetailModalVisible] = useState(false);
     const [selectedStaff, setSelectedStaff] = useState<any>(null);
     const [detailTab, setDetailTab] = useState<'Monthly' | 'Orders' | 'Collections'>('Monthly');
@@ -42,21 +43,32 @@ export default function SalesTeamReport() {
     const [staffPayments, setStaffPayments] = useState<any[]>([]);
     const [monthlyStats, setMonthlyStats] = useState<any[]>([]);
 
-    // --- ROLE CHECK ---
-    const userRole = (currentUser?.role || '').toLowerCase();
+    // PAGINATION STATE
+    const [visibleCount, setVisibleCount] = useState(20);
+
+    useEffect(() => {
+        setVisibleCount(20);
+    }, [viewMode, currentDate, selectedUserId]);
+
+    const userRole = (activeUser?.role || '').toLowerCase();
     const isAdmin = userRole.includes('admin') || userRole.includes('manager') || userRole.includes('account') || userRole.includes('hr');
 
-    // --- DATE NAVIGATION ---
+    // DATE NAVIGATION
     const changeDate = (dir: number) => {
         const d = new Date(currentDate);
         if (viewMode === 'Month') d.setMonth(d.getMonth() + dir);
-        else d.setFullYear(d.getFullYear() + dir);
+        else d.setFullYear(d.getFullYear() + dir); 
         setCurrentDate(d);
     };
 
     const getDateLabel = () => {
         if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-        return currentDate.getFullYear().toString();
+        
+        const currentMonth = currentDate.getMonth(); 
+        const currentYear = currentDate.getFullYear();
+        const fyStartYear = currentMonth >= 3 ? currentYear : currentYear - 1;
+        const fyEndYear = fyStartYear + 1;
+        return `FY ${fyStartYear.toString().slice(-2)}-${fyEndYear.toString().slice(-2)}`;
     };
 
     const formatDateShort = (dateStr: string) => {
@@ -65,7 +77,19 @@ export default function SalesTeamReport() {
         return d.toLocaleDateString('en-GB', {day:'2-digit', month:'short'});
     };
 
-    // --- 🔥 MAIN LOGIC ---
+    // 🔥 NEW HELPER: Standardize any date string to YYYY-MM-DD
+    const getValidDateStr = (obj: any) => {
+        if (obj.dateIso) return obj.dateIso;
+        if (obj.createdAt) return obj.createdAt.split('T')[0];
+        if (obj.date && obj.date.includes('-')) return obj.date; 
+        if (obj.date && obj.date.includes('/')) {
+            const parts = obj.date.split('/');
+            if(parts.length === 3) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        }
+        return "1970-01-01";
+    };
+
+    // --- MAIN LOGIC ---
     useEffect(() => {
         calculateIncentives();
     }, [rules, orderList, paymentList, userList, viewMode, currentDate, selectedUserId]);
@@ -74,83 +98,85 @@ export default function SalesTeamReport() {
         const targetMonth = currentDate.getMonth();
         const targetYear = currentDate.getFullYear();
 
-        // 1. FILTER STAFF (Updated to include Admin)
+        const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+        const fyStartDateStr = `${fyStartYear}-04-01`; 
+        const fyEndDateStr = `${fyStartYear + 1}-03-31`;
+
         let eligibleStaff = [];
         
         if (isAdmin) {
             eligibleStaff = userList.filter((u: any) => {
                 const r = (u.role || '').toLowerCase();
-                // 🔥 FIX: Admin ko bhi list me dikhao
                 return r.includes('sales') || r.includes('manager') || r.includes('admin') || r.includes('account');
             });
         } else {
-            // Employee sees ONLY themselves
-            eligibleStaff = userList.filter((u: any) => u.id === currentUser?.id || u.uid === currentUser?.id);
+            eligibleStaff = userList.filter((u: any) => u.id === activeUser?.id || u.uid === activeUser?.uid);
         }
 
-        // Apply Dropdown Filter
         if (selectedUserId !== 'All') {
-            eligibleStaff = eligibleStaff.filter((u: any) => u.id === selectedUserId);
+            eligibleStaff = eligibleStaff.filter((u: any) => (u.id === selectedUserId || u.uid === selectedUserId));
         }
 
-        const processedData = eligibleStaff.map((user: any) => {
-            
-            // 🔥 LOGIC: Agar Firebase me target hai (5L), to wo lo. Nahi to Default (10L) lo.
+        const processedData = eligibleStaff.map((u: any) => {
             let monthlyTarget = 0;
-            if (user.monthlyTarget && Number(user.monthlyTarget) > 0) {
-                monthlyTarget = Number(user.monthlyTarget); // Custom Target (e.g. 500,000)
+            if (u.monthlyTarget && Number(u.monthlyTarget) > 0) {
+                monthlyTarget = Number(u.monthlyTarget); 
             } else {
-                monthlyTarget = Number(rules.baseTarget); // Global Default
+                monthlyTarget = Number(rules.baseTarget); 
             }
 
-            // Tier 2 Logic (Target + 50%)
             let monthlyTier2 = monthlyTarget * 1.5;
+            let effectiveTarget = viewMode === 'FY' ? monthlyTarget * 12 : monthlyTarget;
+            let effectiveTier2 = viewMode === 'FY' ? monthlyTier2 * 12 : monthlyTier2;
 
-            // View Mode Adjustment
-            let effectiveTarget = viewMode === 'Year' ? monthlyTarget * 12 : monthlyTarget;
-            let effectiveTier2 = viewMode === 'Year' ? monthlyTier2 * 12 : monthlyTier2;
-
-            // 2. GET SALES
+            // GET SALES
             const userOrders = orderList.filter((order: any) => {
-                const d = new Date(order.date || order.createdAt);
+                const orderDateStr = getValidDateStr(order);
+                if (!orderDateStr || orderDateStr === "1970-01-01") return false;
+
+                const d = new Date(orderDateStr);
                 
                 let dateMatch = false;
-                if (viewMode === 'Month') dateMatch = d.getMonth() === targetMonth && d.getFullYear() === targetYear;
-                else dateMatch = d.getFullYear() === targetYear;
+                if (viewMode === 'Month') {
+                    dateMatch = d.getMonth() === targetMonth && d.getFullYear() === targetYear;
+                } else {
+                    dateMatch = orderDateStr >= fyStartDateStr && orderDateStr <= fyEndDateStr; 
+                }
 
-                // User Check
-                const userMatch = (order.senderId === user.id || order.userId === user.id || order.senderName === user.name);
-                // Status Check
+                const userMatch = (order.senderId === u.id || order.userId === u.id || order.senderName === u.name || order.senderId === u.uid);
                 const statusMatch = order.status === 'Approved' || order.status === 'Completed' || order.status === 'Dispatched';
 
                 return dateMatch && userMatch && statusMatch;
             });
 
-            // 3. GET COLLECTIONS
+            // GET COLLECTIONS
             const userPayments = paymentList.filter((payment: any) => {
-                const d = new Date(payment.date || payment.createdAt);
+                const payDateStr = getValidDateStr(payment);
+                if (!payDateStr || payDateStr === "1970-01-01") return false;
+
+                const d = new Date(payDateStr);
                 
                 let dateMatch = false;
-                if (viewMode === 'Month') dateMatch = d.getMonth() === targetMonth && d.getFullYear() === targetYear;
-                else dateMatch = d.getFullYear() === targetYear;
+                if (viewMode === 'Month') {
+                    dateMatch = d.getMonth() === targetMonth && d.getFullYear() === targetYear;
+                } else {
+                    dateMatch = payDateStr >= fyStartDateStr && payDateStr <= fyEndDateStr; 
+                }
 
-                const userMatch = (payment.senderId === user.id || payment.userName === user.name);
+                const userMatch = (payment.senderId === u.id || payment.userName === u.name || payment.senderId === u.uid);
                 return dateMatch && userMatch;
             });
 
-            // 4. TOTALS
             const totalSales = userOrders.reduce((sum: number, o: any) => sum + Number(o.amount || 0), 0);
             const totalCollected = userPayments.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
-
-            // 5. INCENTIVE CALCULATION (Based on Effective Target)
             const incentive = getIncentiveAmount(totalSales, effectiveTarget, effectiveTier2);
 
             return {
-                id: user.id,
-                name: user.name,
-                role: user.role,
+                id: u.id || u.uid,
+                name: u.name,
+                role: u.role,
                 target: effectiveTarget,
-                isCustomTarget: !!(user.monthlyTarget && Number(user.monthlyTarget) > 0),
+                isCustomTarget: !!(u.monthlyTarget && Number(u.monthlyTarget) > 0),
                 orderCount: userOrders.length,
                 totalSales: totalSales,
                 collectionCount: userPayments.length,
@@ -160,7 +186,6 @@ export default function SalesTeamReport() {
             };
         });
 
-        // SORT by Performance
         setIncentiveData(processedData.sort((a: any, b: any) => b.totalSales - a.totalSales));
     };
 
@@ -178,31 +203,31 @@ export default function SalesTeamReport() {
         return Math.floor(incentive);
     };
 
-    // --- 🔥 MONTHLY BREAKDOWN LOGIC ---
-    const generateMonthlyStats = (user: any) => {
+    // --- MONTHLY BREAKDOWN LOGIC ---
+    const generateMonthlyStats = (u: any) => {
         const fyMonths = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
         
-        // Get current year context based on FY logic
-        const now = new Date();
-        let startYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+        const targetMonth = currentDate.getMonth();
+        const targetYear = currentDate.getFullYear();
+        const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
         
         const stats = fyMonths.map((m, index) => {
-            const actualYear = index > 8 ? startYear + 1 : startYear;
+            const actualYear = index > 8 ? fyStartYear + 1 : fyStartYear; 
             const monthIndex = index > 8 ? index - 9 : index + 3; 
 
-            // Filter Orders
             const monthlySales = orderList.filter((o: any) => {
-                const d = new Date(o.date || o.createdAt);
+                const dStr = getValidDateStr(o);
+                const d = new Date(dStr);
                 return d.getMonth() === monthIndex && d.getFullYear() === actualYear && 
-                       (o.senderId === user.id || o.senderName === user.name) && 
+                       (o.senderId === u.id || o.senderName === u.name || o.senderId === u.uid) && 
                        (o.status === 'Approved' || o.status === 'Completed' || o.status === 'Dispatched');
             }).reduce((sum: number, x: any) => sum + Number(x.amount || 0), 0);
 
-            // Filter Collections
             const monthlyColl = paymentList.filter((p: any) => {
-                const d = new Date(p.date || p.createdAt);
+                const dStr = getValidDateStr(p);
+                const d = new Date(dStr);
                 return d.getMonth() === monthIndex && d.getFullYear() === actualYear && 
-                       (p.senderId === user.id || p.userName === user.name);
+                       (p.senderId === u.id || p.userName === u.name || p.senderId === u.uid);
             }).reduce((sum: number, x: any) => sum + Number(x.amount || 0), 0);
 
             return { month: m, sales: monthlySales, collection: monthlyColl };
@@ -211,21 +236,59 @@ export default function SalesTeamReport() {
         setMonthlyStats(stats);
     };
 
+    // 🔥 FIX: DATE FILTERING FOR POPUP TABS
     const handleCardClick = (item: any) => {
         setSelectedStaff(item);
         
-        const allUserOrders = orderList.filter((o:any) => (o.senderId === item.id || o.senderName === item.name) && (o.status === 'Approved' || o.status === 'Completed' || o.status === 'Dispatched'));
-        const allUserPayments = paymentList.filter((p:any) => (p.senderId === item.id || p.userName === item.name));
+        const targetMonth = currentDate.getMonth();
+        const targetYear = currentDate.getFullYear();
+        const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+        const fyStartDateStr = `${fyStartYear}-04-01`; 
+        const fyEndDateStr = `${fyStartYear + 1}-03-31`;
 
-        setStaffOrders(allUserOrders.sort((a:any, b:any) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-        setStaffPayments(allUserPayments.sort((a:any, b:any) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+        // Filter Orders for Modal
+        const allUserOrders = orderList.filter((o:any) => {
+            const isUser = (o.senderId === item.id || o.senderId === item.uid || o.senderName === item.name);
+            const isStatus = (o.status === 'Approved' || o.status === 'Completed' || o.status === 'Dispatched');
+            if(!isUser || !isStatus) return false;
+
+            const dStr = getValidDateStr(o);
+            if (viewMode === 'Month') {
+                const d = new Date(dStr);
+                return d.getMonth() === targetMonth && d.getFullYear() === targetYear;
+            } else {
+                return dStr >= fyStartDateStr && dStr <= fyEndDateStr; 
+            }
+        });
+
+        // Filter Payments for Modal
+        const allUserPayments = paymentList.filter((p:any) => {
+            const isUser = (p.senderId === item.id || p.senderId === item.uid || p.userName === item.name);
+            if(!isUser) return false;
+
+            const dStr = getValidDateStr(p);
+            if (viewMode === 'Month') {
+                const d = new Date(dStr);
+                return d.getMonth() === targetMonth && d.getFullYear() === targetYear;
+            } else {
+                return dStr >= fyStartDateStr && dStr <= fyEndDateStr; 
+            }
+        });
+
+        setStaffOrders(allUserOrders.sort((a:any, b:any) => getValidDateStr(b).localeCompare(getValidDateStr(a))));
+        setStaffPayments(allUserPayments.sort((a:any, b:any) => getValidDateStr(b).localeCompare(getValidDateStr(a))));
         
         generateMonthlyStats(item);
         setDetailTab('Monthly'); 
         setDetailModalVisible(true);
     };
 
-    const dropdownList = [{id: 'All', name: 'All Staff'}, ...userList];
+    const dropdownList = [
+        {id: 'All', name: 'All Staff'}, 
+        ...userList.map((u: any) => ({ ...u, id: u.id || u.uid }))
+    ];
+
+    const renderedList = incentiveData.slice(0, visibleCount);
 
     return (
         <View style={styles.container}>
@@ -244,8 +307,8 @@ export default function SalesTeamReport() {
                     <TouchableOpacity style={[styles.toggleBtn, viewMode==='Month' && styles.activeToggle]} onPress={()=>setViewMode('Month')}>
                         <Text style={[styles.toggleText, viewMode==='Month' && {color:'#3b5998'}]}>Monthly</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[styles.toggleBtn, viewMode==='Year' && styles.activeToggle]} onPress={()=>setViewMode('Year')}>
-                        <Text style={[styles.toggleText, viewMode==='Year' && {color:'#3b5998'}]}>Yearly</Text>
+                    <TouchableOpacity style={[styles.toggleBtn, viewMode==='FY' && styles.activeToggle]} onPress={()=>setViewMode('FY')}>
+                        <Text style={[styles.toggleText, viewMode==='FY' && {color:'#3b5998'}]}>FY (Yearly)</Text>
                     </TouchableOpacity>
                 </View>
                 <View style={styles.dateNav}>
@@ -255,7 +318,6 @@ export default function SalesTeamReport() {
                 </View>
             </View>
 
-            {/* Config Box (Only Admin sees config) */}
             {isAdmin && (
                 <View style={styles.configBox}>
                     <Text style={styles.sectionTitle}>⚙️ Global Settings (Default)</Text>
@@ -277,15 +339,14 @@ export default function SalesTeamReport() {
             )}
 
             <FlatList 
-                data={incentiveData}
+                data={renderedList}
                 keyExtractor={item => item.id}
-                contentContainerStyle={{padding: 15}}
+                contentContainerStyle={{padding: 15, paddingBottom: 20}} 
                 ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>No Data Found.</Text>}
                 renderItem={({item, index}) => (
                     <TouchableOpacity style={styles.card} onPress={() => handleCardClick(item)} activeOpacity={0.7}>
                         <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:5}}>
                             <View style={{flexDirection:'row', alignItems:'center'}}>
-                                {/* Rank Badge */}
                                 {isAdmin && index < 3 && (
                                     <View style={[styles.rankBadge, {backgroundColor: index===0?'#FFD700': index===1?'#C0C0C0':'#CD7F32'}]}>
                                         <Text style={{fontSize:10, fontWeight:'bold', color:'white'}}>#{index+1}</Text>
@@ -297,7 +358,6 @@ export default function SalesTeamReport() {
                                 </View>
                             </View>
                             <View style={{alignItems:'flex-end'}}>
-                                {/* Custom Target Badge */}
                                 {item.isCustomTarget ? (
                                     <View style={styles.customBadge}><Text style={styles.customText}>Custom Goal</Text></View>
                                 ) : (
@@ -333,9 +393,38 @@ export default function SalesTeamReport() {
                         </View>
                     </TouchableOpacity>
                 )}
+                
+                ListFooterComponent={
+                    <View style={{ paddingBottom: 80 }}>
+                        {visibleCount < incentiveData.length ? (
+                            <TouchableOpacity 
+                                onPress={() => setVisibleCount(prev => prev + 20)} 
+                                style={{
+                                    padding: 12, 
+                                    backgroundColor: '#fff', 
+                                    alignItems: 'center', 
+                                    marginVertical: 15, 
+                                    borderRadius: 8,
+                                    borderWidth: 1,
+                                    borderColor: '#ddd',
+                                    elevation: 1
+                                }}
+                            >
+                                <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                                    👇 Load More Records ({incentiveData.length - visibleCount} remaining)
+                                </Text>
+                            </TouchableOpacity>
+                        ) : (
+                            incentiveData.length > 0 ? (
+                                <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
+                                    --- End of List ---
+                                </Text>
+                            ) : null
+                        )}
+                    </View>
+                }
             />
 
-            {/* DETAIL POPUP (Same as before) */}
             <Modal visible={detailModalVisible} transparent animationType="slide">
                 <View style={styles.modalOverlay}>
                     <View style={styles.detailModalContent}>
@@ -349,7 +438,6 @@ export default function SalesTeamReport() {
                             </TouchableOpacity>
                         </View>
 
-                        {/* Tabs */}
                         <View style={styles.tabContainer}>
                             <TouchableOpacity style={[styles.tab, detailTab==='Monthly' && styles.activeTab]} onPress={()=>setDetailTab('Monthly')}>
                                 <Text style={[styles.tabText, detailTab==='Monthly' && styles.activeTabText]}>Monthly 📅</Text>
@@ -362,7 +450,7 @@ export default function SalesTeamReport() {
                             </TouchableOpacity>
                         </View>
 
-                        <ScrollView contentContainerStyle={{paddingBottom:20}}>
+                        <ScrollView contentContainerStyle={{paddingBottom: 80}} showsVerticalScrollIndicator={false}>
                             {detailTab === 'Monthly' && (
                                 <View>
                                     <View style={[styles.monthRow, {backgroundColor:'#eee', borderRadius:5, paddingVertical:8}]}>
@@ -378,7 +466,7 @@ export default function SalesTeamReport() {
                                         </View>
                                     ))}
                                     <View style={{marginTop:15, padding:10, backgroundColor:'#e3f2fd', borderRadius:8}}>
-                                        <Text style={{textAlign:'center', fontSize:12, color:'#1565c0'}}>Total Year Sales: ₹{monthlyStats.reduce((a,b)=>a+b.sales,0).toLocaleString()}</Text>
+                                        <Text style={{textAlign:'center', fontSize:12, color:'#1565c0'}}>Total {viewMode === 'FY' ? 'FY' : 'Year'} Sales: ₹{monthlyStats.reduce((a,b)=>a+b.sales,0).toLocaleString()}</Text>
                                     </View>
                                 </View>
                             )}
@@ -391,7 +479,7 @@ export default function SalesTeamReport() {
                                             <Text style={styles.itemTitle}>{order.hospitalName || 'Unknown'}</Text>
                                             <Text style={styles.itemAmount}>₹{order.amount.toLocaleString()}</Text>
                                         </View>
-                                        <Text style={styles.itemSub}>{formatDateShort(order.date)} • {order.status}</Text>
+                                        <Text style={styles.itemSub}>{formatDateShort(getValidDateStr(order))} • {order.status}</Text>
                                         {order.productDetails && <Text style={styles.itemProd}>{order.productDetails}</Text>}
                                     </View>
                                 ))
@@ -405,7 +493,7 @@ export default function SalesTeamReport() {
                                             <Text style={styles.itemTitle}>{pay.orgName || 'Unknown'}</Text>
                                             <Text style={styles.itemAmount}>₹{pay.amount.toLocaleString()}</Text>
                                         </View>
-                                        <Text style={styles.itemSub}>{formatDateShort(pay.date)} • {pay.mode}</Text>
+                                        <Text style={styles.itemSub}>{formatDateShort(getValidDateStr(pay))} • {pay.mode}</Text>
                                         {pay.orderRef && <Text style={{fontSize:10, color:'#e65100', marginTop:2}}>🔗 {pay.orderRef}</Text>}
                                     </View>
                                 ))
@@ -437,7 +525,7 @@ export default function SalesTeamReport() {
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f5f5f5' },
     header: { backgroundColor: '#3b5998', paddingTop: 50, padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-    headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },
+    headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold', marginLeft: 10 },
     
     controlBar: { flexDirection: 'row', justifyContent: 'space-between', padding: 10, backgroundColor: 'white', elevation: 2 },
     toggleContainer: { flexDirection: 'row', backgroundColor: '#eee', borderRadius: 8, padding: 2 },

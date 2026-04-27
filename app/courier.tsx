@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useData } from './context/DataContext';
 
@@ -15,16 +15,14 @@ import * as Sharing from 'expo-sharing';
 
 export default function CourierScreen() {
   const router = useRouter();
-  // 🔥 UPDATED: Added 'companyProfile'
-  const { courierList = [], user, addNotification, companyProfile } = useData(); 
+  const { courierList = [], user, addNotification, companyProfile, orgList = [] } = useData(); 
 
   // --- STATES ---
   const [activeTab, setActiveTab] = useState<'All' | 'Inward' | 'Outward'>('All'); 
-  const [activeStatus, setActiveStatus] = useState('All'); 
+  const [activeStatus, setActiveStatus] = useState('Pending'); 
   const [searchText, setSearchText] = useState('');
   
-  // DATE FILTER STATES
-  const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'Year' | 'All'>('Year');
+  const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
 
   // MODAL STATES
@@ -32,6 +30,22 @@ export default function CourierScreen() {
   const [selectedCourier, setSelectedCourier] = useState<any>(null);
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // 🔥 ADMIN EDIT STATES 🔥
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editData, setEditData] = useState<any>({});
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  // 🔥 PAGINATION STATE
+  const [visibleCount, setVisibleCount] = useState(20);
+
+  useEffect(() => {
+      if (viewMode === 'Day') {
+          setVisibleCount(500); 
+      } else {
+          setVisibleCount(20); 
+      }
+  }, [viewMode, currentDate, activeTab, activeStatus, searchText]);
 
   // POWER USER CHECK
   const role = user?.role || ''; 
@@ -42,6 +56,8 @@ export default function CourierScreen() {
       role === 'Account' || role === 'Accountant' ||
       role === 'Hr' ||  
       role === 'Store' || role === 'Store Keeper';    
+
+  const isStrictAdmin = role === 'Admin' || role === 'Manager';
 
   // --- BADGE COUNTS ---
   const inwardPending = courierList.filter((c: any) => c.type === 'Inward' && c.status === 'Pending').length;
@@ -59,19 +75,16 @@ export default function CourierScreen() {
       return new Date(0);
   };
 
-  // 🔥🔥 UPDATED DYNAMIC PDF GENERATOR (WITH EMAIL) 🔥🔥
+  // 🔥 DYNAMIC PDF GENERATOR 🔥
   const generateChallan = async (data: any) => {
       try {
-          // 1. SMART ROW LOGIC
           let tableRows = '';
           let totalQty = 0;
-
           let itemsList = [];
 
           if (data.items && Array.isArray(data.items)) {
               itemsList = data.items;
           } else {
-              // Fallback for Old Data
               const names = (data.material || '').split('\n').filter((l: string) => l.trim() !== '');
               const qtys = (data.qty || '').split('\n');
               itemsList = names.map((name: string, i: number) => ({
@@ -97,7 +110,6 @@ export default function CourierScreen() {
               tableRows = `<tr><td colspan="3" style="text-align: center;">No Material Details</td></tr>`;
           }
 
-          // --- 2. Dynamic Profile Logic ---
           const logoHTML = companyProfile?.logoUrl 
                 ? `<img src="${companyProfile.logoUrl}" style="height: 60px; margin-bottom: 10px;" />` 
                 : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
@@ -105,6 +117,19 @@ export default function CourierScreen() {
           const signatureHTML = companyProfile?.signatureUrl 
                 ? `<img src="${companyProfile.signatureUrl}" style="height: 50px; margin-top: 5px;" />` 
                 : `<div style="height: 40px;"></div>`;
+
+          let receiverName = data.receiver ? data.receiver.split(',')[0] : '-';
+          let receiverAddr = data.toCity || '';
+          
+          const org = orgList.find((o: any) => 
+              (data.orgId && o.id === data.orgId) || 
+              o.orgName === receiverName || 
+              o.name === receiverName
+          );
+          
+          if (org) {
+              receiverAddr = org.address ? `${org.address}, ${org.city || ''}` : (org.city || receiverAddr);
+          }
 
           const htmlContent = `
           <html>
@@ -129,9 +154,9 @@ export default function CourierScreen() {
                 ${logoHTML}
                 ${companyProfile?.logoUrl ? `<div class="title" style="font-size:20px;">${companyProfile.companyName}</div>` : ''}
                 
-                <div class="sub-title">${companyProfile?.address}</div>
+                <div class="sub-title">${companyProfile?.address || ''}</div>
                 <div class="sub-title">
-                    Phone: ${companyProfile?.contactPhone || companyProfile?.phone} |
+                    Phone: ${companyProfile?.contactPhone || companyProfile?.phone || '-'} |
                     Email: ${companyProfile?.contactEmail || companyProfile?.email || '-'}
                 </div>
                 <div class="sub-title">
@@ -148,8 +173,8 @@ export default function CourierScreen() {
 
               <div class="box">
                 <div class="label" style="margin-bottom:5px;">Consignee / Receiver Details:</div>
-                <div style="font-size: 18px; font-weight: bold; text-transform: uppercase;">${data.receiver.split(',')[0]}</div>
-                <div style="font-size: 14px; margin-top: 5px;">${data.toCity || ''}</div>
+                <div style="font-size: 18px; font-weight: bold; text-transform: uppercase;">${receiverName}</div>
+                <div style="font-size: 14px; margin-top: 5px;">${receiverAddr}</div>
               </div>
 
               <div class="box">
@@ -176,7 +201,7 @@ export default function CourierScreen() {
                 <div class="sign">Receiver's Sign</div>
                 
                 <div class="sign-img-box">
-                    <div style="font-size:10px; margin-bottom:5px;">For, ${companyProfile?.companyName}</div>
+                    <div style="font-size:10px; margin-bottom:5px;">For, ${companyProfile?.companyName || 'Us'}</div>
                     ${signatureHTML}
                     <div class="sign">Authorised Signatory</div>
                 </div>
@@ -186,8 +211,9 @@ export default function CourierScreen() {
 
           const { uri } = await Print.printToFileAsync({ html: htmlContent });
           const newFileName = `${data.dcNo || 'Challan'}.pdf`;
-          // @ts-ignore
-          const newPath = `${FileSystem.cacheDirectory}${newFileName}`;
+          
+          const fs = FileSystem as any;
+          const newPath = `${fs.cacheDirectory}${newFileName}`;
 
           try {
               await FileSystem.copyAsync({ from: uri, to: newPath });
@@ -198,23 +224,28 @@ export default function CourierScreen() {
       } catch (error) { Alert.alert("Error", "Could not generate PDF."); }
   };
 
-  // --- DATE NAVIGATION ---
+  // --- FY DATE NAVIGATION ---
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
       if (viewMode === 'Day') d.setDate(d.getDate() + dir);
       else if (viewMode === 'Month') d.setMonth(d.getMonth() + dir);
-      else if (viewMode === 'Year') d.setFullYear(d.getFullYear() + dir);
+      else if (viewMode === 'FY') d.setFullYear(d.getFullYear() + dir);
       setCurrentDate(d);
   };
 
   const getHeaderDate = () => {
       if (viewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
       if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      if (viewMode === 'Year') return currentDate.getFullYear().toString();
+      if (viewMode === 'FY') {
+          const m = currentDate.getMonth(); 
+          const y = currentDate.getFullYear();
+          const startY = m >= 3 ? y : y - 1;
+          return `FY ${startY.toString().slice(-2)}-${(startY + 1).toString().slice(-2)}`;
+      }
       return "All Time";
   };
 
-  // --- FILTER LOGIC ---
+  // --- 🔥 FIXED: FILTER LOGIC WITH PROPER FY BOUNDARIES (Removed Jan 2026 Limit) ---
   const getFilteredData = () => {
       let data = Array.isArray(courierList) ? [...courierList] : [];
 
@@ -247,12 +278,19 @@ export default function CourierScreen() {
           const targetMonth = currentDate.getMonth();
           const targetDay = currentDate.getDate();
 
+          // FY Boundaries Logic (April 1st to March 31st)
+          const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // 1st April
+          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // 31st March
+
           data = data.filter((item: any) => {
               if(!item.date) return false;
               const itemDate = parseDate(item.date);
-              if (viewMode === 'Year') return itemDate.getFullYear() === targetYear;
+              const itemTime = itemDate.getTime();
+
               if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
               if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
+              if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
               return true;
           });
       }
@@ -261,13 +299,70 @@ export default function CourierScreen() {
       return data;
   };
 
-  const displayList = getFilteredData();
+  const fullList = getFilteredData(); 
+  const renderedList = fullList.slice(0, visibleCount);
 
   const openDetails = (item: any) => {
       setSelectedCourier(item);
       setNote(item.note || item.notes || ''); 
       setModalVisible(true);
   };
+  
+  const openEditModal = (item: any) => {
+    let itemsText = '';
+    if (item.items && Array.isArray(item.items)) {
+        itemsText = item.items.map((i: any) => `${i.description} - Qty: ${i.qty}`).join('\n');
+    } else {
+        itemsText = `${item.material || ''}\nQty: ${item.qty || ''}`;
+    }
+
+    setEditData({
+        id: item.id,
+        orgId: item.orgId || '', 
+        docketNo: item.docketNo || '',
+        courierName: item.courierName || '',
+        date: item.date || '',
+        type: item.type || 'Outward',
+        sender: item.sender || '',
+        receiver: item.receiver || '',
+        material: itemsText, 
+        status: item.status || 'Pending',
+        notes: item.notes || item.note || ''
+    });
+    setEditModalVisible(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editData.id) return;
+    if (!editData.docketNo || !editData.courierName) {
+        Alert.alert("Error", "Docket No and Courier Name are mandatory.");
+        return;
+    }
+    setIsSavingEdit(true);
+    try {
+        const docRef = doc(db, "couriers", editData.id);
+        await updateDoc(docRef, {
+            orgId: editData.orgId || '', 
+            docketNo: editData.docketNo,
+            courierName: editData.courierName,
+            date: editData.date,
+            type: editData.type,
+            sender: editData.sender,
+            receiver: editData.receiver,
+            material: editData.material, 
+            status: editData.status,
+            notes: editData.notes,
+            note: editData.notes 
+        });
+        Alert.alert("Success", "Courier details updated successfully!");
+        setEditModalVisible(false);
+    } catch (error: any) {
+        Alert.alert("Error", "Could not update courier. " + error.message);
+    } finally {
+        setIsSavingEdit(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (!selectedCourier) return;
     Alert.alert("Delete Entry?", "Permanently delete this record?", [
@@ -284,6 +379,7 @@ export default function CourierScreen() {
       }
     ]);
   };
+
   const handleUpdateStatus = (newStatus: string) => {
       if (!selectedCourier) return;
       Alert.alert("Confirm", `Mark as ${newStatus}?`, [
@@ -320,8 +416,6 @@ export default function CourierScreen() {
   const renderItem = ({item}: any) => {
     const statusStyle = getStatusColor(item.status);
     const isInward = item.type === 'Inward';
-    
-    // Check if items array exists
     let materialText = item.material || item.materialSummary || "No Details";
     
     return (
@@ -331,8 +425,15 @@ export default function CourierScreen() {
                     <Ionicons name="calendar-outline" size={14} color="gray" />
                     <Text style={styles.dateText}> {item.date}</Text>
                 </View>
-                <View style={[styles.statusBadge, {backgroundColor: statusStyle.bg}]}>
-                    <Text style={{color: statusStyle.text, fontSize:10, fontWeight:'bold'}}>{item.status}</Text>
+                <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                    <View style={[styles.statusBadge, {backgroundColor: statusStyle.bg}]}>
+                        <Text style={{color: statusStyle.text, fontSize:10, fontWeight:'bold'}}>{item.status}</Text>
+                    </View>
+                    {isStrictAdmin && (
+                        <TouchableOpacity style={{marginLeft: 10}} onPress={() => openEditModal(item)}>
+                            <Ionicons name="create" size={18} color="#d32f2f" />
+                        </TouchableOpacity>
+                    )}
                 </View>
             </View>
             <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:12}}>
@@ -366,7 +467,6 @@ export default function CourierScreen() {
   const isReceiver = selectedCourier && user?.name && selectedCourier.receiver ? selectedCourier.receiver.toLowerCase().includes(user.name.toLowerCase()) : false;
   const canUpdate = canManage || isReceiver;
 
-  // 🔥 HELPER TO RENDER MATERIAL LIST IN MODAL
   const renderMaterialList = (item: any) => {
       if (item.items && Array.isArray(item.items)) {
           return (
@@ -414,7 +514,7 @@ export default function CourierScreen() {
 
       <View style={{backgroundColor:'white', paddingBottom:5, marginBottom:0}}>
           <View style={styles.tabContainer}>
-              {['Day', 'Month', 'Year', 'All'].map((m) => (
+              {['Day', 'Month', 'FY', 'All'].map((m) => (
                   <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
                       <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
                   </TouchableOpacity>
@@ -439,10 +539,115 @@ export default function CourierScreen() {
                   </TouchableOpacity>
               ))}
           </ScrollView>
-          <Text style={{textAlign:'right', fontSize:11, color:'gray', paddingRight:15, marginTop:2}}>Total: {displayList.length}</Text>
+          <Text style={{textAlign:'right', fontSize:11, color:'gray', paddingRight:15, marginTop:2}}>Total: {fullList.length}</Text>
       </View>
 
-      <FlatList data={displayList} keyExtractor={item => item.id} contentContainerStyle={styles.contentContainer} ListEmptyComponent={<Text style={{textAlign:'center', marginTop:50, color:'gray'}}>No Couriers Found</Text>} renderItem={renderItem} />
+      <FlatList 
+        data={renderedList} 
+        keyExtractor={item => item.id} 
+        contentContainerStyle={styles.contentContainer} 
+        ListEmptyComponent={<Text style={{textAlign:'center', marginTop:50, color:'gray'}}>No Couriers Found</Text>} 
+        renderItem={renderItem} 
+        ListFooterComponent={
+            <View style={{ paddingBottom: 100 }}>
+                {visibleCount < fullList.length ? (
+                    <TouchableOpacity 
+                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                        style={{
+                            padding: 12, 
+                            backgroundColor: '#fff', 
+                            alignItems: 'center', 
+                            marginVertical: 10, 
+                            borderRadius: 8,
+                            borderWidth: 1,
+                            borderColor: '#ddd'
+                        }}
+                    >
+                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                            👇 Load More Records ({fullList.length - visibleCount} remaining)
+                        </Text>
+                    </TouchableOpacity>
+                ) : (
+                    fullList.length > 0 ? (
+                        <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
+                            --- End of List ---
+                        </Text>
+                    ) : null
+                )}
+            </View>
+        }
+      />
+
+      {/* ADMIN EDIT MODAL */}
+      <Modal visible={editModalVisible} transparent animationType="slide">
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                  <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:15}}>
+                      <Text style={styles.modalTitle}>Edit Courier (Admin)</Text>
+                      <TouchableOpacity onPress={() => setEditModalVisible(false)}>
+                          <Ionicons name="close-circle" size={28} color="#d32f2f" />
+                      </TouchableOpacity>
+                  </View>
+
+                  <ScrollView showsVerticalScrollIndicator={false}>
+                      <Text style={styles.inputLabel}>Docket No *</Text>
+                      <TextInput style={styles.editInput} value={editData.docketNo} onChangeText={t => setEditData({...editData, docketNo: t})} />
+
+                      <Text style={styles.inputLabel}>Courier Service Name *</Text>
+                      <TextInput style={styles.editInput} value={editData.courierName} onChangeText={t => setEditData({...editData, courierName: t})} />
+
+                      <Text style={styles.inputLabel}>Date</Text>
+                      <TextInput style={styles.editInput} value={editData.date} onChangeText={t => setEditData({...editData, date: t})} />
+
+                      <Text style={styles.inputLabel}>Type</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom: 10}}>
+                          {['Inward', 'Outward'].map(ty => (
+                              <TouchableOpacity 
+                                  key={ty} 
+                                  style={[styles.statusChip, editData.type === ty && {backgroundColor: '#3b5998', borderColor: '#3b5998'}]}
+                                  onPress={() => setEditData({...editData, type: ty})}
+                              >
+                                  <Text style={{color: editData.type === ty ? 'white' : '#555', fontSize: 12}}>{ty}</Text>
+                              </TouchableOpacity>
+                          ))}
+                      </ScrollView>
+
+                      <Text style={styles.inputLabel}>From (Sender)</Text>
+                      <TextInput style={styles.editInput} value={editData.sender} onChangeText={t => setEditData({...editData, sender: t})} />
+
+                      <Text style={styles.inputLabel}>To (Receiver)</Text>
+                      <TextInput style={styles.editInput} value={editData.receiver} onChangeText={t => setEditData({...editData, receiver: t})} />
+
+                      <Text style={styles.inputLabel}>Material Details / Items</Text>
+                      <TextInput style={[styles.editInput, {height: 80, textAlignVertical: 'top'}]} multiline value={editData.material} onChangeText={t => setEditData({...editData, material: t})} />
+
+                      <Text style={styles.inputLabel}>Status</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom: 10}}>
+                          {['Pending', 'Received', 'Delivered'].map(st => (
+                              <TouchableOpacity 
+                                  key={st} 
+                                  style={[styles.statusChip, editData.status === st && {backgroundColor: '#3b5998', borderColor: '#3b5998'}]}
+                                  onPress={() => setEditData({...editData, status: st})}
+                              >
+                                  <Text style={{color: editData.status === st ? 'white' : '#555', fontSize: 12}}>{st}</Text>
+                              </TouchableOpacity>
+                          ))}
+                      </ScrollView>
+
+                      <Text style={styles.inputLabel}>Notes</Text>
+                      <TextInput style={[styles.editInput, {height: 60, textAlignVertical: 'top'}]} multiline value={editData.notes} onChangeText={t => setEditData({...editData, notes: t})} />
+                  </ScrollView>
+
+                  <TouchableOpacity 
+                      style={[styles.saveEditBtn, isSavingEdit && {opacity: 0.6}]} 
+                      onPress={handleSaveEdit}
+                      disabled={isSavingEdit}
+                  >
+                      {isSavingEdit ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Save Changes</Text>}
+                  </TouchableOpacity>
+              </View>
+          </KeyboardAvoidingView>
+      </Modal>
 
       <Modal visible={modalVisible} transparent={true} animationType="slide">
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{flex: 1}}>
@@ -486,26 +691,26 @@ export default function CourierScreen() {
                                   <Text style={{fontWeight:'bold', marginTop:15, marginBottom:5}}>Remarks / Note:</Text>
                                   <TextInput style={styles.noteInput} multiline placeholder="Add a note..." value={note} onChangeText={setNote} />
                                   <View style={{marginTop: 10}}>
-    {selectedCourier.type === 'Inward' && (
-        <TouchableOpacity 
-            style={[styles.actionBtnGreen, loading && {opacity: 0.7}]} 
-            onPress={() => handleUpdateStatus('Received')} 
-            disabled={loading} 
-        >
-            {loading ? <ActivityIndicator color="white"/> : <Text style={styles.btnText}>Mark as Received</Text>}
-        </TouchableOpacity>
-    )}
+                                      {selectedCourier.type === 'Inward' && (
+                                          <TouchableOpacity 
+                                              style={[styles.actionBtnGreen, loading && {opacity: 0.7}]} 
+                                              onPress={() => handleUpdateStatus('Received')} 
+                                              disabled={loading} 
+                                          >
+                                              {loading ? <ActivityIndicator color="white"/> : <Text style={styles.btnText}>Mark as Received</Text>}
+                                          </TouchableOpacity>
+                                      )}
 
-    {selectedCourier.type === 'Outward' && (
-        <TouchableOpacity 
-            style={[styles.actionBtnBlue, loading && {opacity: 0.7}]} 
-            onPress={() => handleUpdateStatus('Delivered')} 
-            disabled={loading}
-        >
-            {loading ? <ActivityIndicator color="white"/> : <Text style={styles.btnText}>Mark as Delivered</Text>}
-        </TouchableOpacity>
-    )}
-</View>
+                                      {selectedCourier.type === 'Outward' && (
+                                          <TouchableOpacity 
+                                              style={[styles.actionBtnBlue, loading && {opacity: 0.7}]} 
+                                              onPress={() => handleUpdateStatus('Delivered')} 
+                                              disabled={loading}
+                                          >
+                                              {loading ? <ActivityIndicator color="white"/> : <Text style={styles.btnText}>Mark as Delivered</Text>}
+                                          </TouchableOpacity>
+                                      )}
+                                  </View>
                               </View>
                           ) : null}
 
@@ -521,28 +726,28 @@ export default function CourierScreen() {
 
                           {canManage && (
                               <TouchableOpacity 
-    style={{marginTop: 20, backgroundColor: '#ffebee', padding: 12, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#ef9a9a', opacity: loading ? 0.5 : 1}} 
-    onPress={handleDelete}
-    disabled={loading}
->
-    <View style={{flexDirection:'row', alignItems:'center'}}>
-        {loading ? (
-            <ActivityIndicator size="small" color="#d32f2f" />
-        ) : (
-            <Ionicons name="trash-outline" size={18} color="#d32f2f" />
-        )}
-        <Text style={{color: '#d32f2f', fontWeight: 'bold', marginLeft: 8}}>
-            {loading ? "Deleting..." : "Delete Entry"}
-        </Text>
-    </View>
-</TouchableOpacity>
+                                  style={{marginTop: 20, backgroundColor: '#ffebee', padding: 12, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#ef9a9a', opacity: loading ? 0.5 : 1}} 
+                                  onPress={handleDelete}
+                                  disabled={loading}
+                              >
+                                  <View style={{flexDirection:'row', alignItems:'center'}}>
+                                      {loading ? (
+                                          <ActivityIndicator size="small" color="#d32f2f" />
+                                      ) : (
+                                          <Ionicons name="trash-outline" size={18} color="#d32f2f" />
+                                      )}
+                                      <Text style={{color: '#d32f2f', fontWeight: 'bold', marginLeft: 8}}>
+                                          {loading ? "Deleting..." : "Delete Entry"}
+                                      </Text>
+                                  </View>
+                              </TouchableOpacity>
                           )}
                           <View style={{height: 20}} />
                       </ScrollView>
                   )}
               </View>
           </View>
-          </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -572,7 +777,7 @@ const styles = StyleSheet.create({
       flexDirection: 'row', 
       backgroundColor: '#e0e0e0', 
       marginHorizontal: 15, 
-      marginTop: 10,       
+      marginTop: 10,      
       marginBottom: 5,      
       borderRadius: 8, 
       padding: 2            
@@ -591,7 +796,7 @@ const styles = StyleSheet.create({
   activeChipText: { color:'white', fontWeight:'bold' },
   contentContainer: { padding: 15,paddingTop: 0, paddingBottom: 100 },
   card: { backgroundColor: 'white', borderRadius: 12, padding: 15, marginBottom: 15, elevation: 2 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom:5 },
   dateText: { fontSize: 12, color: 'gray' },
   statusBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
   docketNo: { fontWeight: 'bold', fontSize: 14, color:'#3b5998' },
@@ -607,13 +812,17 @@ const styles = StyleSheet.create({
   divider: { height:1, backgroundColor:'#eee', marginVertical:5 },
   footer: { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginTop:5 },
   materialText: { fontSize:12, color:'#555', fontStyle:'italic' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
-  modalContent: { width: '90%', backgroundColor: 'white', borderRadius: 15, padding: 25, elevation: 5, maxHeight: '80%' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end', padding: 10 },
+  modalContent: { width: '100%', backgroundColor: 'white', borderRadius: 15, padding: 25, elevation: 5, maxHeight: '90%' },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   materialBox: { backgroundColor:'#f0f4ff', padding:10, borderRadius:8, marginTop:10 },
   noteInput: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, height: 60, textAlignVertical: 'top', marginBottom: 10, backgroundColor:'#f9f9f9' },
   actionBtnGreen: { backgroundColor: '#2e7d32', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 5 },
   actionBtnBlue: { backgroundColor: '#1565c0', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 5 },
   btnText: { color: 'white', fontWeight: 'bold' },
-  infoBox: { marginTop:10, padding:10, backgroundColor:'#f5f5f5', borderRadius:8, alignItems:'center' }
+  
+  inputLabel: { fontSize: 12, color: 'gray', marginTop: 10, marginBottom: 5, fontWeight: 'bold' },
+  editInput: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, fontSize: 14, color: '#333', backgroundColor: '#f9f9f9' },
+  saveEditBtn: { backgroundColor: '#d32f2f', padding: 15, borderRadius: 8, alignItems: 'center', marginTop: 20 },
+  statusChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: '#ddd', marginRight: 10 },
 });

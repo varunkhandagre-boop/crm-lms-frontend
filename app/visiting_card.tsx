@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { collection, doc, getDocs, query, updateDoc } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     FlatList,
     KeyboardAvoidingView,
@@ -27,7 +28,8 @@ export default function VisitingCardScreen() {
   // --- STATES ---
   const [searchText, setSearchText] = useState('');
   const [activeStatus, setActiveStatus] = useState('All');
-  const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'Year' | 'All'>('All');
+  // 🔥 CHANGED: 'Year' to 'FY'
+  const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All');
   const [currentDate, setCurrentDate] = useState(new Date());
 
   // MODAL STATES
@@ -37,15 +39,31 @@ export default function VisitingCardScreen() {
   // State for Tracking No
   const [dispatchTracking, setDispatchTracking] = useState('');
 
+  // 🔥 LOADING STATES FOR BUTTONS
+  const [isDispatching, setIsDispatching] = useState(false);
+  const [isReceiving, setIsReceiving] = useState(false);
+
   // --- EMPLOYEE FILTER ---
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All'); 
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
+  // 🔥 PAGINATION STATE (SMART LOAD MORE)
+  const [visibleCount, setVisibleCount] = useState(20);
+
   // ROLE CHECK
   const myRole = (currentUser?.role || '').toLowerCase();
-  const canViewAll = ['admin', 'manager', 'store', 'account', 'accountant', 'Hr'].some(r => myRole.includes(r));
+  const canViewAll = ['admin', 'manager', 'store', 'account', 'accountant', 'hr'].some(r => myRole.includes(r));
   const canDispatch = canViewAll; 
+
+  // 🔥 RESET PAGINATION ON FILTER CHANGE
+  useEffect(() => {
+      if (viewMode === 'Day' && activeStatus === 'All' && !searchText) {
+          setVisibleCount(500); // Day view me sab dikha do
+      } else {
+          setVisibleCount(20); // Baki views me Load More use karo
+      }
+  }, [viewMode, currentDate, activeStatus, searchText, selectedEmployeeName]);
 
   // 0. FETCH EMPLOYEES (For Admin/Store)
   useEffect(() => {
@@ -82,19 +100,25 @@ export default function VisitingCardScreen() {
       return new Date(dateStr);
   };
 
-  // --- DATE NAVIGATION ---
+  // 🔥 CHANGED: FY Navigation
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
       if (viewMode === 'Day') d.setDate(d.getDate() + dir);
       else if (viewMode === 'Month') d.setMonth(d.getMonth() + dir);
-      else if (viewMode === 'Year') d.setFullYear(d.getFullYear() + dir);
+      else if (viewMode === 'FY') d.setFullYear(d.getFullYear() + dir);
       setCurrentDate(d);
   };
 
+  // 🔥 CHANGED: Header Title logic for Financial Year
   const getHeaderDate = () => {
       if (viewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
       if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      if (viewMode === 'Year') return currentDate.getFullYear().toString();
+      if (viewMode === 'FY') {
+          const m = currentDate.getMonth(); 
+          const y = currentDate.getFullYear();
+          const startY = m >= 3 ? y : y - 1;
+          return `FY ${startY.toString().slice(-2)}-${(startY + 1).toString().slice(-2)}`;
+      }
       return "All Time";
   };
 
@@ -127,20 +151,26 @@ export default function VisitingCardScreen() {
           });
       }
 
-      // 4. Date Filter
+      // 4. Date Filter (🔥 FY Boundaries added)
       if (viewMode !== 'All') {
           const targetYear = currentDate.getFullYear();
           const targetMonth = currentDate.getMonth();
           const targetDay = currentDate.getDate();
 
+          // FY Boundaries Logic
+          const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // 1st April
+          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // 31st March
+
           data = data.filter((item: any) => {
               const dateField = item.createdAt || item.date;
               if(!dateField) return false;
               const itemDate = parseDate(dateField);
+              const itemTime = itemDate.getTime();
               
-              if (viewMode === 'Year') return itemDate.getFullYear() === targetYear;
               if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
               if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
+              if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
               return true;
           });
       }
@@ -151,7 +181,10 @@ export default function VisitingCardScreen() {
       return data;
   };
 
-  const displayList = getFilteredData();
+  const displayList = getFilteredData(); // 🔥 Full Data
+  
+  // 🔥 SLICE FOR LIST (Rendered Data)
+  const renderedList = displayList.slice(0, visibleCount);
 
   const openDetails = (item: any) => {
       setSelectedRequest(item);
@@ -159,12 +192,13 @@ export default function VisitingCardScreen() {
       setModalVisible(true);
   };
 
-  // --- DISPATCH LOGIC ---
+  // --- 🔥 UPDATED DISPATCH LOGIC (WITH LOADING) ---
   const handleDispatch = async () => {
       if (!dispatchTracking) {
           Alert.alert("Required", "Please enter Courier Name & Tracking Number");
           return;
       }
+      setIsDispatching(true); // Start Loading
       try {
            const docRef = doc(db, "card_requests", selectedRequest.id);
            await updateDoc(docRef, {
@@ -187,20 +221,27 @@ export default function VisitingCardScreen() {
            Alert.alert("Success", "Request Dispatched Successfully! 🚀");
       } catch (error) {
            Alert.alert("Error", "Could not update status.");
+      } finally {
+          setIsDispatching(false); // Stop Loading
       }
   };
 
-  // --- RECEIVE LOGIC ---
+  // --- 🔥 UPDATED RECEIVE LOGIC (WITH LOADING) ---
   const handleReceive = () => {
       Alert.alert("Confirm Receipt", "Confirm that you received items?", [
           { text: "Cancel", style: "cancel" },
           { text: "Yes", onPress: async () => {
+              setIsReceiving(true); // Start Loading
               try {
                   const docRef = doc(db, "card_requests", selectedRequest.id);
                   await updateDoc(docRef, { status: 'Received' });
                   setModalVisible(false);
                   Alert.alert("Success", "Marked as Received! ✅");
-              } catch (error) { Alert.alert("Error", "Update failed."); }
+              } catch (error) { 
+                  Alert.alert("Error", "Update failed."); 
+              } finally {
+                  setIsReceiving(false); // Stop Loading
+              }
           }}
       ]);
   };
@@ -237,7 +278,8 @@ export default function VisitingCardScreen() {
       <View style={{backgroundColor:'white', paddingBottom:10, marginBottom:5}}>
           
           <View style={styles.tabContainer}>
-              {['Day', 'Month', 'Year', 'All'].map((m) => (
+              {/* 🔥 CHANGED: 'Year' to 'FY' */}
+              {['Day', 'Month', 'FY', 'All'].map((m) => (
                   <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
                       <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
                   </TouchableOpacity>
@@ -282,7 +324,8 @@ export default function VisitingCardScreen() {
       </View>
 
       <FlatList 
-        data={displayList}
+        // 🔥 Use Rendered List
+        data={renderedList}
         keyExtractor={item => item.id}
         contentContainerStyle={styles.contentContainer}
         ListEmptyComponent={
@@ -321,6 +364,36 @@ export default function VisitingCardScreen() {
                 </TouchableOpacity>
             );
         }}
+        // 🔥 LOAD MORE BUTTON FOOTER
+        ListFooterComponent={
+            <View style={{ paddingBottom: 80 }}>
+                {visibleCount < displayList.length ? (
+                    <TouchableOpacity 
+                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                        style={{
+                            padding: 12, 
+                            backgroundColor: '#fff', 
+                            alignItems: 'center', 
+                            marginVertical: 10, 
+                            borderRadius: 8,
+                            borderWidth: 1,
+                            borderColor: '#ddd',
+                            elevation: 1
+                        }}
+                    >
+                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                            👇 Load More Records ({displayList.length - visibleCount} remaining)
+                        </Text>
+                    </TouchableOpacity>
+                ) : (
+                    displayList.length > 0 ? (
+                        <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
+                            --- End of List ---
+                        </Text>
+                    ) : null
+                )}
+            </View>
+        }
       />
 
       {/* DETAILS MODAL */}
@@ -339,7 +412,7 @@ export default function VisitingCardScreen() {
                       <ScrollView showsVerticalScrollIndicator={false}>
                           <DetailRow label="Requested By" value={selectedRequest.userName} />
                           <DetailRow label="ID" value={selectedRequest.reqId} />
-                          <DetailRow label="Date" value={selectedRequest.date || selectedRequest.createdAt} />
+                          <DetailRow label="Date" value={selectedRequest.date || selectedRequest.createdAt?.split('T')[0]} />
                           <DetailRow label="Status" value={selectedRequest.status} color={getStatusTheme(selectedRequest.status).text} />
                           
                           {selectedRequest.trackingNo ? (
@@ -350,7 +423,7 @@ export default function VisitingCardScreen() {
                               </View>
                           ) : null}
 
-                          {/* DISPATCH ACTION */}
+                          {/* 🔥 UPDATED DISPATCH ACTION WITH LOADING */}
                           {selectedRequest.status === 'Pending' && canDispatch && (
                               <View style={styles.adminActionBox}>
                                   <Text style={styles.adminActionTitle}>Dispatch Order</Text>
@@ -359,9 +432,14 @@ export default function VisitingCardScreen() {
                                       placeholder="Courier Name & Tracking No"
                                       value={dispatchTracking}
                                       onChangeText={setDispatchTracking}
+                                      editable={!isDispatching}
                                   />
-                                  <TouchableOpacity style={styles.dispatchBtn} onPress={handleDispatch}>
-                                      <Text style={styles.dispatchBtnText}>Mark as Sent</Text>
+                                  <TouchableOpacity 
+                                      style={[styles.dispatchBtn, isDispatching && { opacity: 0.6 }]} 
+                                      onPress={handleDispatch}
+                                      disabled={isDispatching}
+                                  >
+                                      {isDispatching ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.dispatchBtnText}>Mark as Sent</Text>}
                                   </TouchableOpacity>
                               </View>
                           )}
@@ -376,11 +454,19 @@ export default function VisitingCardScreen() {
                               ))}
                           </View>
 
-                          {/* RECEIVE ACTION */}
+                          {/* 🔥 UPDATED RECEIVE ACTION WITH LOADING */}
                           {selectedRequest.status === 'Sent' && (
-                              <TouchableOpacity style={styles.receiveBtn} onPress={handleReceive}>
-                                  <Ionicons name="checkmark-circle" size={20} color="white" />
-                                  <Text style={styles.receiveBtnText}>Confirm Delivery</Text>
+                              <TouchableOpacity 
+                                  style={[styles.receiveBtn, isReceiving && { opacity: 0.6 }]} 
+                                  onPress={handleReceive}
+                                  disabled={isReceiving}
+                              >
+                                  {isReceiving ? <ActivityIndicator color="white" size="small" /> : (
+                                      <>
+                                          <Ionicons name="checkmark-circle" size={20} color="white" />
+                                          <Text style={styles.receiveBtnText}>Confirm Delivery</Text>
+                                      </>
+                                  )}
                               </TouchableOpacity>
                           )}
                       </ScrollView>

@@ -1,16 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  FlatList,
-  Image, Modal,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    FlatList,
+    Image,
+    Modal,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { useData } from './context/DataContext';
+
+const ITEMS_PER_PAGE = 20; // Number of items to load per scroll
 
 export default function OnlineServiceScreen() {
   const router = useRouter();
@@ -18,37 +22,55 @@ export default function OnlineServiceScreen() {
 
   // --- STATES ---
   const [searchText, setSearchText] = useState('');
-  const [itemsPerPage, setItemsPerPage] = useState(25);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [modalVisible, setModalVisible] = useState(false);
 
-  // --- 1. FILTER ONLY ONLINE SERVICES ---
-  const onlineData = serviceList.filter((item: any) => item.type === 'Online');
+  // --- PAGINATION STATES ---
+  const [visibleLimit, setVisibleLimit] = useState(ITEMS_PER_PAGE);
+  const [loadingMore, setLoadingMore] = useState(false);
 
-  // --- 2. SMART SEARCH & LIMIT LOGIC ---
-  const getFilteredData = () => {
-    if (!searchText) return itemsPerPage === -1 ? onlineData : onlineData.slice(0, itemsPerPage);
+  // --- 1. FILTER ONLY ONLINE SERVICES ---
+  const onlineData = useMemo(() => {
+     return serviceList ? serviceList.filter((item: any) => item.type === 'Online') : [];
+  }, [serviceList]);
+
+  // --- 2. SMART SEARCH LOGIC (Full Filtered List) ---
+  const fullFilteredList = useMemo(() => {
+    if (!searchText) return onlineData;
     
     const searchTerms = searchText.toLowerCase().split(' ');
-    let filtered = onlineData.filter((item: any) => {
+    return onlineData.filter((item: any) => {
        // Search in TicketNo, Hospital, Issue, Date, Status
-       const itemData = `${item.ticketNo} ${item.hospital} ${item.issue} ${item.date} ${item.status}`.toLowerCase();
+       const itemData = `${item.ticketNo || ''} ${item.hospital || ''} ${item.issue || ''} ${item.date || ''} ${item.status || ''}`.toLowerCase();
        return searchTerms.every((term: string) => itemData.includes(term));
     });
+  }, [searchText, onlineData]);
 
-    if (itemsPerPage !== -1) return filtered.slice(0, itemsPerPage);
-    return filtered;
+  // --- 3. DISPLAY LIST (Sliced for View) ---
+  const displayList = fullFilteredList.slice(0, visibleLimit);
+
+  // Reset pagination when search changes
+  useEffect(() => {
+    setVisibleLimit(ITEMS_PER_PAGE);
+  }, [searchText]);
+
+  const loadMore = () => {
+    if (visibleLimit < fullFilteredList.length && !loadingMore) {
+        setLoadingMore(true);
+        setTimeout(() => {
+            setVisibleLimit(prev => prev + ITEMS_PER_PAGE);
+            setLoadingMore(false);
+        }, 100); // Slight delay for smooth UI
+    }
   };
-
-  const displayList = getFilteredData();
 
   // --- OPEN DETAILS ---
   const openDetails = (item: any) => {
-      setSelectedItem(item);
-      setModalVisible(true);
+    setSelectedItem(item);
+    setModalVisible(true);
   };
 
-  // --- RENDER CARD (Your Design) ---
+  // --- RENDER CARD ---
   const renderItem = ({ item }: any) => (
     <TouchableOpacity style={styles.card} onPress={() => openDetails(item)}>
         <View style={styles.row}>
@@ -99,21 +121,11 @@ export default function OnlineServiceScreen() {
           )}
       </View>
 
-      {/* LIMIT SELECTOR */}
+      {/* TOTAL COUNT INDICATOR */}
       <View style={styles.limitContainer}>
-          <Text style={{fontSize:12, color:'gray', marginRight:10}}>Show:</Text>
-          {[25, 50, 100, -1].map((num) => (
-              <TouchableOpacity 
-                key={num} 
-                style={[styles.limitBtn, itemsPerPage === num && styles.activeLimitBtn]} 
-                onPress={() => setItemsPerPage(num)}
-              >
-                  <Text style={[styles.limitText, itemsPerPage === num && styles.activeLimitText]}>
-                      {num === -1 ? 'All' : num}
-                  </Text>
-              </TouchableOpacity>
-          ))}
-          <Text style={{marginLeft:'auto', fontSize:12, color:'gray'}}>Total: {onlineData.length}</Text>
+          <Text style={{marginLeft:'auto', fontSize:12, color:'gray'}}>
+              Showing {displayList.length} of {fullFilteredList.length} Records
+          </Text>
       </View>
 
       {/* LIST VIEW */}
@@ -121,7 +133,19 @@ export default function OnlineServiceScreen() {
         data={displayList}
         keyExtractor={item => item.id}
         renderItem={renderItem}
-        contentContainerStyle={{padding: 15}}
+        contentContainerStyle={{padding: 15, paddingBottom: 50}}
+        
+        // Smart Pagination Props
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={
+            loadingMore ? (
+                <View style={{paddingVertical: 20}}>
+                    <ActivityIndicator size="small" color="#3b5998" />
+                </View>
+            ) : null
+        }
+
         ListEmptyComponent={
             <View style={{alignItems:'center', marginTop:50}}>
                 <Image source={{ uri: 'https://cdn-icons-png.flaticon.com/512/7486/7486747.png' }} style={{ width: 100, height: 100, opacity: 0.5 }} />
@@ -131,33 +155,33 @@ export default function OnlineServiceScreen() {
       />
 
       {/* --- POPUP MODAL --- */}
-      <Modal visible={modalVisible} transparent={true} animationType="fade">
+      <Modal visible={modalVisible} transparent={true} animationType="fade" onRequestClose={() => setModalVisible(false)}>
           <View style={styles.modalOverlay}>
-              <View style={styles.modalContent}>
-                  <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:15}}>
-                      <Text style={styles.modalTitle}>Service Details</Text>
-                      <TouchableOpacity onPress={() => setModalVisible(false)}>
-                          <Ionicons name="close-circle" size={28} color="#d32f2f" />
-                      </TouchableOpacity>
-                  </View>
+            <View style={styles.modalContent}>
+                <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:15}}>
+                    <Text style={styles.modalTitle}>Service Details</Text>
+                    <TouchableOpacity onPress={() => setModalVisible(false)}>
+                        <Ionicons name="close-circle" size={28} color="#d32f2f" />
+                    </TouchableOpacity>
+                </View>
 
-                  {selectedItem && (
-                      <View>
-                          <DetailRow label="Ticket No" value={selectedItem.ticketNo} icon="ticket" />
-                          <DetailRow label="Date" value={selectedItem.date} icon="calendar" />
-                          <DetailRow label="Hospital" value={selectedItem.hospital} icon="business" highlight />
-                          <View style={styles.divider} />
-                          <Text style={{fontSize:12, color:'gray', marginBottom:2}}>Complaint / Issue:</Text>
-                          <Text style={{fontSize:14, fontWeight:'500', marginBottom:10}}>{selectedItem.issue}</Text>
-                          
-                          <Text style={{fontSize:12, color:'gray', marginBottom:2}}>Action Taken:</Text>
-                          <Text style={{fontSize:14, fontWeight:'500', marginBottom:10, color:'#3b5998'}}>{selectedItem.action}</Text>
+                {selectedItem && (
+                    <View>
+                        <DetailRow label="Ticket No" value={selectedItem.ticketNo} icon="ticket" />
+                        <DetailRow label="Date" value={selectedItem.date} icon="calendar" />
+                        <DetailRow label="Hospital" value={selectedItem.hospital} icon="business" highlight />
+                        <View style={styles.divider} />
+                        <Text style={{fontSize:12, color:'gray', marginBottom:2}}>Complaint / Issue:</Text>
+                        <Text style={{fontSize:14, fontWeight:'500', marginBottom:10}}>{selectedItem.issue}</Text>
+                        
+                        <Text style={{fontSize:12, color:'gray', marginBottom:2}}>Action Taken:</Text>
+                        <Text style={{fontSize:14, fontWeight:'500', marginBottom:10, color:'#3b5998'}}>{selectedItem.action || 'No Action'}</Text>
 
-                          <DetailRow label="Status" value={selectedItem.status} icon="information-circle" 
-                                     color={selectedItem.status === 'Resolved' ? 'green' : 'orange'} />
-                      </View>
-                  )}
-              </View>
+                        <DetailRow label="Status" value={selectedItem.status} icon="information-circle" 
+                                   color={selectedItem.status === 'Resolved' ? 'green' : 'orange'} />
+                    </View>
+                )}
+            </View>
           </View>
       </Modal>
 
@@ -167,15 +191,15 @@ export default function OnlineServiceScreen() {
 
 // Helper Components
 const DetailRow = ({label, value, icon, highlight, color}: any) => (
-    <View style={{flexDirection:'row', alignItems:'center', marginBottom:12}}>
-        <View style={{width:30}}><Ionicons name={icon} size={20} color="#3b5998" /></View>
-        <View style={{flex:1}}>
-            <Text style={{fontSize:11, color:'gray'}}>{label}</Text>
-            <Text style={{fontSize:15, fontWeight: highlight ? 'bold' : '500', color: color ? color : (highlight ? '#3b5998' : '#333')}}>
-                {value}
-            </Text>
-        </View>
-    </View>
+  <View style={{flexDirection:'row', alignItems:'center', marginBottom:12}}>
+      <View style={{width:30}}><Ionicons name={icon} size={20} color="#3b5998" /></View>
+      <View style={{flex:1}}>
+          <Text style={{fontSize:11, color:'gray'}}>{label}</Text>
+          <Text style={{fontSize:15, fontWeight: highlight ? 'bold' : '500', color: color ? color : (highlight ? '#3b5998' : '#333')}}>
+              {value}
+          </Text>
+      </View>
+  </View>
 );
 
 const styles = StyleSheet.create({
@@ -189,10 +213,6 @@ const styles = StyleSheet.create({
 
   // Limit
   limitContainer: { flexDirection:'row', alignItems:'center', paddingHorizontal:15, marginBottom:10 },
-  limitBtn: { paddingVertical:4, paddingHorizontal:8, borderRadius:4, backgroundColor:'#e0e0e0', marginRight:8 },
-  activeLimitBtn: { backgroundColor:'#3b5998' },
-  limitText: { fontSize:12, color:'#333' },
-  activeLimitText: { color:'white', fontWeight:'bold' },
 
   // Card Styles (Your Design)
   card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 10, elevation: 2 },

@@ -43,6 +43,53 @@ export default function UpdatedDashboard() {
   const fyEndDate = new Date(fyEndYear, 2, 31, 23, 59, 59); 
   const fyLabel = `FY ${fyStartYear.toString().slice(-2)}-${fyEndYear.toString().slice(-2)}`;
 
+  // --- 🔥 SMART DASHBOARD REMINDERS LOGIC (OVERDUE, TODAY, HOT) ---
+  const parseDate = (dateStr: any) => {
+      if (!dateStr) return new Date(0);
+      if (typeof dateStr === 'string') {
+          if (dateStr.includes('T')) return new Date(dateStr);
+          if (dateStr.includes('-')) return new Date(dateStr);
+          if (dateStr.includes('/')) {
+              const parts = dateStr.split('/');
+              if (parts.length === 3) return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+          }
+      }
+      return new Date(dateStr);
+  };
+
+  const getLeadActionCounts = () => {
+      let myLeads = leadsList || [];
+      if (!isAdmin) {
+          myLeads = myLeads.filter((l: any) => l.userId === currentUser?.uid || l.assignedTo === currentUser?.uid || l.senderId === currentUser?.uid);
+      }
+
+      const todayObj = new Date();
+      todayObj.setHours(0, 0, 0, 0);
+
+      let overdue = 0;
+      let dueToday = 0;
+      let hot = 0;
+
+      myLeads.forEach((l: any) => {
+          const status = (l.status || '').toLowerCase();
+          if (status.includes('converted') || status.includes('lost') || status.includes('order closed') || status.includes('drop')) return;
+
+          if (l.isHot || l.type === 'Hot') hot++;
+
+          if (l.nextDate) {
+              const nDate = parseDate(l.nextDate);
+              nDate.setHours(0, 0, 0, 0);
+              const diff = nDate.getTime() - todayObj.getTime();
+              if (diff < 0) overdue++;
+              else if (diff === 0) dueToday++;
+          }
+      });
+
+      return { overdue, dueToday, hot };
+  };
+
+  const leadActionCounts = getLeadActionCounts();
+
   // --- 1. FINANCIAL CALCULATIONS ---
 
   // A. SALES (Total Order Value)
@@ -75,32 +122,20 @@ export default function UpdatedDashboard() {
       progress = 100;
   }
 
-  // C. 🔥 NEW TOTAL OUTSTANDING (Based on Order Balance)
-  // Hum orderList check karenge jinka balance > 0 hai aur Approved hain
+  // C. OUTSTANDING
   const totalMarketOutstanding = orderList
     .filter((order: any) => {
-        // Sirf Approved orders ka paisa baki mana jayega
         const isApproved = ['Approved', 'Completed', 'Dispatched'].includes(order.status);
         const isMine = isAdmin ? true : (order.senderId === currentUser?.id);
-        
-        // Balance check (Agar balance field nahi hai, to full amount due hai)
-        // Lekin 'Paid' status walo ko hata denge
         const isNotPaid = order.paymentStatus !== 'Paid';
-        
         return isApproved && isMine && isNotPaid;
     })
     .reduce((sum: number, order: any) => {
-        // Balance field ko priority do, nahi to amount
         const due = order.balance !== undefined ? Number(order.balance) : Number(order.amount);
         return sum + due;
     }, 0);
 
-  // Note: Aapka purana 'dueList' logic bhi rakh sakte hain agar wahan kuch extra manual entries hain
-  // Lekin Order Linking ke baad upar wala logic zyada accurate hai.
-  // Hum dono ko jod sakte hain ya sirf Order wala dikha sakte hain.
-  // Abhi ke liye mai sirf Order Based Outstanding dikha raha hu.
-
-  // D. RECOVERY (This Month)
+  // D. RECOVERY
   const totalRecoveryThisMonth = paymentList
     .filter((p: any) => {
         const isMine = isAdmin ? true : (p.senderId === currentUser?.id);
@@ -176,7 +211,7 @@ export default function UpdatedDashboard() {
   
   const totalSalesFollowUps = activeVisits + activeLeads;
 
-  // --- 3. DUES LIST (Priority) ---
+  // --- 3. DUES LIST ---
   const topDues = [...dueList]
     .filter((due: any) => isAdmin ? true : (due.assignedToUid === currentUser?.id || due.senderId === currentUser?.id))
     .sort((a, b) => Number(b.amount) - Number(a.amount))
@@ -209,37 +244,48 @@ export default function UpdatedDashboard() {
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         
-        {/* 🔥 SALES TARGET CARD (Employee Only - Clickable Now) */}
-{!isAdmin && (
-    <TouchableOpacity 
-        style={styles.progressCard} 
-        // 🔥 LINK THIS TO REPORT TOO
-        onPress={() => router.push('/sales_team_report' as any)}
-    >
-        <View style={styles.progressHeader}>
-            <View style={{flexDirection:'row', alignItems:'center'}}>
-                <Text style={styles.progressLabel}>My Sales Target ({fyLabel})</Text>
-                <Ionicons name="chevron-forward" size={14} color="#555" style={{marginLeft:5}}/>
-            </View>
-            <Text style={styles.progressValue}>{progress.toFixed(1)}%</Text>
+        {/* 🔥 NEW: SMART REMINDERS WIDGET 🔥 */}
+        <View style={styles.actionCardsRow}>
+            <TouchableOpacity style={[styles.actionCard, { backgroundColor: '#ffebee', borderColor: '#d32f2f', borderWidth: 1 }]} onPress={() => router.push('/leads' as any)}>
+                <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#d32f2f' }}>{leadActionCounts.overdue}</Text>
+                <Text style={{ fontSize: 10, color: '#d32f2f', fontWeight: 'bold', marginTop: 2 }}>OVERDUE</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.actionCard, { backgroundColor: '#fff3e0', borderColor: '#f57c00', borderWidth: 1 }]} onPress={() => router.push('/leads' as any)}>
+                <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#f57c00' }}>{leadActionCounts.dueToday}</Text>
+                <Text style={{ fontSize: 10, color: '#f57c00', fontWeight: 'bold', marginTop: 2 }}>DUE TODAY</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.actionCard, { backgroundColor: '#e8f5e9', borderColor: '#2e7d32', borderWidth: 1 }]} onPress={() => router.push('/leads' as any)}>
+                <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#2e7d32' }}>{leadActionCounts.hot}</Text>
+                <Text style={{ fontSize: 10, color: '#2e7d32', fontWeight: 'bold', marginTop: 2 }}>HOT DEALS</Text>
+            </TouchableOpacity>
         </View>
-        
-        <View style={styles.progressBarBg}>
-            <View style={[styles.progressBarFill, { width: `${progress}%`, backgroundColor: progress >= 100 ? '#2E7D32' : '#1A237E' }]} />
-        </View>
-        
-        <Text style={styles.targetText}>
-            Achieved: ₹{(totalSale/100000).toFixed(2)}L / Target: ₹{(displayTarget/100000).toFixed(2)}L
-        </Text>
-        <Text style={{fontSize:10, color:'#3b5998', marginTop:5, textAlign:'right', fontWeight:'bold'}}>
-            View My Incentive & Details →
-        </Text>
-    </TouchableOpacity>
-)}
+
+        {/* 🔥 SALES TARGET CARD */}
+        {!isAdmin && (
+            <TouchableOpacity style={styles.progressCard} onPress={() => router.push('/sales_team_report' as any)}>
+                <View style={styles.progressHeader}>
+                    <View style={{flexDirection:'row', alignItems:'center'}}>
+                        <Text style={styles.progressLabel}>My Sales Target ({fyLabel})</Text>
+                        <Ionicons name="chevron-forward" size={14} color="#555" style={{marginLeft:5}}/>
+                    </View>
+                    <Text style={styles.progressValue}>{progress.toFixed(1)}%</Text>
+                </View>
+                
+                <View style={styles.progressBarBg}>
+                    <View style={[styles.progressBarFill, { width: `${progress}%`, backgroundColor: progress >= 100 ? '#2E7D32' : '#1A237E' }]} />
+                </View>
+                
+                <Text style={styles.targetText}>
+                    Achieved: ₹{(totalSale/100000).toFixed(2)}L / Target: ₹{(displayTarget/100000).toFixed(2)}L
+                </Text>
+                <Text style={{fontSize:10, color:'#3b5998', marginTop:5, textAlign:'right', fontWeight:'bold'}}>
+                    View My Incentive & Details →
+                </Text>
+            </TouchableOpacity>
+        )}
 
         {/* FINANCIAL STATS */}
         <View style={styles.mainStatsRow}>
-            {/* SALES CARD (BLUE) */}
             <TouchableOpacity style={[styles.statCardFull, { backgroundColor: '#1A237E' }]} onPress={() => router.push('/orders' as any)}>
                 <View style={styles.statCardContent}>
                     <View>
@@ -252,12 +298,8 @@ export default function UpdatedDashboard() {
                 </View>
             </TouchableOpacity>
 
-            {/* 🔥 ADMIN ONLY: VIEW TEAM REPORT BUTTON 🔥 */}
             {isAdmin && (
-                <TouchableOpacity 
-                    style={styles.adminReportBtn}
-                    onPress={() => router.push('/sales_team_report' as any)} 
-                >
+                <TouchableOpacity style={styles.adminReportBtn} onPress={() => router.push('/sales_team_report' as any)} >
                     <View style={{flexDirection:'row', alignItems:'center'}}>
                         <View style={{backgroundColor:'rgba(255,255,255,0.2)', padding:6, borderRadius:8, marginRight:10}}>
                             <Ionicons name="podium" size={20} color="white" />
@@ -272,13 +314,10 @@ export default function UpdatedDashboard() {
             )}
 
             <View style={styles.statsGrid}>
-                {/* 🔥 Dues Updated Logic */}
                 <TouchableOpacity style={[styles.statCardSmall, { backgroundColor: '#D32F2F' }]} onPress={() => router.push({ pathname: '/payment_duelist', params: { activeTab: 'Pending' } } as any)}>
                     <Text style={styles.statLabelLight}>Market Outstanding</Text>
                     <Text style={styles.statValueSmall}>₹{totalMarketOutstanding.toLocaleString('en-IN')}</Text>
                 </TouchableOpacity>
-
-                {/* Collection */}
                 <TouchableOpacity style={[styles.statCardSmall, { backgroundColor: '#2E7D32' }]} onPress={() => router.push('/payment_collection' as any)}>
                     <Text style={styles.statLabelLight}>Coll. (This Month)</Text>
                     <Text style={styles.statValueSmall}>₹{totalRecoveryThisMonth.toLocaleString('en-IN')}</Text>
@@ -301,7 +340,7 @@ export default function UpdatedDashboard() {
         <View style={styles.section}>
             <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitleSmall}>Priority Follow-ups</Text>
-                <TouchableOpacity onPress={() => router.push({pathname: '/payment_duelist',params: { activeTab: 'Pending' }} as any)}>     
+                <TouchableOpacity onPress={() => router.push({pathname: '/payment_duelist',params: { activeTab: 'Pending' }} as any)}>    
                     <Text style={styles.viewAll}>View All</Text>
                 </TouchableOpacity>
             </View>
@@ -328,7 +367,9 @@ const QuickLink = ({icon, label, count, color, onPress, showBadge}: any) => (
         <View style={[styles.qlIcon, {backgroundColor: color + '15'}]}>
             <Ionicons name={icon} size={22} color={color} />
             {(showBadge && count > 0) ? (
-                <View style={styles.iconBadge}><Text style={styles.iconBadgeText}>{count > 99 ? '99+' : count}</Text></View>
+                <View style={styles.iconBadge}>
+                    <Text style={styles.iconBadgeText}>{count}</Text>
+                </View>
             ) : null}
         </View>
         <View style={{flex:1, marginLeft:10}}>
@@ -349,6 +390,11 @@ const styles = StyleSheet.create({
   notifBtn: { backgroundColor: 'rgba(255,255,255,0.15)', padding: 10, borderRadius: 12 },
   badge: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF5252', position: 'absolute', right: 10, top: 10, borderWidth: 1.5, borderColor: '#1A237E' },
   scrollContent: { padding: 18 },
+  
+  // 🔥 ACTION CARDS WIDGET STYLES 🔥
+  actionCardsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 18 },
+  actionCard: { flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12, marginHorizontal: 4, elevation: 2 },
+
   progressCard: { backgroundColor: 'white', padding: 18, borderRadius: 20, elevation: 3, marginBottom: 18 },
   progressHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   progressLabel: { fontWeight: 'bold', color: '#555', fontSize: 13 },
@@ -371,8 +417,8 @@ const styles = StyleSheet.create({
   qlIcon: { width: 38, height: 38, borderRadius: 10, justifyContent: 'center', alignItems: 'center', position: 'relative' },
   qlLabel: { fontWeight: 'bold', color: '#444', fontSize: 12 },
   qlCount: { fontSize: 10, fontWeight: 'bold' },
-  iconBadge: { position: 'absolute', top: -5, right: -5, backgroundColor: '#D32F2F', borderRadius: 10, minWidth: 18, height: 18, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'white', zIndex: 10 },
-  iconBadgeText: { color: 'white', fontSize: 9, fontWeight: 'bold', paddingHorizontal: 2 },
+  iconBadge: { position: 'absolute', top: -6, right: -6, backgroundColor: '#D32F2F', borderRadius: 12, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'white', zIndex: 10,paddingHorizontal: 4 },
+  iconBadgeText: { color: 'white', fontSize: 9, fontWeight: 'bold', textAlign: 'center' },
   section: { backgroundColor: 'white', padding: 18, borderRadius: 22, marginBottom: 20, elevation: 2 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15, alignItems: 'center' },
   viewAll: { color: '#1A237E', fontWeight: 'bold', fontSize: 11 },

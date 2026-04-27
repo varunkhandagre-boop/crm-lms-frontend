@@ -1,13 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     Alert,
     FlatList,
     RefreshControl,
     StyleSheet,
     Text,
-    TextInput, // 🔥 Added
+    TextInput,
     TouchableOpacity,
     View
 } from 'react-native';
@@ -23,12 +23,20 @@ export default function NotificationScreen() {
   
   const [filter, setFilter] = useState(savedTabState);
   const [refreshing, setRefreshing] = useState(false);
-  const [searchText, setSearchText] = useState(''); // 🔥 NEW STATE FOR SEARCH
+  const [searchText, setSearchText] = useState(''); 
+
+  // 🔥 PAGINATION STATE (SMART LOAD MORE)
+  const [visibleCount, setVisibleCount] = useState(20);
+
+  // 🔥 RESET PAGINATION ON FILTER CHANGE
+  useEffect(() => {
+      setVisibleCount(20);
+  }, [filter, searchText]);
 
   const changeFilter = (newFilter: any) => {
       savedTabState = newFilter; 
       setFilter(newFilter);
-      setSearchText(''); // Tab change hone par search clear karein
+      setSearchText(''); 
   };
 
   // --- 🔥 FILTER LOGIC ---
@@ -41,19 +49,10 @@ export default function NotificationScreen() {
 
       return notificationList.filter((n: any) => {
           const target = (n.to || '').toLowerCase().trim();
-
-          // 1. Direct Name Match
           if (target === myName) return true;
-
-          // 2. ID Match
           if (n.to === myId) return true;
-
-          // 3. Role Match
           if (target === myRole) return true;
-          
-          // 4. Admin Special Access
           if (myRole === 'admin' && target === 'admin') return true;
-
           return false;
       });
   };
@@ -74,16 +73,12 @@ export default function NotificationScreen() {
       const query = searchText.toLowerCase().trim();
       
       displayList = displayList.filter((item: any) => {
-          // Fields create karein jisme search karna hai
           const title = (item.title || '').toLowerCase();
           const message = (item.message || '').toLowerCase();
           const type = (item.type || '').toLowerCase();
-          
-          // Date format search (e.g. 18/01/2026)
           const dateObj = new Date(item.createdAt);
-          const dateStr = dateObj.toLocaleDateString('en-GB'); // DD/MM/YYYY
+          const dateStr = dateObj.toLocaleDateString('en-GB'); 
           
-          // Check karein query match ho rahi hai kya
           return title.includes(query) || 
                  message.includes(query) || 
                  type.includes(query) || 
@@ -91,11 +86,12 @@ export default function NotificationScreen() {
       });
   }
 
+  // 🔥 SLICE FOR LIST (Rendered Data)
+  const renderedList = displayList.slice(0, visibleCount);
+
   const handlePress = async (item: any) => {
-      // 1. Navigation Logic Define karein (Pehle hi path set kar lein)
       let targetRoute = item.route || item.screen;
 
-      // 🔥 MAPPING LOGIC
       if (targetRoute === 'organization' || item.type === 'organization') targetRoute = '/organization'; 
       
       if (
@@ -109,39 +105,29 @@ export default function NotificationScreen() {
       if (targetRoute === 'leads' || item.title?.includes('Lead')) targetRoute = '/leads';
       if (targetRoute === 'tasks' || item.title?.includes('Task')) targetRoute = '/tasks';
 
-      // 2. Mark as Read (Safe Mode)
       if (!item.read) {
-          // A. UI ko turant update karein (Taaki user ko wait na karna pade)
           item.read = true;
-          // Force refresh agar Unread tab me hain
           if(filter === 'Unread') {
              setRefreshing(true);
              setTimeout(() => setRefreshing(false), 100);
           }
 
-          // B. Database Update (Try-Catch Block ke sath)
           try {
-              // Check karein ki ID valid string hai aur timestamp number nahi hai
               if (item.id && typeof item.id === 'string' && item.id.length > 15 && isNaN(Number(item.id))) {
                   await markNotificationRead(item.id);
               } else {
                   console.log("⚠️ Invalid ID detected, skipping Firebase update:", item.id);
-                  // Ye purana ya galat data hai, isey ignore karein
               }
           } catch (error) {
               console.log("❌ Notification update failed (Old/Deleted data):", error);
-              // Error aane par bhi hum rukenge nahi, navigation continue karenge
           }
       }
 
-      // 3. Final Navigation (Ye ab hamesha chalega)
       if (targetRoute) {
           try { 
               let cleanRoute = targetRoute;
               if (cleanRoute === '/visiting_cards') cleanRoute = '/visiting_card'; 
               if (!cleanRoute.startsWith('/')) cleanRoute = '/' + cleanRoute;
-
-              console.log("Navigating to:", cleanRoute); 
               router.push(cleanRoute as any); 
           } catch (e) { 
               console.log("Route error", e); 
@@ -157,7 +143,6 @@ export default function NotificationScreen() {
       ]);
   };
 
-  // --- UI HELPERS ---
   const formatTimeAgo = (isoString: any) => {
       if (!isoString) return 'Just now';
       const date = new Date(isoString);
@@ -203,20 +188,20 @@ export default function NotificationScreen() {
       {/* TABS */}
       <View style={styles.tabContainer}>
           {['Unread', 'All', 'Read'].map((tab) => (
-              <TouchableOpacity 
-                  key={tab} 
-                  style={[styles.tab, filter === tab && styles.activeTab]} 
-                  onPress={() => changeFilter(tab)}
-              >
-                  <Text style={[styles.tabText, filter === tab && styles.activeTabText]}>{tab}</Text>
-                  {tab === 'Unread' && myData.filter((n: any) => !n.read).length > 0 && 
-                    <View style={styles.unreadDot} />
-                  }
-              </TouchableOpacity>
+            <TouchableOpacity 
+                key={tab} 
+                style={[styles.tab, filter === tab && styles.activeTab]} 
+                onPress={() => changeFilter(tab)}
+            >
+                <Text style={[styles.tabText, filter === tab && styles.activeTabText]}>{tab}</Text>
+                {tab === 'Unread' && myData.filter((n: any) => !n.read).length > 0 && 
+                  <View style={styles.unreadDot} />
+                }
+            </TouchableOpacity>
           ))}
       </View>
 
-      {/* 🔥 SEARCH BAR (Visible Only when 'All' is selected) */}
+      {/* SEARCH BAR (Visible Only when 'All' is selected) */}
       {filter === 'All' && (
           <View style={styles.searchWrapper}>
               <View style={styles.searchBar}>
@@ -236,54 +221,92 @@ export default function NotificationScreen() {
               </View>
           </View>
       )}
+      
+      {/* TOTAL COUNT INDICATOR */}
+      {filter === 'All' && (
+          <Text style={{textAlign:'right', paddingHorizontal:20, fontSize:12, color:'gray', marginBottom:5}}>
+              Total: {displayList.length}
+          </Text>
+      )}
 
       {/* LIST */}
       <FlatList 
-          data={displayList}
-          keyExtractor={(item: any) => item.id}
-          contentContainerStyle={styles.list}
-          showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={()=>{setRefreshing(true); setTimeout(()=>setRefreshing(false), 1000)}} />}
-          ListEmptyComponent={
-              <View style={styles.emptyBox}>
-                  <Ionicons name={searchText ? "search" : "notifications-off-outline"} size={60} color="#DDD" />
-                  <Text style={styles.emptyText}>
-                      {searchText ? `No match for "${searchText}"` : `No notifications in ${filter}`}
-                  </Text>
-              </View>
-          }
-          renderItem={({ item }: any) => {
-              const config = getIconConfig(item.type);
-              
-              return (
-                  <TouchableOpacity 
-                      style={[styles.card, !item.read && styles.unreadCard]} 
-                      onPress={() => handlePress(item)}
-                      activeOpacity={0.7}
-                  >
-                      <View style={[styles.iconBox, {backgroundColor: config.bg}]}>
-                          <Ionicons name={config.name as any} size={22} color={config.color} />
-                      </View>
-                      
-                      <View style={styles.content}>
-                          <View style={styles.cardHeader}>
-                              <Text style={[styles.title, !item.read && styles.boldTitle]} numberOfLines={1}>{item.title}</Text>
-                              <Text style={styles.time}>{formatTimeAgo(item.createdAt)}</Text>
-                          </View>
-                          <Text style={styles.message} numberOfLines={2}>{item.message}</Text>
-                          
-                          {(item.route || item.screen) && (
-                              <View style={styles.actionHint}>
-                                  <Text style={styles.actionHintText}>Tap to View</Text>
-                                  <Ionicons name="chevron-forward" size={12} color="#1A237E" />
-                              </View>
-                          )}
-                      </View>
-                      
-                      {!item.read && <View style={styles.newIndicator} />}
-                  </TouchableOpacity>
-              );
-          }}
+        data={renderedList}
+        keyExtractor={(item: any) => item.id}
+        contentContainerStyle={styles.list}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={()=>{setRefreshing(true); setTimeout(()=>setRefreshing(false), 1000)}} />}
+        ListEmptyComponent={
+            <View style={styles.emptyBox}>
+                <Ionicons name={searchText ? "search" : "notifications-off-outline"} size={60} color="#DDD" />
+                <Text style={styles.emptyText}>
+                    {searchText ? `No match for "${searchText}"` : `No notifications in ${filter}`}
+                </Text>
+            </View>
+        }
+        renderItem={({ item }: any) => {
+            const config = getIconConfig(item.type);
+            
+            return (
+                <TouchableOpacity 
+                    style={[styles.card, !item.read && styles.unreadCard]} 
+                    onPress={() => handlePress(item)}
+                    activeOpacity={0.7}
+                >
+                    <View style={[styles.iconBox, {backgroundColor: config.bg}]}>
+                        <Ionicons name={config.name as any} size={22} color={config.color} />
+                    </View>
+                    
+                    <View style={styles.content}>
+                        <View style={styles.cardHeader}>
+                            <Text style={[styles.title, !item.read && styles.boldTitle]} numberOfLines={1}>{item.title}</Text>
+                            <Text style={styles.time}>{formatTimeAgo(item.createdAt)}</Text>
+                        </View>
+                        <Text style={styles.message} numberOfLines={2}>{item.message}</Text>
+                        
+                        {(item.route || item.screen) && (
+                            <View style={styles.actionHint}>
+                                <Text style={styles.actionHintText}>Tap to View</Text>
+                                <Ionicons name="chevron-forward" size={12} color="#1A237E" />
+                            </View>
+                        )}
+                    </View>
+                    
+                    {!item.read && <View style={styles.newIndicator} />}
+                </TouchableOpacity>
+            );
+        }}
+        
+        // 🔥 LOAD MORE BUTTON FOOTER (FIXED WITH PADDING)
+        ListFooterComponent={
+            <View style={{ paddingBottom: 80 }}>
+                {visibleCount < displayList.length ? (
+                    <TouchableOpacity 
+                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                        style={{
+                            padding: 12, 
+                            backgroundColor: '#fff', 
+                            alignItems: 'center', 
+                            marginVertical: 10, 
+                            borderRadius: 8,
+                            borderWidth: 1,
+                            borderColor: '#ddd',
+                            elevation: 1
+                        }}
+                    >
+                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                            👇 Load More Notifications ({displayList.length - visibleCount} remaining)
+                        </Text>
+                    </TouchableOpacity>
+                ) : (
+                    displayList.length > 0 ? (
+                        <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
+                            --- End of List ---
+                        </Text>
+                    ) : null
+                )}
+            </View>
+        }
       />
     </View>
   );
@@ -305,7 +328,7 @@ const styles = StyleSheet.create({
   activeTabText: { color: 'white' },
   unreadDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#FF5252', marginLeft: 5 },
   
-  // 🔥 SEARCH BAR STYLES
+  // SEARCH BAR STYLES
   searchWrapper: { paddingHorizontal: 15, marginBottom: 5, marginTop: 5 },
   searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', borderRadius: 12, paddingHorizontal: 12, height: 45, borderWidth: 1, borderColor: '#E0E0E0' },
   searchInput: { flex: 1, fontSize: 14, color: '#333' },

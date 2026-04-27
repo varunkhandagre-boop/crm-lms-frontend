@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { addDoc, collection } from 'firebase/firestore';
 import React, { useState } from 'react';
 import {
     ActivityIndicator,
@@ -12,12 +11,19 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db } from '../firebaseConfig'; // Apne path ke hisab se adjust karein
+
+// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function AddSparePartScreen() {
   const router = useRouter();
-  const { refreshData, user } = useData();
+  
+  // 🔥 1. Context se sirf user aur notification nikala (refreshData ab zaroori nahi)
+  const { currentUser, addNotification } = useData();
+
+  // 🔥 2. Naya SaaS Engine connect kiya
+  const { addSaaSData } = useSaaSDB();
 
   const [partName, setPartName] = useState('');
   const [partNo, setPartNo] = useState('');
@@ -26,6 +32,7 @@ export default function AddSparePartScreen() {
   const [stock, setStock] = useState('0'); // Initial Office Stock
   const [loading, setLoading] = useState(false);
 
+  // 🔥 3. SAAS SAVE LOGIC
   const handleSave = async () => {
       if (!partName.trim() || !partNo.trim() || !price.trim()) {
           Alert.alert("Error", "Please fill Name, Part No, and Price.");
@@ -34,24 +41,39 @@ export default function AddSparePartScreen() {
 
       setLoading(true);
       try {
-          await addDoc(collection(db, "spare_parts"), {
+          // 🔥 CLEAN PAYLOAD: Engine automatically injects ID, Company ID, Sender ID, Created At
+          const newPart = {
               partName: partName.trim(),
               partNo: partNo.trim(),
               price: price.trim(),
               compatibleModels: models.trim(),
               officeStock: parseInt(stock) || 0,
               stockHolders: {}, // Empty initially for engineers
-              createdAt: new Date().toISOString(),
-              createdBy: user?.name || 'Admin'
-          });
+              role: currentUser?.role || 'Employee'
+          };
 
-          if(refreshData) await refreshData();
-          
-          Alert.alert("Success", "Spare Part Added Successfully!", [
-              { text: "OK", onPress: () => router.back() }
-          ]);
+          const res = await addSaaSData("spare_parts", newPart);
+
+          if (res.success) {
+              // 🔥 REAL PUSH NOTIFICATION
+              if (addNotification) {
+                  await addNotification({
+                      title: "New Spare Part ⚙️",
+                      message: `${partName} (PN: ${partNo}) added to inventory.`,
+                      to: "Admin", // 'Store' role ko bhi bhej sakte hain
+                      route: "/spare_parts",
+                      type: "info"
+                  });
+              }
+
+              Alert.alert("Success", "Spare Part Added Successfully!", [
+                  { text: "OK", onPress: () => router.back() }
+              ]);
+          } else {
+              Alert.alert("Error", "Could not save spare part.");
+          }
       } catch (error: any) {
-          Alert.alert("Error", error.message);
+          Alert.alert("Error", error.message || "Something went wrong.");
       } finally {
           setLoading(false);
       }

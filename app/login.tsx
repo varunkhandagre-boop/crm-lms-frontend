@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
+    ActivityIndicator, // 🔥 Added ActivityIndicator
     Alert,
     Image,
     KeyboardAvoidingView,
@@ -125,15 +126,18 @@ export default function LoginScreen() {
                   />
               </View>
 
+              {/* 🔥 UPDATED LOGIN BUTTON WITH BLUR AND SPINNER */}
               <TouchableOpacity 
-                  style={styles.loginBtn} 
+                  style={[styles.loginBtn, isLoading && { opacity: 0.6 }]} 
                   onPress={handleLogin} 
                   disabled={isLoading}
                   activeOpacity={0.7}
               >
-                  <Text style={styles.loginText}>
-                      {isLoading ? 'Please Wait...' : 'LOGIN'}
-                  </Text>
+                  {isLoading ? (
+                      <ActivityIndicator color="white" />
+                  ) : (
+                      <Text style={styles.loginText}>LOGIN</Text>
+                  )}
               </TouchableOpacity>
 
               <Text style={styles.footerText}>Need Help? Contact Admin</Text>
