@@ -17,15 +17,23 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { useData } from './context/DataContext';
 
-import { deleteDoc, doc, updateDoc } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+// 🔥 SAAS IMPORTS (Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
+import { useData } from './context/DataContext';
 
 export default function ProductMasterScreen() {
     const router = useRouter();
-    const { productList = [], addProduct, user } = useData();
     
+    // 🔥 1. Context se sirf user nikalenge
+    const { currentUser } = useData();
+    
+    // 🔥 2. Naya SaaS Engine
+    const { fetchSaaSData, addSaaSData, updateSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
+
+    // 🔥 3. Lazy Loaded States
+    const [productList, setProductList] = useState<any[]>([]);
+
     // --- FORM STATES ---
     const [name, setName] = useState('');
     const [model, setModel] = useState('');
@@ -33,7 +41,7 @@ export default function ProductMasterScreen() {
     const [desc, setDesc] = useState('');
     const [specifications, setSpecifications] = useState('');
     
-    // 🔥 NEW: Price and GST State
+    // Price and GST State
     const [price, setPrice] = useState('');
     const [gstRate, setGstRate] = useState('');
     
@@ -52,11 +60,23 @@ export default function ProductMasterScreen() {
 
     const [visibleCount, setVisibleCount] = useState(20);
 
+    const canEdit = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
+
     useEffect(() => {
         setVisibleCount(20);
     }, [searchText]);
 
-    const canEdit = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr'].includes(user?.role || '');
+    // 🔥 4. LOAD SAAS DATA ON MOUNT
+    const loadProducts = async () => {
+        if (currentUser?.companyId) {
+            const data = await fetchSaaSData("products");
+            setProductList(data);
+        }
+    };
+
+    useEffect(() => {
+        loadProducts();
+    }, [currentUser]);
 
     const addLinkToList = () => {
         if(!linkTitle.trim() || !linkUrl.trim()) return Alert.alert("Required", "Enter both Title and Link.");
@@ -88,6 +108,7 @@ export default function ProductMasterScreen() {
         try { await Share.share({ message: `📄 ${type}: ${title}\n🔗 ${url}` }); } catch (error) {}
     };
 
+    // 🔥 5. SAAS ENGINE SAVE / UPDATE LOGIC
     const handleSave = async () => {
         if (!name.trim() || !model.trim()) return Alert.alert("Missing Fields", "Product Name and Model Name are required.");
         
@@ -98,24 +119,36 @@ export default function ProductMasterScreen() {
             series: series.trim(),
             description: desc.trim(),
             specifications: specifications.trim(),
-            price: Number(price) || 0,     // 🔥 NEW: Save Price
-            gstRate: Number(gstRate) || 0, // 🔥 NEW: Save GST
+            price: Number(price) || 0,     
+            gstRate: Number(gstRate) || 0, 
             catalogs: catalogs, 
             videos: videos,
-            updatedBy: user?.name, 
+            updatedBy: currentUser?.name, 
             updatedAt: new Date().toISOString()
         };
 
         try {
             if (editingId) {
-                await updateDoc(doc(db, "products", editingId), productData);
-                Alert.alert("Updated", "Product updated successfully!");
+                const res = await updateSaaSData("products", editingId, productData);
+                if (res.success) {
+                    setProductList(prev => prev.map(item => item.id === editingId ? { ...item, ...productData } : item));
+                    Alert.alert("Updated", "Product updated successfully!");
+                } else {
+                    throw new Error("Update Failed");
+                }
             } else {
-                await addProduct({ 
-                    ...productData, 
-                    addedBy: user?.name, 
+                const newProductData = {
+                    ...productData,
+                    addedBy: currentUser?.name, 
                     createdAt: new Date().toISOString() 
-                });
+                };
+                const res = await addSaaSData("products", newProductData);
+                if (res.success) {
+                    setProductList([{ id: res.id, ...newProductData }, ...productList]);
+                    Alert.alert("Success", "Product added successfully!");
+                } else {
+                    throw new Error("Add Failed");
+                }
             }
             closeModal();
         } catch (e) { 
@@ -132,8 +165,8 @@ export default function ProductMasterScreen() {
         setSeries(item.series || '');
         setDesc(item.description || '');
         setSpecifications(item.specifications || '');
-        setPrice(item.price ? item.price.toString() : '');       // 🔥 NEW: Load Price
-        setGstRate(item.gstRate ? item.gstRate.toString() : ''); // 🔥 NEW: Load GST
+        setPrice(item.price ? item.price.toString() : '');       
+        setGstRate(item.gstRate ? item.gstRate.toString() : ''); 
         
         const oldCat = item.catalogLink ? [{title: 'Main Catalog', url: item.catalogLink}] : [];
         const oldVid = item.videoLink ? [{title: 'Demo Video', url: item.videoLink}] : [];
@@ -147,14 +180,22 @@ export default function ProductMasterScreen() {
     const closeModal = () => {
         setModalVisible(false); setEditingId(null);
         setName(''); setModel(''); setSeries(''); setDesc(''); setSpecifications(''); setCatalogs([]); setVideos([]);
-        setPrice(''); setGstRate(''); // 🔥 Clear Temp Data
+        setPrice(''); setGstRate(''); 
         setLinkTitle(''); setLinkUrl('');
     };
 
+    // 🔥 6. SAAS ENGINE DELETE LOGIC
     const handleDelete = async (id: string, pname: string) => {
         Alert.alert("Delete", `Remove ${pname}?`, [
             { text: "Cancel" },
-            { text: "Delete", style: 'destructive', onPress: async () => { try { await deleteDoc(doc(db, "products", id)); } catch(e) {} }}
+            { text: "Delete", style: 'destructive', onPress: async () => { 
+                try { 
+                    const res = await deleteSaaSData("products", id); 
+                    if (res.success) {
+                        setProductList(prev => prev.filter(item => item.id !== id));
+                    }
+                } catch(e) {} 
+            }}
         ]);
     };
 
@@ -179,7 +220,6 @@ export default function ProductMasterScreen() {
                 {isExpanded && (
                     <View style={styles.detailsBox}>
                         
-                        {/* 🔥 NEW: Show Price & GST */}
                         <View style={styles.priceRow}>
                             <Text style={styles.priceText}>₹ {item.price ? item.price.toLocaleString() : '0'}</Text>
                             <Text style={styles.gstBadge}>GST: {item.gstRate || 0}%</Text>
@@ -266,15 +306,15 @@ export default function ProductMasterScreen() {
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={28} color="#333" /></TouchableOpacity>
                 <Text style={styles.headerTitle}>Product Master</Text>
-                {canEdit && (
+                {canEdit ? (
                     <TouchableOpacity style={styles.addIconBtn} onPress={() => setModalVisible(true)}>
                         <Ionicons name="add" size={30} color="white" />
                     </TouchableOpacity>
-                )}
+                ) : <View style={{width: 30}} />}
             </View>
 
             <View style={styles.searchBar}>
-                <Ionicons name="search" size={22} color="gray" />
+                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={22} color="gray" />}
                 <TextInput style={styles.searchInput} placeholder="Search Name or Model..." value={searchText} onChangeText={setSearchText} />
             </View>
                         
@@ -287,33 +327,39 @@ export default function ProductMasterScreen() {
                 keyExtractor={item => item.id}
                 renderItem={renderItem}
                 contentContainerStyle={{padding: 15, paddingBottom: 100}}
-                ListEmptyComponent={<Text style={{textAlign:'center', marginTop:50, color:'gray'}}>No products found.</Text>}
+                ListEmptyComponent={
+                    <View style={{alignItems: 'center', marginTop: 50}}>
+                        {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{textAlign:'center', color:'gray'}}>No products found.</Text>}
+                    </View>
+                }
                 
                 ListFooterComponent={
-                    visibleCount < filteredList.length ? (
-                        <TouchableOpacity 
-                            onPress={() => setVisibleCount(prev => prev + 20)} 
-                            style={{
-                                padding: 12, 
-                                backgroundColor: '#fff', 
-                                alignItems: 'center', 
-                                marginVertical: 10, 
-                                borderRadius: 8,
-                                borderWidth: 1,
-                                borderColor: '#ddd'
-                            }}
-                        >
-                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                                👇 Load More Records ({filteredList.length - visibleCount} remaining)
-                            </Text>
-                        </TouchableOpacity>
-                    ) : (
-                        filteredList.length > 0 ? (
-                            <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
-                                --- End of List ---
-                            </Text>
-                        ) : null
-                    )
+                    <View style={{ paddingBottom: 80 }}>
+                        {visibleCount < filteredList.length ? (
+                            <TouchableOpacity 
+                                onPress={() => setVisibleCount(prev => prev + 20)} 
+                                style={{
+                                    padding: 12, 
+                                    backgroundColor: '#fff', 
+                                    alignItems: 'center', 
+                                    marginVertical: 10, 
+                                    borderRadius: 8,
+                                    borderWidth: 1,
+                                    borderColor: '#ddd'
+                                }}
+                            >
+                                <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                                    👇 Load More Records ({filteredList.length - visibleCount} remaining)
+                                </Text>
+                            </TouchableOpacity>
+                        ) : (
+                            filteredList.length > 0 ? (
+                                <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
+                                    --- End of List ---
+                                </Text>
+                            ) : null
+                        )}
+                    </View>
                 }
             />
 
@@ -339,7 +385,6 @@ export default function ProductMasterScreen() {
                                     <TextInput style={[styles.inputBig, {flex:0.6}]} placeholder="Series" value={series} onChangeText={setSeries} />
                                 </View>
 
-                                {/* 🔥 NEW: Price & GST Row in Edit Modal */}
                                 <View style={{flexDirection:'row', gap:10}}>
                                     <TextInput style={[styles.inputBig, {flex:1}]} placeholder="Price (₹)" keyboardType="numeric" value={price} onChangeText={setPrice} />
                                     <TextInput style={[styles.inputBig, {flex:0.6}]} placeholder="GST (%)" keyboardType="numeric" value={gstRate} onChangeText={setGstRate} />
@@ -418,7 +463,6 @@ const styles = StyleSheet.create({
 
     detailsBox: { marginTop: 15, paddingTop: 15, borderTopWidth: 1, borderTopColor: '#eee' },
     
-    // 🔥 NEW: Price and GST Styles
     priceRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 10 },
     priceText: { fontSize: 18, fontWeight: 'bold', color: '#e53935' },
     gstBadge: { backgroundColor: '#ffebee', color: '#c62828', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, fontSize: 12, fontWeight: 'bold', overflow: 'hidden' },
@@ -442,7 +486,6 @@ const styles = StyleSheet.create({
     deleteBtn: { backgroundColor: '#d32f2f', paddingVertical: 12, borderRadius: 8, flexDirection:'row', alignItems:'center', flex:1, justifyContent:'center' },
     adminBtnText: { color:'white', fontSize:14, fontWeight:'bold', marginLeft:6 },
 
-    // MODAL
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
     modalContent: { backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '90%' },
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },

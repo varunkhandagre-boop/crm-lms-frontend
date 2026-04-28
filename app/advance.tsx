@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { collection, doc, getDocs, query, writeBatch } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -14,16 +13,25 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS (Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function EmployeeAdvanceScreen() {
   const router = useRouter();
   
-  const { advanceList = [], updateAdvanceStatus, user, addNotification, refreshData } = useData();
+  // 🔥 1. Context se sirf user aur notification engine nikala
+  const { currentUser, addNotification } = useData();
+
+  // 🔥 2. Naya SaaS Engine connect kiya
+  const { fetchSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded Lists
+  const [advanceList, setAdvanceList] = useState<any[]>([]);
+  const [usersList, setUsersList] = useState<any[]>([]);
 
   // STATES
-  // 🔥 CHANGED: 'Year' to 'FY'
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All'); 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [searchText, setSearchText] = useState('');
@@ -32,49 +40,52 @@ export default function EmployeeAdvanceScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [isSettling, setIsSettling] = useState(false);
 
-  // 🔥 NEW STATE FOR APPROVE/REJECT LOADING
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
 
-  // EMPLOYEE FILTER
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All'); 
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  // 🔥 PAGINATION STATE (SMART LOAD MORE)
   const [visibleCount, setVisibleCount] = useState(20); 
 
-  const canManage = ['Admin', 'Manager', 'Account', 'Accountant' ,'Hr'].includes(user?.role || '');
+  const canManage = ['Admin', 'Manager', 'Account', 'Accountant' ,'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
 
-  // 🔥 RESET PAGINATION ON FILTER CHANGE
+  // RESET PAGINATION ON FILTER CHANGE
   useEffect(() => {
-      if (viewMode === 'Day') {
-          setVisibleCount(100); // Day view me sab dikha do
-      } else {
-          setVisibleCount(20); // Baki views me Load More use karo
-      }
+      if (viewMode === 'Day') setVisibleCount(100); 
+      else setVisibleCount(20); 
   }, [viewMode, currentDate, selectedEmployeeName, searchText]);
 
-  // 0. FETCH EMPLOYEES
+  // 🔥 4. LOAD DATA ON MOUNT
   useEffect(() => {
-    if (canManage) {
-      const fetchEmployees = async () => {
-        try {
-          const q = query(collection(db, "users"));
-          const querySnapshot = await getDocs(q);
-          const usersData = querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            name: doc.data().name || 'Unknown User'
-          }));
-          const uniqueUsers = Array.from(new Set(usersData.map(a => a.name)))
-            .map(name => usersData.find(a => a.name === name));
-          setEmployees([{ id: 'All', name: 'All' }, ...uniqueUsers as any]);
-        } catch (error) {}
+      const loadData = async () => {
+          if (currentUser?.companyId) {
+              const [advances, users] = await Promise.all([
+                  fetchSaaSData("advances"),
+                  fetchSaaSData("users")
+              ]);
+              
+              setAdvanceList(advances);
+              
+              if (canManage) {
+                  setUsersList(users);
+                  
+                  // 🔥 FIX: Safe Unique Array logic to prevent TS Error
+                  const uniqueMap = new Map();
+                  users.forEach((u: any) => {
+                      if (u.name && !uniqueMap.has(u.name)) {
+                          uniqueMap.set(u.name, { id: u.id || '0', name: u.name });
+                      }
+                  });
+                  
+                  setEmployees([{ id: 'All', name: 'All' }, ...Array.from(uniqueMap.values())]);
+              }
+          }
       };
-      fetchEmployees();
-    }
-  }, [user]);
+      loadData();
+  }, [currentUser]);
 
-  // 1. DATE PARSER
+  // DATE PARSER
   const parseDate = (dateStr: any) => {
       if (!dateStr) return new Date();
       if (dateStr instanceof Date) return dateStr;
@@ -87,7 +98,6 @@ export default function EmployeeAdvanceScreen() {
       return new Date(dateStr);
   };
 
-  // 🔥 CHANGED: FY Navigation
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
       if (viewMode === 'Day') d.setDate(d.getDate() + dir);
@@ -96,7 +106,6 @@ export default function EmployeeAdvanceScreen() {
       setCurrentDate(d);
   };
 
-  // 🔥 CHANGED: Header Title logic for Financial Year
   const getHeaderDate = () => {
       if (viewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
       if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -109,31 +118,31 @@ export default function EmployeeAdvanceScreen() {
       return "All Time";
   };
 
-  // --- 🔥 FILTER LOGIC ---
+  // --- FILTER LOGIC ---
   const getFilteredData = () => {
     let data = Array.isArray(advanceList) ? [...advanceList] : [];
 
-    // 1. SECURITY FILTER
+    // Security Filter (SaaS hook already filters by company, this is role-based logic)
     if (canManage) {
         if(selectedEmployeeName !== 'All') {
             data = data.filter((item: any) => item.senderName === selectedEmployeeName);
         }
     } else {
-        if(user?.uid) {
-            data = data.filter((item: any) => item.senderId === user.uid);
+        if(currentUser?.id || currentUser?.uid) {
+            const uid = currentUser.id || currentUser.uid;
+            data = data.filter((item: any) => item.senderId === uid || item.userId === uid);
         }
     }
 
-    // 2. DATE FILTER
+    // Date Filter
     if (viewMode !== 'All') {
         const targetYear = currentDate.getFullYear();
         const targetMonth = currentDate.getMonth();
         const targetDay = currentDate.getDate();
 
-        // 🔥 FY Boundaries Logic
         const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-        const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // 1st April
-        const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // 31st March
+        const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
+        const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime();
 
         data = data.filter(item => {
             if(!item.date) return false;
@@ -147,7 +156,7 @@ export default function EmployeeAdvanceScreen() {
         });
     }
 
-    // 3. SEARCH
+    // Search
     if (searchText) {
         const term = searchText.toLowerCase();
         data = data.filter((item: any) => {
@@ -160,12 +169,10 @@ export default function EmployeeAdvanceScreen() {
     return data;
   };
 
-  const fullFilteredList = getFilteredData(); // 🔥 Full Data (For Calculations)
-  
-  // 🔥 SLICE DATA FOR FLATLIST (For Performance)
+  const fullFilteredList = getFilteredData(); 
   const renderedList = fullFilteredList.slice(0, visibleCount);
 
-  // 🔥🔥 DUAL CALCULATION LOGIC (Always uses Full Data) 🔥🔥
+  // Calculations
   const outstandingAmount = fullFilteredList
       .filter((item: any) => item.status === 'Approved')
       .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
@@ -175,7 +182,7 @@ export default function EmployeeAdvanceScreen() {
       .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
 
 
-  // --- SETTLEMENT LOGIC ---
+  // 🔥 5. SAAS SETTLEMENT LOGIC (Batch simulation)
   const handleSettlement = async () => {
       if (selectedEmployeeName === 'All') {
           Alert.alert("Error", "Please select a specific employee to settle accounts.");
@@ -200,17 +207,22 @@ export default function EmployeeAdvanceScreen() {
   const processSettlement = async () => {
       setIsSettling(true);
       try {
-          const batch = writeBatch(db);
-          // Only settle 'Approved' items
           const itemsToSettle = fullFilteredList.filter(item => item.status === 'Approved');
-
-          itemsToSettle.forEach((item) => {
-              const ref = doc(db, "advances", item.id);
-              batch.update(ref, { status: 'Settled', settlementDate: new Date().toISOString() });
+          
+          // Map through array to run multiple update requests
+          const promises = itemsToSettle.map(item => {
+              return updateSaaSData("advances", item.id, { 
+                  status: 'Settled', 
+                  settlementDate: new Date().toISOString() 
+              });
           });
 
-          await batch.commit();
-          if(refreshData) await refreshData();
+          await Promise.all(promises);
+
+          // Silent reload to reflect settlement
+          const advances = await fetchSaaSData("advances");
+          setAdvanceList(advances);
+
           Alert.alert("Success", "Account Settled! Balance is now 0.");
       } catch (error) {
           Alert.alert("Error", "Settlement failed.");
@@ -224,15 +236,17 @@ export default function EmployeeAdvanceScreen() {
       setModalVisible(true);
   };
 
-  // 🔥 UPDATED STATUS HANDLER (WITH LOADING)
+  // 🔥 6. SAAS STATUS UPDATE LOGIC
   const handleStatusUpdate = async (status: string) => {
-      if(updateAdvanceStatus) {
-          setUpdatingStatus(status); // Start Loading
-          try {
-              await updateAdvanceStatus(selectedItem.id, status);
-              
+      setUpdatingStatus(status);
+      try {
+          const res = await updateSaaSData("advances", selectedItem.id, { status: status });
+          
+          if (res.success) {
               const targetUserId = selectedItem.senderId || selectedItem.userId;
-              if (addNotification && targetUserId && targetUserId !== user?.uid) {
+              
+              // PUSH NOTIFICATION
+              if (addNotification && targetUserId && targetUserId !== (currentUser?.id || currentUser?.uid)) {
                   await addNotification({
                       title: `Advance ${status}`, 
                       message: `Your advance request of ₹${selectedItem.amount} has been ${status}.`,
@@ -242,18 +256,23 @@ export default function EmployeeAdvanceScreen() {
                       route: '/advance'
                   });
               }
+
+              // Update local state immediately so UI refreshes without full reload
+              setAdvanceList(prev => prev.map(item => item.id === selectedItem.id ? { ...item, status: status } : item));
               setModalVisible(false);
               Alert.alert("Updated", `Request marked as ${status}`);
-          } catch (error) {
+          } else {
               Alert.alert("Error", "Could not update status.");
-          } finally {
-              setUpdatingStatus(null); // Stop Loading
           }
+      } catch (error) {
+          Alert.alert("Error", "Could not update status.");
+      } finally {
+          setUpdatingStatus(null); 
       }
   };
 
   const renderItem = ({ item }: any) => {
-    let statusColor = '#fff3e0'; // Pending
+    let statusColor = '#fff3e0'; 
     let statusTextCol = '#ef6c00';
 
     if (item.status === 'Approved') { statusColor = '#e8f5e9'; statusTextCol = '#2e7d32'; }
@@ -294,11 +313,9 @@ export default function EmployeeAdvanceScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* 🔥 DUAL BALANCE CARD */}
+      {/* DUAL BALANCE CARD */}
       <View style={styles.balanceContainer}>
           <View style={{flexDirection:'row', justifyContent:'space-between', width:'100%'}}>
-              
-              {/* Outstanding Box */}
               <View style={{alignItems:'center', flex:1}}>
                   <Text style={styles.statLabel}>Outstanding (Due)</Text>
                   <Text style={[styles.statValue, {color:'#d32f2f'}]}>₹{outstandingAmount.toLocaleString()}</Text>
@@ -306,7 +323,6 @@ export default function EmployeeAdvanceScreen() {
 
               <View style={styles.vDivider} />
 
-              {/* Total History Box */}
               <View style={{alignItems:'center', flex:1}}>
                   <Text style={styles.statLabel}>Total Taken</Text>
                   <Text style={[styles.statValue, {color:'#3b5998'}]}>₹{totalHistoryAmount.toLocaleString()}</Text>
@@ -331,7 +347,6 @@ export default function EmployeeAdvanceScreen() {
 
       <View style={{backgroundColor:'white', paddingBottom:10}}>
           <View style={styles.tabContainer}>
-              {/* 🔥 CHANGED: 'Year' to 'FY' */}
               {['Day', 'Month', 'FY', 'All'].map((m) => (
                   <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
                       <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
@@ -359,7 +374,7 @@ export default function EmployeeAdvanceScreen() {
 
           <View style={{paddingHorizontal:15}}>
               <View style={styles.searchBar}>
-                  <Ionicons name="search" size={20} color="gray" />
+                  {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
                   <TextInput 
                       style={styles.searchInput}
                       placeholder={canManage ? "Search Name, Amount..." : "Search Amount, Date..."}
@@ -375,11 +390,10 @@ export default function EmployeeAdvanceScreen() {
         data={renderedList}
         keyExtractor={item => item.id}
         renderItem={renderItem}
-        contentContainerStyle={{padding: 15, paddingBottom: 50}} // 🔥 Safe padding added
+        contentContainerStyle={{padding: 15, paddingBottom: 50}} 
         ListEmptyComponent={
-            <Text style={{textAlign:'center', marginTop:50, color:'gray'}}>No advance records found.</Text>
+            <Text style={{textAlign:'center', marginTop:50, color:'gray'}}>{isDbLoading ? 'Loading data...' : 'No advance records found.'}</Text>
         }
-        // 🔥 LOAD MORE BUTTON WRAPPED IN VIEW
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
                 {visibleCount < fullFilteredList.length ? (
@@ -428,7 +442,6 @@ export default function EmployeeAdvanceScreen() {
                         <View style={styles.divider} />
                         <DetailRow label="Amount" value={`₹ ${selectedItem.amount}`} icon="cash" highlight />
                         
-                        {/* Show Paid Label if Settled */}
                         {selectedItem.status === 'Settled' && (
                             <Text style={{textAlign:'center', color:'green', fontWeight:'bold', marginBottom:10}}>( PAID / SETTLED )</Text>
                         )}
@@ -439,7 +452,7 @@ export default function EmployeeAdvanceScreen() {
                             <Text style={{fontSize:14, color:'#333'}}>{selectedItem.reason}</Text>
                         </View>
 
-                        {/* 🔥 UPDATED ACTION BUTTONS WITH BLUR & LOADING */}
+                        {/* ACTION BUTTONS WITH LOADING */}
                         {canManage && selectedItem.status === 'Pending' && (
                             <View style={styles.actionContainer}>
                                 <TouchableOpacity 

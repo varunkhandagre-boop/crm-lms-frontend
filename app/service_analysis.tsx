@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { collection, getDocs, query } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     FlatList,
     Modal,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
@@ -12,23 +13,30 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS (Direct DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function AnalysisScreen() {
     const router = useRouter();
     
-    // 🔥 DATA FETCHING
-    const contextData = useData();
-    const { user } = contextData; 
-    const serviceList = contextData.serviceList || [];
-    const pmsList = contextData.pmsList || [];
-    const demoList = contextData.demoList || [];
-    const installationList = contextData.installList || contextData.installationList || [];
+    // 🔥 1. Context se sirf user
+    const { currentUser } = useData(); 
 
-    // 🔥 FILTERS
+    // 🔥 2. Naya SaaS Engine
+    const { fetchSaaSData, isDbLoading } = useSaaSDB();
+
+    // 🔥 3. Lazy Loaded Master States
+    const [serviceList, setServiceList] = useState<any[]>([]);
+    const [pmsList, setPmsList] = useState<any[]>([]);
+    const [demoList, setDemoList] = useState<any[]>([]);
+    const [installationList, setInstallationList] = useState<any[]>([]);
+    const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
+    const [refreshing, setRefreshing] = useState(false);
+
+    // FILTERS
     const [reportType, setReportType] = useState('All'); 
-    // 🔥 CHANGED: 'Year' to 'FY'
     const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY'); 
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [searchText, setSearchText] = useState('');
@@ -37,24 +45,21 @@ export default function AnalysisScreen() {
     const [selectedItem, setSelectedItem] = useState<any>(null);
     const [detailModalVisible, setDetailModalVisible] = useState(false);
 
-    // --- EMPLOYEE FILTER STATES ---
-    const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
     const [selectedEmployee, setSelectedEmployee] = useState('All'); 
     const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
     const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-    // 🔥 PAGINATION STATE (SMART LOAD MORE)
     const [visibleCount, setVisibleCount] = useState(20);
 
-    const isAdmin = ['Admin', 'Manager', 'Account'].includes(user?.role || '');
+    const userRole = currentUser?.role ? currentUser.role.toLowerCase() : 'unknown';
+    const isAdmin = ['admin', 'manager', 'account', 'superadmin'].includes(userRole);
 
-    // 🔥 RESET PAGINATION ON FILTER CHANGE
     useEffect(() => {
         if (viewMode === 'Day') setVisibleCount(500);
         else setVisibleCount(20);
     }, [reportType, viewMode, selectedDate, searchText, selectedEmployee]);
 
-    // --- 🔥 ROBUST DATE PARSER ---
+    // --- ROBUST DATE PARSER ---
     const parseDate = (dateStr: any) => {
         if (!dateStr) return 0;
         if (typeof dateStr === 'number') return dateStr; 
@@ -77,27 +82,41 @@ export default function AnalysisScreen() {
         return isNaN(d.getTime()) ? 0 : d.getTime();
     };
 
-    // ==========================================
-    // 0. FETCH EMPLOYEES
-    // ==========================================
-    useEffect(() => {
-        if (isAdmin) {
-          const fetchEmployees = async () => {
-            try {
-              const q = query(collection(db, "users"));
-              const querySnapshot = await getDocs(q);
-              const usersData = querySnapshot.docs.map(doc => ({
-                id: doc.id,
-                name: doc.data().name || 'Unknown User'
-              }));
-              setEmployees([{ id: 'All', name: 'All Staff' }, ...usersData]);
-            } catch (error) {
-              console.log("Error fetching employees:", error);
+    // 🔥 4. MASSIVE SAAS DATA LOAD
+    const loadAllData = async () => {
+        if (currentUser?.companyId) {
+            const [services, pms, demos, installs, users] = await Promise.all([
+                fetchSaaSData("service_calls"),
+                fetchSaaSData("pms_reports"),
+                fetchSaaSData("demos"),
+                fetchSaaSData("installations"),
+                fetchSaaSData("users")
+            ]);
+            
+            setServiceList(services);
+            setPmsList(pms);
+            setDemoList(demos);
+            setInstallationList(installs);
+
+            if (isAdmin) {
+                const mappedUsers = users.map((u: any) => ({
+                    id: u.id,
+                    name: u.name || 'Unknown User'
+                }));
+                setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
             }
-          };
-          fetchEmployees();
         }
-    }, [user]);
+    };
+
+    useEffect(() => {
+        loadAllData();
+    }, [currentUser]);
+
+    const onRefresh = async () => {
+        setRefreshing(true);
+        await loadAllData();
+        setRefreshing(false);
+    };
 
     // ==========================================
     // 1. DATA MERGING & FILTERING
@@ -110,7 +129,7 @@ export default function AnalysisScreen() {
             allData = [...allData, ...installationList.map((i:any) => ({
                 ...i,
                 reportType: 'Installation',
-                displayDate: i.date || i.installationDate || i.createdAt,
+                displayDate: i.dateIso || i.date || i.installationDate || i.createdAt,
                 hospital: i.hospital || i.orgName || i.hospitalName || "Unknown Client",
                 orgId: i.orgId || '', 
                 engineer: i.engineer || i.senderName || i.userName || "Admin",
@@ -127,7 +146,7 @@ export default function AnalysisScreen() {
             allData = [...allData, ...pmsList.map((i:any) => ({
                 ...i,
                 reportType: 'PMS',
-                displayDate: i.status === 'Done' || i.status === 'Completed' ? (i.date || i.createdAt) : (i.nextServiceDate || i.scheduledDate || i.dueDate || i.computedDueDate),
+                displayDate: i.status === 'Done' || i.status === 'Completed' ? (i.dateIso || i.date || i.createdAt) : (i.nextServiceDate || i.scheduledDate || i.dueDate || i.computedDueDate),
                 hospital: i.hospitalName || i.hospital || "Unknown", 
                 orgId: i.orgId || '', 
                 engineer: i.userName || i.engineer || "Admin",
@@ -144,7 +163,7 @@ export default function AnalysisScreen() {
             allData = [...allData, ...serviceList.map((i:any) => ({
                 ...i,
                 reportType: 'Breakdown',
-                displayDate: i.date || i.ticketDate || i.createdAt,
+                displayDate: i.dateIso || i.date || i.ticketDate || i.createdAt,
                 hospital: i.hospitalName || i.customerName || "Unknown",
                 orgId: i.orgId || '', 
                 engineer: i.resolvedBy || i.userName || i.assignedTo || "Admin",
@@ -161,7 +180,7 @@ export default function AnalysisScreen() {
             allData = [...allData, ...demoList.map((i:any) => ({
                 ...i,
                 reportType: 'Demo',
-                displayDate: i.demoDate || i.date || i.createdAt,
+                displayDate: i.dateIso || i.demoDate || i.date || i.createdAt,
                 hospital: i.hospitalName || i.doctorName || i.hospital || "Unknown",
                 orgId: i.orgId || '', 
                 engineer: i.demonstrator || i.userName || i.senderName || "Admin",
@@ -185,10 +204,11 @@ export default function AnalysisScreen() {
                 ((i.senderName || '').toLowerCase().trim() === targetName)
             );
         } else if (!isAdmin) {
+            const myId = currentUser?.id || currentUser?.uid;
             allData = allData.filter(i => 
-                i.engineerId === user?.uid || 
-                i.senderId === user?.uid ||
-                ((i.engineer || '').toLowerCase() === (user?.name || '').toLowerCase())
+                i.engineerId === myId || 
+                i.senderId === myId ||
+                ((i.engineer || '').toLowerCase() === (currentUser?.name || '').toLowerCase())
             ); 
         }
 
@@ -207,18 +227,16 @@ export default function AnalysisScreen() {
             });
         }
 
-        // 4. Date View Filter (🔥 FY Logic added)
+        // 4. Date View Filter
         if (viewMode !== 'All') {
             const targetYear = selectedDate.getFullYear();
             const targetMonth = selectedDate.getMonth();
             const targetDay = selectedDate.getDate();
 
-            // 🔥 FY Boundaries Logic
             const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-            let fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // 1st April
-            const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // 31st March
+            let fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
+            const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
 
-            // 🔥 NEW: Apply App Launch Date (Jan 1, 2026) Limit
             const APP_LAUNCH_DATE = new Date(2026, 0, 1).getTime();
             if (fyStartDate < APP_LAUNCH_DATE) {
                 fyStartDate = APP_LAUNCH_DATE;
@@ -247,8 +265,6 @@ export default function AnalysisScreen() {
     }, [serviceList, installationList, pmsList, demoList, searchText, viewMode, selectedDate, reportType, selectedEmployee]);
 
 
-    // HELPERS
-    // 🔥 CHANGED: FY Date Shift
     const changeDate = (dir: number) => {
         const d = new Date(selectedDate);
         if (viewMode === 'Day') d.setDate(d.getDate() + dir);
@@ -264,7 +280,6 @@ export default function AnalysisScreen() {
         return new Date(ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
     };
 
-    // 🔥 CHANGED: FY Header Text Logic
     const getHeaderDate = () => {
         if (viewMode === 'Day') return selectedDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
         if (viewMode === 'Month') return selectedDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -292,7 +307,6 @@ export default function AnalysisScreen() {
         setDetailModalVisible(true);
     };
 
-    // 🔥 SLICE FOR LIST (Rendered Data)
     const renderedList = filteredData.slice(0, visibleCount);
 
     const renderItem = ({ item }: any) => {
@@ -341,7 +355,6 @@ export default function AnalysisScreen() {
 
             <View style={{ flex: 1 }}>
                 
-                {/* 1. REPORT TYPE TABS */}
                 <View style={styles.filterContainer}>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingRight:20}}>
                         {['All', 'PMS', 'Installation', 'Breakdown', 'Demo'].map((type) => (
@@ -356,10 +369,8 @@ export default function AnalysisScreen() {
                     </ScrollView>
                 </View>
 
-                {/* 2. CONTROLS */}
                 <View style={styles.controlsContainer}>
                     <View style={styles.toggleRow}>
-                        {/* 🔥 CHANGED: 'Year' to 'FY' */}
                         {['Day', 'Month', 'FY', 'All'].map((m) => (
                             <TouchableOpacity key={m} style={[styles.toggleBtn, viewMode === m && styles.activeToggle]} onPress={() => setViewMode(m as any)}>
                                 <Text style={[styles.toggleText, viewMode === m && {color:'#333', fontWeight:'bold'}]}>{m}</Text>
@@ -389,7 +400,7 @@ export default function AnalysisScreen() {
                     )}
 
                     <View style={styles.searchBox}>
-                        <Ionicons name="search" size={18} color="gray" />
+                        {isDbLoading ? <ActivityIndicator size="small" color="#1565c0" /> : <Ionicons name="search" size={18} color="gray" />}
                         <TextInput 
                             style={styles.input} 
                             placeholder="Search Hospital, Serial..." 
@@ -400,37 +411,33 @@ export default function AnalysisScreen() {
                     </View>
                 </View>
 
-                {/* 3. LIST */}
                 <View style={styles.countStrip}>
                     <Text style={{color:'gray', fontSize:12}}>Total Records: <Text style={{fontWeight:'bold', color:'#333'}}>{filteredData.length}</Text></Text>
                 </View>
 
                 <FlatList 
                     data={renderedList}
-                    keyExtractor={(item, index) => index.toString()}
-                    renderItem={renderItem}
+                    keyExtractor={(item, index) => item.id || index.toString()}
                     contentContainerStyle={{ padding: 15, paddingBottom: 100 }}
+                    renderItem={renderItem}
+                    refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                     ListEmptyComponent={
                         <View style={{ alignItems: 'center', marginTop: 50 }}>
-                            <Ionicons name="folder-open-outline" size={40} color="#ccc" />
-                            <Text style={{ color: 'gray', marginTop: 10 }}>No reports found.</Text>
+                            {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                                <>
+                                    <Ionicons name="folder-open-outline" size={40} color="#ccc" />
+                                    <Text style={{ color: 'gray', marginTop: 10 }}>No reports found.</Text>
+                                </>
+                            )}
                         </View>
                     }
-                    // 🔥 LOAD MORE BUTTON WITH VIEW WRAPPER
                     ListFooterComponent={
                         <View style={{ paddingBottom: 80 }}>
                             {visibleCount < filteredData.length ? (
                                 <TouchableOpacity 
                                     onPress={() => setVisibleCount(prev => prev + 20)} 
                                     style={{
-                                        padding: 12, 
-                                        backgroundColor: '#fff', 
-                                        alignItems: 'center', 
-                                        marginVertical: 10, 
-                                        borderRadius: 8,
-                                        borderWidth: 1,
-                                        borderColor: '#ddd',
-                                        elevation: 1
+                                        padding: 12, backgroundColor: '#fff', alignItems: 'center', marginVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ddd', elevation: 1
                                     }}
                                 >
                                     <Text style={{fontWeight:'bold', color:'#3b5998'}}>
@@ -574,7 +581,6 @@ const styles = StyleSheet.create({
     activeToggle: { backgroundColor: 'white', elevation: 2 },
     toggleText: { color: 'gray', fontSize: 12, fontWeight: '600' },
 
-    // Admin Employee Button Style
     employeeFilterBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#e8f5e9', paddingHorizontal:12, paddingVertical:10, borderRadius:8, borderWidth:1, borderColor:'#2e7d32', marginBottom:10 },
 
     dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'white', padding: 8, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#ddd' },

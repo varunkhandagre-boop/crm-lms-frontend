@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { addDoc, collection, updateDoc } from 'firebase/firestore';
+import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
     ActivityIndicator,
@@ -13,9 +13,16 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 
 export default function CustomerComplaintForm() {
+    const router = useRouter();
+    
+    // 🔥 Naya SaaS Engine
+    const { addSaaSData } = useSaaSDB();
+
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isSuccess, setIsSuccess] = useState(false);
 
@@ -28,6 +35,7 @@ export default function CustomerComplaintForm() {
         issue: ''
     });
 
+    // 🔥 SAAS ENGINE: SUBMIT TICKET LOGIC
     const handleSubmit = async () => {
         if (!formData.hospitalName || !formData.mobile || !formData.issue) {
             Alert.alert("Missing Details", "Please fill Hospital Name, Mobile, and Issue description.");
@@ -38,35 +46,41 @@ export default function CustomerComplaintForm() {
         try {
             const today = new Date().toISOString().split('T')[0];
 
-            // 1. Save Ticket to database
-            const docRef = await addDoc(collection(db, "service_calls"), {
+            // 1. Save Ticket to SaaS database
+            const ticketData = {
                 ...formData,
                 status: 'Open',
                 date: today,
                 createdAt: new Date().toISOString(),
                 source: 'Customer Web Form',
                 senderName: 'Customer'
-            });
+            };
 
-            await updateDoc(docRef, { id: docRef.id });
+            const ticketRes = await addSaaSData("service_calls", ticketData);
 
-            // 2. Send Notification to Admin/Service Manager
-            await addDoc(collection(db, "notifications"), {
-                title: "New Service Request 🚨",
-                message: `${formData.hospitalName} reported an issue: ${formData.issue}`,
-                to: "Admin",
-                type: "warning",
-                route: "/service_call",
-                createdAt: new Date().toISOString(),
-                read: false,
-                senderName: formData.contactPerson || 'Customer'
-            });
+            if (ticketRes.success) {
+                // 2. Send Notification to Admin/Service Manager using SaaS DB
+                await addSaaSData("notifications", {
+                    title: "New Service Request 🚨",
+                    message: `${formData.hospitalName} reported an issue: ${formData.issue}`,
+                    to: "Admin", // Depending on your DB logic, 'Admin' or specific UID
+                    type: "warning",
+                    route: "/service_call",
+                    createdAt: new Date().toISOString(),
+                    read: false,
+                    senderName: formData.contactPerson || 'Customer'
+                });
 
-            setIsSuccess(true);
+                setIsSuccess(true);
+            } else {
+                throw new Error("Failed to add ticket.");
+            }
+
         } catch (error) {
             Alert.alert("Error", "Could not submit your request. Please try again or call us.");
+        } finally {
+            setIsSubmitting(false);
         }
-        setIsSubmitting(false);
     };
 
     if (isSuccess) {
@@ -86,7 +100,7 @@ export default function CustomerComplaintForm() {
 
     return (
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.container}>
-            <ScrollView contentContainerStyle={{ padding: 20, flexGrow: 1, justifyContent: 'center' }}>
+            <ScrollView contentContainerStyle={{ padding: 20, flexGrow: 1, justifyContent: 'center' }} showsVerticalScrollIndicator={false}>
                 
                 <View style={styles.headerBox}>
                     <Ionicons name="settings" size={50} color="#3b5998" />
@@ -116,6 +130,7 @@ export default function CustomerComplaintForm() {
                         style={styles.input} 
                         placeholder="10-digit number" 
                         keyboardType="phone-pad"
+                        maxLength={10}
                         value={formData.mobile} 
                         onChangeText={t => setFormData({...formData, mobile: t})} 
                     />
@@ -160,6 +175,7 @@ export default function CustomerComplaintForm() {
                 <Text style={{ textAlign: 'center', marginTop: 20, color: 'gray', fontSize: 12 }}>
                     Powered by Your Company CRM
                 </Text>
+                <View style={{height: 50}}/>
             </ScrollView>
         </KeyboardAvoidingView>
     );

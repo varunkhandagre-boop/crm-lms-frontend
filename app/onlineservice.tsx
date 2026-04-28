@@ -6,19 +6,32 @@ import {
     FlatList,
     Image,
     Modal,
+    RefreshControl,
     StyleSheet,
     Text,
     TextInput,
     TouchableOpacity,
     View
 } from 'react-native';
+
+// 🔥 SAAS IMPORTS (Context DB removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
-const ITEMS_PER_PAGE = 20; // Number of items to load per scroll
+const ITEMS_PER_PAGE = 20; 
 
 export default function OnlineServiceScreen() {
   const router = useRouter();
-  const { serviceList } = useData(); // Get all services
+  
+  // 🔥 1. Context se current user nikala
+  const { currentUser } = useData(); 
+
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded Master States
+  const [serviceList, setServiceList] = useState<any[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
 
   // --- STATES ---
   const [searchText, setSearchText] = useState('');
@@ -29,9 +42,29 @@ export default function OnlineServiceScreen() {
   const [visibleLimit, setVisibleLimit] = useState(ITEMS_PER_PAGE);
   const [loadingMore, setLoadingMore] = useState(false);
 
+  // 🔥 4. LOAD SAAS DATA ON MOUNT
+  const loadData = async () => {
+      if (currentUser?.companyId) {
+          const data = await fetchSaaSData("service_calls");
+          // Abhi ke liye hum assume kar rahe hain ki "Online" ek status ya property hai,
+          // Agar database me "type" field exist karta hai toh we map it accordingly.
+          setServiceList(data);
+      }
+  };
+
+  useEffect(() => {
+      loadData();
+  }, [currentUser]);
+
+  const onRefresh = async () => {
+      setRefreshing(true);
+      await loadData();
+      setRefreshing(false);
+  };
+
   // --- 1. FILTER ONLY ONLINE SERVICES ---
   const onlineData = useMemo(() => {
-     return serviceList ? serviceList.filter((item: any) => item.type === 'Online') : [];
+     return serviceList ? serviceList.filter((item: any) => item.type === 'Online' || item.serviceType === 'Online') : [];
   }, [serviceList]);
 
   // --- 2. SMART SEARCH LOGIC (Full Filtered List) ---
@@ -40,8 +73,7 @@ export default function OnlineServiceScreen() {
     
     const searchTerms = searchText.toLowerCase().split(' ');
     return onlineData.filter((item: any) => {
-       // Search in TicketNo, Hospital, Issue, Date, Status
-       const itemData = `${item.ticketNo || ''} ${item.hospital || ''} ${item.issue || ''} ${item.date || ''} ${item.status || ''}`.toLowerCase();
+       const itemData = `${item.ticketNo || item.scrId || ''} ${item.hospital || item.hospitalName || ''} ${item.issue || item.remark || ''} ${item.date || item.dateIso || ''} ${item.status || ''}`.toLowerCase();
        return searchTerms.every((term: string) => itemData.includes(term));
     });
   }, [searchText, onlineData]);
@@ -49,7 +81,6 @@ export default function OnlineServiceScreen() {
   // --- 3. DISPLAY LIST (Sliced for View) ---
   const displayList = fullFilteredList.slice(0, visibleLimit);
 
-  // Reset pagination when search changes
   useEffect(() => {
     setVisibleLimit(ITEMS_PER_PAGE);
   }, [searchText]);
@@ -60,43 +91,38 @@ export default function OnlineServiceScreen() {
         setTimeout(() => {
             setVisibleLimit(prev => prev + ITEMS_PER_PAGE);
             setLoadingMore(false);
-        }, 100); // Slight delay for smooth UI
+        }, 100); 
     }
   };
 
-  // --- OPEN DETAILS ---
   const openDetails = (item: any) => {
     setSelectedItem(item);
     setModalVisible(true);
   };
 
-  // --- RENDER CARD ---
   const renderItem = ({ item }: any) => (
     <TouchableOpacity style={styles.card} onPress={() => openDetails(item)}>
         <View style={styles.row}>
-            {/* Display Ticket No as ID */}
-            <Text style={styles.boldText}>{item.ticketNo || item.id}</Text> 
+            <Text style={styles.boldText}>{item.ticketNo || item.scrId || item.id}</Text> 
             <Text style={styles.badgeGreen}>{item.status}</Text>
         </View>
-        <Text style={styles.title}>{item.hospital}</Text>
-        <Text style={{marginBottom:5, color:'gray'}}>{item.date}</Text>
+        <Text style={styles.title}>{item.hospital || item.hospitalName}</Text>
+        <Text style={{marginBottom:5, color:'gray'}}>{item.date || item.dateIso || item.createdAt?.split('T')[0]}</Text>
         
         <View style={styles.row}>
-            <Text style={{color:'gray', fontSize:12}}>Issue: {item.issue}</Text>
+            <Text style={{color:'gray', fontSize:12}}>Issue: {item.issue || item.remark || 'N/A'}</Text>
         </View>
         
         <View style={styles.divider} />
         <View style={styles.row}>
-            <Text style={{fontSize:12, color:'#333'}}>Engineer: Nilesh Lokhande</Text>
-            {/* Display Action as a Tag */}
-            <Text style={styles.badgeGray} numberOfLines={1}>{item.action ? 'Action Taken' : 'Pending Action'}</Text>
+            <Text style={{fontSize:12, color:'#333'}}>Engineer: {item.engineer || item.senderName || 'Unknown'}</Text>
+            <Text style={styles.badgeGray} numberOfLines={1}>{item.action || item.resolutionNote ? 'Action Taken' : 'Pending Action'}</Text>
         </View>
     </TouchableOpacity>
   );
 
   return (
     <View style={styles.container}>
-      {/* HEADER */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#333" />
@@ -105,9 +131,8 @@ export default function OnlineServiceScreen() {
         <View style={{width: 24}} /> 
       </View>
 
-      {/* SEARCH BAR */}
       <View style={styles.searchContainer}>
-          <Ionicons name="search" size={20} color="gray" />
+          {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
           <TextInput 
              style={styles.searchInput}
              placeholder="Search Hospital, Ticket No, Issue..."
@@ -121,21 +146,18 @@ export default function OnlineServiceScreen() {
           )}
       </View>
 
-      {/* TOTAL COUNT INDICATOR */}
       <View style={styles.limitContainer}>
           <Text style={{marginLeft:'auto', fontSize:12, color:'gray'}}>
               Showing {displayList.length} of {fullFilteredList.length} Records
           </Text>
       </View>
 
-      {/* LIST VIEW */}
       <FlatList 
         data={displayList}
         keyExtractor={item => item.id}
         renderItem={renderItem}
         contentContainerStyle={{padding: 15, paddingBottom: 50}}
-        
-        // Smart Pagination Props
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         onEndReached={loadMore}
         onEndReachedThreshold={0.5}
         ListFooterComponent={
@@ -145,11 +167,14 @@ export default function OnlineServiceScreen() {
                 </View>
             ) : null
         }
-
         ListEmptyComponent={
             <View style={{alignItems:'center', marginTop:50}}>
-                <Image source={{ uri: 'https://cdn-icons-png.flaticon.com/512/7486/7486747.png' }} style={{ width: 100, height: 100, opacity: 0.5 }} />
-                <Text style={{color:'gray', marginTop:10}}>No Online Reports Found</Text>
+                {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                    <>
+                        <Image source={{ uri: 'https://cdn-icons-png.flaticon.com/512/7486/7486747.png' }} style={{ width: 100, height: 100, opacity: 0.5 }} />
+                        <Text style={{color:'gray', marginTop:10}}>No Online Reports Found</Text>
+                    </>
+                )}
             </View>
         }
       />
@@ -167,15 +192,15 @@ export default function OnlineServiceScreen() {
 
                 {selectedItem && (
                     <View>
-                        <DetailRow label="Ticket No" value={selectedItem.ticketNo} icon="ticket" />
-                        <DetailRow label="Date" value={selectedItem.date} icon="calendar" />
-                        <DetailRow label="Hospital" value={selectedItem.hospital} icon="business" highlight />
+                        <DetailRow label="Ticket No" value={selectedItem.ticketNo || selectedItem.scrId} icon="ticket" />
+                        <DetailRow label="Date" value={selectedItem.date || selectedItem.dateIso || selectedItem.createdAt?.split('T')[0]} icon="calendar" />
+                        <DetailRow label="Hospital" value={selectedItem.hospital || selectedItem.hospitalName} icon="business" highlight />
                         <View style={styles.divider} />
                         <Text style={{fontSize:12, color:'gray', marginBottom:2}}>Complaint / Issue:</Text>
-                        <Text style={{fontSize:14, fontWeight:'500', marginBottom:10}}>{selectedItem.issue}</Text>
+                        <Text style={{fontSize:14, fontWeight:'500', marginBottom:10}}>{selectedItem.issue || selectedItem.remark}</Text>
                         
                         <Text style={{fontSize:12, color:'gray', marginBottom:2}}>Action Taken:</Text>
-                        <Text style={{fontSize:14, fontWeight:'500', marginBottom:10, color:'#3b5998'}}>{selectedItem.action || 'No Action'}</Text>
+                        <Text style={{fontSize:14, fontWeight:'500', marginBottom:10, color:'#3b5998'}}>{selectedItem.action || selectedItem.resolutionNote || 'No Action'}</Text>
 
                         <DetailRow label="Status" value={selectedItem.status} icon="information-circle" 
                                    color={selectedItem.status === 'Resolved' ? 'green' : 'orange'} />
@@ -189,7 +214,6 @@ export default function OnlineServiceScreen() {
   );
 }
 
-// Helper Components
 const DetailRow = ({label, value, icon, highlight, color}: any) => (
   <View style={{flexDirection:'row', alignItems:'center', marginBottom:12}}>
       <View style={{width:30}}><Ionicons name={icon} size={20} color="#3b5998" /></View>
@@ -207,14 +231,11 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
 
-  // Search
   searchContainer: { flexDirection: 'row', alignItems:'center', backgroundColor:'white', margin:15, marginBottom:10, padding:10, borderRadius:8, elevation:2 },
   searchInput: { flex:1, marginLeft:10, fontSize:15 },
 
-  // Limit
   limitContainer: { flexDirection:'row', alignItems:'center', paddingHorizontal:15, marginBottom:10 },
 
-  // Card Styles (Your Design)
   card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 10, elevation: 2 },
   row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5, alignItems:'center' },
   title: { fontWeight: 'bold', fontSize: 15, marginBottom: 5, width:'70%' },
@@ -223,7 +244,6 @@ const styles = StyleSheet.create({
   badgeGreen: { backgroundColor: '#e8f5e9', color: 'green', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, fontSize: 11, fontWeight:'bold' },
   badgeGray: { backgroundColor: '#f0f0f0', color: '#333', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, fontSize: 11, fontWeight:'600' },
 
-  // Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
   modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 25, elevation: 5 },
   modalTitle: { fontSize: 20, fontWeight: 'bold', color:'#3b5998' },

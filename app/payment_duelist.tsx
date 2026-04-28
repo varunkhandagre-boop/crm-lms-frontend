@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     FlatList,
     Modal,
@@ -12,19 +13,27 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { useData } from './context/DataContext';
 
-// 🔥 FIREBASE IMPORTS FOR TRACKING
-import { addDoc, arrayUnion, collection, doc, updateDoc } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+// 🔥 SAAS IMPORTS (Direct DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
+import { useData } from './context/DataContext';
 
 export default function PaymentDueList() {
     const router = useRouter();
-    // 🔥 Added orgList and companyProfile to fetch mobile numbers and company name
-    const { dueList = [], paymentList = [], currentUser, user, orgList = [], companyProfile } = useData(); 
     
+    // 🔥 1. Context se sirf global settings aur user nikalenge
+    const { currentUser, companyProfile } = useData(); 
+    
+    // 🔥 2. Naya SaaS Engine connect karenge
+    const { fetchSaaSData, addSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+
+    // 🔥 3. Lazy Loaded States for DB
+    const [dueList, setDueList] = useState<any[]>([]);
+    const [paymentList, setPaymentList] = useState<any[]>([]);
+    const [orgList, setOrgList] = useState<any[]>([]);
+
     // STATES
-    const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All');
+    const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
     const [currentDate, setCurrentDate] = useState(new Date());
     const [searchTerm, setSearchTerm] = useState('');
     
@@ -40,8 +49,26 @@ export default function PaymentDueList() {
         }
     }, [viewMode, currentDate, searchTerm]);
 
-    const roleToCheck = currentUser?.role || user?.role;
-    const canAddDue = ['Admin', 'Accountant', 'Account', 'Manager', 'Hr'].includes(roleToCheck);
+    // 🔥 4. LOAD SAAS DATA ON MOUNT
+    const loadData = async () => {
+        if (currentUser?.companyId) {
+            const [dues, payments, orgs] = await Promise.all([
+                fetchSaaSData("dues"), // Change to "advances" or "dues" depending on your schema mapping
+                fetchSaaSData("payments"),
+                fetchSaaSData("organizations")
+            ]);
+            setDueList(dues);
+            setPaymentList(payments);
+            setOrgList(orgs);
+        }
+    };
+
+    useEffect(() => {
+        loadData();
+    }, [currentUser]);
+
+    const roleToCheck = currentUser?.role || 'employee';
+    const canAddDue = ['Admin', 'Accountant', 'Account', 'Manager', 'Hr', 'SuperAdmin'].includes(roleToCheck);
 
     const parseDate = (dateStr: string) => {
         if (!dateStr) return new Date(0);
@@ -75,7 +102,7 @@ export default function PaymentDueList() {
         return "All Time";
     };
 
-    // 🔥 NEW: HANDLE SEND REMINDER WITH TRACKING
+    // 🔥 5. SAAS REMINDER TRACKING ENGINE
     const handleSendReminder = async (item: any) => {
         Alert.alert(
             "Send Reminder",
@@ -106,8 +133,9 @@ export default function PaymentDueList() {
                             const todayStr = new Date().toLocaleDateString('en-GB');
                             const timestampStr = new Date().toLocaleString('en-GB');
 
-                            // 1. Queue the message
-                            await addDoc(collection(db, 'outbound_messages'), {
+                            // 1. Queue the message in SaaS (Global outbox simulation)
+                            // This might need a specialized SaaS hook if your engine requires tenant tagging for messages
+                            await addSaaSData('outbound_messages', {
                                 type: 'whatsapp',
                                 to: finalTo,
                                 templateName: 'payment_reminder',
@@ -121,17 +149,25 @@ export default function PaymentDueList() {
                                 retryCount: 0
                             });
 
-                            // 2. 🔥 Update Tracking in Due Record
-                            const dueRef = doc(db, 'payment_dues', item.id);
-                            await updateDoc(dueRef, {
-                                lastReminderDate: todayStr,
-                                reminderHistory: arrayUnion({
-                                    date: timestampStr,
-                                    sentBy: currentUser?.name || user?.name || 'System'
-                                })
+                            // 2. Update Tracking in Due Record using SaaS
+                            const updatedHistory = item.reminderHistory ? [...item.reminderHistory] : [];
+                            updatedHistory.push({
+                                date: timestampStr,
+                                sentBy: currentUser?.name || 'System'
                             });
 
-                            Alert.alert("Success ✅", "Reminder sent and tracked!");
+                            const res = await updateSaaSData("dues", item.id, {
+                                lastReminderDate: todayStr,
+                                reminderHistory: updatedHistory
+                            });
+
+                            if(res.success) {
+                                setDueList(prev => prev.map(d => d.id === item.id ? { ...d, lastReminderDate: todayStr, reminderHistory: updatedHistory } : d));
+                                Alert.alert("Success ✅", "Reminder sent and tracked!");
+                            } else {
+                                throw new Error("Update Failed");
+                            }
+                            
                         } catch(e) {
                             Alert.alert("Error", "Could not track reminder.");
                         }
@@ -152,7 +188,7 @@ export default function PaymentDueList() {
         if (searchTerm) {
             const lowerTerm = searchTerm.toLowerCase();
             filtered = filtered.filter((item:any) => {
-                const fullString = `${item.orgName} ${item.amount} ${item.billNo || item.billRef} ${item.date} ${item.dueDate || ''} ${item.orderId || ''}`.toLowerCase();
+                const fullString = `${item.orgName} ${item.amount} ${item.billNo || item.billRef} ${item.dateIso || item.date} ${item.dueDate || ''} ${item.orderId || ''}`.toLowerCase();
                 return fullString.includes(lowerTerm);
             });
         }
@@ -167,7 +203,7 @@ export default function PaymentDueList() {
             const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59);
 
             filtered = filtered.filter((item: any) => {
-                const dateVal = item.date || item.createdAt;
+                const dateVal = item.dateIso || item.date || item.createdAt;
                 if(!dateVal) return false;
                 
                 const itemDate = parseDate(dateVal);
@@ -180,8 +216,8 @@ export default function PaymentDueList() {
         }
         
         return filtered.sort((a: any, b: any) => {
-            const dateA = a.date || a.createdAt;
-            const dateB = b.date || b.createdAt;
+            const dateA = a.dateIso || a.date || a.createdAt;
+            const dateB = b.dateIso || b.date || b.createdAt;
             return parseDate(dateA).getTime() - parseDate(dateB).getTime();
         });
     };
@@ -213,7 +249,7 @@ export default function PaymentDueList() {
                 const targetName = partyItem.orgName || partyItem.hospitalName;
                 return p.orgName === targetName;
             })
-            .sort((a: any, b: any) => parseDate(b.date).getTime() - parseDate(a.date).getTime())
+            .sort((a: any, b: any) => parseDate(b.dateIso || b.date).getTime() - parseDate(a.dateIso || a.date).getTime())
             .slice(0, 5); 
     };
 
@@ -241,7 +277,7 @@ export default function PaymentDueList() {
     };
 
     const renderItem = ({ item }: any) => {
-        const dateToShow = item.date || item.createdAt;
+        const dateToShow = item.dateIso || item.date || item.createdAt;
         const daysOutstanding = getOverdueDays(dateToShow);
         const displayAmount = item.balance !== undefined ? item.balance : item.amount;
         
@@ -267,7 +303,6 @@ export default function PaymentDueList() {
                         </Text>
                     </View>
 
-                    {/* 🔥 NEW: LAST REMINDER STATUS ON MAIN CARD */}
                     <View style={{flexDirection:'row', alignItems:'center', marginTop:5}}>
                         <Ionicons name="notifications-outline" size={12} color={item.lastReminderDate ? "#2e7d32" : "#999"} />
                         <Text style={{fontSize:10, color: item.lastReminderDate ? "#2e7d32" : "#999", marginLeft:4, fontStyle:'italic'}}>
@@ -336,7 +371,7 @@ export default function PaymentDueList() {
                     </View>
                 )}
                 <View style={styles.searchBar}>
-                    <Ionicons name="search" size={18} color="gray" />
+                    {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={18} color="gray" />}
                     <TextInput style={styles.searchInput} placeholder="Search Party, Bill No..." value={searchTerm} onChangeText={setSearchTerm} />
                     {searchTerm.length > 0 && <TouchableOpacity onPress={()=>setSearchTerm('')}><Ionicons name="close-circle" size={18} color="gray"/></TouchableOpacity>}
                 </View>
@@ -353,35 +388,41 @@ export default function PaymentDueList() {
                 contentContainerStyle={{padding: 15, paddingBottom: 100}}
                 ListEmptyComponent={
                     <View style={styles.empty}>
-                        <Ionicons name="checkmark-circle-outline" size={60} color="#4caf50" />
-                        <Text style={{color:'gray', marginTop:10, fontSize:16}}>No Pending Dues!</Text>
+                        {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                            <>
+                                <Ionicons name="checkmark-circle-outline" size={60} color="#4caf50" />
+                                <Text style={{color:'gray', marginTop:10, fontSize:16}}>No Pending Dues!</Text>
+                            </>
+                        )}
                     </View>
                 }
                 ListFooterComponent={
-                    visibleCount < fullFilteredList.length ? (
-                        <TouchableOpacity 
-                            onPress={() => setVisibleCount(prev => prev + 20)} 
-                            style={{
-                                padding: 12, 
-                                backgroundColor: '#fff', 
-                                alignItems: 'center', 
-                                marginVertical: 10, 
-                                borderRadius: 8, 
-                                borderWidth: 1, 
-                                borderColor: '#ddd'
-                            }}
-                        >
-                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                                👇 Load More Records ({fullFilteredList.length - visibleCount} remaining)
-                            </Text>
-                        </TouchableOpacity>
-                    ) : (
-                        fullFilteredList.length > 0 ? (
-                            <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
-                                --- End of List ---
-                            </Text>
-                        ) : null
-                    )
+                    <View style={{ paddingBottom: 80 }}>
+                        {visibleCount < fullFilteredList.length ? (
+                            <TouchableOpacity 
+                                onPress={() => setVisibleCount(prev => prev + 20)} 
+                                style={{
+                                    padding: 12, 
+                                    backgroundColor: '#fff', 
+                                    alignItems: 'center', 
+                                    marginVertical: 10, 
+                                    borderRadius: 8, 
+                                    borderWidth: 1, 
+                                    borderColor: '#ddd'
+                                }}
+                            >
+                                <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                                    👇 Load More Records ({fullFilteredList.length - visibleCount} remaining)
+                                </Text>
+                            </TouchableOpacity>
+                        ) : (
+                            fullFilteredList.length > 0 ? (
+                                <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
+                                    --- End of List ---
+                                </Text>
+                            ) : null
+                        )}
+                    </View>
                 }
             />
 
@@ -405,7 +446,7 @@ export default function PaymentDueList() {
                                 <DetailRow label="Customer" value={selectedItem?.orgName || selectedItem?.hospitalName} />
                                 <DetailRow label={selectedItem.orderId ? "Order ID" : "Bill No"} value={selectedItem?.orderId || selectedItem?.billNo || 'N/A'} />
                                 
-                                <DetailRow label="Bill Date" value={selectedItem?.date || selectedItem?.createdAt} />
+                                <DetailRow label="Bill Date" value={selectedItem?.dateIso || selectedItem?.date || selectedItem?.createdAt} />
                                 {selectedItem?.dueDate && <DetailRow label="Target Due Date" value={selectedItem.dueDate} />}
                                 
                                 <DetailRow label="Original Amount" value={`₹ ${selectedItem?.amount}`} />
@@ -417,7 +458,7 @@ export default function PaymentDueList() {
                                     </View>
                                 ) : null}
 
-                                {/* 🔥 REMINDER HISTORY SECTION IN MODAL */}
+                                {/* REMINDER HISTORY SECTION */}
                                 <View style={{marginTop:20, paddingTop:10, borderTopWidth:1, borderTopColor:'#eee'}}>
                                     <Text style={{fontSize:12, fontWeight:'bold', color:'#e65100', marginBottom:10}}>REMINDER LOGS</Text>
                                     {selectedItem.reminderHistory && selectedItem.reminderHistory.length > 0 ? (
@@ -491,12 +532,12 @@ const DetailRow = ({label, value}: any) => (
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 4, alignItems:'center' },
+    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 0, alignItems:'center' },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
     backBtn: { paddingRight: 10 },
     addBtn: { flexDirection:'row', backgroundColor:'#3b5998', paddingVertical:6, paddingHorizontal:12, borderRadius:20, alignItems:'center' },
     filterBox: { backgroundColor:'white', padding:15, paddingBottom:10, marginBottom:5 },
-    tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', borderRadius: 8, padding: 3, marginBottom: 10 },
+    tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', borderRadius: 8, padding: 2, marginBottom: 5 },
     tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
     activeTab: { backgroundColor: 'white', elevation: 2 },
     tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
@@ -524,6 +565,6 @@ const styles = StyleSheet.create({
     modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
     receiptRow: { marginBottom: 12, flexDirection:'row', justifyContent:'space-between', alignItems:'center', borderBottomWidth:1, borderBottomColor:'#f0f0f0', paddingBottom:5 },
     receiptLabel: { fontSize: 12, color: 'gray' },
-    receiptValue: { fontSize: 14, fontWeight: 'bold', color: '#333' },
+    receiptValue: { fontSize: 14, fontWeight: 'bold', color: '#333', maxWidth:'65%', textAlign:'right' },
     modalCollectBtn: { backgroundColor:'#27ae60', padding:15, borderRadius:10, alignItems:'center', width:'100%', justifyContent:'center' },
 });

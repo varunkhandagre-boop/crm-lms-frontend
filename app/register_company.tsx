@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
 import React, { useState } from 'react';
 import {
     ActivityIndicator,
@@ -15,11 +14,17 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { auth, db } from '../firebaseConfig';
+import { auth } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS (Direct Firestore imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 
 export default function RegisterCompanyScreen() {
     const router = useRouter();
     const [loading, setLoading] = useState(false);
+
+    // 🔥 Naya SaaS Engine
+    const { addSaaSData } = useSaaSDB();
 
     // Form State
     const [companyName, setCompanyName] = useState('');
@@ -46,17 +51,20 @@ export default function RegisterCompanyScreen() {
             const cleanEmail = email.trim().toLowerCase();
             const cleanEmpCount = employeesCount ? Number(employeesCount) : 10;
 
-            // 1. Create Auth User
+            // 1. Create Auth User (Maintains Firebase Auth base)
             await createUserWithEmailAndPassword(auth, cleanEmail, password);
 
-            // 2. Dates Calculation (7 Din ka demo date rahega, par status inactive hoga)
+            // 2. Dates Calculation 
             const companyId = `COMP-${Date.now()}`;
             const startDate = new Date();
             const expiryDate = new Date();
-            expiryDate.setDate(startDate.getDate() + 7); // Date set hai par login blocked rahega
+            expiryDate.setDate(startDate.getDate() + 7); 
 
-            // 3. Create COMPANY Document
+            // 3. Create COMPANY Document via SaaS Engine
+            // SaaS DB hook handles the custom ID if we pass it, otherwise we'll adapt.
+            // Since we need exact IDs, we use addSaaSData with custom ID mapping or adapt it
             const companyData = {
+                id: companyId, // Used as custom doc ID in our SaaS hook
                 companyName: companyName,
                 ownerName: ownerName,
                 ownerEmail: cleanEmail,
@@ -66,19 +74,17 @@ export default function RegisterCompanyScreen() {
                 state: state || "",
                 gstNumber: gstNumber || "",
                 maxEmployees: cleanEmpCount,
-                
-                // 🔥 FIX 1: Default Status 'Inactive' (Approval Pending)
                 isActive: false, 
-                plan: 'Pending Approval', // Plan ka naam badal diya
-                
+                plan: 'Pending Approval', 
                 startDate: startDate.toISOString(),
                 expiryDate: expiryDate.toISOString(),
                 createdAt: new Date().toISOString()
             };
-            await setDoc(doc(db, "companies", companyId), companyData);
+            await addSaaSData("companies", companyData);
 
-            // 4. Create USER Document
+            // 4. Create USER Document via SaaS Engine
             const userData = {
+                id: cleanEmail, // SaaS hook reads this to set custom ID
                 name: ownerName,
                 email: cleanEmail,
                 mobile: mobile,
@@ -88,9 +94,8 @@ export default function RegisterCompanyScreen() {
                 createdAt: new Date().toISOString(),
                 status: 'Active'
             };
-            await setDoc(doc(db, "users", cleanEmail), userData);
+            await addSaaSData("users", userData);
 
-            // 🔥 FIX 2: Registration hote hi Login page par bhejo
             Alert.alert(
                 "Registration Successful ✅", 
                 "Your account is created but requires Super Admin approval. Please contact support.", 
@@ -98,12 +103,11 @@ export default function RegisterCompanyScreen() {
                     { 
                         text: "Go to Login", 
                         onPress: () => {
-                            // Turant Login Page par phenko
                             router.replace('/login' as any);
                         } 
                     }
                 ],
-                { cancelable: false } // User bahar click karke popup band nahi kar payega
+                { cancelable: false } 
             );
 
         } catch (error: any) {
@@ -113,6 +117,7 @@ export default function RegisterCompanyScreen() {
         }
         setLoading(false);
     };
+
     return (
         <KeyboardAvoidingView 
             behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
@@ -135,9 +140,9 @@ export default function RegisterCompanyScreen() {
                         style={styles.input} 
                         placeholder="Official Email (Login ID) *" 
                         keyboardType="email-address" 
-                        autoCapitalize="none" // 🔥 Auto Capital off
+                        autoCapitalize="none" 
                         value={email} 
-                        onChangeText={(text) => setEmail(text.toLowerCase())} // 🔥 Force Lowercase typing
+                        onChangeText={(text) => setEmail(text.toLowerCase())} 
                     />
                     <TextInput style={styles.input} placeholder="Password *" secureTextEntry value={password} onChangeText={setPassword} />
                     <TextInput style={styles.input} placeholder="Mobile Number *" keyboardType="phone-pad" maxLength={10} value={mobile} onChangeText={setMobile} />

@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import React, { useEffect, useState } from 'react';
 import {
@@ -18,14 +17,22 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db, storage } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS (Direct Firestore DB imports removed)
+import { storage } from '../firebaseConfig';
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 const USE_STORAGE_BUCKET = false; 
 
 export default function CompanyProfileScreen() {
     const router = useRouter();
-    const { setCompanyProfile } = useData();
+    
+    // 🔥 1. Context se Company Profile aur Current User nikalenge
+    const { companyProfile, setCompanyProfile, currentUser } = useData();
+    
+    // 🔥 2. Naya SaaS Engine
+    const { updateSaaSData } = useSaaSDB();
 
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -40,29 +47,21 @@ export default function CompanyProfileScreen() {
         bank2_name: '', bank2_acc: '', bank2_ifsc: '', bank2_branch: ''
     });
 
-    useEffect(() => { fetchCompanyProfile(); }, []);
-
-    const fetchCompanyProfile = async () => {
-        setLoading(true);
-        try {
-            const docRef = doc(db, "company_profile", "main_profile");
-            const docSnap = await getDoc(docRef);
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                const addr = data.fullAddress || {};
-                setProfile({
-                    ...profile,
-                    companyName: data.companyName || '', shortName: data.shortName || '', tagline: data.tagline || '',
-                    addressLine: addr.line || data.address || '', city: addr.city || '', state: addr.state || '', pincode: addr.pincode || '',
-                    email: data.contactEmail || data.email || '', phone: data.contactPhone || data.phone || '', landline: data.landline || '', website: data.website || '', gstNumber: data.gstNumber || '',
-                    logoUrl: data.logoUrl || '', signatureUrl: data.signatureUrl || '', qrCodeUrl: data.qrCodeUrl || '', upiId: data.upiId || '',
-                    bank1_name: data.bankDetails1?.bankName || '', bank1_acc: data.bankDetails1?.accountNo || '', bank1_ifsc: data.bankDetails1?.ifsc || '', bank1_branch: data.bankDetails1?.branch || '',
-                    bank2_name: data.bankDetails2?.bankName || '', bank2_acc: data.bankDetails2?.accountNo || '', bank2_ifsc: data.bankDetails2?.ifsc || '', bank2_branch: data.bankDetails2?.branch || '',
-                });
-            }
-        } catch (error) { console.log("Error fetching profile:", error); } 
-        finally { setLoading(false); }
-    };
+    // 🔥 3. LOAD DATA INSTANTLY FROM CONTEXT
+    useEffect(() => {
+        if (companyProfile) {
+            const addr = companyProfile.fullAddress || {};
+            setProfile(prev => ({
+                ...prev,
+                companyName: companyProfile.companyName || '', shortName: companyProfile.shortName || '', tagline: companyProfile.tagline || '',
+                addressLine: addr.line || companyProfile.address || '', city: addr.city || '', state: addr.state || '', pincode: addr.pincode || '',
+                email: companyProfile.contactEmail || companyProfile.email || '', phone: companyProfile.contactPhone || companyProfile.phone || '', landline: companyProfile.landline || '', website: companyProfile.website || '', gstNumber: companyProfile.gstNumber || '',
+                logoUrl: companyProfile.logoUrl || '', signatureUrl: companyProfile.signatureUrl || '', qrCodeUrl: companyProfile.qrCodeUrl || '', upiId: companyProfile.upiId || '',
+                bank1_name: companyProfile.bankDetails1?.bankName || '', bank1_acc: companyProfile.bankDetails1?.accountNo || '', bank1_ifsc: companyProfile.bankDetails1?.ifsc || '', bank1_branch: companyProfile.bankDetails1?.branch || '',
+                bank2_name: companyProfile.bankDetails2?.bankName || '', bank2_acc: companyProfile.bankDetails2?.accountNo || '', bank2_ifsc: companyProfile.bankDetails2?.ifsc || '', bank2_branch: companyProfile.bankDetails2?.branch || '',
+            }));
+        }
+    }, [companyProfile]);
 
     const handleImagePick = async (field: 'logoUrl' | 'signatureUrl' | 'qrCodeUrl') => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -87,14 +86,13 @@ export default function CompanyProfileScreen() {
         }
     };
 
-    // 🔥 NEW: Image Delete Function
     const handleRemoveImage = (field: string) => {
         Alert.alert("Remove Image", "Are you sure you want to remove this image?", [
             { text: "Cancel", style: "cancel" },
             { 
                 text: "Remove", 
                 style: "destructive", 
-                onPress: () => updateField(field, '') // Empty string set kar dega
+                onPress: () => updateField(field, '') 
             }
         ]);
     };
@@ -110,8 +108,10 @@ export default function CompanyProfileScreen() {
         } catch (error) { return uri; }
     };
 
+    // 🔥 4. SAAS ISOLATED SAVE LOGIC
     const handleSave = async () => {
         if (!profile.companyName || !profile.shortName) return Alert.alert("Error", "Company Name and Short Name are mandatory!");
+        if (!currentUser?.companyId) return Alert.alert("Error", "No Company ID found. Contact support.");
 
         setSaving(true);
         try {
@@ -120,36 +120,41 @@ export default function CompanyProfileScreen() {
             let finalQr = profile.qrCodeUrl;
 
             if (USE_STORAGE_BUCKET) {
+                setUploading(true);
+                // 🔥 SaaS Isolation for Storage
+                const basePath = `companies/${currentUser.companyId}`;
                 if (profile.logoUrl?.startsWith('file://')) {
-                    setUploading(true);
-                    finalLogo = await uploadToFirebaseStorage(profile.logoUrl, `company/logo_${Date.now()}.jpg`);
+                    finalLogo = await uploadToFirebaseStorage(profile.logoUrl, `${basePath}/logo_${Date.now()}.jpg`);
                 }
                 if (profile.signatureUrl?.startsWith('file://')) {
-                    setUploading(true);
-                    finalSign = await uploadToFirebaseStorage(profile.signatureUrl, `company/sign_${Date.now()}.jpg`);
+                    finalSign = await uploadToFirebaseStorage(profile.signatureUrl, `${basePath}/sign_${Date.now()}.jpg`);
                 }
                 if (profile.qrCodeUrl?.startsWith('file://')) {
-                    setUploading(true);
-                    finalQr = await uploadToFirebaseStorage(profile.qrCodeUrl, `company/qr_${Date.now()}.jpg`);
+                    finalQr = await uploadToFirebaseStorage(profile.qrCodeUrl, `${basePath}/qr_${Date.now()}.jpg`);
                 }
                 setUploading(false);
             }
 
-            const docRef = doc(db, "company_profile", "main_profile");
             const dataToSave = {
                 companyName: profile.companyName, shortName: profile.shortName.toUpperCase(), tagline: profile.tagline,
                 fullAddress: { line: profile.addressLine, city: profile.city, state: profile.state, pincode: profile.pincode },
                 address: `${profile.addressLine}, ${profile.city}, ${profile.state} - ${profile.pincode}`,
                 gstNumber: profile.gstNumber, contactEmail: profile.email, contactPhone: profile.phone, landline: profile.landline, website: profile.website,
                 logoUrl: finalLogo, signatureUrl: finalSign, qrCodeUrl: finalQr, upiId: profile.upiId,
-                updatedAt: new Date().toISOString(),
                 bankDetails1: { bankName: profile.bank1_name, accountNo: profile.bank1_acc, ifsc: profile.bank1_ifsc, branch: profile.bank1_branch },
                 bankDetails2: { bankName: profile.bank2_name, accountNo: profile.bank2_acc, ifsc: profile.bank2_ifsc, branch: profile.bank2_branch }
             };
 
-            await setDoc(docRef, dataToSave, { merge: true });
-            if(setCompanyProfile) setCompanyProfile(dataToSave);
-            Alert.alert("Success ✅", "Company Profile Updated Successfully!");
+            // 🔥 SaaS Engine update for specific companyId
+            const res = await updateSaaSData("company_profile", currentUser.companyId, dataToSave);
+            
+            if (res.success) {
+                // Update Context instantly to reflect across the app
+                if(setCompanyProfile) setCompanyProfile({ ...companyProfile, ...dataToSave });
+                Alert.alert("Success ✅", "Company Profile Updated Successfully!");
+            } else {
+                Alert.alert("Error", "Could not save company profile.");
+            }
         } catch (error: any) {
             Alert.alert("Error", "Could not save: " + error.message);
         } finally {
@@ -168,7 +173,6 @@ export default function CompanyProfileScreen() {
         <View style={styles.container}>
             <StatusBar barStyle="light-content" backgroundColor="#3b5998" />
             
-            {/* Header fixed rahega */}
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => router.back()}>
                     <Ionicons name="arrow-back" size={24} color="white" />
@@ -177,16 +181,15 @@ export default function CompanyProfileScreen() {
                 <View style={{width:24}} /> 
             </View>
 
-            {/* 🔥 FIX: Keyboard Handling */}
             <KeyboardAvoidingView 
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
                 style={{flex:1}}
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 50} // Header ki height adjust karne ke liye
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 50} 
             >
                 <ScrollView 
-                    contentContainerStyle={{padding: 20, paddingBottom: 150}} // 🔥 Bottom padding badha di
+                    contentContainerStyle={{padding: 20, paddingBottom: 150}} 
                     showsVerticalScrollIndicator={false}
-                    keyboardShouldPersistTaps="handled" // Taps miss nahi honge
+                    keyboardShouldPersistTaps="handled" 
                 >
                     
                     {/* 1. BRANDING */}
@@ -355,7 +358,6 @@ export default function CompanyProfileScreen() {
                         {saving || uploading ? <ActivityIndicator color="white" /> : <Text style={styles.saveText}>Save Global Settings</Text>}
                     </TouchableOpacity>
                     
-                    {/* 🔥 EXTRA SPACE AT BOTTOM */}
                     <View style={{height: 100}} /> 
                 </ScrollView>
             </KeyboardAvoidingView>
@@ -379,7 +381,6 @@ const styles = StyleSheet.create({
     saveBtn: { backgroundColor: '#2E7D32', padding: 15, borderRadius: 10, alignItems: 'center', elevation: 3 },
     saveText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
     
-    // IMAGE STYLES
     imgLabel: { fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 5, marginTop: 10 },
     imgBox: { width: 100, height: 100, backgroundColor: '#f9f9f9', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginBottom: 15, borderStyle: 'dashed' },
     previewImg: { width: '100%', height: '100%', borderRadius: 8 },
@@ -387,11 +388,10 @@ const styles = StyleSheet.create({
     phText: { fontSize: 10, color: '#999', marginTop: 4 },
     editBadge: { position: 'absolute', bottom: -5, right: -5, backgroundColor: '#e65100', width: 24, height: 24, borderRadius: 12, justifyContent: 'center', alignItems: 'center', elevation: 2 },
     
-    // 🔥 NEW DELETE BADGE STYLE
     deleteBadge: { 
         position: 'absolute', 
-        top: 25, // Adjusted to overlap nicely on top-right of image
-        left: 85, // Adjust based on box width
+        top: 25, 
+        left: 85, 
         backgroundColor: '#d32f2f', 
         width: 26, 
         height: 26, 

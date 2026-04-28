@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     FlatList,
     Modal,
     ScrollView,
@@ -11,12 +12,25 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+
+// 🔥 SAAS IMPORTS
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function SalesAnalysisScreen() {
   const router = useRouter();
   
-  const { orderList = [], paymentList = [], orgList = [], user, userList = [] } = useData();
+  // 🔥 1. Context se sirf user nikalenge
+  const { currentUser } = useData();
+
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded States
+  const [orderList, setOrderList] = useState<any[]>([]);
+  const [paymentList, setPaymentList] = useState<any[]>([]);
+  const [orgList, setOrgList] = useState<any[]>([]);
+  const [userList, setUserList] = useState<any[]>([]);
 
   // STATES
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
@@ -38,8 +52,8 @@ export default function SalesAnalysisScreen() {
   // PAGINATION STATE 
   const [visibleCount, setVisibleCount] = useState(20);
 
-  const userRole = user?.role ? user.role.toLowerCase() : 'unknown';
-  const isAdmin = userRole === 'admin' || userRole === 'manager' || userRole === 'accountant';
+  const userRole = currentUser?.role ? currentUser.role.toLowerCase() : 'unknown';
+  const isAdmin = ['admin', 'manager', 'accountant', 'hr', 'superadmin'].includes(userRole);
 
   useEffect(() => {
       if (viewMode === 'Day') {
@@ -49,7 +63,27 @@ export default function SalesAnalysisScreen() {
       }
   }, [viewMode, currentDate, selectedEmployee, searchText]);
 
-  // 🔥 NEW HELPER: Standardize any date string to YYYY-MM-DD
+  // 🔥 4. LOAD SAAS DATA ON MOUNT
+  const loadData = async () => {
+      if (currentUser?.companyId) {
+          const [orders, payments, orgs, users] = await Promise.all([
+              fetchSaaSData("orders"),
+              fetchSaaSData("payments"),
+              fetchSaaSData("organizations"),
+              fetchSaaSData("users")
+          ]);
+          setOrderList(orders);
+          setPaymentList(payments);
+          setOrgList(orgs);
+          setUserList(users);
+      }
+  };
+
+  useEffect(() => {
+      loadData();
+  }, [currentUser]);
+
+  // HELPER: Standardize any date string to YYYY-MM-DD
   const getValidDateStr = (obj: any) => {
       if (obj.dateIso) return obj.dateIso;
       if (obj.createdAt) return obj.createdAt.split('T')[0];
@@ -94,16 +128,6 @@ export default function SalesAnalysisScreen() {
       return "All Time";
   };
 
-  const getCity = (item: any) => {
-      if (item.city) return item.city;
-      const orgData = orgList.find((o: any) => 
-          (item.orgId && o.id === item.orgId) || 
-          o.orgName === item.hospitalName ||
-          o.name === item.hospitalName
-      );
-      return orgData?.city || '';
-  };
-
   // --- 1. FILTER LOGIC FOR ORDERS ---
   const getFilteredData = () => {
       let data = [...orderList];
@@ -128,9 +152,9 @@ export default function SalesAnalysisScreen() {
           }
       } else {
           data = data.filter((o: any) => 
-              o.senderId === user?.uid || 
-              o.senderId === user?.id || 
-              o.userName === user?.name
+              o.senderId === currentUser?.uid || 
+              o.senderId === currentUser?.id || 
+              o.userName === currentUser?.name
           );
       }
 
@@ -187,9 +211,9 @@ export default function SalesAnalysisScreen() {
           }
       } else {
           pData = pData.filter((p: any) => 
-              p.senderId === user?.uid || 
-              p.senderId === user?.id || 
-              p.userName === user?.name
+              p.senderId === currentUser?.uid || 
+              p.senderId === currentUser?.id || 
+              p.userName === currentUser?.name
           );
       }
 
@@ -231,9 +255,8 @@ export default function SalesAnalysisScreen() {
       const u = userList.find((x:any) => x.uid === selectedEmployee || x.id === selectedEmployee);
       baseMonthlyTarget = (u && u.monthlyTarget && Number(u.monthlyTarget) > 0) ? Number(u.monthlyTarget) : 1000000;
   } else if (!isAdmin) {
-      baseMonthlyTarget = (user?.monthlyTarget && Number(user.monthlyTarget) > 0) ? Number(user.monthlyTarget) : 1000000;
+      baseMonthlyTarget = (currentUser?.monthlyTarget && Number(currentUser.monthlyTarget) > 0) ? Number(currentUser.monthlyTarget) : 1000000;
   } else {
-      // 🔥 ALL TEAM TARGET
       baseMonthlyTarget = userList.reduce((sum:number, u:any) => {
           const role = (u.role || '').toLowerCase();
           if(role.includes('sales') || role.includes('manager') || role.includes('admin') || role.includes('account')) {
@@ -250,19 +273,14 @@ export default function SalesAnalysisScreen() {
   } else if (viewMode === 'Day') {
       target1 = baseMonthlyTarget / 25; 
   } else if (viewMode === 'All') {
-      // 🔥 FIX FOR "ALL" MODE: Dynamic Target based on total months of data
       if (displayList.length > 0) {
-          // चूंकि लिस्ट उल्टी सॉर्ट (Sort) है, इसलिए सबसे आखिरी आइटम सबसे पुराना होगा
           const oldestDateStr = getValidDateStr(displayList[displayList.length - 1]);
           const oldestDate = new Date(oldestDateStr !== "1970-01-01" ? oldestDateStr : Date.now());
           const today = new Date();
-          
-          // Calculate exact number of months between first order and today
           const monthsDiff = Math.abs((today.getFullYear() - oldestDate.getFullYear()) * 12 + (today.getMonth() - oldestDate.getMonth())) + 1;
-          
           target1 = baseMonthlyTarget * Math.max(1, monthsDiff);
       } else {
-          target1 = baseMonthlyTarget * 12; // Fallback
+          target1 = baseMonthlyTarget * 12; 
       }
   }
 
@@ -274,10 +292,8 @@ export default function SalesAnalysisScreen() {
   const handleGraph = () => {
       let graphSourceList = [...orderList];
       
-      // 1. Basic Status Filter
       graphSourceList = graphSourceList.filter(order => ['Approved', 'Completed', 'Dispatched'].includes(order.status));
       
-      // 2. Employee Filter
       if (isAdmin && selectedEmployee) {
           const selectedUserObj = userList.find((u: any) => (u.uid === selectedEmployee || u.id === selectedEmployee));
           const targetName = selectedUserObj?.name?.trim().toLowerCase();
@@ -292,7 +308,7 @@ export default function SalesAnalysisScreen() {
           });
       } else if (!isAdmin) {
           graphSourceList = graphSourceList.filter((o: any) => 
-              o.senderId === user?.uid || o.senderId === user?.id || o.userName === user?.name
+              o.senderId === currentUser?.uid || o.senderId === currentUser?.id || o.userName === currentUser?.name
           );
       }
 
@@ -307,7 +323,6 @@ export default function SalesAnalysisScreen() {
       const targetYM = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}`;
       const targetYMD = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}`;
 
-      // 3. String-based Date Filter (Immune to Timezone Bugs)
       graphSourceList = graphSourceList.filter((item: any) => {
           const dateStr = getValidDateStr(item);
           if (dateStr === "1970-01-01") return false;
@@ -325,12 +340,11 @@ export default function SalesAnalysisScreen() {
           tData = [1,2,3,4].map(week => ({label: `Wk ${week}`, value: 0})); 
           graphSourceList.forEach(o => {
               const dateStr = getValidDateStr(o);
-              const day = parseInt(dateStr.split('-')[2]); // Extracts DD from YYYY-MM-DD
+              const day = parseInt(dateStr.split('-')[2]); 
               const weekIdx = Math.min(Math.floor((day-1)/7), 3);
               tData[weekIdx].value += parseAmount(o.amount);
           });
       } else {
-          // FY View: Group by YYYY-MM explicitly
           const fyMonthsStr = [
               `${fyStartYear}-04`, `${fyStartYear}-05`, `${fyStartYear}-06`,
               `${fyStartYear}-07`, `${fyStartYear}-08`, `${fyStartYear}-09`,
@@ -347,7 +361,6 @@ export default function SalesAnalysisScreen() {
       }
       setTrendData(tData);
 
-      // 4. Product Stats Calculation
       const stats: Record<string, number> = {};
       graphSourceList.forEach((order: any) => {
           const rawName = order.productDetails || "Unknown";
@@ -388,7 +401,6 @@ export default function SalesAnalysisScreen() {
 
       <View style={styles.filterBox}>
           <View style={styles.tabContainer}>
-              {/* 🔥 CHANGED: FY Tab Included */}
               {['Day', 'Month', 'FY', 'All'].map((m) => (
                   <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
                       <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
@@ -406,7 +418,7 @@ export default function SalesAnalysisScreen() {
 
           <View style={styles.searchRow}>
               <View style={styles.searchBar}>
-                  <Ionicons name="search" size={20} color="gray" />
+                  {isDbLoading ? <ActivityIndicator size="small" color="#1565c0" /> : <Ionicons name="search" size={20} color="gray" />}
                   <TextInput 
                       style={styles.input}
                       placeholder="Search ID, Hospital..."
@@ -431,7 +443,6 @@ export default function SalesAnalysisScreen() {
 
       <ScrollView contentContainerStyle={{paddingBottom: 20}}>
         
-        {/* SUMMARY CARD */}
         <View style={styles.cardsContainer}>
             <TouchableOpacity style={styles.targetCard} onPress={handleGraph}>
                 <View style={styles.cardHeader}>
@@ -490,13 +501,17 @@ export default function SalesAnalysisScreen() {
             </TouchableOpacity>
         </View>
 
-        {/* LIST */}
         <View style={styles.listSection}>
             <Text style={styles.sectionHeader}>Confirmed Orders</Text>
             <FlatList 
                 data={renderedList}
                 keyExtractor={item => item.id}
                 scrollEnabled={false}
+                ListEmptyComponent={
+                    <View style={{alignItems:'center'}}>
+                        {isDbLoading ? <ActivityIndicator size="small" color="#1565c0" /> : <Text style={{color:'gray'}}>No confirmed orders found.</Text>}
+                    </View>
+                }
                 renderItem={({item}) => {
                     const totalAmt = parseAmount(item.amount);
                     
@@ -544,9 +559,7 @@ export default function SalesAnalysisScreen() {
                         </TouchableOpacity>
                     );
                 }}
-                ListEmptyComponent={<Text style={{textAlign:'center', color:'gray', marginTop:20}}>No confirmed orders found.</Text>}
                 
-                // 🔥 CHANGED: Wrap Load More Button with paddingBottom: 80
                 ListFooterComponent={
                     <View style={{ paddingBottom: 80 }}>
                         {visibleCount < displayList.length ? (
@@ -580,7 +593,6 @@ export default function SalesAnalysisScreen() {
         </View>
       </ScrollView>
 
-      {/* --- EMPLOYEE PICKER MODAL (ADMIN) --- */}
       <Modal visible={showEmpPicker} transparent animationType="slide">
           <View style={styles.modalOverlay}>
               <View style={styles.pickerContainer}>
@@ -604,7 +616,6 @@ export default function SalesAnalysisScreen() {
           </View>
       </Modal>
 
-      {/* ORDER DETAILS MODAL */}
       <Modal visible={poModalVisible} transparent={true} animationType="slide">
         <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
@@ -642,17 +653,12 @@ export default function SalesAnalysisScreen() {
                         <View style={styles.productBox}>
                             <Text style={{color:'#333', lineHeight:20}}>{selectedOrder.productDetails}</Text>
                         </View>
-                        
-                        {selectedOrder.poFileUri && (
-                            <Text style={{color:'#1565c0', marginTop:10, textDecorationLine:'underline'}}>View Attached PO Document</Text>
-                        )}
                     </ScrollView>
                 )}
             </View>
         </View>
       </Modal>
 
-      {/* GRAPH MODAL */}
       <Modal visible={graphModalVisible} transparent={true} animationType="slide">
           <View style={styles.modalOverlay}>
               <View style={styles.graphModalContent}>

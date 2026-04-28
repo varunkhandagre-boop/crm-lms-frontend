@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { collection, doc, getDocs, updateDoc } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -15,12 +14,17 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS (Direct DB calls removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 
 export default function SuperAdminDashboard() {
     const router = useRouter();
+    
+    // 🔥 Naya SaaS Engine
+    const { fetchSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+    
     const [companies, setCompanies] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
     
     // Modal State
     const [selectedCompany, setSelectedCompany] = useState<any>(null);
@@ -28,21 +32,19 @@ export default function SuperAdminDashboard() {
     const [editEmployeeLimit, setEditEmployeeLimit] = useState('');
 
     useEffect(() => {
-        fetchCompanies();
+        loadCompanies();
     }, []);
 
-    const fetchCompanies = async () => {
-        setLoading(true);
+    // 🔥 FETCH COMPANIES VIA SAAS HOOK
+    const loadCompanies = async () => {
         try {
-            const querySnapshot = await getDocs(collection(db, "companies"));
-            const list = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const data = await fetchSaaSData("companies");
             // Sort: Newest first
-            list.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-            setCompanies(list);
+            data.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            setCompanies(data);
         } catch (error) {
             Alert.alert("Error", "Could not fetch companies");
         }
-        setLoading(false);
     };
 
     const handleCardClick = (company: any) => {
@@ -51,29 +53,35 @@ export default function SuperAdminDashboard() {
         setModalVisible(true);
     };
 
-    // 🔥 NEW: Toggle Active/Inactive without changing Date
+    // 🔥 SAAS UPDATE: Toggle Active/Inactive
     const toggleCompanyStatus = async (value: boolean) => {
         if (!selectedCompany) return;
         
         try {
-            // Update Firestore
-            await updateDoc(doc(db, "companies", selectedCompany.id), {
+            const updates = {
                 isActive: value,
                 plan: value ? (selectedCompany.plan === 'Pending Approval' ? 'Trial Active' : selectedCompany.plan) : 'Disabled by Admin'
-            });
+            };
 
-            // Update Local State immediately for UI
-            setSelectedCompany({ ...selectedCompany, isActive: value });
-            
-            // Update List in background
-            fetchCompanies();
-            
-            Alert.alert("Success", `Company is now ${value ? "ACTIVE ✅" : "DISABLED 🚫"}`);
+            const res = await updateSaaSData("companies", selectedCompany.id, updates);
+
+            if (res.success) {
+                // Update Local State immediately for UI
+                setSelectedCompany({ ...selectedCompany, ...updates });
+                
+                // Update List seamlessly
+                setCompanies(prev => prev.map(c => c.id === selectedCompany.id ? { ...c, ...updates } : c));
+                
+                Alert.alert("Success", `Company is now ${value ? "ACTIVE ✅" : "DISABLED 🚫"}`);
+            } else {
+                Alert.alert("Error", "Could not update status");
+            }
         } catch (e) {
             Alert.alert("Error", "Could not update status");
         }
     };
 
+    // 🔥 SAAS UPDATE: Save Limits and Dates
     const updateCompanySettings = async (daysToAdd: number = 0) => {
         if (!selectedCompany) return;
         
@@ -93,16 +101,20 @@ export default function SuperAdminDashboard() {
                 
                 updates.expiryDate = newExpiry.toISOString();
                 
-                // 🔥 Auto-Activate if date extended
+                // Auto-Activate if date extended
                 updates.isActive = true; 
                 updates.plan = daysToAdd === 7 ? 'Trial Extended' : 'Paid Plan';
             }
 
-            await updateDoc(doc(db, "companies", selectedCompany.id), updates);
+            const res = await updateSaaSData("companies", selectedCompany.id, updates);
             
-            Alert.alert("Success ✅", "Company settings updated!");
-            setModalVisible(false);
-            fetchCompanies(); // Refresh List
+            if (res.success) {
+                Alert.alert("Success ✅", "Company settings updated!");
+                setModalVisible(false);
+                await loadCompanies(); // Refresh List
+            } else {
+                Alert.alert("Error", "Update failed");
+            }
 
         } catch (error) {
             Alert.alert("Error", "Update failed");
@@ -111,9 +123,9 @@ export default function SuperAdminDashboard() {
 
     const renderCompany = ({ item }: any) => {
         const isExpired = new Date(item.expiryDate) < new Date();
-        const isActive = item.isActive; // Firestore Status
+        const isActive = item.isActive; 
 
-        // 🔥 LOGIC: Badge Color & Text
+        // LOGIC: Badge Color & Text
         let badgeColor = '#e8f5e9'; // Green (Active)
         let textColor = 'green';
         let statusText = 'ACTIVE';
@@ -150,18 +162,19 @@ export default function SuperAdminDashboard() {
     return (
         <View style={styles.container}>
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.replace('/')}>
+                <TouchableOpacity onPress={() => router.replace('/' as any)}>
                     <Ionicons name="arrow-back" size={24} color="white" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Super Admin Panel</Text>
             </View>
 
-            {loading ? <ActivityIndicator size="large" color="#3b5998" style={{ marginTop: 50 }} /> :
+            {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" style={{ marginTop: 50 }} /> :
                 <FlatList
                     data={companies}
                     keyExtractor={item => item.id}
                     renderItem={renderCompany}
                     contentContainerStyle={{ padding: 15 }}
+                    ListEmptyComponent={<Text style={{textAlign:'center', marginTop: 20}}>No companies found.</Text>}
                 />
             }
 
@@ -179,7 +192,7 @@ export default function SuperAdminDashboard() {
 
                             <View style={styles.divider} />
 
-                            {/* 🔥 NEW: MASTER TOGGLE SWITCH */}
+                            {/* MASTER TOGGLE SWITCH */}
                             <View style={styles.statusRow}>
                                 <View>
                                     <Text style={styles.label}>Account Status</Text>
@@ -209,7 +222,7 @@ export default function SuperAdminDashboard() {
 
                             <View style={styles.divider} />
 
-                            {/* 🔥 CONTROLS */}
+                            {/* CONTROLS */}
                             <Text style={styles.sectionHeader}>Subscription Controls</Text>
                             
                             <Text style={styles.label}>Max Employees:</Text>
@@ -265,7 +278,7 @@ const styles = StyleSheet.create({
     value: { fontSize: 16, color: '#333', fontWeight: '500' },
     sectionHeader: { fontSize: 18, fontWeight:'bold', color:'#d32f2f', marginVertical: 10 },
     
-    // 🔥 New Status Row Style
+    // Status Row Style
     statusRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 15, borderRadius: 10, borderWidth: 1, borderColor: '#eee' },
 
     inputBox: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, width: 80, textAlign: 'center', fontSize: 16, fontWeight:'bold' },

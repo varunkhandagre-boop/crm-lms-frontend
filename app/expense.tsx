@@ -1,7 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-// Firebase Imports
-import { collection, doc, getDocs, query, writeBatch } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -16,15 +14,25 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function ExpenseScreen() {
   const router = useRouter();
-  const { expenseList = [], updateExpenseStatus, user, addNotification, refreshData } = useData();
+  
+  // 🔥 1. Context se User & Notification
+  const { currentUser, addNotification } = useData();
+
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded Master States
+  const [expenseList, setExpenseList] = useState<any[]>([]);
+  const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
 
   // STATES
-  // 🔥 CHANGED: 'Year' to 'FY'
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [searchText, setSearchText] = useState('');
@@ -33,47 +41,45 @@ export default function ExpenseScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [isSettling, setIsSettling] = useState(false);
 
-  // 🔥 NEW STATE FOR APPROVE/REJECT LOADING
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
 
-  // EMPLOYEE FILTER
-  const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All'); 
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  // 🔥 PAGINATION STATE (SMART LOAD MORE)
   const [visibleCount, setVisibleCount] = useState(20);
 
-  const canManage = ['Admin', 'Manager', 'Hr', 'Account', 'Accountant'].includes(user?.role || '');
+  const canManage = ['Admin', 'Manager', 'Hr', 'Account', 'Accountant', 'SuperAdmin'].includes(currentUser?.role || '');
 
-  // 🔥 RESET PAGINATION ON FILTER CHANGE
+  // RESET PAGINATION ON FILTER CHANGE
   useEffect(() => {
-      if (viewMode === 'Day') {
-          setVisibleCount(100); // Day view me sab dikha do
-      } else {
-          setVisibleCount(20); // Baki views me Load More use karo
-      }
+      if (viewMode === 'Day') setVisibleCount(100); 
+      else setVisibleCount(20); 
   }, [viewMode, currentDate, selectedEmployeeName, searchText]);
 
-  // 0. FETCH EMPLOYEES
+  // 🔥 4. LOAD DATA ON MOUNT
+  const loadData = async () => {
+      if (currentUser?.companyId) {
+          const [expenses, users] = await Promise.all([
+              fetchSaaSData("expenses"),
+              fetchSaaSData("users")
+          ]);
+          setExpenseList(expenses);
+
+          if (canManage) {
+              const uniqueMap = new Map();
+              users.forEach((u: any) => {
+                  if (u.name && !uniqueMap.has(u.name)) {
+                      uniqueMap.set(u.name, { id: u.id || '0', name: u.name });
+                  }
+              });
+              setEmployees([{ id: 'All', name: 'All' }, ...Array.from(uniqueMap.values())]);
+          }
+      }
+  };
+
   useEffect(() => {
-    if (canManage) {
-      const fetchEmployees = async () => {
-        try {
-          const q = query(collection(db, "users"));
-          const querySnapshot = await getDocs(q);
-          const usersData = querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            name: doc.data().name || 'Unknown User'
-          }));
-          const uniqueUsers = Array.from(new Set(usersData.map(a => a.name)))
-            .map(name => usersData.find(a => a.name === name));
-          setEmployees([{ id: 'All', name: 'All' }, ...uniqueUsers as any]);
-        } catch (error) {}
-      };
-      fetchEmployees();
-    }
-  }, [user]);
+      loadData();
+  }, [currentUser]);
 
   // 1. DATE PARSER
   const parseDate = (dateStr: any) => {
@@ -88,7 +94,6 @@ export default function ExpenseScreen() {
       return new Date(dateStr);
   };
 
-  // 🔥 CHANGED: FY Navigation
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
       if (viewMode === 'Day') d.setDate(d.getDate() + dir);
@@ -97,7 +102,6 @@ export default function ExpenseScreen() {
       setCurrentDate(d);
   };
 
-  // 🔥 CHANGED: Header Title logic for Financial Year
   const getHeaderDate = () => {
       if (viewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
       if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -110,7 +114,7 @@ export default function ExpenseScreen() {
       return "All Time";
   };
 
-  // --- 🔥 FILTER LOGIC ---
+  // --- FILTER LOGIC ---
   const getFilteredData = () => {
     let data = Array.isArray(expenseList) ? [...expenseList] : [];
 
@@ -120,8 +124,9 @@ export default function ExpenseScreen() {
             data = data.filter((item: any) => item.senderName === selectedEmployeeName);
         }
     } else {
-        if(user?.uid) {
-            data = data.filter((item: any) => item.senderId === user.uid);
+        if(currentUser?.uid || currentUser?.id) {
+            const myId = currentUser.uid || currentUser.id;
+            data = data.filter((item: any) => item.senderId === myId || item.userId === myId);
         }
     }
 
@@ -131,10 +136,9 @@ export default function ExpenseScreen() {
         const targetMonth = currentDate.getMonth();
         const targetDay = currentDate.getDate();
 
-        // 🔥 FY Boundaries Logic
         const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-        const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // 1st April
-        const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // 31st March
+        const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
+        const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
 
         data = data.filter(item => {
             if(!item.date) return false;
@@ -161,25 +165,19 @@ export default function ExpenseScreen() {
     return data;
   };
 
-  const fullFilteredList = getFilteredData(); // 🔥 Full Data (For Calculations)
-  
-  // 🔥 SLICE DATA FOR FLATLIST (For Performance)
+  const fullFilteredList = getFilteredData(); 
   const renderedList = fullFilteredList.slice(0, visibleCount);
 
-  // 🔥🔥 UPDATED CALCULATION LOGIC (Always uses Full Data) 🔥🔥
-  
-  // 1. Outstanding (Current Payable): Pending + Approved (Not Settled/Rejected)
   const outstandingAmount = fullFilteredList
       .filter((item: any) => item.status === 'Pending' || item.status === 'Approved')
       .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
 
-  // 2. Total History (Spent): Everything except Rejected
   const totalHistoryAmount = fullFilteredList
       .filter((item: any) => item.status !== 'Rejected')
       .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
 
 
-  // --- SETTLEMENT LOGIC ---
+  // 🔥 5. SAAS SETTLEMENT LOGIC (Batch Simulation)
   const handleSettlement = async () => {
       if (selectedEmployeeName === 'All') {
           Alert.alert("Error", "Please select a specific employee to settle accounts.");
@@ -204,17 +202,19 @@ export default function ExpenseScreen() {
   const processSettlement = async () => {
       setIsSettling(true);
       try {
-          const batch = writeBatch(db);
-          // Settle both Pending & Approved
           const itemsToSettle = fullFilteredList.filter(item => item.status === 'Pending' || item.status === 'Approved');
 
-          itemsToSettle.forEach((item) => {
-              const ref = doc(db, "expenses", item.id);
-              batch.update(ref, { status: 'Settled', settlementDate: new Date().toISOString() });
+          // Running multiple update requests parallelly through SaaS Engine
+          const promises = itemsToSettle.map(item => {
+              return updateSaaSData("expenses", item.id, { 
+                  status: 'Settled', 
+                  settlementDate: new Date().toISOString() 
+              });
           });
 
-          await batch.commit();
-          if(refreshData) await refreshData();
+          await Promise.all(promises);
+          
+          await loadData(); // Silent Reload
           Alert.alert("Success", "Expenses Settled! Balance is now 0.");
       } catch (error) {
           Alert.alert("Error", "Settlement failed.");
@@ -228,15 +228,15 @@ export default function ExpenseScreen() {
       setModalVisible(true);
   };
 
-  // --- 🔥 UPDATED APPROVAL LOGIC (WITH LOADING) ---
+  // 🔥 6. SAAS STATUS UPDATE LOGIC
   const handleStatusUpdate = async (status: string) => {
-      if(updateExpenseStatus) {
-          setUpdatingStatus(status); // Start Loading
-          try {
-              await updateExpenseStatus(selectedItem.id, status);
+      setUpdatingStatus(status); 
+      try {
+          const res = await updateSaaSData("expenses", selectedItem.id, { status: status });
 
+          if (res.success) {
               const targetUserId = selectedItem.senderId || selectedItem.userId;
-              if (addNotification && targetUserId && targetUserId !== user?.uid) {
+              if (addNotification && targetUserId && targetUserId !== (currentUser?.id || currentUser?.uid)) {
                   await addNotification({
                       title: `Expense Claim ${status}`,
                       message: `Your claim of ₹${selectedItem.amount} has been ${status}.`,
@@ -246,18 +246,22 @@ export default function ExpenseScreen() {
                       route: '/expense'
                   });
               }
+              
+              setExpenseList(prev => prev.map(item => item.id === selectedItem.id ? { ...item, status: status } : item));
               setModalVisible(false);
               Alert.alert("Updated", `Claim marked as ${status}`);
-          } catch (error) {
+          } else {
               Alert.alert("Error", "Could not update status.");
-          } finally {
-              setUpdatingStatus(null); // Stop Loading
           }
+      } catch (error) {
+          Alert.alert("Error", "Could not update status.");
+      } finally {
+          setUpdatingStatus(null); 
       }
   };
 
   const renderItem = ({ item }: any) => {
-    let statusColor = '#fff3e0'; // Pending
+    let statusColor = '#fff3e0'; 
     let statusTextCol = '#ef6c00';
 
     if (item.status === 'Approved') { statusColor = '#e8f5e9'; statusTextCol = '#2e7d32'; }
@@ -301,17 +305,14 @@ export default function ExpenseScreen() {
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Expense Claim</Text>
         </View>
-        <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_expense')}>
+        <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_expense' as any)}>
             <Ionicons name="add" size={20} color="white" />
             <Text style={{color:'white', fontWeight:'bold', marginLeft:5}}>Add Claim</Text>
         </TouchableOpacity>
       </View>
 
-      {/* 🔥 DUAL BALANCE CARD */}
       <View style={styles.balanceContainer}>
           <View style={{flexDirection:'row', justifyContent:'space-between', width:'100%'}}>
-              
-              {/* Outstanding Box */}
               <View style={{alignItems:'center', flex:1}}>
                   <Text style={styles.statLabel}>Outstanding (Due)</Text>
                   <Text style={[styles.statValue, {color:'#d32f2f'}]}>₹{outstandingAmount.toLocaleString()}</Text>
@@ -319,7 +320,6 @@ export default function ExpenseScreen() {
 
               <View style={styles.vDivider} />
 
-              {/* Total History Box */}
               <View style={{alignItems:'center', flex:1}}>
                   <Text style={styles.statLabel}>Total Spent</Text>
                   <Text style={[styles.statValue, {color:'#3b5998'}]}>₹{totalHistoryAmount.toLocaleString()}</Text>
@@ -344,7 +344,6 @@ export default function ExpenseScreen() {
 
       <View style={{backgroundColor:'white', paddingBottom:10}}>
           <View style={styles.tabContainer}>
-              {/* 🔥 CHANGED: 'Year' to 'FY' */}
               {['Day', 'Month', 'FY', 'All'].map((m) => (
                   <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
                       <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
@@ -372,7 +371,7 @@ export default function ExpenseScreen() {
 
           <View style={{paddingHorizontal:15}}>
               <View style={styles.searchBar}>
-                  <Ionicons name="search" size={20} color="gray" />
+                  {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
                   <TextInput 
                       style={styles.searchInput}
                       placeholder={canManage ? "Search Name, Amount..." : "Search Amount, Type..."}
@@ -392,10 +391,9 @@ export default function ExpenseScreen() {
         ListEmptyComponent={
             <View style={{alignItems:'center', marginTop:50}}>
                 <Ionicons name="receipt-outline" size={60} color="#ddd" />
-                <Text style={{textAlign:'center', marginTop:10, color:'gray'}}>No expense records found.</Text>
+                <Text style={{textAlign:'center', marginTop:10, color:'gray'}}>{isDbLoading ? 'Loading expenses...' : 'No expense records found.'}</Text>
             </View>
         }
-        // 🔥 LOAD MORE BUTTON WRAPPED IN VIEW
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
                 {visibleCount < fullFilteredList.length ? (
@@ -436,7 +434,7 @@ export default function ExpenseScreen() {
                   </View>
 
                   {selectedItem && (
-                      <ScrollView>
+                      <ScrollView showsVerticalScrollIndicator={false}>
                           {canManage && <View style={{backgroundColor:'#e3f2fd', padding:10, borderRadius:8, marginBottom:10}}><Text style={{color:'#1565c0', fontWeight:'bold', textAlign:'center'}}>👤 {selectedItem.senderName}</Text></View>}
                           
                           <DetailRow label="Date" value={selectedItem.date} icon="calendar" />
@@ -445,7 +443,6 @@ export default function ExpenseScreen() {
                           <View style={styles.divider} />
                           <DetailRow label="Amount" value={`₹ ${selectedItem.amount}`} icon="cash" highlight />
                           
-                          {/* Show Paid Label if Settled */}
                           {selectedItem.status === 'Settled' && (
                               <Text style={{textAlign:'center', color:'green', fontWeight:'bold', marginBottom:10}}>( PAID / SETTLED )</Text>
                           )}
@@ -461,7 +458,6 @@ export default function ExpenseScreen() {
                               </View>
                           ) : <Text style={{fontSize:12, color:'gray', fontStyle:'italic'}}>No bill attached.</Text>}
 
-                          {/* 🔥 UPDATED ACTION BUTTONS WITH BLUR & LOADING */}
                           {canManage && selectedItem.status === 'Pending' && (
                               <View style={styles.actionContainer}>
                                   <TouchableOpacity 

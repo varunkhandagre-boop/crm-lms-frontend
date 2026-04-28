@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-    ActivityIndicator, // 🔥 Added ActivityIndicator
+    ActivityIndicator,
     Alert,
     Image,
     KeyboardAvoidingView,
@@ -15,10 +15,14 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+
+// 🔥 SAAS IMPORTS
 import { useData } from './context/DataContext';
 
 export default function LoginScreen() {
   const router = useRouter();
+  
+  // 🔥 SaaS Auth System is mapped via DataContext's login function
   const { login } = useData();
 
   const [email, setEmail] = useState('');
@@ -29,7 +33,7 @@ export default function LoginScreen() {
   const [branding, setBranding] = useState({
       name: 'LMS',
       tagline: 'Field Force Automation',
-      logo: null
+      logo: null as string | null
   });
 
   // Load Branding from Local Storage
@@ -50,6 +54,7 @@ export default function LoginScreen() {
       loadBranding();
   }, []);
 
+  // 🔥 SAAS LOGIN LOGIC
   const handleLogin = async () => {
       if(!email || !password) {
           Alert.alert("Missing Details", "Please enter valid Email & Password.");
@@ -59,7 +64,9 @@ export default function LoginScreen() {
       setIsLoading(true); 
       
       try {
-          const success = await login(email, password);
+          // The underlying login function in context will now fetch the user document,
+          // which includes the companyId, effectively routing them to their tenant's isolated data.
+          const success = await login(email.trim().toLowerCase(), password);
           
           if (success) {
               router.replace('/'); 
@@ -126,7 +133,7 @@ export default function LoginScreen() {
                   />
               </View>
 
-              {/* 🔥 UPDATED LOGIN BUTTON WITH BLUR AND SPINNER */}
+              {/* LOGIN BUTTON WITH SPINNER */}
               <TouchableOpacity 
                   style={[styles.loginBtn, isLoading && { opacity: 0.6 }]} 
                   onPress={handleLogin} 

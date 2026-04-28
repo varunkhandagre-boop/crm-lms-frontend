@@ -17,27 +17,35 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+
+// 🔥 SAAS IMPORTS (Firebase direct DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
-// FIREBASE IMPORTS
-import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
-
-// PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
 export default function PaymentCollection() {
     const router = useRouter();
-    const { paymentList, currentUser, orgList, userList, companyProfile } = useData();
+    
+    // 🔥 1. Context se sirf user aur company profile nikala
+    const { currentUser, companyProfile } = useData();
+
+    // 🔥 2. Naya SaaS Engine connect kiya
+    const { fetchSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+
+    // 🔥 3. Lazy Loaded Master States
+    const [paymentList, setPaymentList] = useState<any[]>([]);
+    const [orgList, setOrgList] = useState<any[]>([]);
+    const [userList, setUserList] = useState<any[]>([]);
 
     const [historySearch, setHistorySearch] = useState(''); 
     const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
     const [historyDate, setHistoryDate] = useState(new Date()); 
     const [selectedHistoryItem, setSelectedHistoryItem] = useState<any>(null); 
     
-    // 🔥 EDIT STATES UPGRADED
+    // EDIT STATES
     const [isEditing, setIsEditing] = useState(false);
     const [editAmount, setEditAmount] = useState('');
     const [editNotes, setEditNotes] = useState('');
@@ -50,22 +58,39 @@ export default function PaymentCollection() {
     const [selectedEmployee, setSelectedEmployee] = useState('All');
     const [showEmployeeModal, setShowEmployeeModal] = useState(false);
     const [showBankModal, setShowBankModal] = useState(false);
-    const [showEditModeModal, setShowEditModeModal] = useState(false); // Mode change picker
+    const [showEditModeModal, setShowEditModeModal] = useState(false); 
 
     const [visibleCount, setVisibleCount] = useState(20);
     const paymentModes = ['Cash', 'UPI', 'NEFT', 'RTGS', 'Cheque'];
 
+    const isAdmin = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
+
     useEffect(() => {
-        if (viewMode === 'Day') {
-            setVisibleCount(500); 
-        } else {
-            setVisibleCount(20); 
-        }
+        if (viewMode === 'Day') setVisibleCount(500); 
+        else setVisibleCount(20); 
     }, [viewMode, historyDate, historySearch, selectedEmployee]);
+
+    // 🔥 4. MASSIVE DATA LOAD ON MOUNT
+    const loadData = async () => {
+        if (currentUser?.companyId) {
+            const [payments, orgs, users] = await Promise.all([
+                fetchSaaSData("payments"),
+                fetchSaaSData("organizations"),
+                fetchSaaSData("users")
+            ]);
+            setPaymentList(payments);
+            setOrgList(orgs);
+            setUserList(users);
+        }
+    };
+
+    useEffect(() => {
+        loadData();
+    }, [currentUser]);
 
     const qrImageSource = companyProfile?.qrCodeUrl 
         ? { uri: companyProfile.qrCodeUrl } 
-        : require('../assets/images/lmsqrcode.jpeg'); 
+        : require('../assets/images/icon.png'); 
         
     const myUpiId = companyProfile?.upiId || "No UPI ID Set"; 
 
@@ -88,9 +113,6 @@ export default function PaymentCollection() {
         return banks;
     }, [companyProfile]);
 
-    const isAdmin = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr'].includes(currentUser?.role);
-
-    // 🔥 SMART LABEL HELPER
     const getRefLabel = (mode: string) => {
         if (mode === 'UPI') return 'UPI Transaction ID';
         if (mode === 'NEFT' || mode === 'RTGS') return 'UTR Number';
@@ -98,7 +120,6 @@ export default function PaymentCollection() {
         return 'Reference Number';
     };
 
-    // Reset Edit State
     useEffect(() => {
         if (selectedHistoryItem) {
             setIsEditing(false);
@@ -274,22 +295,35 @@ export default function PaymentCollection() {
         }
     };
 
+    // 🔥 5. SAAS ENGINE UPDATE LOGIC
     const handleUpdate = async () => {
         if (!selectedHistoryItem) return;
         setLoading(true);
         try {
-            const payRef = doc(db, "payment_collections", selectedHistoryItem.id);
-            await updateDoc(payRef, {
+            const res = await updateSaaSData("payments", selectedHistoryItem.id, {
                 amount: parseFloat(editAmount) || 0,
                 notes: editNotes,
                 mode: editModeVal,
                 refNumber: editRefNumber
             });
-            Alert.alert("Success", "Receipt Updated!");
-            setIsEditing(false);
-            setSelectedHistoryItem(null); 
+
+            if (res.success) {
+                setPaymentList(prev => prev.map(item => item.id === selectedHistoryItem.id ? { 
+                    ...item, 
+                    amount: parseFloat(editAmount) || 0,
+                    notes: editNotes,
+                    mode: editModeVal,
+                    refNumber: editRefNumber
+                } : item));
+                
+                Alert.alert("Success", "Receipt Updated!");
+                setIsEditing(false);
+                setSelectedHistoryItem(null); 
+            } else {
+                Alert.alert("Error", "Could not update payment.");
+            }
         } catch (error: any) {
-            Alert.alert("Error", error.message);
+            Alert.alert("Error", "Could not update payment.");
         } finally {
             setLoading(false);
         }
@@ -355,7 +389,7 @@ export default function PaymentCollection() {
         if (isAdmin && selectedEmployee !== 'All') {
             data = data.filter((p: any) => p.userName === selectedEmployee || p.senderName === selectedEmployee);
         } else if (!isAdmin) {
-            data = data.filter((p: any) => p.senderId === currentUser?.id || p.userName === currentUser?.name);
+            data = data.filter((p: any) => p.senderId === currentUser?.id || p.senderId === currentUser?.uid || p.userName === currentUser?.name);
         }
         
         if (historySearch) {
@@ -376,8 +410,9 @@ export default function PaymentCollection() {
             const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59); 
 
             data = data.filter((item: any) => {
-                if(!item.date) return false;
-                const itemDate = parseDate(item.date); 
+                const dateVal = item.dateIso || item.createdAt || item.date;
+                if(!dateVal) return false;
+                const itemDate = parseDate(dateVal); 
                 
                 if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
                 if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
@@ -385,7 +420,7 @@ export default function PaymentCollection() {
                 return true;
             });
         }
-        return data.sort((a: any, b: any) => parseDate(b.date).getTime() - parseDate(a.date).getTime());
+        return data.sort((a: any, b: any) => parseDate(b.dateIso || b.date).getTime() - parseDate(a.dateIso || a.date).getTime());
     };
 
     const fullFilteredList = getMyFilteredHistory(); 
@@ -516,7 +551,7 @@ export default function PaymentCollection() {
                 )}
 
                 <View style={styles.searchBar}>
-                    <Ionicons name="search" size={18} color="gray" />
+                    {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={18} color="gray" />}
                     <TextInput style={styles.searchInput} placeholder="Search Party, Amount, Bill..." value={historySearch} onChangeText={setHistorySearch} />
                     {historySearch.length > 0 && <TouchableOpacity onPress={() => setHistorySearch('')}><Ionicons name="close-circle" size={18} color="gray" /></TouchableOpacity>}
                 </View>
@@ -532,7 +567,7 @@ export default function PaymentCollection() {
                 keyExtractor={item => item.id} 
                 contentContainerStyle={{padding: 5, paddingBottom: 100}} 
                 renderItem={renderItem} 
-                ListEmptyComponent={<View style={{alignItems:'center', marginTop:50}}><Ionicons name="documents-outline" size={50} color="#ccc" /><Text style={{color:'gray', marginTop:10}}>No Collections Found</Text></View>} 
+                ListEmptyComponent={<View style={{alignItems:'center', marginTop:50}}><Ionicons name="documents-outline" size={50} color="#ccc" /><Text style={{color:'gray', marginTop:10}}>{isDbLoading ? 'Loading payments...' : 'No Collections Found'}</Text></View>} 
                 
                 ListFooterComponent={
                     <View style={{ paddingBottom: 80 }}>
@@ -813,7 +848,6 @@ const styles = StyleSheet.create({
     empItem: { paddingVertical:15, borderBottomWidth:1, borderBottomColor:'#eee', flexDirection:'row', justifyContent:'space-between' },
     shareBtnSmall: { flexDirection:'row', alignItems:'center', backgroundColor:'#27ae60', paddingVertical:6, paddingHorizontal:12, borderRadius:15, alignSelf:'flex-end', marginTop:8 },
     
-    // 🔥 NEW EDIT STYLES
     editInput: { borderWidth:1, borderColor:'#3b5998', borderRadius:8, padding:10, fontSize:15, width:'100%', backgroundColor:'#f0f4ff', marginBottom:10 },
     editDropdown: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth:1, borderColor:'#3b5998', borderRadius:8, padding:10, backgroundColor:'#f0f4ff', marginBottom:10 },
     actionBtn: { padding:12, borderRadius:8, alignItems:'center' }

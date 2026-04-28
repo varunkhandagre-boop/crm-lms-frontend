@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { collection, getDocs, query } from 'firebase/firestore';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -15,7 +14,9 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { db } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 // 🔥 PDF IMPORTS
@@ -25,14 +26,22 @@ import * as Sharing from 'expo-sharing';
 
 export default function PMSScheduleScreen() {
   const router = useRouter();
-  // 🔥 Added orgList to fetch missing address for PDF
-  const { pmsList = [], orgList = [], user, refreshData, companyProfile } = useData(); 
+  
+  // 🔥 1. Context se sirf current user & profile nikala
+  const { currentUser, companyProfile } = useData(); 
+
+  // 🔥 2. Naya SaaS Engine connect kiya
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded Master States
+  const [pmsList, setPmsList] = useState<any[]>([]);
+  const [orgList, setOrgList] = useState<any[]>([]);
+  const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
 
   // --- STATES ---
   const [filter, setFilter] = useState<'All' | 'Upcoming' | 'Completed' | 'Overdue'>('All');
   const [searchText, setSearchText] = useState('');
   
-  // 🔥 CHANGED: 'Year' to 'FY'
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
 
@@ -42,15 +51,14 @@ export default function PMSScheduleScreen() {
   const [generatingPdf, setGeneratingPdf] = useState(false); 
 
   // --- EMPLOYEE FILTER ---
-  const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
   const [selectedEmployee, setSelectedEmployee] = useState('All');
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  // 🔥 PAGINATION STATE (SMART LOAD MORE)
   const [visibleCount, setVisibleCount] = useState(20);
 
-  // 🔥 RESET PAGINATION ON FILTER CHANGE
+  const isAdmin = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
+
   useEffect(() => {
       if (viewMode === 'Day') {
           setVisibleCount(500); 
@@ -59,27 +67,42 @@ export default function PMSScheduleScreen() {
       }
   }, [viewMode, currentDate, searchText, filter, selectedEmployee]);
 
-  const isAdmin = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr'].includes(user?.role || '');
+  // 🔥 4. LOAD SAAS DATA
+  const loadData = async () => {
+      if (currentUser?.companyId) {
+          const [pms, orgs, users] = await Promise.all([
+              fetchSaaSData("pms_reports"),
+              fetchSaaSData("organizations"),
+              fetchSaaSData("users")
+          ]);
+          setPmsList(pms);
+          setOrgList(orgs);
 
-  // --- FETCH EMPLOYEES ---
+          if (isAdmin) {
+              const mappedUsers = users.map((u: any) => ({
+                  id: u.id,
+                  name: u.name || 'Unknown User'
+              }));
+              setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
+          }
+      }
+  };
+
   useEffect(() => {
-    if (isAdmin) {
-      const fetchEmployees = async () => {
-        try {
-          const q = query(collection(db, "users"));
-          const querySnapshot = await getDocs(q);
-          const usersData = querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            name: doc.data().name || 'Unknown User'
-          }));
-          setEmployees([{ id: 'All', name: 'All Staff' }, ...usersData]);
-        } catch (error) {
-          console.log("Error fetching employees:", error);
-        }
-      };
-      fetchEmployees();
-    }
-  }, [user]);
+      loadData();
+  }, [currentUser]);
+
+  useFocusEffect(
+      useCallback(() => { 
+          loadData(); 
+      }, [])
+  );
+
+  const onRefresh = async () => {
+      setRefreshing(true);
+      await loadData();
+      setRefreshing(false);
+  };
 
   // --- HELPER: CHECK STATUS ---
   const isTaskCompleted = (status: string) => {
@@ -113,7 +136,6 @@ export default function PMSScheduleScreen() {
     return new Date(dateStr).getTime();
   };
 
-  // Add Months Logic
   const addMonths = (dateStr: any, months: number) => {
     let timestamp = parseDate(dateStr);
     if (!timestamp) timestamp = new Date().getTime();
@@ -127,7 +149,6 @@ export default function PMSScheduleScreen() {
     return `${yyyy}-${mm}-${dd}`;
   };
 
-  // 🔥 CHANGED: FY Navigation
   const changeDate = (dir: number) => {
     const d = new Date(currentDate);
     if (viewMode === 'Day') d.setDate(d.getDate() + dir);
@@ -136,7 +157,6 @@ export default function PMSScheduleScreen() {
     setCurrentDate(d);
   };
 
-  // 🔥 CHANGED: Header Title logic for Financial Year
   const getHeaderDate = () => {
     if (viewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -149,11 +169,9 @@ export default function PMSScheduleScreen() {
     return "All Time";
   };
 
-  // 🔥 PDF GENERATOR FOR PMS REPORT
   const generatePMSPDF = async (pmsData: any) => {
     setGeneratingPdf(true);
     try {
-        // 🔥 SMART ADDRESS FALLBACK
         let orgAddr = pmsData.address || '';
         let orgCity = pmsData.city || '';
         
@@ -209,7 +227,7 @@ export default function PMSScheduleScreen() {
             <div class="box">
                 <div class="row">
                     <div><span class="label">PMS Type:</span> <b>${pmsData.type || 'Preventive'}</b></div>
-                    <div><span class="label">Date:</span> ${new Date(pmsData.lastDoneDate || pmsData.date).toLocaleDateString('en-GB')}</div>
+                    <div><span class="label">Date:</span> ${new Date(pmsData.lastDoneDate || pmsData.dateIso || pmsData.date).toLocaleDateString('en-GB')}</div>
                 </div>
             </div>
 
@@ -271,13 +289,12 @@ export default function PMSScheduleScreen() {
     }
   };
 
-  // --- DATA PROCESSING ---
   const getProcessedList = () => {
     if (!pmsList) return [];
     return pmsList.map((item: any) => {
-      let computedDueDate = item.dueDate;
+      let computedDueDate = item.dueDate || item.nextServiceDate;
       if (!computedDueDate) {
-        const baseDate = item.lastDoneDate || item.date || item.createdAt || new Date();
+        const baseDate = item.lastDoneDate || item.dateIso || item.date || item.createdAt || new Date();
         computedDueDate = addMonths(baseDate, 3);
       }
       return { ...item, computedDueDate };
@@ -285,16 +302,6 @@ export default function PMSScheduleScreen() {
   };
 
   const processedList = getProcessedList();
-
-  useFocusEffect(
-    useCallback(() => { if (refreshData) refreshData(); }, [refreshData])
-  );
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    if (refreshData) await refreshData();
-    setTimeout(() => setRefreshing(false), 1000);
-  }, [refreshData]);
 
   // --- 🔥 MAIN FILTER LOGIC ---
   const getFilteredData = () => {
@@ -309,7 +316,8 @@ export default function PMSScheduleScreen() {
         (item.senderName === selectedEmployeeName)
       );
     } else if (!isAdmin) {
-      data = data.filter((item: any) => item.userId === user?.uid || item.engineerId === user?.uid);
+      const myId = currentUser?.uid || currentUser?.id;
+      data = data.filter((item: any) => item.userId === myId || item.engineerId === myId || item.senderId === myId);
     }
 
     // 1. Search Logic
@@ -339,7 +347,7 @@ export default function PMSScheduleScreen() {
       });
     }
 
-    // 3. DATE FILTER (🔥 FY Boundaries added)
+    // 3. DATE FILTER (FY Boundaries)
     const shouldApplyDateFilter = viewMode !== 'All' && (filter === 'All' || filter === 'Completed');
 
     if (shouldApplyDateFilter) {
@@ -347,15 +355,14 @@ export default function PMSScheduleScreen() {
       const tMonth = currentDate.getMonth();
       const tDay = currentDate.getDate();
 
-      // FY Boundaries Logic
       const fyStartYear = tMonth >= 3 ? tYear : tYear - 1;
-      const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // 1st April
-      const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // 31st March
+      const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
+      const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
 
       data = data.filter((item: any) => {
         let dateField;
         if (isTaskCompleted(item.status)) {
-          dateField = item.lastDoneDate || item.date;
+          dateField = item.lastDoneDate || item.dateIso || item.date;
         } else {
           dateField = item.computedDueDate;
         }
@@ -378,8 +385,8 @@ export default function PMSScheduleScreen() {
       if (filter === 'Upcoming' || filter === 'Overdue') {
         return parseDate(a.computedDueDate) - parseDate(b.computedDueDate);
       }
-      const dateA = isTaskCompleted(a.status) ? parseDate(a.lastDoneDate || a.date) : parseDate(a.computedDueDate);
-      const dateB = isTaskCompleted(b.status) ? parseDate(b.lastDoneDate || b.date) : parseDate(b.computedDueDate);
+      const dateA = isTaskCompleted(a.status) ? parseDate(a.lastDoneDate || a.dateIso || a.date) : parseDate(a.computedDueDate);
+      const dateB = isTaskCompleted(b.status) ? parseDate(b.lastDoneDate || b.dateIso || b.date) : parseDate(b.computedDueDate);
       return dateA - dateB;
     });
 
@@ -483,7 +490,6 @@ export default function PMSScheduleScreen() {
 
   return (
     <View style={styles.container}>
-      {/* HEADER */}
       <View style={styles.header}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <TouchableOpacity onPress={() => router.back()}>
@@ -497,10 +503,8 @@ export default function PMSScheduleScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* FILTERS */}
       <View style={{ backgroundColor: 'white', paddingBottom: 10, marginBottom: 5 }}>
         <View style={styles.tabContainer}>
-          {/* 🔥 CHANGED: 'Year' to 'FY' */}
           {['Day', 'Month', 'FY', 'All'].map((m) => (
             <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
               <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
@@ -508,7 +512,6 @@ export default function PMSScheduleScreen() {
           ))}
         </View>
 
-        {/* --- ADMIN STAFF DROPDOWN --- */}
         {isAdmin && (
           <View style={{ paddingHorizontal: 15, marginBottom: 10 }}>
             <TouchableOpacity
@@ -532,9 +535,8 @@ export default function PMSScheduleScreen() {
           </View>
         )}
 
-        {/* SEARCH */}
         <View style={styles.searchBar}>
-          <Ionicons name="search" size={20} color="gray" />
+          {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
           <TextInput
             style={styles.input}
             placeholder="Search Hospital, Machine, Serial..."
@@ -564,9 +566,11 @@ export default function PMSScheduleScreen() {
         contentContainerStyle={{ padding: 5, paddingBottom: 100 }}
         renderItem={renderItem}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        ListEmptyComponent={<Text style={{ textAlign: 'center', marginTop: 50, color: 'gray' }}>No Data Found</Text>}
-        
-        // 🔥 LOAD MORE BUTTON WRAPPED WITH PADDING
+        ListEmptyComponent={
+            <View style={{ alignItems: 'center', marginTop: 50 }}>
+                {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{ color: 'gray' }}>No Data Found</Text>}
+            </View>
+        }
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
                 {visibleCount < fullList.length ? (
@@ -598,7 +602,6 @@ export default function PMSScheduleScreen() {
         }
       />
 
-      {/* DETAILS MODAL */}
       <Modal visible={modalVisible} transparent={true} animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -632,7 +635,7 @@ export default function PMSScheduleScreen() {
                 <View style={styles.dateRowBox}>
                   <View style={{ alignItems: 'center', flex: 1 }}>
                     <Text style={{ fontSize: 10, color: 'gray' }}>LAST DONE</Text>
-                    <Text style={{ fontWeight: 'bold' }}>{selectedItem.lastDoneDate || selectedItem.date || '-'}</Text>
+                    <Text style={{ fontWeight: 'bold' }}>{selectedItem.lastDoneDate || selectedItem.dateIso || selectedItem.date || '-'}</Text>
                   </View>
                   <View style={{ width: 1, backgroundColor: '#ccc', height: '100%' }} />
                   <View style={{ alignItems: 'center', flex: 1 }}>
@@ -669,7 +672,6 @@ export default function PMSScheduleScreen() {
         </View>
       </Modal>
 
-      {/* EMPLOYEE PICKER MODAL */}
       <Modal visible={showEmployeePicker} transparent animationType="fade">
         <TouchableOpacity style={styles.pickerOverlay} onPress={() => setShowEmployeePicker(false)}>
           <View style={styles.pickerContainer}>
@@ -710,53 +712,46 @@ const DetailRow = ({ label, value, highlight, color }: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 6, paddingTop: 50, backgroundColor: 'white', elevation: 4 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 10, paddingTop: 50, backgroundColor: 'white', elevation: 4, alignItems:'center' },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
-  addBtn: { flexDirection: 'row', backgroundColor: '#3b5998', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, alignItems: 'center' },
-
+  addBtn: { flexDirection:'row', backgroundColor:'#3b5998', paddingVertical:6, paddingHorizontal:12, borderRadius:20, alignItems:'center' },
+  filterBox: { backgroundColor:'white', padding:15, paddingBottom:10, marginBottom:5 },
   tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', margin: 10, borderRadius: 8, padding: 2, marginBottom: 5 },
   tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
   activeTab: { backgroundColor: 'white', elevation: 2 },
   tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
   activeTabText: { color: '#3b5998', fontWeight: 'bold' },
-
-  employeeFilterBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e8f5e9', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2e7d32' },
-
-  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 4, marginHorizontal: 15, borderRadius: 8, marginBottom: 5, borderWidth: 1, borderColor: '#eee' },
-  monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
-
-  searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', marginHorizontal: 15, paddingHorizontal: 10, borderRadius: 8, height: 36, alignItems: 'center', marginBottom: 5 },
+  navRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 8, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#eee' },
+  navText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
+  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f0f0', marginHorizontal: 15, paddingHorizontal: 10, borderRadius: 8, height: 36, marginBottom: 5 },
   input: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
-
   filterChip: { paddingHorizontal: 15, paddingVertical: 6, backgroundColor: '#eee', borderRadius: 20, marginRight: 10 },
   activeChip: { backgroundColor: '#3b5998' },
   chipText: { fontSize: 12, color: '#555' },
-
+  employeeFilterBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e8f5e9', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2e7d32' },
+  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 4, marginHorizontal: 15, borderRadius: 8, marginBottom: 5, borderWidth: 1, borderColor: '#eee' },
+  monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
   card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 15, elevation: 2, borderLeftWidth: 4, borderLeftColor: '#2196f3' },
   cardOverdue: { borderLeftColor: '#d32f2f' },
   cardDone: { borderLeftColor: '#4caf50' },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   hospitalName: { fontSize: 15, fontWeight: 'bold', color: '#333', flex: 1, marginRight: 5 },
-  
   dateBadge: { backgroundColor: '#f9f9f9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, alignItems: 'flex-end', minWidth: 80 },
   dateText: { fontSize: 12, fontWeight: 'bold', marginLeft: 4 },
   contractBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
   contractText: { fontSize: 10, fontWeight: 'bold' },
   actionBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#e3f2fd', paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6 },
   btnText: { color: '#3b5998', fontWeight: 'bold', marginRight: 5, fontSize: 11 },
-
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { width: '90%', backgroundColor: 'white', borderRadius: 15, padding: 25, elevation: 5, maxHeight: '85%' },
-  modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
+  modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 25, elevation: 5, maxHeight: '85%' },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
   sectionHeader: { fontSize: 12, fontWeight: 'bold', color: '#999', marginBottom: 8, marginTop: 5 },
   infoSection: { marginBottom: 15 },
   dateRowBox: { flexDirection: 'row', backgroundColor: '#f5f5f5', padding: 10, borderRadius: 8, marginBottom: 10 },
   noteBox: { backgroundColor: '#fff3e0', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ffe0b2' },
   noteText: { fontSize: 13, color: '#e65100', fontStyle: 'italic' },
-
   pdfBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#e3f2fd', padding: 12, borderRadius: 8, marginTop: 15, borderWidth: 1, borderColor: '#2196f3' },
   pdfBtnText: { color: '#1565c0', fontWeight: 'bold', marginLeft: 8 },
-
   pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
   pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation: 10 },
   pickerHeader: { fontWeight: 'bold', fontSize: 16, marginBottom: 10, color: '#3b5998', textAlign: 'center' },

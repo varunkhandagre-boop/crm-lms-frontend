@@ -3,11 +3,12 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import { collection, getDocs, query } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import * as XLSX from 'xlsx';
-import { db } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS (Direct Firestore imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function CombinedActivityScreen() {
@@ -15,16 +16,73 @@ export default function CombinedActivityScreen() {
   
   const [activeTab, setActiveTab] = useState<'timeline' | 'employee' | 'download'>('timeline');
 
-  const { 
-      userList = [], attendanceList = [], courierList = [], serviceCallList = [], 
-      orderList = [], demoList = [], installList = [], paymentList = [], taskList = [],
-      pmsList = [], salesVisitList = [], leadsList = [], locationLogs = [],
-      expenseList = [], advanceList = [], leaveList = [], travelList = [], orgList = [],
-      user
-  } = useData();
+  // 🔥 1. Context se sirf user aur profile nikala
+  const { currentUser, companyProfile } = useData();
 
-  const userRole = (user?.role || '').toLowerCase().trim();
-  const isFinanceRole = ['admin', 'manager', 'account', 'accountant'].includes(userRole);
+  // 🔥 2. SaaS Engine connect kiya
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded Master States
+  const [userList, setUserList] = useState<any[]>([]);
+  const [attendanceList, setAttendanceList] = useState<any[]>([]);
+  const [courierList, setCourierList] = useState<any[]>([]);
+  const [serviceCallList, setServiceCallList] = useState<any[]>([]);
+  const [orderList, setOrderList] = useState<any[]>([]);
+  const [demoList, setDemoList] = useState<any[]>([]);
+  const [installList, setInstallList] = useState<any[]>([]);
+  const [paymentList, setPaymentList] = useState<any[]>([]);
+  const [taskList, setTaskList] = useState<any[]>([]);
+  const [pmsList, setPmsList] = useState<any[]>([]);
+  const [salesVisitList, setSalesVisitList] = useState<any[]>([]);
+  const [leadsList, setLeadsList] = useState<any[]>([]);
+  const [expenseList, setExpenseList] = useState<any[]>([]);
+  const [advanceList, setAdvanceList] = useState<any[]>([]);
+  const [leaveList, setLeaveList] = useState<any[]>([]);
+  const [travelList, setTravelList] = useState<any[]>([]);
+  const [orgList, setOrgList] = useState<any[]>([]);
+
+  // 🔥 4. LOAD ALL MODULE DATA
+  const loadAllData = async () => {
+      if (currentUser?.companyId) {
+          const [
+              users, attendance, couriers, serviceCalls, orders, demos,
+              installs, payments, tasks, pms, salesVisits, leads,
+              expenses, advances, leaves, travels, orgs
+          ] = await Promise.all([
+              fetchSaaSData("users"),
+              fetchSaaSData("attendance"),
+              fetchSaaSData("couriers"),
+              fetchSaaSData("service_calls"),
+              fetchSaaSData("orders"),
+              fetchSaaSData("demos"),
+              fetchSaaSData("installations"),
+              fetchSaaSData("payments"),
+              fetchSaaSData("tasks"),
+              fetchSaaSData("pms_reports"),
+              fetchSaaSData("sales_reports"),
+              fetchSaaSData("leads"),
+              fetchSaaSData("expenses"),
+              fetchSaaSData("advances"),
+              fetchSaaSData("leaves"),
+              fetchSaaSData("travel_notes"),
+              fetchSaaSData("organizations")
+          ]);
+
+          setUserList(users); setAttendanceList(attendance); setCourierList(couriers);
+          setServiceCallList(serviceCalls); setOrderList(orders); setDemoList(demos);
+          setInstallList(installs); setPaymentList(payments); setTaskList(tasks);
+          setPmsList(pms); setSalesVisitList(salesVisits); setLeadsList(leads);
+          setExpenseList(expenses); setAdvanceList(advances); setLeaveList(leaves);
+          setTravelList(travels); setOrgList(orgs);
+      }
+  };
+
+  useEffect(() => {
+      loadAllData();
+  }, [currentUser]);
+
+  const userRole = (currentUser?.role || '').toLowerCase().trim();
+  const isFinanceRole = ['admin', 'manager', 'account', 'accountant', 'superadmin'].includes(userRole);
 
   // ==========================================
   // 🟢 SHARED UTILS & DATE LOGIC
@@ -59,8 +117,8 @@ export default function CombinedActivityScreen() {
       return "";
   };
 
-  // 🔥 FIX 2: Added 'paymentDate' to ensure collections are tracked properly
   const getItemDate = (item: any) => {
+      if (item.dateIso) return item.dateIso;
       if (item.paymentDate && item.paymentDate.includes('T')) return item.paymentDate.split('T')[0];
       if (item.paymentDate) return item.paymentDate;
       if (item.createdAt && item.createdAt.includes('T')) return item.createdAt.split('T')[0];
@@ -142,7 +200,7 @@ export default function CombinedActivityScreen() {
 
   useEffect(() => {
       if (activeTab === 'timeline') generateTimeline();
-  }, [selectedDate, selectedUser, attendanceList, courierList, serviceCallList, orderList, demoList, installList, paymentList, taskList, pmsList, salesVisitList, leadsList, locationLogs, activeTab]);
+  }, [selectedDate, selectedUser, attendanceList, courierList, serviceCallList, orderList, demoList, installList, paymentList, taskList, pmsList, salesVisitList, leadsList, activeTab]);
 
   const generateTimeline = () => {
       const targetDate = getStandardDate(selectedDate);
@@ -176,7 +234,6 @@ export default function CombinedActivityScreen() {
           if (getStandardDate(getItemDate(d)) === targetDate && checkUser(d.senderId, d.senderName)) events.push({ id: `dm_${d.id}`, time: getItemTime(d), title: `${d.senderName || 'User'} gave a Demo`, desc: `Client: ${getClientName(d)}`, extra: `Product: ${d.product}`, icon: 'play-circle', color: '#00bcd4', rawData: d, type: 'Demo' });
       });
       
-      // 🔥 FIX 2: Payment Collection Users (addedBy, userId)
       paymentList?.forEach((p: any) => {
           if (getStandardDate(getItemDate(p)) === targetDate && checkUser(p.senderId || p.addedBy || p.userId, p.senderName || p.addedBy || p.userName)) events.push({ id: `pay_${p.id}`, time: getItemTime(p), title: `${p.senderName || p.addedBy || 'User'} collected Payment`, desc: `Client: ${getClientName(p)}`, extra: `Amount: ₹${p.amount || p.receivedAmount || 0}`, icon: 'cash', color: '#00897b', rawData: p, type: 'Payment' });
       });
@@ -263,7 +320,6 @@ export default function CombinedActivityScreen() {
           }
       });
 
-      // 🔥 FIX 2: Payment Collections Users
       paymentList?.forEach((p: any) => {
           if (checkUser(p.senderId || p.addedBy || p.userId, p.senderName || p.addedBy || p.userName) && isDateInSelectedFY(getItemDate(p))) {
               const val = Number(p.amount || p.receivedAmount || 0); cVal += val;
@@ -419,7 +475,7 @@ export default function CombinedActivityScreen() {
 
   const filterDataForExport = (data: any[], dateField: string, userField: string, isOrg: boolean = false) => {
       return data.filter(item => {
-          const stdDate = getStandardDate(item[dateField] || item.paymentDate || item.createdAt || item.date);
+          const stdDate = getStandardDate(item[dateField] || item.paymentDate || item.dateIso || item.createdAt || item.date);
           if(!stdDate) return false;
           
           const d = new Date(stdDate);
@@ -443,18 +499,17 @@ export default function CombinedActivityScreen() {
       });
   };
 
+  // 🔥 SAAS EXCEL FETCH LOGIC
   const fetchAndAddSheet = async (wb: any, colName: string, sheetName: string, dateField: string, userField: string, isOrg: boolean = false) => {
       if (!modules[sheetName.toLowerCase() as keyof typeof modules] && !modules[colName as keyof typeof modules]) return false;
       setProgress(`Fetching ${sheetName}...`);
       try {
-          const q = query(collection(db, colName));
-          const snap = await getDocs(q);
-          const raw = snap.docs.map(d => {
-              const data = d.data();
-              const { location, items, history, ...cleanData } = data; 
+          const rawData = await fetchSaaSData(colName);
+          const cleanRawData = rawData.map((d: any) => {
+              const { location, items, history, ...cleanData } = d; 
               return cleanData;
           });
-          const filtered = filterDataForExport(raw, dateField, userField, isOrg);
+          const filtered = filterDataForExport(cleanRawData, dateField, userField, isOrg);
           if (filtered.length > 0) {
               const ws = XLSX.utils.json_to_sheet(filtered);
               XLSX.utils.book_append_sheet(wb, ws, sheetName);
@@ -469,22 +524,22 @@ export default function CombinedActivityScreen() {
       try {
           const wb = XLSX.utils.book_new(); 
           let hasData = false;
-          if(await fetchAndAddSheet(wb, "orders", "Orders", "date", "senderId")) hasData = true;
-          if(await fetchAndAddSheet(wb, "payment_collections", "Collections", "date", "senderId")) hasData = true;
-          if(await fetchAndAddSheet(wb, "expenses", "Expenses", "date", "userId")) hasData = true;
-          if(await fetchAndAddSheet(wb, "leads", "Leads", "createdAt", "senderId")) hasData = true;
-          if(await fetchAndAddSheet(wb, "attendance", "Attendance", "date", "senderId")) hasData = true;
-          if(await fetchAndAddSheet(wb, "installations", "Installations", "date", "senderId")) hasData = true;
-          if(await fetchAndAddSheet(wb, "pms_reports", "PMS", "date", "senderId")) hasData = true;
-          if(await fetchAndAddSheet(wb, "service_calls", "ServiceCalls", "date", "senderId")) hasData = true;
-          if(await fetchAndAddSheet(wb, "demos", "Demos", "date", "senderId")) hasData = true;
-          if(await fetchAndAddSheet(wb, "couriers", "Couriers", "date", "senderId")) hasData = true;
-          if(await fetchAndAddSheet(wb, "tasks", "Tasks", "createdAt", "senderId")) hasData = true;
-          if(await fetchAndAddSheet(wb, "advances", "Advances", "date", "senderId")) hasData = true;
-          if(await fetchAndAddSheet(wb, "travel_notes", "Travel", "date", "senderId")) hasData = true;
-          if(await fetchAndAddSheet(wb, "leaves", "Leaves", "fromDate", "senderId")) hasData = true;
-          if(await fetchAndAddSheet(wb, "projects", "Projects", "createdAt", "senderId")) hasData = true;
-          if(await fetchAndAddSheet(wb, "organizations", "Organizations", "createdAt", "addedBy", true)) hasData = true;
+          if(await fetchAndAddSheet(wb, "orders", "Orders", "dateIso", "senderId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "payments", "Collections", "dateIso", "senderId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "expenses", "Expenses", "dateIso", "userId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "leads", "Leads", "dateIso", "senderId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "attendance", "Attendance", "dateIso", "senderId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "installations", "Installations", "dateIso", "senderId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "pms_reports", "PMS", "dateIso", "senderId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "service_calls", "ServiceCalls", "dateIso", "senderId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "demos", "Demos", "dateIso", "senderId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "couriers", "Couriers", "dateIso", "senderId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "tasks", "Tasks", "dateIso", "senderId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "advances", "Advances", "dateIso", "senderId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "travel_notes", "Travel", "dateIso", "senderId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "leaves", "Leaves", "fromDateIso", "senderId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "projects", "Projects", "dateIso", "senderId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "organizations", "Organizations", "dateIso", "addedBy", true)) hasData = true;
 
           if (!hasData) {
               Alert.alert("No Data", "No records found for the selected criteria.");
@@ -511,7 +566,7 @@ export default function CombinedActivityScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <View style={{flex:1, backgroundColor:'#f4f6f8'}}>
       <View style={styles.header}>
         <View style={{flexDirection: 'row', alignItems: 'center'}}>
             <TouchableOpacity onPress={() => router.back()} style={{marginRight: 10}}>
@@ -559,8 +614,12 @@ export default function CombinedActivityScreen() {
                 contentContainerStyle={{ padding: 15, paddingBottom: 50 }}
                 ListEmptyComponent={
                     <View style={{alignItems:'center', marginTop: 50}}>
-                        <Ionicons name="time-outline" size={50} color="#ccc" />
-                        <Text style={{color:'gray', marginTop:10}}>No activity found for this day.</Text>
+                        {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                            <>
+                                <Ionicons name="time-outline" size={50} color="#ccc" />
+                                <Text style={{color:'gray', marginTop:10}}>No activity found for this day.</Text>
+                            </>
+                        )}
                     </View>
                 }
             />
@@ -758,7 +817,7 @@ export default function CombinedActivityScreen() {
       {/* 🟡 SHARED MODALS */}
       {/* ========================================= */}
       
-      {/* 🔥 FIX 1: UNIVERSAL DETAILS POPUP MODAL */}
+      {/* UNIVERSAL DETAILS POPUP MODAL */}
       <Modal visible={detailModalVisible} transparent animationType="fade">
           <View style={styles.modalOverlay}>
               <View style={styles.detailCard}>
@@ -783,7 +842,6 @@ export default function CombinedActivityScreen() {
                                   {isFinanceRole && (
                                       <DetailRow label="Order Value" value={`₹ ${Number(selectedEvent.rawData.totalValue || selectedEvent.rawData.orderValue || selectedEvent.rawData.amount || 0).toLocaleString()}`} />
                                   )}
-                                  {/* 🔥 FIX 1: Safe Location Object Parsing */}
                                   <DetailRow label="Client / Location" value={`${getClientName(selectedEvent.rawData)} (${selectedEvent.rawData.city || (typeof selectedEvent.rawData.location === 'string' ? selectedEvent.rawData.location : selectedEvent.rawData.location?.address) || 'N/A'})`} />
                                   <View style={styles.infoBox}><Text style={styles.infoLabel}>Remark:</Text><Text style={styles.infoValue}>{selectedEvent.rawData.remark || selectedEvent.rawData.note || '-'}</Text></View>
                               </>
@@ -946,6 +1004,13 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   header: { padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 10 },
+  sectionHeader: { 
+      fontSize: 16, 
+      fontWeight: 'bold', 
+      color: '#3b5998', 
+      marginTop: 20, 
+      marginBottom: 10 
+  },
   
   // Tabs
   tabContainer: { flexDirection: 'row', padding: 10, backgroundColor: 'white', paddingBottom: 15 },
@@ -1012,9 +1077,8 @@ const styles = StyleSheet.create({
   btnText: { color: 'white', fontSize: 16, fontWeight: 'bold', marginLeft: 10 },
 
   // Shared
-  sectionHeader: { fontSize: 14, fontWeight: 'bold', color: 'gray', marginBottom: 10, marginTop: 5, textTransform: 'uppercase' },
   centerState: { alignItems: 'center', marginTop: 50 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 20, maxHeight: 400 },
   modalTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 15, textAlign: 'center', color: '#3b5998' },
   modalItem: { paddingVertical: 12, borderBottomWidth: 1, borderColor: '#eee' },

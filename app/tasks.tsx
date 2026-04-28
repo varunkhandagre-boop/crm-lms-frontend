@@ -1,13 +1,39 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
+} from 'react-native';
+
+// 🔥 SAAS IMPORTS (Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function TaskScreen() {
   const router = useRouter();
   
-  const { taskList = [], completeTask, currentUser, addNotification, userList } = useData();
+  // 🔥 1. Context se sirf current user nikala gaya hai
+  const { currentUser } = useData();
+
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData, updateSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded States
+  const [taskList, setTaskList] = useState<any[]>([]);
+  const [userList, setUserList] = useState<any[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
 
   // --- STATES ---
   const [taskViewMode, setTaskViewMode] = useState<'MyTasks' | 'Given'>('MyTasks');
@@ -20,7 +46,6 @@ export default function TaskScreen() {
   const [employeeModalVisible, setEmployeeModalVisible] = useState(false);
 
   // DATE FILTER STATES
-  // 🔥 CHANGED: 'Year' to 'FY'
   const [dateViewMode, setDateViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
 
@@ -29,23 +54,44 @@ export default function TaskScreen() {
   const [selectedTask, setSelectedTask] = useState<any>(null);
   const [completionNote, setCompletionNote] = useState('');
 
-  // 🔥 LOADING STATE FOR COMPLETE BUTTON
+  // LOADING STATE FOR COMPLETE BUTTON
   const [isCompleting, setIsCompleting] = useState(false);
 
-  // 🔥 PAGINATION STATE (SMART LOAD MORE)
+  // PAGINATION STATE
   const [visibleCount, setVisibleCount] = useState(20);
 
-  // 🔥 RESET PAGINATION ON FILTER CHANGE
+  // RESET PAGINATION ON FILTER CHANGE
   useEffect(() => {
       if (dateViewMode === 'Day' && activeStatus === 'Pending' && !searchText) {
-          setVisibleCount(500); // Day view me sab dikha do
+          setVisibleCount(500); 
       } else {
-          setVisibleCount(20); // Baki views me Load More use karo
+          setVisibleCount(20); 
       }
   }, [taskViewMode, activeStatus, searchText, priorityFilter, selectedEmployee, dateViewMode, currentDate]);
 
-  // --- CHECK ADMIN ROLE ---
-  const isAdminOrManager = ['Admin', 'Manager'].includes(currentUser?.role);
+  const isAdminOrManager = ['Admin', 'Manager', 'SuperAdmin'].includes(currentUser?.role || '');
+
+  // 🔥 4. LOAD SAAS DATA ON MOUNT
+  const loadData = async () => {
+      if (currentUser?.companyId) {
+          const [tasks, users] = await Promise.all([
+              fetchSaaSData("tasks"),
+              fetchSaaSData("users")
+          ]);
+          setTaskList(tasks);
+          setUserList(users);
+      }
+  };
+
+  useEffect(() => {
+      loadData();
+  }, [currentUser]);
+
+  const onRefresh = async () => {
+      setRefreshing(true);
+      await loadData();
+      setRefreshing(false);
+  };
 
   // --- GENERATE EMPLOYEE LIST ---
   const employeeList = useMemo(() => {
@@ -108,7 +154,7 @@ export default function TaskScreen() {
       }
   };
 
-  // --- 🔥 CHANGED: FY DATE NAVIGATION ---
+  // --- FY DATE NAVIGATION ---
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
       if (dateViewMode === 'Day') d.setDate(d.getDate() + dir);
@@ -117,7 +163,6 @@ export default function TaskScreen() {
       setCurrentDate(d);
   };
 
-  // --- 🔥 CHANGED: FY HEADER TEXT ---
   const getHeaderDate = () => {
       if (dateViewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
       if (dateViewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -178,10 +223,9 @@ export default function TaskScreen() {
           const targetMonth = currentDate.getMonth();
           const targetDay = currentDate.getDate();
 
-          // 🔥 FY Boundaries Logic
           const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // 1st April
-          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // 31st March
+          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
+          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
 
           data = data.filter((item: any) => {
               const dateField = item.status === 'Completed' ? item.completedAt : (item.dueDate || item.createdAt);
@@ -216,26 +260,51 @@ export default function TaskScreen() {
       setCompletionNote('');
   };
 
+  // 🔥 5. SAAS COMPLETE TASK LOGIC
   const handleCompleteTask = async () => {
       if (!completionNote.trim()) return Alert.alert("Note Required", "Please enter what action you took.");
       
       setIsCompleting(true); 
       try {
-          if (typeof completeTask === 'function') {
-              await completeTask(selectedTask.id, completionNote);
-              if (addNotification && selectedTask.from && selectedTask.from !== 'Self' && selectedTask.from !== currentUser?.name) {
-                  await addNotification({
+          const completedDate = new Date().toISOString();
+          
+          const res = await updateSaaSData("tasks", selectedTask.id, {
+              status: 'Completed',
+              completionNote: completionNote,
+              completedAt: completedDate,
+              completedBy: currentUser?.name || 'Unknown'
+          });
+
+          if (res.success) {
+              setTaskList(prev => prev.map(t => t.id === selectedTask.id ? { 
+                  ...t, 
+                  status: 'Completed', 
+                  completionNote, 
+                  completedAt: completedDate, 
+                  completedBy: currentUser?.name || 'Unknown'
+              } : t));
+
+              if (selectedTask.from && selectedTask.from !== 'Self' && selectedTask.from !== currentUser?.name) {
+                  // Find Target User ID for Notifications
+                  const targetUserObj = userList.find(u => u.name === selectedTask.from);
+                  const targetUserId = targetUserObj ? (targetUserObj.uid || targetUserObj.id) : selectedTask.from;
+                  
+                  await addSaaSData("notifications", {
                       title: "Task Completed ✅",
-                      message: `${currentUser.name} has completed: "${selectedTask.task}"`,
+                      message: `${currentUser?.name} has completed: "${selectedTask.task}"`,
                       type: "success",
-                      to: selectedTask.from, 
-                      route: '/tasks'
+                      to: selectedTask.from,
+                      userId: targetUserId,
+                      screen: '/tasks',
+                      read: false,
+                      createdAt: new Date().toISOString()
                   });
               }
+              
               Alert.alert("Success", "Task marked as completed!");
               setTaskModalVisible(false);
           } else {
-              Alert.alert("Error", "Context Function Missing");
+              Alert.alert("Error", "Update Failed");
           }
       } catch (error) {
           Alert.alert("Error", "Update Failed");
@@ -283,7 +352,6 @@ export default function TaskScreen() {
 
       <View style={{backgroundColor:'white', paddingBottom:10, marginBottom:5}}>
           <View style={styles.tabContainer}>
-              {/* 🔥 CHANGED: 'Year' to 'FY' */}
               {['Day', 'Month', 'FY', 'All'].map((m) => (
                   <TouchableOpacity key={m} style={[styles.dateTab, dateViewMode === m && styles.activeDateTab]} onPress={() => setDateViewMode(m as any)}>
                       <Text style={[styles.dateTabText, dateViewMode === m && styles.activeDateTabText]}>{m}</Text>
@@ -301,7 +369,7 @@ export default function TaskScreen() {
 
           <View style={styles.searchRow}>
               <View style={styles.searchBar}>
-                  <Ionicons name="search" size={20} color="gray" />
+                  {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" style={{marginRight: 5}}/> : <Ionicons name="search" size={20} color="gray" />}
                   <TextInput 
                       style={styles.input}
                       placeholder="Search tasks..."
@@ -346,11 +414,16 @@ export default function TaskScreen() {
         data={renderedList}
         keyExtractor={(item, index) => (item.id || index.toString()) + index}
         contentContainerStyle={styles.listPadding}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListEmptyComponent={
             <View style={{alignItems:'center', marginTop:2}}>
-                <Ionicons name="checkbox-outline" size={60} color="#ccc" />
-                <Text style={{color:'gray', marginTop:10}}>No Tasks Found</Text>
-                {priorityFilter !== 'All' && <Text style={{color:'#3b5998', marginTop:5}}>Filter: {priorityFilter}</Text>}
+                {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                    <>
+                        <Ionicons name="checkbox-outline" size={60} color="#ccc" />
+                        <Text style={{color:'gray', marginTop:10}}>No Tasks Found</Text>
+                        {priorityFilter !== 'All' && <Text style={{color:'#3b5998', marginTop:5}}>Filter: {priorityFilter}</Text>}
+                    </>
+                )}
             </View>
         }
         renderItem={({item}) => {

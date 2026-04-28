@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     Keyboard,
     Modal,
@@ -13,30 +14,39 @@ import {
     TouchableWithoutFeedback,
     View
 } from 'react-native';
-import { useData } from './context/DataContext';
 
-// 🔥 FILE SYSTEM IMPORTS (Legacy mode for permission-free access)
+// 🔥 FILE SYSTEM IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+
+// 🔥 SAAS IMPORTS (Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
+import { useData } from './context/DataContext';
 
 export default function SerialNumberScreen() {
   const router = useRouter();
   
-  const { 
-      installList = [], serviceCallList = [], salesVisitList = [], pmsList = [], orgList = [], 
-      orderList = [], paymentList = [], dueList = [], courierList = [], projectList = [],
-      user 
-  } = useData();
+  // 🔥 1. Context se sirf user nikala
+  const { currentUser } = useData();
 
-  const userRole = (user?.role || '').toLowerCase().trim();
-  const isFinanceRole = ['admin', 'manager', 'account', 'accountant'].includes(userRole);
+  // 🔥 2. Naya SaaS Engine connect kiya
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
+  const userRole = (currentUser?.role || '').toLowerCase().trim();
+  const isFinanceRole = ['admin', 'manager', 'account', 'accountant', 'superadmin'].includes(userRole);
+
+  // Search & Navigation States
   const [searchType, setSearchType] = useState<'MACHINE' | 'ORGANIZATION'>('MACHINE');
   const [searchInput, setSearchInput] = useState('');
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [viewMode, setViewMode] = useState<'IDLE' | 'LIST' | 'DETAILS' | 'ORG_DETAILS'>('IDLE');
   
+  // Lazy Loaded Master States
+  const [installList, setInstallList] = useState<any[]>([]);
+  const [orgList, setOrgList] = useState<any[]>([]);
+  
+  // Specific Context Data States
   const [machineList, setMachineList] = useState<any[]>([]); 
   const [selectedMachine, setSelectedMachine] = useState<any>(null); 
   const [selectedOrg, setSelectedOrg] = useState<any>(null);
@@ -50,11 +60,29 @@ export default function SerialNumberScreen() {
   
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<any>(null);
+  const [isDataFetching, setIsDataFetching] = useState(false);
 
   useEffect(() => {
       setVisibleCount(20);
       setActiveTimelineFilter('All');
   }, [viewMode, selectedOrg, selectedMachine]);
+
+  // 🔥 3. LOAD CORE MASTERS ON MOUNT (Only Installs and Orgs for quick search)
+  useEffect(() => {
+      const loadInitialMasters = async () => {
+          if (currentUser?.companyId) {
+              setIsDataFetching(true);
+              const [installs, orgs] = await Promise.all([
+                  fetchSaaSData("installations"),
+                  fetchSaaSData("organizations")
+              ]);
+              setInstallList(installs);
+              setOrgList(orgs);
+              setIsDataFetching(false);
+          }
+      };
+      loadInitialMasters();
+  }, [currentUser]);
 
   const handleSearchInput = (text: string) => {
       setSearchInput(text);
@@ -124,15 +152,23 @@ export default function SerialNumberScreen() {
       }
   };
 
-  const openMachineHistory = (machine: any) => {
+  // 🔥 4. LOAD DEEP DATA FOR SPECIFIC MACHINE
+  const openMachineHistory = async (machine: any) => {
       setSelectedMachine(machine);
-      const services = serviceCallList.filter((item: any) => item.serialNo?.toLowerCase() === machine.serialNo?.toLowerCase());
-      const pms = pmsList.filter((item: any) => item.serialNo?.toLowerCase() === machine.serialNo?.toLowerCase());
+      setIsDataFetching(true);
+      
+      const [serviceCalls, pmsReports] = await Promise.all([
+          fetchSaaSData("service_calls"),
+          fetchSaaSData("pms_reports")
+      ]);
+
+      const services = serviceCalls.filter((item: any) => item.serialNo?.toLowerCase() === machine.serialNo?.toLowerCase());
+      const pms = pmsReports.filter((item: any) => item.serialNo?.toLowerCase() === machine.serialNo?.toLowerCase());
 
       const events = [
           {
               type: 'Installation',
-              date: machine.date || machine.createdAt,
+              date: machine.dateIso || machine.date || machine.createdAt,
               title: 'Machine Installed',
               desc: `Model: ${machine.model || '-'} | By: ${machine.engineer || machine.senderName || 'Unknown'}`,
               status: 'Installed',
@@ -142,7 +178,7 @@ export default function SerialNumberScreen() {
           },
           ...services.map((s: any) => ({
               type: 'Service',
-              date: s.date || s.createdAt,
+              date: s.dateIso || s.date || s.createdAt,
               title: s.status === 'Open' ? 'Ticket Raised' : 'Service Done',
               desc: s.remark || s.resolutionNote || 'No details',
               status: s.status,
@@ -152,7 +188,7 @@ export default function SerialNumberScreen() {
           })),
           ...pms.map((p: any) => ({
               type: 'PMS',
-              date: p.lastDoneDate || p.date || p.createdAt,
+              date: p.lastDoneDate || p.dateIso || p.date || p.createdAt,
               title: `PMS (${p.currentPmsNumber}/${p.totalPms})`,
               desc: p.remarks || p.remark || 'Routine checkup',
               status: p.status,
@@ -162,13 +198,27 @@ export default function SerialNumberScreen() {
           }))
       ];
       events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      
       setTimeline(events);
+      setIsDataFetching(false);
       setViewMode('DETAILS');
   };
 
-  const openHospitalKundali = (org: any) => {
+  // 🔥 5. LOAD DEEP DATA FOR SPECIFIC HOSPITAL/ORG
+  const openHospitalKundali = async (org: any) => {
       Keyboard.dismiss();
       setSelectedOrg(org);
+      setIsDataFetching(true);
+      
+      const [services, pmsData, visits, orders, payments, dues, couriers] = await Promise.all([
+          fetchSaaSData("service_calls"),
+          fetchSaaSData("pms_reports"),
+          fetchSaaSData("sales_reports"),
+          fetchSaaSData("orders"),
+          fetchSaaSData("payments"),
+          fetchSaaSData("dues"), // Make sure your context uses 'dues' collection
+          fetchSaaSData("couriers")
+      ]);
       
       const orgId = String(org.id || '').trim(); 
       const orgNameClean = (org.orgName || org.name || '').toLowerCase().trim();
@@ -191,31 +241,31 @@ export default function SerialNumberScreen() {
           return false;
       };
 
-      const installs = installList.filter(matchOrg);
-      const services = serviceCallList.filter(matchOrg);
-      const pms = pmsList.filter(matchOrg);
-      const visits = salesVisitList.filter(matchOrg);
-      const fetchedOrders = orderList.filter(matchOrg);
-      const fetchedPayments = paymentList.filter(matchOrg);
-      const fetchedDues = dueList.filter(matchOrg);
-      const fetchedCouriers = courierList.filter(matchOrg);
+      const matchedInstalls = installList.filter(matchOrg);
+      const matchedServices = services.filter(matchOrg);
+      const matchedPms = pmsData.filter(matchOrg);
+      const matchedVisits = visits.filter(matchOrg);
+      const matchedOrders = orders.filter(matchOrg);
+      const matchedPayments = payments.filter(matchOrg);
+      const matchedDues = dues.filter(matchOrg);
+      const matchedCouriers = couriers.filter(matchOrg);
 
       let tValue = 0; let tReceived = 0; let tDues = 0;
-      fetchedOrders.forEach((o: any) => tValue += Number(o.totalValue || o.orderValue || o.amount) || 0);
-      fetchedPayments.forEach((p: any) => tReceived += Number(p.amount || p.receivedAmount) || 0);
-      fetchedDues.forEach((d: any) => tDues += Number(d.balance !== undefined ? d.balance : (d.dueAmount || d.amount || 0)));
+      matchedOrders.forEach((o: any) => tValue += Number(o.totalValue || o.orderValue || o.amount) || 0);
+      matchedPayments.forEach((p: any) => tReceived += Number(p.amount || p.receivedAmount) || 0);
+      matchedDues.forEach((d: any) => tDues += Number(d.balance !== undefined ? d.balance : (d.dueAmount || d.amount || 0)));
       
       setOrgFinance({ totalValue: tValue, totalReceived: tReceived, totalDues: tDues });
 
       setOrgSummary({
-          installs: installs.length, services: services.length, pms: pms.length, visits: visits.length,
-          orders: fetchedOrders.length, payments: fetchedPayments.length, couriers: fetchedCouriers.length, dues: fetchedDues.length
+          installs: matchedInstalls.length, services: matchedServices.length, pms: matchedPms.length, visits: matchedVisits.length,
+          orders: matchedOrders.length, payments: matchedPayments.length, couriers: matchedCouriers.length, dues: matchedDues.length
       });
 
       const events = [
-          ...fetchedOrders.map((o: any) => ({
+          ...matchedOrders.map((o: any) => ({
               type: 'Order',
-              date: o.createdAt || o.date || new Date().toISOString(),
+              date: o.dateIso || o.createdAt || o.date || new Date().toISOString(),
               title: `Order: ${o.name || o.product || 'New Order'}`,
               desc: isFinanceRole ? `Value: ₹${(Number(o.totalValue || o.orderValue || o.amount) || 0).toLocaleString()}` : 'Order Placed',
               status: o.status || 'Confirmed',
@@ -223,9 +273,9 @@ export default function SerialNumberScreen() {
               color: '#8e24aa', 
               rawData: o
           })),
-          ...fetchedPayments.map((pay: any) => ({
+          ...matchedPayments.map((pay: any) => ({
               type: 'Payment',
-              date: pay.date || pay.paymentDate || new Date().toISOString(),
+              date: pay.dateIso || pay.date || pay.paymentDate || new Date().toISOString(),
               title: `Payment Recd: ₹${(Number(pay.amount || pay.receivedAmount) || 0).toLocaleString()}`,
               desc: `Mode: ${pay.mode || pay.paymentMode || 'N/A'}\nNote: ${pay.note || pay.remark || '-'}`,
               status: 'Received',
@@ -233,11 +283,11 @@ export default function SerialNumberScreen() {
               color: '#00897b', 
               rawData: pay
           })),
-          ...fetchedDues.map((due: any) => {
+          ...matchedDues.map((due: any) => {
               const pendingBalance = due.balance !== undefined ? Number(due.balance) : Number(due.dueAmount || due.amount || 0);
               return {
                   type: 'Due',
-                  date: due.dueDate || due.date || due.createdAt || new Date().toISOString(),
+                  date: due.dueDate || due.dateIso || due.date || due.createdAt || new Date().toISOString(),
                   title: `Pending Due: ₹${pendingBalance.toLocaleString()}`,
                   desc: `Original Bill: ₹${Number(due.amount || 0).toLocaleString()}`,
                   status: due.status || 'Pending',
@@ -246,9 +296,9 @@ export default function SerialNumberScreen() {
                   rawData: due
               };
           }),
-          ...fetchedCouriers.map((item: any) => ({
+          ...matchedCouriers.map((item: any) => ({
               type: 'Courier',
-              date: item.date || item.dispatchDate || item.createdAt || new Date().toISOString(),
+              date: item.dateIso || item.date || item.dispatchDate || item.createdAt || new Date().toISOString(),
               title: `Courier: ${item.courierName || item.name || 'Dispatch'}`,
               desc: `Docket: ${item.docketNo || item.trackingNo || 'N/A'}\nQty: ${item.qty || 1}`,
               status: item.status || 'Dispatched',
@@ -256,9 +306,9 @@ export default function SerialNumberScreen() {
               color: item.status === 'Delivered' ? '#2e7d32' : '#f57c00', 
               rawData: item
           })),
-          ...installs.map((i: any) => ({
+          ...matchedInstalls.map((i: any) => ({
               type: 'Installation',
-              date: i.date || i.createdAt || new Date().toISOString(),
+              date: i.dateIso || i.date || i.createdAt || new Date().toISOString(),
               title: `Install: ${i.product || i.productName}`,
               desc: `S/N: ${i.serialNo}\nBy: ${i.engineer || i.senderName}`,
               status: 'Installed',
@@ -266,9 +316,9 @@ export default function SerialNumberScreen() {
               color: '#2e7d32', 
               rawData: i
           })),
-          ...services.map((s: any) => ({
+          ...matchedServices.map((s: any) => ({
               type: 'Service',
-              date: s.date || s.createdAt || new Date().toISOString(),
+              date: s.dateIso || s.date || s.createdAt || new Date().toISOString(),
               title: `Service: ${s.machine || 'Machine'}`,
               desc: `S/N: ${s.serialNo || 'N/A'}\nIssue: ${s.remark || 'N/A'}\nBy: ${s.senderName || 'Unknown'}`,
               status: s.status || 'Open',
@@ -276,9 +326,9 @@ export default function SerialNumberScreen() {
               color: '#c62828', 
               rawData: s
           })),
-          ...pms.map((p: any) => ({
+          ...matchedPms.map((p: any) => ({
               type: 'PMS',
-              date: p.lastDoneDate || p.date || p.createdAt || new Date().toISOString(),
+              date: p.lastDoneDate || p.dateIso || p.date || p.createdAt || new Date().toISOString(),
               title: `PMS: ${p.machine || 'Machine'}`,
               desc: `S/N: ${p.serialNo || 'N/A'}\nCycle: ${p.currentPmsNumber}/${p.totalPms}\nBy: ${p.senderName || 'Unknown'}`,
               status: p.status || 'Pending',
@@ -286,9 +336,9 @@ export default function SerialNumberScreen() {
               color: '#1565c0', 
               rawData: p
           })),
-          ...visits.map((v: any) => ({
+          ...matchedVisits.map((v: any) => ({
               type: 'Sales Visit',
-              date: v.date || v.createdAt || new Date().toISOString(),
+              date: v.dateIso || v.date || v.createdAt || new Date().toISOString(),
               title: `Visit by ${v.senderName || 'Unknown'}`,
               desc: `Met: ${v.person || 'N/A'}\nNote: ${v.discussion ? v.discussion.split('\n')[0] : 'N/A'}`,
               status: v.outcome || 'Visited',
@@ -302,6 +352,7 @@ export default function SerialNumberScreen() {
       secureEvents.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       
       setTimeline(secureEvents);
+      setIsDataFetching(false);
       setViewMode('ORG_DETAILS');
   };
 
@@ -336,7 +387,6 @@ export default function SerialNumberScreen() {
       setDetailModalVisible(true);
   };
 
-  // 🔥 FULLY EXPANDED EXPORT TO EXCEL
   const exportToExcel = async () => {
     try {
       if (filteredTimeline.length === 0) {
@@ -344,7 +394,6 @@ export default function SerialNumberScreen() {
         return;
       }
 
-      // Updated Headers to include more details
       let csvString = "\uFEFFDate,Type,Title,Status,Amount_Value,Assigned_AddedBy,SerialNo_Docket,Model_Machine,Extra_Details,Description\n";
       
       filteredTimeline.forEach(item => {
@@ -360,7 +409,6 @@ export default function SerialNumberScreen() {
           value = item.rawData?.qty || '1';
         }
 
-        // 🔥 Extracting Additional Columns
         let assignedTo = (item.rawData?.assignedToName || item.rawData?.engineer || item.rawData?.userName || item.rawData?.senderName || item.rawData?.addedBy || item.rawData?.createdBy || '-').replace(/,/g, ' ');
         let serialOrDocket = (item.rawData?.serialNo || item.rawData?.docketNo || item.rawData?.trackingNo || '-').replace(/,/g, ' ');
         let machineModel = (item.rawData?.product || item.rawData?.productName || item.rawData?.machine || item.rawData?.model || '-').replace(/,/g, ' ');
@@ -412,7 +460,7 @@ export default function SerialNumberScreen() {
             <Text style={styles.headerTitle}>
                 {viewMode === 'DETAILS' ? 'Machine History' : viewMode === 'ORG_DETAILS' ? 'Organization Record' : 'Universal Tracker'}
             </Text>
-            <View style={{width:24}} /> 
+            {isDataFetching ? <ActivityIndicator size="small" color="#333" /> : <View style={{width:24}} />}
         </View>
 
         {!['DETAILS', 'ORG_DETAILS'].includes(viewMode) && (
@@ -751,8 +799,8 @@ const DetailRow = ({label, value}: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 0, zIndex: 10 },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
   toggleContainer: { flexDirection: 'row', backgroundColor: 'white', paddingHorizontal: 15, paddingBottom: 10, elevation: 2 },
   toggleBtn: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingVertical: 8, borderWidth: 1, borderColor: '#eee', backgroundColor: '#f9f9f9' },
   activeToggle: { backgroundColor: '#3b5998', borderColor: '#3b5998' },

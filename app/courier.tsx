@@ -1,21 +1,41 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
+} from 'react-native';
+
+// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
-// FIREBASE
-import { deleteDoc, doc, updateDoc } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
-
-// 🔥 PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
 export default function CourierScreen() {
   const router = useRouter();
-  const { courierList = [], user, addNotification, companyProfile, orgList = [] } = useData(); 
+  
+  // 🔥 1. Context se sirf Profile, User & Notifications Nikala
+  const { currentUser, addNotification, companyProfile } = useData(); 
+
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData, updateSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded Lists
+  const [courierList, setCourierList] = useState<any[]>([]);
+  const [orgList, setOrgList] = useState<any[]>([]);
 
   // --- STATES ---
   const [activeTab, setActiveTab] = useState<'All' | 'Inward' | 'Outward'>('All'); 
@@ -31,39 +51,48 @@ export default function CourierScreen() {
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // 🔥 ADMIN EDIT STATES 🔥
+  // ADMIN EDIT STATES
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editData, setEditData] = useState<any>({});
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
-  // 🔥 PAGINATION STATE
   const [visibleCount, setVisibleCount] = useState(20);
 
   useEffect(() => {
-      if (viewMode === 'Day') {
-          setVisibleCount(500); 
-      } else {
-          setVisibleCount(20); 
-      }
+      if (viewMode === 'Day') setVisibleCount(500); 
+      else setVisibleCount(20); 
   }, [viewMode, currentDate, activeTab, activeStatus, searchText]);
 
-  // POWER USER CHECK
-  const role = user?.role || ''; 
+  // 🔥 4. LOAD DATA ON MOUNT
+  useEffect(() => {
+      const loadData = async () => {
+          if (currentUser?.companyId) {
+              const [couriers, orgs] = await Promise.all([
+                  fetchSaaSData("couriers"),
+                  fetchSaaSData("organizations")
+              ]);
+              setCourierList(couriers);
+              setOrgList(orgs);
+          }
+      };
+      loadData();
+  }, [currentUser]);
 
+  // POWER USER CHECK
+  const role = currentUser?.role || ''; 
   const canManage = 
       role === 'Admin' || 
       role === 'Manager' || 
       role === 'Account' || role === 'Accountant' ||
       role === 'Hr' ||  
-      role === 'Store' || role === 'Store Keeper';    
+      role === 'Store' || role === 'Store Keeper' || role === 'SuperAdmin';    
 
-  const isStrictAdmin = role === 'Admin' || role === 'Manager';
+  const isStrictAdmin = role === 'Admin' || role === 'Manager' || role === 'SuperAdmin';
 
   // --- BADGE COUNTS ---
   const inwardPending = courierList.filter((c: any) => c.type === 'Inward' && c.status === 'Pending').length;
   const outwardPending = courierList.filter((c: any) => c.type === 'Outward' && c.status === 'Pending').length;
 
-  // --- HELPER: DATE PARSER ---
   const parseDate = (dateStr: string) => {
       if (!dateStr) return new Date(0);
       if (dateStr.includes('T')) return new Date(dateStr);
@@ -75,7 +104,6 @@ export default function CourierScreen() {
       return new Date(0);
   };
 
-  // 🔥 DYNAMIC PDF GENERATOR 🔥
   const generateChallan = async (data: any) => {
       try {
           let tableRows = '';
@@ -224,7 +252,6 @@ export default function CourierScreen() {
       } catch (error) { Alert.alert("Error", "Could not generate PDF."); }
   };
 
-  // --- FY DATE NAVIGATION ---
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
       if (viewMode === 'Day') d.setDate(d.getDate() + dir);
@@ -245,15 +272,14 @@ export default function CourierScreen() {
       return "All Time";
   };
 
-  // --- 🔥 FIXED: FILTER LOGIC WITH PROPER FY BOUNDARIES (Removed Jan 2026 Limit) ---
   const getFilteredData = () => {
       let data = Array.isArray(courierList) ? [...courierList] : [];
 
-      if (!canManage && user?.uid) {
+      if (!canManage && currentUser?.uid) {
           data = data.filter((item: any) => 
-              item.senderId === user.uid || 
-              (item.receiver && item.receiver.toLowerCase().includes(user.name?.toLowerCase())) ||
-              (item.sender && item.sender.toLowerCase().includes(user.name?.toLowerCase()))
+              item.senderId === currentUser.uid || 
+              (item.receiver && item.receiver.toLowerCase().includes(currentUser.name?.toLowerCase())) ||
+              (item.sender && item.sender.toLowerCase().includes(currentUser.name?.toLowerCase()))
           );
       }
 
@@ -278,10 +304,9 @@ export default function CourierScreen() {
           const targetMonth = currentDate.getMonth();
           const targetDay = currentDate.getDate();
 
-          // FY Boundaries Logic (April 1st to March 31st)
           const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // 1st April
-          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // 31st March
+          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
+          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
 
           data = data.filter((item: any) => {
               if(!item.date) return false;
@@ -295,7 +320,7 @@ export default function CourierScreen() {
           });
       }
 
-      data.sort((a: any, b: any) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
+      data.sort((a: any, b: any) => new Date(b.createdAt || b.dateIso || b.date).getTime() - new Date(a.createdAt || a.dateIso || a.date).getTime());
       return data;
   };
 
@@ -332,6 +357,7 @@ export default function CourierScreen() {
     setEditModalVisible(true);
   };
 
+  // 🔥 5. SAAS UPDATE LOGIC (EDIT)
   const handleSaveEdit = async () => {
     if (!editData.id) return;
     if (!editData.docketNo || !editData.courierName) {
@@ -340,8 +366,7 @@ export default function CourierScreen() {
     }
     setIsSavingEdit(true);
     try {
-        const docRef = doc(db, "couriers", editData.id);
-        await updateDoc(docRef, {
+        const res = await updateSaaSData("couriers", editData.id, {
             orgId: editData.orgId || '', 
             docketNo: editData.docketNo,
             courierName: editData.courierName,
@@ -354,15 +379,22 @@ export default function CourierScreen() {
             notes: editData.notes,
             note: editData.notes 
         });
-        Alert.alert("Success", "Courier details updated successfully!");
-        setEditModalVisible(false);
+
+        if (res.success) {
+            setCourierList(prev => prev.map(item => item.id === editData.id ? { ...item, ...editData } : item));
+            Alert.alert("Success", "Courier details updated successfully!");
+            setEditModalVisible(false);
+        } else {
+            Alert.alert("Error", "Could not update.");
+        }
     } catch (error: any) {
-        Alert.alert("Error", "Could not update courier. " + error.message);
+        Alert.alert("Error", "Could not update courier. ");
     } finally {
         setIsSavingEdit(false);
     }
   };
 
+  // 🔥 6. SAAS DELETE LOGIC
   const handleDelete = async () => {
     if (!selectedCourier) return;
     Alert.alert("Delete Entry?", "Permanently delete this record?", [
@@ -370,9 +402,14 @@ export default function CourierScreen() {
       { text: "Delete", style: 'destructive', onPress: async () => {
           setLoading(true); 
           try {
-            await deleteDoc(doc(db, "couriers", selectedCourier.id));
-            setModalVisible(false);
-            Alert.alert("Deleted", "Success.");
+            const res = await deleteSaaSData("couriers", selectedCourier.id);
+            if (res.success) {
+                setCourierList(prev => prev.filter(item => item.id !== selectedCourier.id));
+                setModalVisible(false);
+                Alert.alert("Deleted", "Success.");
+            } else {
+                Alert.alert("Error", "Could not delete.");
+            }
           } catch (error) { Alert.alert("Error", "Could not delete."); }
           finally { setLoading(false); } 
         }
@@ -380,6 +417,7 @@ export default function CourierScreen() {
     ]);
   };
 
+  // 🔥 7. SAAS UPDATE LOGIC (STATUS)
   const handleUpdateStatus = (newStatus: string) => {
       if (!selectedCourier) return;
       Alert.alert("Confirm", `Mark as ${newStatus}?`, [
@@ -387,17 +425,25 @@ export default function CourierScreen() {
           { text: "Yes", onPress: async () => {
               setLoading(true); 
               try {
-                  const docRef = doc(db, "couriers", selectedCourier.id);
-                  await updateDoc(docRef, { status: newStatus, notes: note }); 
+                  const res = await updateSaaSData("couriers", selectedCourier.id, { status: newStatus, notes: note }); 
                   
-                  if (addNotification) {
-                      const targetUser = selectedCourier.type === 'Inward' ? selectedCourier.receiver : selectedCourier.sender;
-                      await addNotification({
-                          title: `Courier ${newStatus}`, message: `Docket: ${selectedCourier.docketNo} marked as ${newStatus}.`, type: 'info', to: targetUser, route: '/courier'
-                      });
+                  if (res.success) {
+                      if (addNotification) {
+                          const targetUser = selectedCourier.type === 'Inward' ? selectedCourier.receiver : selectedCourier.sender;
+                          await addNotification({
+                              title: `Courier ${newStatus}`, 
+                              message: `Docket: ${selectedCourier.docketNo} marked as ${newStatus}.`, 
+                              type: 'info', 
+                              to: targetUser, 
+                              route: '/courier'
+                          });
+                      }
+                      setCourierList(prev => prev.map(item => item.id === selectedCourier.id ? { ...item, status: newStatus, notes: note } : item));
+                      setModalVisible(false);
+                      Alert.alert("Success", "Status Updated!");
+                  } else {
+                      Alert.alert("Error", "Update failed.");
                   }
-                  setModalVisible(false);
-                  Alert.alert("Success", "Status Updated!");
               } catch (error) { Alert.alert("Error", "Update failed."); }
               finally { setLoading(false); } 
           }}
@@ -464,7 +510,7 @@ export default function CourierScreen() {
     );
   };
 
-  const isReceiver = selectedCourier && user?.name && selectedCourier.receiver ? selectedCourier.receiver.toLowerCase().includes(user.name.toLowerCase()) : false;
+  const isReceiver = selectedCourier && currentUser?.name && selectedCourier.receiver ? selectedCourier.receiver.toLowerCase().includes(currentUser.name.toLowerCase()) : false;
   const canUpdate = canManage || isReceiver;
 
   const renderMaterialList = (item: any) => {
@@ -528,7 +574,7 @@ export default function CourierScreen() {
               </View>
           )}
           <View style={styles.searchBar}>
-              <Ionicons name="search" size={20} color="gray" />
+              {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
               <TextInput style={styles.input} placeholder="Search Docket, Name..." value={searchText} onChangeText={setSearchText} />
               {searchText.length > 0 && (<TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={18} color="gray" /></TouchableOpacity>)}
           </View>
@@ -546,7 +592,7 @@ export default function CourierScreen() {
         data={renderedList} 
         keyExtractor={item => item.id} 
         contentContainerStyle={styles.contentContainer} 
-        ListEmptyComponent={<Text style={{textAlign:'center', marginTop:50, color:'gray'}}>No Couriers Found</Text>} 
+        ListEmptyComponent={<Text style={{textAlign:'center', marginTop:50, color:'gray'}}>{isDbLoading ? 'Loading data...' : 'No Couriers Found'}</Text>} 
         renderItem={renderItem} 
         ListFooterComponent={
             <View style={{ paddingBottom: 100 }}>

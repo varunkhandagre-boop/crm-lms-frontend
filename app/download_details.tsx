@@ -2,8 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import { collection, getDocs, query, where } from 'firebase/firestore';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -16,14 +15,25 @@ import {
     View
 } from 'react-native';
 import * as XLSX from 'xlsx';
-import { db } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function DownloadDetailsScreen() {
     const router = useRouter();
-    const { currentUser, userList } = useData();
+    
+    // 🔥 1. Context se sirf logged in User
+    const { currentUser } = useData();
+    
+    // 🔥 2. Naya SaaS Engine
+    const { fetchSaaSData } = useSaaSDB();
+
     const [loading, setLoading] = useState(false);
     const [progress, setProgress] = useState('');
+
+    // 🔥 3. Lazy Loaded Employee List
+    const [userList, setUserList] = useState<any[]>([]);
 
     // Filters
     const [selectedMonth, setSelectedMonth] = useState(-1); // -1 means "All Months"
@@ -54,17 +64,27 @@ export default function DownloadDetailsScreen() {
     });
 
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    // ✅ New Code (Jo apne aap badhega)
-const currentYearVal = new Date().getFullYear(); // Abhi ka saal nikalega (e.g. 2026)
-const startYear = 2024; // Jab app launch hua
-// Ye loop 2024 se lekar aane wale saal tak ki list bana dega
-const years = Array.from({length: (currentYearVal - startYear) + 2}, (_, i) => startYear + i);
+    
+    const currentYearVal = new Date().getFullYear(); 
+    const startYear = 2024; 
+    const years = Array.from({length: (currentYearVal - startYear) + 2}, (_, i) => startYear + i);
+
+    // 🔥 4. LOAD USERS ON MOUNT
+    useEffect(() => {
+        const loadUsers = async () => {
+            if (currentUser?.companyId) {
+                const users = await fetchSaaSData("users");
+                setUserList(users);
+            }
+        };
+        loadUsers();
+    }, [currentUser]);
 
     // Helper to filter data by date & user
     const filterData = (data: any[], dateField: string, userField: string) => {
         return data.filter(item => {
             // Date Logic
-            const val = item[dateField] || item.createdAt || item.date;
+            const val = item[dateField] || item.dateIso || item.createdAt || item.date;
             if(!val) return false;
             
             const d = new Date(val);
@@ -85,21 +105,23 @@ const years = Array.from({length: (currentYearVal - startYear) + 2}, (_, i) => s
         });
     };
 
+    // 🔥 5. SAAS DATA FETCH ENGINE FOR EXCEL
     const fetchAndAddSheet = async (wb: any, colName: string, sheetName: string, dateField: string, userField: string) => {
         if (!modules[sheetName.toLowerCase() as keyof typeof modules] && !modules[colName as keyof typeof modules]) return false;
         
         setProgress(`Fetching ${sheetName}...`);
         
         try {
-            const q = query(collection(db, colName), where("companyId", "==", currentUser.companyId));
-            const snap = await getDocs(q);
-            const raw = snap.docs.map(d => {
-                const data = d.data();
-                const { location, items, history, ...cleanData } = data; 
+            // SAAS MAGIC: Automatically fetches only current company's data
+            const rawData = await fetchSaaSData(colName);
+            
+            // 🔥 FIX: Added (d: any) to tell TypeScript to accept dynamic properties
+            const cleanRawData = rawData.map((d: any) => {
+                const { location, items, history, outLocation, partsUsed, ...cleanData } = d; 
                 return cleanData;
             });
 
-            const filtered = filterData(raw, dateField, userField);
+            const filtered = filterData(cleanRawData, dateField, userField);
 
             if (filtered.length > 0) {
                 const ws = XLSX.utils.json_to_sheet(filtered);
@@ -120,22 +142,22 @@ const years = Array.from({length: (currentYearVal - startYear) + 2}, (_, i) => s
             const wb = XLSX.utils.book_new(); 
             let hasData = false;
 
-            // Fetch Modules
-            if(await fetchAndAddSheet(wb, "orders", "Orders", "date", "senderId")) hasData = true;
-            if(await fetchAndAddSheet(wb, "payment_collections", "Collections", "date", "senderId")) hasData = true;
-            if(await fetchAndAddSheet(wb, "expenses", "Expenses", "date", "userId")) hasData = true;
-            if(await fetchAndAddSheet(wb, "leads", "Leads", "createdAt", "senderId")) hasData = true;
-            if(await fetchAndAddSheet(wb, "attendance", "Attendance", "date", "senderId")) hasData = true;
-            if(await fetchAndAddSheet(wb, "installations", "Installations", "date", "senderId")) hasData = true;
-            if(await fetchAndAddSheet(wb, "pms_reports", "PMS", "date", "senderId")) hasData = true;
-            if(await fetchAndAddSheet(wb, "service_calls", "ServiceCalls", "date", "senderId")) hasData = true;
-            if(await fetchAndAddSheet(wb, "demos", "Demos", "date", "senderId")) hasData = true;
-            if(await fetchAndAddSheet(wb, "couriers", "Couriers", "date", "senderId")) hasData = true;
-            if(await fetchAndAddSheet(wb, "tasks", "Tasks", "createdAt", "senderId")) hasData = true;
-            if(await fetchAndAddSheet(wb, "advances", "Advances", "date", "senderId")) hasData = true;
-            if(await fetchAndAddSheet(wb, "travel_notes", "Travel", "date", "senderId")) hasData = true;
-            if(await fetchAndAddSheet(wb, "leaves", "Leaves", "fromDate", "senderId")) hasData = true;
-            if(await fetchAndAddSheet(wb, "projects", "Projects", "createdAt", "senderId")) hasData = true;
+            // Fetch Modules dynamically through SaaS Engine
+            if(await fetchAndAddSheet(wb, "orders", "Orders", "dateIso", "senderId")) hasData = true;
+            if(await fetchAndAddSheet(wb, "payments", "Collections", "dateIso", "senderId")) hasData = true;
+            if(await fetchAndAddSheet(wb, "expenses", "Expenses", "dateIso", "userId")) hasData = true;
+            if(await fetchAndAddSheet(wb, "leads", "Leads", "dateIso", "senderId")) hasData = true;
+            if(await fetchAndAddSheet(wb, "attendance", "Attendance", "dateIso", "senderId")) hasData = true;
+            if(await fetchAndAddSheet(wb, "installations", "Installations", "dateIso", "senderId")) hasData = true;
+            if(await fetchAndAddSheet(wb, "pms_reports", "PMS", "dateIso", "senderId")) hasData = true;
+            if(await fetchAndAddSheet(wb, "service_calls", "ServiceCalls", "dateIso", "senderId")) hasData = true;
+            if(await fetchAndAddSheet(wb, "demos", "Demos", "dateIso", "senderId")) hasData = true;
+            if(await fetchAndAddSheet(wb, "couriers", "Couriers", "dateIso", "senderId")) hasData = true;
+            if(await fetchAndAddSheet(wb, "tasks", "Tasks", "dateIso", "senderId")) hasData = true;
+            if(await fetchAndAddSheet(wb, "advances", "Advances", "dateIso", "senderId")) hasData = true;
+            if(await fetchAndAddSheet(wb, "travel_notes", "Travel", "dateIso", "senderId")) hasData = true;
+            if(await fetchAndAddSheet(wb, "leaves", "Leaves", "fromDateIso", "senderId")) hasData = true;
+            if(await fetchAndAddSheet(wb, "projects", "Projects", "dateIso", "senderId")) hasData = true;
 
             if (!hasData) {
                 Alert.alert("No Data", "No records found for the selected period.");
@@ -223,7 +245,7 @@ const years = Array.from({length: (currentYearVal - startYear) + 2}, (_, i) => s
                             <Text style={[styles.chipText, selectedUser === 'All' && {color:'white'}]}>All Staff</Text>
                         </TouchableOpacity>
                         {userList.map((u: any) => (
-                             u.companyId === currentUser.companyId && (
+                             u.companyId === currentUser?.companyId && (
                                 <TouchableOpacity key={u.id} style={[styles.chip, selectedUser === u.id && styles.activeChip]} onPress={() => setSelectedUser(u.id)}>
                                     <Text style={[styles.chipText, selectedUser === u.id && {color:'white'}]}>{u.name}</Text>
                                 </TouchableOpacity>
@@ -336,7 +358,6 @@ const styles = StyleSheet.create({
     card: { backgroundColor: 'white', padding: 15, borderRadius: 12, marginBottom: 15, elevation: 1 },
     cardHeader: { fontSize: 14, fontWeight: 'bold', color: '#555', borderBottomWidth:1, borderBottomColor:'#eee', paddingBottom:5 },
     
-    // Filter Row Styles
     filterRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10, gap: 10 },
     dropdown: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f4ff', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#d1d9ff', justifyContent: 'space-between' },
     dropdownText: { fontSize: 14, fontWeight: 'bold', color: '#333' },
@@ -353,7 +374,6 @@ const styles = StyleSheet.create({
     downloadBtn: { backgroundColor: '#2e7d32', padding: 15, borderRadius: 12, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 10, elevation: 3 },
     btnText: { color: 'white', fontSize: 16, fontWeight: 'bold', marginLeft: 10 },
 
-    // Modal Styles
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
     modalContent: { width: '90%', backgroundColor: 'white', borderRadius: 12, padding: 20, elevation: 5 },
     modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center', color: '#3b5998' },

@@ -1,28 +1,37 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+
+// 🔥 SAAS IMPORTS
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function ProjectsScreen() {
   const router = useRouter();
-  const { user, projectList = [] } = useData(); 
-  const [searchText, setSearchText] = useState('');
+  
+  // 🔥 1. Context se sirf current user nikala
+  const { currentUser } = useData(); 
 
-  // 🔥 PAGINATION STATE
+  // 🔥 2. Naya SaaS Engine connect kiya
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded States
+  const [projectList, setProjectList] = useState<any[]>([]);
+
+  const [searchText, setSearchText] = useState('');
   const [visibleCount, setVisibleCount] = useState(20);
 
-  // 🔥 NEW STATES: FY Filter
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
 
   // 🔒 SECURITY CHECK
-  const allowedRoles = ['admin', 'manager', 'account', 'accountant', 'store', 'store keeper', 'hr'];
-  const userRole = user?.role ? user.role.toLowerCase() : '';
+  const allowedRoles = ['admin', 'manager', 'account', 'accountant', 'store', 'store keeper', 'hr', 'superadmin'];
+  const userRole = currentUser?.role ? currentUser.role.toLowerCase() : '';
   const hasAccess = allowedRoles.includes(userRole);
 
   useEffect(() => {
-      if (user && !hasAccess) {
+      if (currentUser && !hasAccess) {
           Alert.alert("Access Denied", "You don't have permission to view Projects.");
           if (router.canGoBack()) {
               router.back();
@@ -30,11 +39,22 @@ export default function ProjectsScreen() {
               router.replace('/');
           }
       }
-  }, [user, hasAccess]);
+  }, [currentUser, hasAccess]);
 
   useEffect(() => {
       setVisibleCount(20);
   }, [searchText, viewMode, currentDate]);
+
+  // 🔥 4. LOAD SAAS DATA ON MOUNT
+  useEffect(() => {
+      const loadData = async () => {
+          if (currentUser?.companyId && hasAccess) {
+              const data = await fetchSaaSData("projects");
+              setProjectList(data);
+          }
+      };
+      loadData();
+  }, [currentUser, hasAccess]);
 
   if (!hasAccess) {
       return null; 
@@ -46,7 +66,6 @@ export default function ProjectsScreen() {
       return '#ff9800'; 
   };
 
-  // 🔥 DATE PARSER
   const parseDate = (dateStr: any) => {
       if (!dateStr) return 0;
       if (typeof dateStr === 'number') return dateStr;
@@ -64,7 +83,6 @@ export default function ProjectsScreen() {
       return new Date(dateStr).getTime();
   };
 
-  // 🔥 FY Navigation
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
       if (viewMode === 'Day') d.setDate(d.getDate() + dir);
@@ -73,7 +91,6 @@ export default function ProjectsScreen() {
       setCurrentDate(d);
   };
 
-  // 🔥 FY Header Text Logic
   const getHeaderDate = () => {
       if (viewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
       if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -86,7 +103,7 @@ export default function ProjectsScreen() {
       return "All Time";
   };
 
-  // 🔥 SUPER SEARCH & DATE FILTER LOGIC
+  // --- FILTER LOGIC ---
   const getFilteredProjects = () => {
       let data = Array.isArray(projectList) ? [...projectList] : [];
 
@@ -104,17 +121,16 @@ export default function ProjectsScreen() {
           const tDay = currentDate.getDate();
 
           const fyStartYear = tMonth >= 3 ? tYear : tYear - 1;
-          let fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // 1st April
-          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // 31st March
+          let fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
+          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
 
-          // 🔥 Apply App Launch Date (Jan 1, 2026) Limit
           const APP_LAUNCH_DATE = new Date(2026, 0, 1).getTime(); 
           if (fyStartDate < APP_LAUNCH_DATE) {
               fyStartDate = APP_LAUNCH_DATE;
           }
 
           data = data.filter((item: any) => {
-              const dateField = item.createdAt || item.date;
+              const dateField = item.dateIso || item.createdAt || item.date;
               if (!dateField) return false;
               const ts = parseDate(dateField);
               if (ts === 0) return false;
@@ -129,8 +145,8 @@ export default function ProjectsScreen() {
       }
 
       data.sort((a: any, b: any) => {
-          const dateA = parseDate(a.createdAt || a.date);
-          const dateB = parseDate(b.createdAt || b.date);
+          const dateA = parseDate(a.dateIso || a.createdAt || a.date);
+          const dateB = parseDate(b.dateIso || b.createdAt || b.date);
           return dateB - dateA;
       });
 
@@ -140,11 +156,9 @@ export default function ProjectsScreen() {
   const fullList = getFilteredProjects(); 
   const renderedList = fullList.slice(0, visibleCount);
 
-  // 🐛 FIX: `FlatList` renderItem method moved outside inline
   const renderProjectCard = ({ item }: any) => (
       <TouchableOpacity 
           style={styles.card} 
-          // 🔥 Direct Query String का इस्तेमाल करेंगे ताकि ID हमेशा String फॉर्मेट में ही जाए
           onPress={() => router.push(`/project_details?id=${item.id}` as any)}
       >
           <View style={styles.cardHeader}>
@@ -178,7 +192,6 @@ export default function ProjectsScreen() {
 
   return (
     <View style={styles.container}>
-      {/* HEADER */}
       <View style={styles.header}>
         <View style={{flexDirection:'row', alignItems:'center'}}>
             <TouchableOpacity onPress={() => router.back()}>
@@ -192,11 +205,9 @@ export default function ProjectsScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* 🔥 NEW FILTER UI STARTS */}
       <View style={{backgroundColor:'white', paddingBottom:5}}>
-          {/* SEARCH BAR */}
           <View style={styles.searchContainer}>
-              <Ionicons name="search" size={20} color="gray" style={{marginRight: 10}} />
+              {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" style={{marginRight: 10}}/> : <Ionicons name="search" size={20} color="gray" style={{marginRight: 10}} />}
               <TextInput 
                   style={styles.searchInput} 
                   placeholder="Search Project, Client, City, ID..." 
@@ -212,7 +223,6 @@ export default function ProjectsScreen() {
 
           {!searchText && (
             <>
-              {/* TABS */}
               <View style={styles.tabContainer}>
                   {['Day', 'Month', 'FY', 'All'].map((m) => (
                       <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
@@ -221,7 +231,6 @@ export default function ProjectsScreen() {
                   ))}
               </View>
 
-              {/* DATE NAVIGATOR */}
               {viewMode !== 'All' && (
                   <View style={styles.dateNav}>
                       <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
@@ -232,7 +241,6 @@ export default function ProjectsScreen() {
             </>
           )}
 
-          {/* SUMMARY CARDS */}
           <View style={styles.summaryContainer}>
               <View style={[styles.summaryCard, {backgroundColor:'#e3f2fd'}]}>
                   <Text style={styles.summaryLabel}>Running</Text>
@@ -253,15 +261,18 @@ export default function ProjectsScreen() {
           </Text>
       </View>
 
-      {/* PROJECT LIST */}
       <FlatList 
         data={renderedList}
         keyExtractor={(item:any) => item.id.toString()} 
         contentContainerStyle={{padding: 15, paddingBottom: 50}}
         ListEmptyComponent={
             <View style={{alignItems:'center', marginTop:50}}>
-                <Ionicons name="business-outline" size={60} color="#ccc" />
-                <Text style={{color:'gray', marginTop:10}}>No Projects Found.</Text>
+                {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                    <>
+                        <Ionicons name="business-outline" size={60} color="#ccc" />
+                        <Text style={{color:'gray', marginTop:10}}>No Projects Found.</Text>
+                    </>
+                )}
             </View>
         }
         renderItem={renderProjectCard}

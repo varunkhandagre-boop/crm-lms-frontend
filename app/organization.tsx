@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     FlatList,
     Linking,
     Modal,
@@ -12,11 +13,22 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+
+// 🔥 SAAS IMPORTS (Direct DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function OrganizationScreen() {
   const router = useRouter();
-  const { orgList } = useData();
+  
+  // 🔥 1. Context se sirf current user nikala
+  const { currentUser } = useData();
+
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded States
+  const [orgList, setOrgList] = useState<any[]>([]);
 
   // --- STATES ---
   const [searchText, setSearchText] = useState('');
@@ -28,6 +40,18 @@ export default function OrganizationScreen() {
   useEffect(() => {
       setVisibleCount(20);
   }, [searchText]);
+
+  // 🔥 4. LOAD SAAS DATA ON MOUNT
+  const loadData = async () => {
+      if (currentUser?.companyId) {
+          const orgs = await fetchSaaSData("organizations");
+          setOrgList(orgs);
+      }
+  };
+
+  useEffect(() => {
+      loadData();
+  }, [currentUser]);
 
   const getFilteredData = () => {
     let data = orgList ? [...orgList] : [];
@@ -108,7 +132,7 @@ export default function OrganizationScreen() {
                  <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/')}>
                      <Ionicons name="home" size={20} color="#3b5998" />
                  </TouchableOpacity>
-                 <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_organization')}>
+                 <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_organization' as any)}>
                      <Ionicons name="add" size={20} color="white" />
                      <Text style={{color:'white', fontWeight:'bold', marginLeft:2}}>Add New</Text>
                  </TouchableOpacity>
@@ -117,7 +141,7 @@ export default function OrganizationScreen() {
 
         <View style={styles.searchRow}>
             <View style={styles.searchBar}>
-                <Ionicons name="search" size={20} color="gray" />
+                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
                 <TextInput 
                     style={styles.input}
                     placeholder="Search Name, City, State..."
@@ -146,11 +170,14 @@ export default function OrganizationScreen() {
         contentContainerStyle={styles.contentContainer}
         ListEmptyComponent={
             <View style={{alignItems:'center', marginTop:50}}>
-                <Ionicons name="business-outline" size={80} color="#ddd" />
-                <Text style={{color:'gray', marginTop:10}}>No Organization Found</Text>
+                {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                    <>
+                        <Ionicons name="business-outline" size={80} color="#ddd" />
+                        <Text style={{color:'gray', marginTop:10}}>No Organization Found</Text>
+                    </>
+                )}
             </View>
         }
-        // 🔥 FIX: Added paddingBottom: 80 wrapper around the footer
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
                 {visibleCount < fullList.length ? (
@@ -220,7 +247,7 @@ export default function OrganizationScreen() {
                                   router.push({ 
                                       pathname: '/add_organization', 
                                       params: { editId: selectedOrg.id } 
-                                  });
+                                  } as any);
                               }}
                           >
                               <Ionicons name="create" size={18} color="white" />

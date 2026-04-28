@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,11 +17,10 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { useData } from './context/DataContext';
 
-// 🔥 FIREBASE IMPORTS
-import { addDoc, collection, doc, getDocs, query, updateDoc } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+// 🔥 SAAS IMPORTS (Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
+import { useData } from './context/DataContext';
 
 // 🔥 PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
@@ -30,7 +30,17 @@ import * as Sharing from 'expo-sharing';
 export default function ServiceCallScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { serviceCallList = [], user, addNotification, companyProfile } = useData(); 
+  
+  // 🔥 1. Context se sirf current user & profile nikala
+  const { currentUser, companyProfile } = useData(); 
+
+  // 🔥 2. Naya SaaS Engine connect kiya
+  const { fetchSaaSData, updateSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded Master States
+  const [serviceCallList, setServiceCallList] = useState<any[]>([]);
+  const [orgList, setOrgList] = useState<any[]>([]);
+  const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
 
   // --- STATES ---
   const [statusFilter, setStatusFilter] = useState<'Open' | 'Closed' | 'All'>('Open');
@@ -40,8 +50,6 @@ export default function ServiceCallScreen() {
       }
   }, [params]);
   const [searchText, setSearchText] = useState('');
-
-  // 🔥 CHANGED: 'Year' to 'FY'
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
 
@@ -50,10 +58,10 @@ export default function ServiceCallScreen() {
 
   const [resolutionNote, setResolutionNote] = useState('');
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false); 
 
-  // --- NEW: EMPLOYEE FILTER STATES ---
-  const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
+  // --- EMPLOYEE FILTER STATES ---
   const [selectedEmployee, setSelectedEmployee] = useState('All');
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
@@ -68,27 +76,39 @@ export default function ServiceCallScreen() {
       }
   }, [viewMode, currentDate, statusFilter, searchText, selectedEmployee]);
 
-  const isAdmin = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr'].includes(user?.role || '');
+  const isAdmin = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
   const openCount = serviceCallList.filter((i: any) => i.status === 'Open' || i.status === 'Assigned').length;
 
+  // 🔥 4. LOAD SAAS DATA ON MOUNT
+  const loadData = async () => {
+      if (currentUser?.companyId) {
+          const [services, orgs, users] = await Promise.all([
+              fetchSaaSData("service_calls"),
+              fetchSaaSData("organizations"),
+              fetchSaaSData("users")
+          ]);
+          setServiceCallList(services);
+          setOrgList(orgs);
+
+          if (isAdmin) {
+              const mappedUsers = users.map((u: any) => ({
+                  id: u.id,
+                  name: u.name || 'Unknown User'
+              }));
+              setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
+          }
+      }
+  };
+
   useEffect(() => {
-    if (isAdmin) {
-      const fetchEmployees = async () => {
-        try {
-          const q = query(collection(db, "users"));
-          const querySnapshot = await getDocs(q);
-          const usersData = querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            name: doc.data().name || 'Unknown User'
-          }));
-          setEmployees([{ id: 'All', name: 'All Staff' }, ...usersData]);
-        } catch (error) {
-          console.log("Error fetching employees:", error);
-        }
-      };
-      fetchEmployees();
-    }
-  }, [user]);
+      loadData();
+  }, [currentUser]);
+
+  const onRefresh = async () => {
+      setRefreshing(true);
+      await loadData();
+      setRefreshing(false);
+  };
 
   const parseDate = (dateStr: any) => {
     if (!dateStr) return 0;
@@ -104,7 +124,6 @@ export default function ServiceCallScreen() {
     return isNaN(d.getTime()) ? 0 : d.getTime();
   };
 
-  // 🔥 CHANGED: FY Navigation
   const changeDate = (dir: number) => {
     const d = new Date(currentDate);
     if (viewMode === 'Day') d.setDate(d.getDate() + dir);
@@ -113,7 +132,6 @@ export default function ServiceCallScreen() {
     setCurrentDate(d);
   };
 
-  // 🔥 CHANGED: FY Header Text Logic
   const getHeaderDate = () => {
     if (viewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -198,7 +216,7 @@ export default function ServiceCallScreen() {
             <div class="box">
                 <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
                     <div><b>Ticket No:</b> ${ticketData.scrId}</div>
-                    <div><b>Date:</b> ${new Date(ticketData.date).toLocaleDateString('en-GB')}</div>
+                    <div><b>Date:</b> ${new Date(ticketData.dateIso || ticketData.date).toLocaleDateString('en-GB')}</div>
                 </div>
                 <div style="display:flex; justify-content:space-between;">
                     <div><b>Status:</b> ${ticketData.status}</div>
@@ -275,7 +293,8 @@ export default function ServiceCallScreen() {
         return false;
       });
     } else if (!isAdmin) {
-      data = data.filter((item: any) => item.senderId === user?.uid || item.assignedToId === user?.uid);
+      const myId = currentUser?.uid || currentUser?.id;
+      data = data.filter((item: any) => item.senderId === myId || item.assignedToId === myId);
     }
 
     if (statusFilter === 'Open') {
@@ -291,24 +310,23 @@ export default function ServiceCallScreen() {
       );
     }
 
-    // 🔥 CHANGED: FY Boundaries Logic
+    // FY Boundaries Logic
     if (viewMode !== 'All') {
       const tYear = currentDate.getFullYear();
       const tMonth = currentDate.getMonth();
       const tDay = currentDate.getDate();
 
       const fyStartYear = tMonth >= 3 ? tYear : tYear - 1;
-      let fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // 1st April
-      const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // 31st March
+      let fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
+      const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
 
-      // 🔥 Apply App Launch Date (Jan 1, 2026) Limit
       const APP_LAUNCH_DATE = new Date(2026, 0, 1).getTime(); 
       if (fyStartDate < APP_LAUNCH_DATE) {
           fyStartDate = APP_LAUNCH_DATE;
       }
 
       data = data.filter((item: any) => {
-        const ts = parseDate(item.createdAt || item.date);
+        const ts = parseDate(item.createdAt || item.dateIso || item.date);
         if (!ts) return false;
         const d = new Date(ts);
         const itemTime = d.getTime();
@@ -320,7 +338,7 @@ export default function ServiceCallScreen() {
       });
     }
 
-    data.sort((a: any, b: any) => parseDate(b.date || b.createdAt) - parseDate(a.date || a.createdAt));
+    data.sort((a: any, b: any) => parseDate(b.dateIso || b.date || b.createdAt) - parseDate(a.dateIso || a.date || a.createdAt));
     return data;
   };
 
@@ -342,48 +360,53 @@ export default function ServiceCallScreen() {
     setDetailsModalVisible(true);
   };
 
+  // 🔥 5. SAAS CLOSE TICKET LOGIC
   const handleCloseCall = async () => {
     if (!resolutionNote) { Alert.alert("Required", "Please enter a resolution note."); return; }
     setLoading(true);
     try {
-      const callRef = doc(db, "service_calls", selectedCall.id);
-      
       const updateData = {
         status: 'Resolved',
         resolutionNote: resolutionNote,
         resolvedAt: new Date().toISOString(),
-        resolvedBy: user?.name || 'Admin'
+        resolvedBy: currentUser?.name || 'Admin'
       };
 
-      await updateDoc(callRef, updateData);
+      const res = await updateSaaSData("service_calls", selectedCall.id, updateData);
       
-      try {
-          const targetUser = user?.role === 'Admin' ? selectedCall.senderId : 'Admin';
-          await addDoc(collection(db, "notifications"), {
-              title: "Service Call Resolved ✅",
-              message: `Ticket #${selectedCall.scrId} resolved by ${user?.name}.`,
-              to: targetUser, 
-              screen: "/service_call?filter=Closed",
-              read: false,
-              createdAt: new Date().toISOString(),
-              type: "success"
-          });
-      } catch (error) {}
+      if (res.success) {
+          setServiceCallList(prev => prev.map(item => item.id === selectedCall.id ? { ...item, ...updateData } : item));
 
-      setDetailsModalVisible(false);
-      
-      Alert.alert(
-          "Call Closed Successfully!", 
-          "Do you want to share the Service Report PDF?",
-          [
-              { text: "No", style: 'cancel' },
-              { text: "Yes, Share PDF", onPress: async () => { 
-                  const finalData = { ...selectedCall, ...updateData };
-                  await generateServicePDF(finalData);
-              }}
-          ]
-      );
+          try {
+              const targetUser = currentUser?.role === 'Admin' || currentUser?.role === 'SuperAdmin' ? selectedCall.senderId : 'Admin';
+              await addSaaSData("notifications", {
+                  title: "Service Call Resolved ✅",
+                  message: `Ticket #${selectedCall.scrId} resolved by ${currentUser?.name}.`,
+                  to: targetUser, 
+                  userId: targetUser,
+                  screen: "/service_call?filter=Closed",
+                  read: false,
+                  createdAt: new Date().toISOString(),
+                  type: "success"
+              });
+          } catch (error) {}
 
+          setDetailsModalVisible(false);
+          
+          Alert.alert(
+              "Call Closed Successfully!", 
+              "Do you want to share the Service Report PDF?",
+              [
+                  { text: "No", style: 'cancel' },
+                  { text: "Yes, Share PDF", onPress: async () => { 
+                      const finalData = { ...selectedCall, ...updateData };
+                      await generateServicePDF(finalData);
+                  }}
+              ]
+          );
+      } else {
+          Alert.alert("Error", "Could not update status.");
+      }
     } catch (error) { Alert.alert("Error", "Could not update status."); }
     finally { setLoading(false); }
   };
@@ -412,7 +435,7 @@ export default function ServiceCallScreen() {
         </View>
         <View style={styles.divider} />
         <View style={styles.cardFooter}>
-          <Text style={styles.footerText}>{item.date}</Text>
+          <Text style={styles.footerText}>{item.dateIso || item.date}</Text>
           <Text style={[styles.footerText, { color: '#3b5998', fontWeight: 'bold' }]}>
             {item.senderName ? item.senderName.split(' ')[0] : 'Unknown'}
           </Text>
@@ -452,7 +475,6 @@ export default function ServiceCallScreen() {
 
       <View style={{ backgroundColor: 'white', paddingBottom: 10, marginBottom: 5 }}>
         <View style={styles.dateTabRow}>
-          {/* 🔥 CHANGED: 'Year' replaced with 'FY' */}
           {['Day', 'Month', 'FY', 'All'].map((m) => (
             <TouchableOpacity key={m} style={[styles.dateTab, viewMode === m && styles.activeDateTab]} onPress={() => setViewMode(m as any)}>
               <Text style={[styles.dateTabText, viewMode === m && styles.activeDateTabText]}>{m}</Text>
@@ -485,7 +507,7 @@ export default function ServiceCallScreen() {
 
         <View style={styles.searchRow}>
           <View style={styles.searchBar}>
-            <Ionicons name="search" size={20} color="gray" />
+            {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
             <TextInput style={styles.input} placeholder="Search Ticket, Hospital..." value={searchText} onChangeText={setSearchText} />
             {searchText.length > 0 && (
               <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={18} color="gray" /></TouchableOpacity>
@@ -500,11 +522,16 @@ export default function ServiceCallScreen() {
         data={renderedList}
         keyExtractor={item => item.id}
         renderItem={renderCard}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         contentContainerStyle={styles.contentContainer}
         ListEmptyComponent={
           <View style={{ alignItems: 'center', marginTop: 50 }}>
-            <Ionicons name="construct-outline" size={60} color="#ddd" />
-            <Text style={{ textAlign: 'center', marginTop: 10, color: 'gray' }}>No Data Found</Text>
+            {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                <>
+                    <Ionicons name="construct-outline" size={60} color="#ddd" />
+                    <Text style={{ textAlign: 'center', marginTop: 10, color: 'gray' }}>No Data Found</Text>
+                </>
+            )}
           </View>
         }
         ListFooterComponent={
@@ -554,7 +581,7 @@ export default function ServiceCallScreen() {
                 <DetailRow label="Hospital" value={selectedCall.hospitalName} icon="business" highlight />
                 <DetailRow label="City" value={selectedCall.city} icon="location" />
                 <DetailRow label="Ticket No" value={selectedCall.scrId} icon="pricetag" />
-                <DetailRow label="Date" value={selectedCall.date} icon="calendar" />
+                <DetailRow label="Date" value={selectedCall.dateIso || selectedCall.date} icon="calendar" />
                 <DetailRow label="Engineer" value={selectedCall.senderName || selectedCall.userName} icon="person" />
 
                 <View style={styles.divider} />
@@ -601,7 +628,6 @@ export default function ServiceCallScreen() {
                       <Text style={{ color: '#2e7d32' }}>{selectedCall.resolutionNote || 'Closed without notes.'}</Text>
                     </View>
 
-                    {/* 🔥 SHARE PDF BUTTON FOR CLOSED TICKETS */}
                     <TouchableOpacity 
                         style={styles.pdfBtn}
                         onPress={() => generateServicePDF(selectedCall)}
@@ -715,7 +741,7 @@ const styles = StyleSheet.create({
   cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   footerText: { color: 'gray', fontSize: 12 },
 
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 25, elevation: 5, width: '90%', maxHeight: '85%' },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', width: '85%' },
   sectionHeader: { fontSize: 12, fontWeight: 'bold', color: '#999', marginTop: 15, marginBottom: 5 },

@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     FlatList,
     Modal,
     ScrollView,
@@ -11,12 +12,25 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+
+// 🔥 SAAS IMPORTS
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function SalesTeamReport() {
     const router = useRouter();
-    const { userList = [], orderList = [], paymentList = [], currentUser, user } = useData();
+    
+    // 🔥 1. Context se sirf user
+    const { currentUser, user } = useData();
     const activeUser = currentUser || user;
+
+    // 🔥 2. Naya SaaS Engine
+    const { fetchSaaSData, isDbLoading } = useSaaSDB();
+
+    // 🔥 3. Lazy Loaded States
+    const [userList, setUserList] = useState<any[]>([]);
+    const [orderList, setOrderList] = useState<any[]>([]);
+    const [paymentList, setPaymentList] = useState<any[]>([]);
 
     // --- STATES ---
     const [viewMode, setViewMode] = useState<'Month' | 'FY'>('Month');
@@ -46,12 +60,29 @@ export default function SalesTeamReport() {
     // PAGINATION STATE
     const [visibleCount, setVisibleCount] = useState(20);
 
+    const userRole = (activeUser?.role || '').toLowerCase();
+    const isAdmin = userRole.includes('admin') || userRole.includes('manager') || userRole.includes('account') || userRole.includes('hr') || userRole.includes('superadmin');
+
     useEffect(() => {
         setVisibleCount(20);
     }, [viewMode, currentDate, selectedUserId]);
 
-    const userRole = (activeUser?.role || '').toLowerCase();
-    const isAdmin = userRole.includes('admin') || userRole.includes('manager') || userRole.includes('account') || userRole.includes('hr');
+    // 🔥 4. LOAD SAAS DATA ON MOUNT
+    useEffect(() => {
+        const loadData = async () => {
+            if (activeUser?.companyId) {
+                const [users, orders, payments] = await Promise.all([
+                    fetchSaaSData("users"),
+                    fetchSaaSData("orders"),
+                    fetchSaaSData("payments")
+                ]);
+                setUserList(users);
+                setOrderList(orders);
+                setPaymentList(payments);
+            }
+        };
+        loadData();
+    }, [activeUser]);
 
     // DATE NAVIGATION
     const changeDate = (dir: number) => {
@@ -77,7 +108,6 @@ export default function SalesTeamReport() {
         return d.toLocaleDateString('en-GB', {day:'2-digit', month:'short'});
     };
 
-    // 🔥 NEW HELPER: Standardize any date string to YYYY-MM-DD
     const getValidDateStr = (obj: any) => {
         if (obj.dateIso) return obj.dateIso;
         if (obj.createdAt) return obj.createdAt.split('T')[0];
@@ -91,8 +121,10 @@ export default function SalesTeamReport() {
 
     // --- MAIN LOGIC ---
     useEffect(() => {
-        calculateIncentives();
-    }, [rules, orderList, paymentList, userList, viewMode, currentDate, selectedUserId]);
+        if (!isDbLoading && userList.length > 0) {
+            calculateIncentives();
+        }
+    }, [rules, orderList, paymentList, userList, viewMode, currentDate, selectedUserId, isDbLoading]);
 
     const calculateIncentives = () => {
         const targetMonth = currentDate.getMonth();
@@ -236,7 +268,6 @@ export default function SalesTeamReport() {
         setMonthlyStats(stats);
     };
 
-    // 🔥 FIX: DATE FILTERING FOR POPUP TABS
     const handleCardClick = (item: any) => {
         setSelectedStaff(item);
         
@@ -297,9 +328,12 @@ export default function SalesTeamReport() {
                     <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="white" /></TouchableOpacity>
                     <Text style={styles.headerTitle}>{isAdmin ? 'Team Performance' : 'My Performance'} 🚀</Text>
                 </View>
-                {isAdmin && (
-                    <TouchableOpacity onPress={() => setShowUserPicker(true)}><Ionicons name="filter" size={24} color="white" /></TouchableOpacity>
-                )}
+                <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                    {isDbLoading && <ActivityIndicator size="small" color="white" style={{marginRight: 10}} />}
+                    {isAdmin && (
+                        <TouchableOpacity onPress={() => setShowUserPicker(true)}><Ionicons name="filter" size={24} color="white" /></TouchableOpacity>
+                    )}
+                </View>
             </View>
 
             <View style={styles.controlBar}>
@@ -342,7 +376,7 @@ export default function SalesTeamReport() {
                 data={renderedList}
                 keyExtractor={item => item.id}
                 contentContainerStyle={{padding: 15, paddingBottom: 20}} 
-                ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>No Data Found.</Text>}
+                ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>{isDbLoading ? 'Loading Analytics...' : 'No Data Found.'}</Text>}
                 renderItem={({item, index}) => (
                     <TouchableOpacity style={styles.card} onPress={() => handleCardClick(item)} activeOpacity={0.7}>
                         <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:5}}>
@@ -542,7 +576,7 @@ const styles = StyleSheet.create({
     label: { fontSize: 10, color: '#555', marginBottom: 2 },
     input: { borderWidth: 1, borderColor: '#fff', borderRadius: 5, padding: 5, fontWeight: 'bold', color: '#333', backgroundColor: 'white', textAlign:'center' },
 
-    card: { backgroundColor: 'white', padding: 15, borderRadius: 10, marginHorizontal: 10, marginBottom: 10, elevation: 2 },
+    card: { backgroundColor: 'white', padding: 15, borderRadius: 10, marginBottom: 15, elevation: 2 },
     rankBadge: { width:20, height:20, borderRadius:10, justifyContent:'center', alignItems:'center', marginRight:8 },
     name: { fontSize: 16, fontWeight: 'bold', color: '#333' },
     roleText: { fontSize: 12, color: 'gray' },

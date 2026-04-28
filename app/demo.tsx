@@ -1,10 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-// Firebase imports update kiye
-import { collection, getDocs, query } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
-    ActivityIndicator, // 🔥 Added
+    ActivityIndicator,
     FlatList,
     Linking,
     Modal,
@@ -15,7 +13,9 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS (Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 // 🔥 PDF IMPORTS
@@ -26,59 +26,73 @@ import * as Sharing from 'expo-sharing';
 export default function DemoScreen() {
   const router = useRouter();
   
-  // 🔥 GET DATA (Demo, Sales, Org, User)
-  const { demoList = [], salesVisitList = [], orgList = [], user, companyProfile } = useData(); 
+  // 🔥 1. Context se sirf current user aur company profile
+  const { currentUser, companyProfile } = useData(); 
+
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded Lists
+  const [demoList, setDemoList] = useState<any[]>([]);
+  const [salesVisitList, setSalesVisitList] = useState<any[]>([]);
+  const [orgList, setOrgList] = useState<any[]>([]);
+  const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
 
   // --- STATES ---
   const [searchText, setSearchText] = useState('');
-  // 🔥 CHANGED: 'Year' to 'FY'
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [modalVisible, setModalVisible] = useState(false);
-  const [orgDetails, setOrgDetails] = useState<any>(null); // For Popup
-  const [generatingPdf, setGeneratingPdf] = useState(false); // 🔥 PDF State
+  const [orgDetails, setOrgDetails] = useState<any>(null); 
+  const [generatingPdf, setGeneratingPdf] = useState(false); 
 
-  // --- NEW: EMPLOYEE FILTER STATES ---
-  const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
+  // --- EMPLOYEE FILTER STATES ---
   const [selectedEmployee, setSelectedEmployee] = useState('All'); 
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  // 🔥 PAGINATION STATE (SMART LOAD MORE)
+  // PAGINATION STATE
   const [visibleCount, setVisibleCount] = useState(20);
 
-  // 🔥 RESET PAGINATION LOGIC
+  const isAdmin = ['Admin', 'Manager', 'Accountant' , 'Account', 'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
+
+  // RESET PAGINATION LOGIC
   useEffect(() => {
       if (viewMode === 'Day') {
-          setVisibleCount(500); // Day view me sab dikhao
+          setVisibleCount(500); 
       } else {
-          setVisibleCount(20); // Baki views me Load More use karo
+          setVisibleCount(20); 
       }
   }, [viewMode, currentDate, selectedEmployee, searchText]);
 
-  const isAdmin = ['Admin', 'Manager', 'Accountant' , 'Account', 'Hr'].includes(user?.role || '');
-
-  // --- FETCH EMPLOYEES (ADMIN ONLY) ---
+  // 🔥 4. MASSIVE SAAS DATA LOAD ON MOUNT
   useEffect(() => {
-    if (isAdmin) {
-      const fetchEmployees = async () => {
-        try {
-          const q = query(collection(db, "users"));
-          const querySnapshot = await getDocs(q);
-          const usersData = querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            name: doc.data().name || 'Unknown User'
-          }));
-          setEmployees([{ id: 'All', name: 'All Staff' }, ...usersData]);
-        } catch (error) {
-          console.log("Error fetching employees:", error);
-        }
+      const loadData = async () => {
+          if (currentUser?.companyId) {
+              const [demos, sales, orgs, users] = await Promise.all([
+                  fetchSaaSData("demos"),           // Make sure this matches your DB collection name
+                  fetchSaaSData("sales_reports"),   // For salesVisitList
+                  fetchSaaSData("organizations"),
+                  fetchSaaSData("users")
+              ]);
+
+              setDemoList(demos);
+              setSalesVisitList(sales);
+              setOrgList(orgs);
+
+              if (isAdmin) {
+                  const mappedUsers = users.map((u: any) => ({
+                      id: u.id,
+                      name: u.name || 'Unknown User'
+                  }));
+                  setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
+              }
+          }
       };
-      fetchEmployees();
-    }
-  }, [user]);
+      loadData();
+  }, [currentUser]);
 
   // --- HELPER: DATE PARSER ---
   const parseDate = (dateStr: string) => {
@@ -92,7 +106,6 @@ export default function DemoScreen() {
       return new Date(0);
   };
 
-  // 🔥 CHANGED: FY Navigation
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
       if (viewMode === 'Day') d.setDate(d.getDate() + dir);
@@ -101,7 +114,6 @@ export default function DemoScreen() {
       setCurrentDate(d);
   };
 
-  // 🔥 CHANGED: Header Title logic for Financial Year
   const getHeaderDate = () => {
       if (viewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
       if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -222,16 +234,15 @@ export default function DemoScreen() {
     }
   };
 
-  // --- 🔥 SMART MERGE LOGIC ---
+  // --- SMART MERGE LOGIC ---
   const getAllDemos = () => {
-      // 1. From Sales Visits (Partial Data)
       const salesDemos = salesVisitList ? salesVisitList.filter((item: any) => 
           (item.discussion && item.discussion.toLowerCase().includes('demo')) || 
           (item.outcome && item.outcome.toLowerCase().includes('demo'))
       ).map((item: any) => ({
           id: item.id, 
           hospital: item.hospital,
-          orgId: item.orgId || '', // Ensuring orgId passes through
+          orgId: item.orgId || '', 
           date: item.date,
           product: 'See Details', 
           result: item.outcome || 'N/A',
@@ -242,19 +253,17 @@ export default function DemoScreen() {
           senderName: item.senderName || 'Unknown'
       })) : [];
 
-      // 2. From Direct Demos (Full Data)
       const actualDemos = demoList || [];
       
-      // 3. Combine
       let combined = [...actualDemos, ...salesDemos].map(item => {
-        // OrgList se city dhundo agar item me nahi hai
         const org = orgList.find((o: any) => (o.id === item.orgId) || (o.orgName === item.hospital) || (o.name === item.hospital));
         return { ...item, city: item.city || (org ? org.city : '') };
       });
 
-      // 4. SECURITY FILTER
+      // SECURITY FILTER
       if (!isAdmin) {
-          combined = combined.filter((item: any) => item.senderId === user?.uid || item.userName === user?.name);
+          const myId = currentUser?.id || currentUser?.uid;
+          combined = combined.filter((item: any) => item.senderId === myId || item.userName === currentUser?.name);
       }
 
       return combined;
@@ -291,16 +300,15 @@ export default function DemoScreen() {
         });
     }
 
-    // 2. DATE FILTER (🔥 FY Boundaries added)
+    // 2. DATE FILTER (FY Boundaries)
     if (viewMode !== 'All') {
         const targetYear = currentDate.getFullYear();
         const targetMonth = currentDate.getMonth();
         const targetDay = currentDate.getDate();
 
-        // FY Boundaries Logic
         const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-        const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // 1st April
-        const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // 31st March
+        const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
+        const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
 
         data = data.filter((item: any) => {
             if(!item.date) return false;
@@ -314,23 +322,16 @@ export default function DemoScreen() {
         });
     }
 
-    // 3. Sort by Date (Newest First)
     return data.sort((a, b) => parseDate(b.date).getTime() - parseDate(a.date).getTime());
   };
 
   const fullList = getFilteredData(); 
-  
-  // 🔥 SLICE FOR LIST
   const renderedList = fullList.slice(0, visibleCount);
 
-  // --- OPEN DETAILS ---
   const openDetails = (item: any) => {
       setSelectedItem(item);
-      
-      // 🔥 Fetch Organization Details from Master List
       const foundOrg = orgList.find((o: any) => (o.id === item.orgId) || (o.orgName === item.hospital) || (o.name === item.hospital));
       setOrgDetails(foundOrg || null);
-
       setModalVisible(true);
   };
 
@@ -338,12 +339,10 @@ export default function DemoScreen() {
       if(num) Linking.openURL(`tel:${num}`);
   };
 
-  // --- RENDER CARD ---
   const renderItem = ({ item }: any) => (
     <TouchableOpacity style={styles.card} onPress={() => openDetails(item)}>
         <View style={styles.row}>
             <Text style={{color:'gray', fontSize:12, fontWeight:'bold'}}>{item.date}</Text>
-            
             <View style={item.isFromSales ? styles.badgeOrange : styles.badgeBlue}>
                 <Text style={item.isFromSales ? styles.textOrange : styles.textBlue}>
                     {item.isFromSales ? 'From Sales' : 'Direct Demo'}
@@ -363,7 +362,6 @@ export default function DemoScreen() {
         ) : null}
         
         <View style={styles.row}>
-            {/* 🔥 ADMIN VIEW: Show Employee Name in List */}
             {isAdmin && (
                  <View style={{flexDirection:'row', alignItems:'center'}}>
                      <Ionicons name="person" size={10} color="#3b5998" />
@@ -385,7 +383,6 @@ export default function DemoScreen() {
                      <Text style={{fontSize:11, color:'#555'}}>Model: {item.model}</Text>
                  ) : null}
              </View>
-             
              <Text style={styles.resultText} numberOfLines={1}>Result: {item.result || 'Pending'}</Text>
         </View>
     </TouchableOpacity>
@@ -393,7 +390,6 @@ export default function DemoScreen() {
 
   return (
     <View style={styles.container}>
-      {/* HEADER */}
       <View style={styles.header}>
         <View style={{flexDirection:'row', alignItems:'center'}}>
             <TouchableOpacity onPress={() => router.back()}>
@@ -406,12 +402,9 @@ export default function DemoScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* 🔥 NEW FILTER UI STARTS */}
       <View style={{backgroundColor:'white', paddingBottom:10}}>
           
-          {/* TABS */}
           <View style={styles.tabContainer}>
-              {/* 🔥 CHANGED: 'Year' to 'FY' */}
               {['Day', 'Month', 'FY', 'All'].map((m) => (
                   <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
                       <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
@@ -419,7 +412,6 @@ export default function DemoScreen() {
               ))}
           </View>
 
-          {/* --- ADMIN STAFF DROPDOWN --- */}
           {isAdmin && (
             <View style={{paddingHorizontal: 15, marginBottom: 10}}>
                <TouchableOpacity 
@@ -435,7 +427,6 @@ export default function DemoScreen() {
             </View>
           )}
 
-          {/* DATE NAVIGATOR */}
           {viewMode !== 'All' && (
               <View style={styles.dateNav}>
                   <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
@@ -444,16 +435,15 @@ export default function DemoScreen() {
               </View>
           )}
 
-          {/* SUPER SEARCH BAR */}
           <View style={{paddingHorizontal:15}}>
               <View style={styles.searchBar}>
-                  <Ionicons name="search" size={20} color="gray" />
+                  {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
                   <TextInput 
-    style={styles.input} // 🔥 यहाँ 'searchInput' की जगह 'input' कर दिया गया है
-    placeholder={isAdmin ? "Search Hospital, Product, Employee..." : "Search Hospital, Product..."}
-    value={searchText}
-    onChangeText={setSearchText}
-/>
+                    style={styles.input} 
+                    placeholder={isAdmin ? "Search Hospital, Product, Employee..." : "Search Hospital, Product..."}
+                    value={searchText}
+                    onChangeText={setSearchText}
+                  />
                   {searchText.length > 0 && (
                       <TouchableOpacity onPress={() => setSearchText('')}>
                           <Ionicons name="close-circle" size={20} color="gray" />
@@ -466,7 +456,6 @@ export default function DemoScreen() {
           </View>
       </View>
 
-      {/* LIST */}
       <FlatList 
         data={renderedList}
         keyExtractor={(item, index) => (item.id || index.toString()) + index} 
@@ -475,10 +464,9 @@ export default function DemoScreen() {
         ListEmptyComponent={
             <View style={{alignItems:'center', marginTop:50}}>
                 <Ionicons name="flask-outline" size={60} color="#ccc" />
-                <Text style={{color:'gray', marginTop:10}}>No Demo Records Found</Text>
+                <Text style={{color:'gray', marginTop:10}}>{isDbLoading ? 'Loading Demos...' : 'No Demo Records Found'}</Text>
             </View>
         }
-        // 🔥 LOAD MORE BUTTON WRAPPED WITH PADDING
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
                 {visibleCount < fullList.length ? (
@@ -509,12 +497,10 @@ export default function DemoScreen() {
         }
       />
 
-      {/* --- FULL DETAILS POPUP --- */}
       <Modal visible={modalVisible} transparent={true} animationType="slide">
           <View style={styles.modalOverlay}>
               <View style={styles.modalContent}>
                   
-                  {/* Modal Header */}
                   <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
                       <Text style={styles.modalTitle}>Demo Report</Text>
                       <TouchableOpacity onPress={() => setModalVisible(false)}>
@@ -525,12 +511,10 @@ export default function DemoScreen() {
                   {selectedItem && (
                       <ScrollView showsVerticalScrollIndicator={false}>
                           
-                          {/* 1. Basic Info */}
                           <View style={styles.section}>
                               <Text style={styles.hospitalHeader}>{selectedItem.hospital}</Text>
                               <Text style={{color:'gray', fontSize:12, marginBottom:5}}>{selectedItem.date}</Text>
                               
-                              {/* Fetched Org Details */}
                               {orgDetails && (
                                   <View style={{flexDirection:'row', alignItems:'center', marginTop:5}}>
                                       <Ionicons name="location" size={14} color="#555" />
@@ -541,7 +525,6 @@ export default function DemoScreen() {
                               )}
                           </View>
 
-                          {/* 2. Contact Person Details */}
                           <View style={styles.section}>
                               <Text style={styles.sectionTitle}>Contact Person</Text>
                               <DetailRow label="Name" value={selectedItem.contactPerson || 'N/A'} icon="person" />
@@ -552,7 +535,6 @@ export default function DemoScreen() {
                               <DetailRow label="Dept" value={selectedItem.department} icon="medkit" />
                           </View>
 
-                          {/* 3. Product Details */}
                           <View style={styles.section}>
                               <Text style={styles.sectionTitle}>Product Details</Text>
                               <DetailRow label="Product" value={selectedItem.product} icon="cube" />
@@ -561,7 +543,6 @@ export default function DemoScreen() {
                               <DetailRow label="Duration" value={selectedItem.duration ? `${selectedItem.duration} Days` : 'N/A'} icon="time" />
                           </View>
 
-                          {/* 4. Feedback & Notes */}
                           <View style={styles.section}>
                               <Text style={styles.sectionTitle}>Feedback & Notes</Text>
                               <View style={styles.noteBox}>
@@ -577,12 +558,10 @@ export default function DemoScreen() {
                               ) : null}
                           </View>
 
-                          {/* 5. Admin Info */}
                           <View style={[styles.section, {borderBottomWidth:0}]}>
                               <DetailRow label="Entry By" value={selectedItem.senderName} icon="person-circle" />
                           </View>
 
-                          {/* SHARE PDF BUTTON */}
                           <TouchableOpacity 
                               style={[styles.pdfBtn, generatingPdf && { opacity: 0.6 }]}
                               onPress={() => generateDemoPDF(selectedItem)}
@@ -605,7 +584,6 @@ export default function DemoScreen() {
           </View>
       </Modal>
 
-      {/* EMPLOYEE PICKER MODAL */}
       <Modal visible={showEmployeePicker} transparent animationType="fade">
           <TouchableOpacity style={styles.pickerOverlay} onPress={() => setShowEmployeePicker(false)}>
               <View style={styles.pickerContainer}>
@@ -637,7 +615,6 @@ export default function DemoScreen() {
   );
 }
 
-// Helper Components
 const DetailRow = ({label, value, icon, highlight}: any) => (
     <View style={{flexDirection:'row', alignItems:'center', marginBottom:8}}>
         <View style={{width:30}}><Ionicons name={icon} size={18} color="#3b5998" /></View>
@@ -653,7 +630,6 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 0 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
   
-  // 🔥 New Filter UI
   tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', margin: 15, borderRadius: 8, padding: 3, marginBottom: 10 },
   tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
   activeTab: { backgroundColor: 'white', elevation: 2 },
@@ -668,11 +644,9 @@ const styles = StyleSheet.create({
   searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', paddingHorizontal: 10, borderRadius: 8, alignItems: 'center', height: 36 },
   input: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
 
-  // Card Styles
   card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 10, elevation: 2 },
   row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5, alignItems:'center' },
   title: { fontWeight: 'bold', fontSize: 16, marginBottom: 5, color:'#333' },
-  boldText: { fontWeight: 'bold', color:'#3b5998', fontSize:12 },
   resultText: { fontSize:12, color:'#555', maxWidth:'60%' },
   divider: { height: 1, backgroundColor: '#eee', marginVertical: 8 },
   
@@ -681,12 +655,10 @@ const styles = StyleSheet.create({
   badgeOrange: { backgroundColor: '#fff3e0', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
   textOrange: { color: '#e65100', fontSize: 10, fontWeight:'bold' },
 
-  // Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { width:'100%', backgroundColor: 'white', borderRadius: 15, padding: 20, maxHeight: '85%' },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color:'#3b5998' },
   
-  // Modal Sections
   section: { borderBottomWidth:1, borderBottomColor:'#eee', paddingBottom:15, marginBottom:15 },
   hospitalHeader: { fontSize: 20, fontWeight: 'bold', color: '#333' },
   sectionTitle: { fontSize: 14, fontWeight: 'bold', color: '#555', marginBottom: 10, textDecorationLine:'underline' },

@@ -17,9 +17,11 @@ import {
     UIManager,
     View
 } from 'react-native';
-import { useData } from './context/DataContext';
-// Baki imports ke saath ise bhi add karein 👇
+
+// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSaaSDB } from '../hooks/useSaaSDB';
+import { useData } from './context/DataContext';
 
 // NOTIFICATION IMPORTS
 import * as Device from 'expo-device';
@@ -44,28 +46,75 @@ Notifications.setNotificationHandler({
 export default function HomeScreen() {
   const router = useRouter();
   
-  // 🔥 UPDATED: Added expenseList, advanceList, orderList
+  // 🔥 1. Context se sirf global variables nikale (Arrays hata diye)
   const { 
       activeSection, setActiveSection, 
       currentUser, logout, 
       shouldOpenSidebar, setShouldOpenSidebar,
-      taskList, leadList, pmsList, dueList, courierList, 
-      serviceCallList, salesVisitList, attendanceList,
-      leaveList, expenseList, advanceList, orderList, cardRequestList,// New Additions
-      installList, demoList, paymentList,
       appPermissions, notificationCount, companyProfile 
   } = useData();
+
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData } = useSaaSDB();
+
+  // 🔥 3. Local States for Counts (Lazy Loaded)
+  const [taskList, setTaskList] = useState<any[]>([]);
+  const [leadList, setLeadList] = useState<any[]>([]);
+  const [pmsList, setPmsList] = useState<any[]>([]);
+  const [dueList, setDueList] = useState<any[]>([]);
+  const [courierList, setCourierList] = useState<any[]>([]);
+  const [serviceCallList, setServiceCallList] = useState<any[]>([]);
+  const [salesVisitList, setSalesVisitList] = useState<any[]>([]);
+  const [attendanceList, setAttendanceList] = useState<any[]>([]);
+  const [leaveList, setLeaveList] = useState<any[]>([]);
+  const [expenseList, setExpenseList] = useState<any[]>([]);
+  const [advanceList, setAdvanceList] = useState<any[]>([]);
+  const [orderList, setOrderList] = useState<any[]>([]);
+  const [cardRequestList, setCardRequestList] = useState<any[]>([]);
+  const [installList, setInstallList] = useState<any[]>([]);
+  const [demoList, setDemoList] = useState<any[]>([]);
+  const [paymentList, setPaymentList] = useState<any[]>([]);
   
   const [sidebarVisible, setSidebarVisible] = useState(false); 
   const [expoPushToken, setExpoPushToken] = useState('');
 
+  // 🔥 4. LOAD ALL DATA ON FOCUS (For Live Badges)
+  useFocusEffect(
+      useCallback(() => {
+          const loadCountsData = async () => {
+              if (currentUser?.companyId) {
+                  const [
+                      tasks, leads, pms, dues, couriers, services, sales,
+                      attendance, leaves, expenses, advances, orders,
+                      cards, installs, demos, payments
+                  ] = await Promise.all([
+                      fetchSaaSData("tasks"), fetchSaaSData("leads"), fetchSaaSData("pms_reports"),
+                      fetchSaaSData("dues"), fetchSaaSData("couriers"), fetchSaaSData("service_calls"),
+                      fetchSaaSData("sales_reports"), fetchSaaSData("attendance"), fetchSaaSData("leaves"),
+                      fetchSaaSData("expenses"), fetchSaaSData("advances"), fetchSaaSData("orders"),
+                      fetchSaaSData("visiting_cards"), fetchSaaSData("installations"), fetchSaaSData("demos"),
+                      fetchSaaSData("payments")
+                  ]);
+
+                  setTaskList(tasks); setLeadList(leads); setPmsList(pms); setDueList(dues);
+                  setCourierList(couriers); setServiceCallList(services); setSalesVisitList(sales);
+                  setAttendanceList(attendance); setLeaveList(leaves); setExpenseList(expenses);
+                  setAdvanceList(advances); setOrderList(orders); setCardRequestList(cards);
+                  setInstallList(installs); setDemoList(demos); setPaymentList(payments);
+              }
+          };
+          loadCountsData();
+          
+          if (shouldOpenSidebar) { setSidebarVisible(true); setShouldOpenSidebar(false); }
+      }, [currentUser, shouldOpenSidebar])
+  );
+
   // 🔥 DYNAMIC BRANDING STATE
   const [branding, setBranding] = useState({
-      name: 'LMS', // Default Name
-      logo: null
+      name: 'LMS',
+      logo: null as string | null
   });
 
-  // Load Branding (Prefer Context, Fallback to Local Storage)
   useEffect(() => {
       const loadBranding = async () => {
           if (companyProfile?.shortName) {
@@ -89,7 +138,6 @@ export default function HomeScreen() {
       loadBranding();
   }, [companyProfile]);
 
-  // --- 🔥 HELPER: GET USER IMAGE ---
   const getUserImage = () => {
       if (currentUser?.profileImage && currentUser.profileImage.startsWith('data:image')) {
           return { uri: currentUser.profileImage };
@@ -100,150 +148,143 @@ export default function HomeScreen() {
   const today = new Date().toISOString().split('T')[0];
   const currentMonth = today.slice(0, 7); 
   
-  const isBoss = ['Admin', 'Manager'].includes(currentUser?.role);
-  const isHRBoss = ['Admin', 'Manager', 'Hr', 'Account', 'Accountant'].includes(currentUser?.role);
+  const isBoss = ['Admin', 'Manager', 'SuperAdmin'].includes(currentUser?.role);
+  const isHRBoss = ['Admin', 'Manager', 'Hr', 'Account', 'Accountant', 'SuperAdmin'].includes(currentUser?.role);
 
   // --- 🔥 COUNTS LOGIC ---
 
-  const pendingTaskCount = taskList ? taskList.filter((t:any) => {
+  const pendingTaskCount = taskList.filter((t:any) => {
       if (t.status !== 'Pending') return false;
       if (isBoss) return true;
       return t.to === currentUser?.name;
-  }).length : 0;
+  }).length;
 
-  const pendingDueCount = dueList ? dueList.filter((d:any) => d.status !== 'Collected').length : 0;
+  const pendingDueCount = dueList.filter((d:any) => d.status !== 'Collected').length;
 
-  const pendingCourierCount = courierList ? courierList.filter((c:any) => {
+  const pendingCourierCount = courierList.filter((c:any) => {
       if (c.status !== 'Pending') return false;
       const isLogisticsRole = ['Admin', 'Manager', 'Accountant', 'Store Keeper'].includes(currentUser?.role);
       if (isLogisticsRole) return true;
       const isMine = c.senderId === currentUser?.uid || (c.receiver && currentUser?.name && c.receiver.toLowerCase().includes(currentUser.name.toLowerCase()));
       return isMine;
-  }).length : 0;
+  }).length;
 
-  const pendingServiceCount = serviceCallList ? serviceCallList.filter((s: any) => {
+  const pendingServiceCount = serviceCallList.filter((s: any) => {
       const isStatusOpen = s.status === 'Open' || s.status === 'Assigned';
       if (!isStatusOpen) return false;
       if (isBoss) return true;
       return s.senderId === currentUser?.uid || s.senderId === currentUser?.id;
-  }).length : 0;
+  }).length;
 
-  const pmsDueCount = pmsList ? pmsList.filter((p:any) => {
+  const pmsDueCount = pmsList.filter((p:any) => {
       const isDue = p.nextServiceDate && p.nextServiceDate.startsWith(currentMonth) && p.status !== 'Done';
       if (!isDue) return false;
       if (isBoss) return true;
       return p.senderId === currentUser?.uid;
-  }).length : 0;
+  }).length;
 
-  const pendingLeadCount = leadList ? leadList.filter((l:any) => {
+  const pendingLeadCount = leadList.filter((l:any) => {
        const isToday = l.nextFollowUp === today && l.status !== 'Closed';
        if (!isToday) return false;
        if (isBoss) return true;
        return l.senderId === currentUser?.uid;
-  }).length : 0;
+  }).length;
 
-  // 🔥 NEW: TODAY'S ACTIVITY COUNTS (सिर्फ आज का काम दिखाएगा)
-  // हमने 'todayStr' हटा दिया है क्योंकि 'today' पहले से ऊपर बना हुआ है
-  const todayInstallCount = installList ? installList.filter((i: any) => {
+  const todayInstallCount = installList.filter((i: any) => {
       const itemDate = i.date || (i.createdAt ? i.createdAt.split('T')[0] : '');
-      return itemDate === today && (isBoss || i.senderId === currentUser?.id);
-  }).length : 0;
+      return itemDate === today && (isBoss || i.senderId === currentUser?.id || i.senderId === currentUser?.uid);
+  }).length;
 
-  const todayDemoCount = demoList ? demoList.filter((d: any) => {
+  const todayDemoCount = demoList.filter((d: any) => {
       const itemDate = d.date || (d.createdAt ? d.createdAt.split('T')[0] : '');
-      return itemDate === today && (isBoss || d.senderId === currentUser?.id);
-  }).length : 0;
+      return itemDate === today && (isBoss || d.senderId === currentUser?.id || d.senderId === currentUser?.uid);
+  }).length;
 
-  const todayPaymentCount = paymentList ? paymentList.filter((p: any) => {
+  const todayPaymentCount = paymentList.filter((p: any) => {
       const itemDate = p.date || (p.createdAt ? p.createdAt.split('T')[0] : '');
-      return itemDate === today && (isBoss || p.senderId === currentUser?.id);
-  }).length : 0;
+      return itemDate === today && (isBoss || p.senderId === currentUser?.id || p.senderId === currentUser?.uid);
+  }).length;
 
-  // 🔥 SMART DSR COUNT: सिर्फ 'आज' के फॉलो-अप या जो पेंडिंग (Overdue) हैं, वही दिखाएगा!
   const getSalesFollowUpCount = () => {
-      const todayStr = new Date().toISOString().split('T')[0]; // आज की तारीख (YYYY-MM-DD)
+      const todayStr = new Date().toISOString().split('T')[0]; 
 
-      const activeVisits = salesVisitList ? salesVisitList.filter((v:any) => {
+      const activeVisits = salesVisitList.filter((v:any) => {
           const outcome = (v.outcome || '').toLowerCase();
           const isClosed = outcome.includes('order closed') || outcome.includes('lost') || outcome.includes('not interested');
-          const isMine = isBoss || v.senderId === currentUser?.uid;
+          const isMine = isBoss || v.senderId === currentUser?.uid || v.senderId === currentUser?.id;
           
-          // चेक करें कि क्या नेक्स्ट फॉलो-अप आज है या आज से पहले का छूट गया है?
           const isDueToday = v.nextFollowUp && v.nextFollowUp === todayStr;
           
           return !isClosed && isMine && isDueToday;
-      }).length : 0;
+      }).length;
 
-      const activeLeads = leadList ? leadList.filter((l:any) => {
+      const activeLeads = leadList.filter((l:any) => {
           const status = (l.status || '').toLowerCase();
           const isClosed = status.includes('converted') || status.includes('lost') || status.includes('drop');
-          const isMine = isBoss || l.senderId === currentUser?.uid;
+          const isMine = isBoss || l.senderId === currentUser?.uid || l.senderId === currentUser?.id;
           
-          // चेक करें कि क्या नेक्स्ट फॉलो-अप आज है या आज से पहले का छूट गया है?
           const isDueToday = l.nextFollowUp && l.nextFollowUp === todayStr;
 
           return !isClosed && isMine && isDueToday;
-      }).length : 0;
+      }).length;
 
       return activeVisits + activeLeads;
   };
   const salesFollowUpCount = getSalesFollowUpCount();
 
-  // 🔥 NEW: HR COUNTS LOGIC
-  const pendingLeaveCount = leaveList ? leaveList.filter((l: any) => {
+  const pendingLeaveCount = leaveList.filter((l: any) => {
       const status = l.status || 'Pending';
       if (status !== 'Pending') return false;
       if (isHRBoss) return true;
-      return l.senderId === currentUser?.uid;
-  }).length : 0;
+      return l.senderId === currentUser?.uid || l.senderId === currentUser?.id;
+  }).length;
 
-  const pendingExpenseCount = expenseList ? expenseList.filter((e: any) => {
+  const pendingExpenseCount = expenseList.filter((e: any) => {
       const status = e.status || 'Pending';
       if (status !== 'Pending') return false;
       if (isHRBoss) return true;
-      return e.senderId === currentUser?.uid;
-  }).length : 0;
+      return e.senderId === currentUser?.uid || e.senderId === currentUser?.id;
+  }).length;
 
-  const pendingAdvanceCount = advanceList ? advanceList.filter((a: any) => {
+  const pendingAdvanceCount = advanceList.filter((a: any) => {
       const status = a.status || 'Pending';
       if (status !== 'Pending') return false;
       if (isHRBoss) return true;
-      return a.senderId === currentUser?.uid;
-  }).length : 0;
+      return a.senderId === currentUser?.uid || a.senderId === currentUser?.id;
+  }).length;
 
-  // 🔥 NEW: SALES ORDER COUNT
-  const pendingOrderCount = orderList ? orderList.filter((o: any) => {
+  const pendingOrderCount = orderList.filter((o: any) => {
       const status = o.status || 'Pending';
       if (status !== 'Pending') return false;
       if (isBoss) return true;
-      return o.senderId === currentUser?.uid;
-  }).length : 0;
+      return o.senderId === currentUser?.uid || o.senderId === currentUser?.id;
+  }).length;
 
-  const pendingCardCount = cardRequestList ? cardRequestList.filter((c: any) => {
+  const pendingCardCount = cardRequestList.filter((c: any) => {
       if (c.status !== 'Pending') return false;
-      if (isBoss) return true; // Admin/Manager ko sabke pending dikhenge
+      if (isBoss) return true; 
       return c.senderId === currentUser?.id || c.userId === currentUser?.id;
-  }).length : 0;
+  }).length;
 
   // --- ⏰ LOGIC: TODAY'S ATTENDANCE STATUS ---
   const todayStr = new Date().toISOString().split('T')[0];
-  const myEntry = attendanceList ? attendanceList.find((a: any) => 
-      a.date === todayStr && a.userName === currentUser?.name
-  ) : null;
+  const myEntry = attendanceList.find((a: any) => 
+      a.date === todayStr && (a.userName === currentUser?.name || a.userId === currentUser?.id || a.senderId === currentUser?.id)
+  );
 
   let statusText = "Not Marked";
   let statusIcon = "ellipse-outline";
-  let statusColor = "#FFCC80"; // Light Orange
+  let statusColor = "#FFCC80"; 
 
   if (myEntry) {
       if (myEntry.outTime) {
           statusText = "Logged Out";
           statusIcon = "checkmark-circle";
-          statusColor = "#EF9A9A"; // Light Red
+          statusColor = "#EF9A9A"; 
       } else {
           statusText = "Logged In";
           statusIcon = "time";
-          statusColor = "#A5D6A7"; // Light Green
+          statusColor = "#A5D6A7"; 
       }
   }
 
@@ -306,16 +347,12 @@ export default function HomeScreen() {
               finalStatus = status;
           }
           if (finalStatus !== 'granted') return;
-          const projectId = "fabfded8-69a3-4648-9d6f-63e2a0c5f618";
+          const projectId = "fabfded8-69a3-4648-9d6f-63e2a0c5f618"; // Do not change
           try { token = (await Notifications.getExpoPushTokenAsync({ projectId })).data; } catch (e) { console.log("Token error:", e); }
       } 
       return token;
   }
   
-  useFocusEffect(useCallback(() => {
-      if (shouldOpenSidebar) { setSidebarVisible(true); setShouldOpenSidebar(false); }
-  }, [shouldOpenSidebar]));
-
   const handleSidebarNavigate = (route: string) => {
       setShouldOpenSidebar(true); setSidebarVisible(false); router.push(route as any);
   };
@@ -332,7 +369,7 @@ export default function HomeScreen() {
   };
 
   const canSee = (moduleKey: string) => {
-    if (currentUser?.role === 'Admin') return true; 
+    if (currentUser?.role === 'Admin' || currentUser?.role === 'SuperAdmin') return true; 
     if (moduleKey === 'common') return true;
 
     let rawRole = (currentUser?.role || '').toLowerCase(); 
@@ -367,7 +404,6 @@ export default function HomeScreen() {
       { id: '90', title: 'Company Profile', icon: 'business', route: '/company_profile', module: 'company_profile' },       
   ];
 
-  // 🔥 UPDATED HR ITEMS (Added Counts)
   const allHrItems = [
       { title: "Attendance", icon: "finger-print", color: "#4caf50", route: '/dayin', module: 'attendance' },
       { title: "Travel Log", icon: "bicycle", color: "#ff9800", route: '/travel', module: 'travel' },
@@ -381,8 +417,8 @@ export default function HomeScreen() {
 
   const allActivityItems = [
       { title: "Visits DSR", icon: "briefcase", color: "#3b5998", route: '/sales', count: salesFollowUpCount, module: 'visits' },
-      { title: "Installation", icon: "construct", color: "#795548", route: '/installation', count: todayInstallCount, module: 'installation' }, // 🔥 Count added
-      { title: "Demo Report", icon: "play-circle", color: "#00bcd4", route: '/demo', count: todayDemoCount, module: 'demos' }, // 🔥 Count added
+      { title: "Installation", icon: "construct", color: "#795548", route: '/installation', count: todayInstallCount, module: 'installation' },
+      { title: "Demo Report", icon: "play-circle", color: "#00bcd4", route: '/demo', count: todayDemoCount, module: 'demos' },
       { title: "Service Call", icon: "settings", color: "#607d8b", route: '/service_call', count: pendingServiceCount, module: 'tickets' }, 
       { title: "PMS Report", icon: "shield-checkmark", color: "#4caf50", route: '/pms_schedule', count: pmsDueCount, module: 'pms' },
       { title: "Service Analysis", icon: "pie-chart", color: "#673ab7", route: '/service_analysis', module: 'service_reports' },
@@ -390,11 +426,10 @@ export default function HomeScreen() {
       { title: "Project Report", icon: "business", color: "#607d8b", route: '/projects', module: 'organizations' } 
   ];
   
-  // 🔥 UPDATED SALES ITEMS (Added Orders Count)
   const allSalesItems = [
       { title: "Order Booking", icon: "cart", color: "#ff9800", route: '/orders', count: pendingOrderCount, module: 'orders' },
       { title: "Dashboard", icon: "stats-chart", color: "#4caf50", route: '/sales_analysis', module: 'sales_analysis' },
-      { title: "Collect Payment", icon: "cash", color: "#27ae60", route: '/payment_collection', count: todayPaymentCount, module: 'payment_coll' }, // 🔥 Count added
+      { title: "Collect Payment", icon: "cash", color: "#27ae60", route: '/payment_collection', count: todayPaymentCount, module: 'payment_coll' },
       { title: "Pending Dues", icon: "time", color: "#c0392b", route: '/payment_duelist', count: pendingDueCount, module: 'payment_due' },
   ];
 
@@ -540,11 +575,7 @@ export default function HomeScreen() {
                                   <Text style={styles.sidebarItemText}>{item.title}</Text>
                               </TouchableOpacity>
                           )}
-                          ListFooterComponent={() => (
-                                    <View>
-                                                                                                    
-                                    </View>
-                                  )}
+                          ListFooterComponent={() => <View></View>}
                       />
                       <TouchableOpacity style={styles.sidebarLogoutBtn} onPress={handleLogout}>
                           <Ionicons name="log-out-outline" size={24} color="white" />
@@ -584,7 +615,7 @@ const styles = StyleSheet.create({
       height: 18, 
       justifyContent: 'center', 
       alignItems: 'center',
-      paddingHorizontal: 4 // स्ट्रेच करने के लिए
+      paddingHorizontal: 4 
   },
   badgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
   scrollContent: { padding: 15, paddingBottom: 150, flexGrow: 1 }, 
@@ -601,16 +632,16 @@ const styles = StyleSheet.create({
   menuBadge: { 
       position: 'absolute', 
       top: -6, 
-      right: -10, // बैज को थोड़ा और बाहर किया ताकि आइकन ना छुपे
+      right: -10, 
       backgroundColor: '#D32F2F', 
-      minWidth: 22, // कम से कम इतना चौड़ा रहेगा 
+      minWidth: 22, 
       height: 20, 
       borderRadius: 10, 
       justifyContent: 'center', 
       alignItems: 'center', 
       borderWidth: 1.5, 
       borderColor: 'white',
-      paddingHorizontal: 5 // 🚀 यही मैजिक है! नंबर बड़ा होने पर डिब्बे को खींचेगा
+      paddingHorizontal: 5 
   },
   menuBadgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
   modalOverlay: { flex: 1, flexDirection: 'row' },

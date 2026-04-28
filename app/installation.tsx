@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import DateTimePicker from '@react-native-community/datetimepicker'; // 🔥 NEW: DatePicker Import
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -16,22 +16,30 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+
+// 🔥 SAAS IMPORTS
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
-// 🔥 FIREBASE & PDF IMPORTS (Added doc, updateDoc)
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import { collection, doc, getDocs, query, updateDoc } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
 
 export default function InstallationListScreen() {
   const router = useRouter();
-  const { installList, user, companyProfile } = useData(); 
+  
+  // 🔥 1. Context se sirf global variables 
+  const { currentUser, companyProfile } = useData(); 
+
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded States
+  const [installList, setInstallList] = useState<any[]>([]);
+  const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
 
   // --- STATES ---
   const [searchText, setSearchText] = useState('');
-  // 🔥 CHANGED: 'Year' to 'FY'
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
   
@@ -39,60 +47,52 @@ export default function InstallationListScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false); 
 
-  // 🔥 ADMIN EDIT STATES 🔥
+  // ADMIN EDIT STATES
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editData, setEditData] = useState<any>({});
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
-  // 🔥 NEW STATES FOR EDIT DATE PICKER 🔥
   const [showEditInstallDate, setShowEditInstallDate] = useState(false);
   const [showEditExpiryDate, setShowEditExpiryDate] = useState(false);
   const [editInstallDateObj, setEditInstallDateObj] = useState(new Date());
   const [editExpiryDateObj, setEditExpiryDateObj] = useState(new Date());
 
-  // --- NEW: EMPLOYEE FILTER STATES ---
-  const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
   const [selectedEmployee, setSelectedEmployee] = useState('All');
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  // 🔥 PAGINATION STATE (SMART LOAD MORE)
   const [visibleCount, setVisibleCount] = useState(20);
 
-  // 🔥 Role Check
-  const isAdmin = ['Admin', 'Manager', 'Hr', 'Account', 'Accountant'].includes(user?.role || '');
-  
-  // 🔥 STRICT ADMIN FOR EDIT
-  const isStrictAdmin = user?.role === 'Admin' || user?.role === 'Manager';
+  const isAdmin = ['Admin', 'Manager', 'Hr', 'Account', 'Accountant', 'SuperAdmin'].includes(currentUser?.role || '');
+  const isStrictAdmin = currentUser?.role === 'Admin' || currentUser?.role === 'Manager' || currentUser?.role === 'SuperAdmin';
 
-  // 🔥 RESET PAGINATION ON FILTER CHANGE
   useEffect(() => {
-      if (viewMode === 'Day') {
-          setVisibleCount(500); 
-      } else {
-          setVisibleCount(20); 
-      }
+      if (viewMode === 'Day') setVisibleCount(500); 
+      else setVisibleCount(20); 
   }, [viewMode, currentDate, searchText, selectedEmployee]);
 
-  // --- FETCH EMPLOYEES (ADMIN ONLY) ---
+  // 🔥 4. MASSIVE SAAS DATA LOAD ON MOUNT
+  const loadData = async () => {
+      if (currentUser?.companyId) {
+          const [installs, users] = await Promise.all([
+              fetchSaaSData("installations"),
+              fetchSaaSData("users")
+          ]);
+          setInstallList(installs);
+
+          if (isAdmin) {
+              const mappedUsers = users.map((u: any) => ({
+                  id: u.id,
+                  name: u.name || 'Unknown User'
+              }));
+              setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
+          }
+      }
+  };
+
   useEffect(() => {
-    if (isAdmin) {
-      const fetchEmployees = async () => {
-        try {
-          const q = query(collection(db, "users"));
-          const querySnapshot = await getDocs(q);
-          const usersData = querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            name: doc.data().name || 'Unknown User'
-          }));
-          setEmployees([{ id: 'All', name: 'All Staff' }, ...usersData]);
-        } catch (error) {
-          console.log("Error fetching employees:", error);
-        }
-      };
-      fetchEmployees();
-    }
-  }, [user]);
+      loadData();
+  }, [currentUser]);
 
   // --- UNIVERSAL DATE PARSER ---
   const parseDate = (dateStr: any) => {
@@ -115,7 +115,6 @@ export default function InstallationListScreen() {
     return isNaN(d.getTime()) ? 0 : d.getTime();
   };
 
-  // Helper to format Date Object to String for Edit inputs
   const formatDateStr = (rawDate: Date) => {
       let day = rawDate.getDate().toString().padStart(2, '0');
       let month = (rawDate.getMonth() + 1).toString().padStart(2, '0');
@@ -123,7 +122,6 @@ export default function InstallationListScreen() {
       return `${year}-${month}-${day}`; 
   };
 
-  // 🔥 CHANGED: FY Navigation
   const changeDate = (dir: number) => {
     const d = new Date(currentDate);
     if (viewMode === 'Day') d.setDate(d.getDate() + dir);
@@ -132,7 +130,6 @@ export default function InstallationListScreen() {
     setCurrentDate(d);
   };
 
-  // 🔥 CHANGED: Header Title logic for Financial Year
   const getHeaderDate = () => {
     if (viewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -145,7 +142,6 @@ export default function InstallationListScreen() {
     return "All Time";
   };
 
-  // 🔥 PDF GENERATOR FOR LIST ITEM
   const generatePDF = async (item: any) => {
     setGeneratingPdf(true);
     try {
@@ -269,9 +265,10 @@ export default function InstallationListScreen() {
       });
     } 
     else if (!isAdmin) {
+      const myId = currentUser?.id || currentUser?.uid;
       data = data.filter((item: any) => 
-          item.senderId === user?.uid || 
-          (item.engineer && item.engineer.toLowerCase() === user?.name?.toLowerCase())
+          item.senderId === myId || 
+          (item.engineer && item.engineer.toLowerCase() === currentUser?.name?.toLowerCase())
       );
     }
 
@@ -293,18 +290,17 @@ export default function InstallationListScreen() {
       });
     }
 
-    // 🔥 CHANGED: FY Boundaries added
     if (viewMode !== 'All') {
       const targetYear = currentDate.getFullYear();
       const targetMonth = currentDate.getMonth();
       const targetDay = currentDate.getDate();
 
       const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-      const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // 1st April
-      const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // 31st March
+      const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
+      const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
 
       data = data.filter((item: any) => {
-        const dateField = item.createdAt || item.date;
+        const dateField = item.dateIso || item.createdAt || item.date;
         if (!dateField) return false;
         const ts = parseDate(dateField);
         if (ts === 0) return false;
@@ -319,8 +315,8 @@ export default function InstallationListScreen() {
     }
 
     data.sort((a: any, b: any) => {
-      const dateA = parseDate(a.createdAt || a.date);
-      const dateB = parseDate(b.createdAt || b.date);
+      const dateA = parseDate(a.dateIso || a.createdAt || a.date);
+      const dateB = parseDate(b.dateIso || b.createdAt || b.date);
       return dateB - dateA;
     });
 
@@ -335,9 +331,7 @@ export default function InstallationListScreen() {
     setModalVisible(true);
   };
 
-  // 🔥 1. OPEN EDIT MODAL FUNCTION WITH DATE PARSER
   const openEditModal = (item: any) => {
-      // Parse existing dates so the calendar doesn't show 1970
       const installTs = parseDate(item.date);
       if (installTs > 0) setEditInstallDateObj(new Date(installTs));
       else setEditInstallDateObj(new Date());
@@ -363,7 +357,7 @@ export default function InstallationListScreen() {
       setEditModalVisible(true);
   };
 
-  // 🔥 2. SAVE EDITED DATA TO FIREBASE
+  // 🔥 5. SAAS ENGINE UPDATE LOGIC
   const handleSaveEdit = async () => {
       if (!editData.id) return;
       if (!editData.hospital || !editData.serialNo) {
@@ -372,8 +366,7 @@ export default function InstallationListScreen() {
       }
       setIsSavingEdit(true);
       try {
-          const docRef = doc(db, "installations", editData.id);
-          await updateDoc(docRef, {
+          const res = await updateSaaSData("installations", editData.id, {
               hospital: editData.hospital,
               orgName: editData.hospital, 
               orgId: editData.orgId || '', 
@@ -388,8 +381,14 @@ export default function InstallationListScreen() {
               warrantyExpiry: editData.warrantyExpiry,
               note: editData.note
           });
-          Alert.alert("Success", "Installation details updated!");
-          setEditModalVisible(false);
+
+          if (res.success) {
+              setInstallList(prev => prev.map(item => item.id === editData.id ? { ...item, ...editData } : item));
+              Alert.alert("Success", "Installation details updated!");
+              setEditModalVisible(false);
+          } else {
+              Alert.alert("Error", "Could not update installation.");
+          }
       } catch (error: any) {
           Alert.alert("Error", "Could not update installation. " + error.message);
       } finally {
@@ -429,7 +428,6 @@ export default function InstallationListScreen() {
                   <Text style={styles.newBadgeText}>🆕 NEW</Text>
                 </View>
               )}
-              {/* 🔥 EDIT BUTTON FOR ADMIN ONLY */}
               {isStrictAdmin && (
                   <TouchableOpacity style={{marginLeft: 10}} onPress={() => openEditModal(item)}>
                       <Ionicons name="create" size={18} color="#d32f2f" />
@@ -499,7 +497,6 @@ export default function InstallationListScreen() {
       {/* FILTER UI */}
       <View style={{ backgroundColor: 'white', paddingBottom: 10 }}>
         <View style={styles.tabContainer}>
-          {/* 🔥 CHANGED: 'Year' to 'FY' */}
           {['Day', 'Month', 'FY', 'All'].map((m) => (
             <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
               <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
@@ -532,7 +529,7 @@ export default function InstallationListScreen() {
 
         <View style={{ paddingHorizontal: 15 }}>
           <View style={styles.searchBar}>
-            <Ionicons name="search" size={20} color="gray" />
+            {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
             <TextInput
               style={styles.input}
               placeholder="Search Hospital, Serial, Product..."
@@ -559,11 +556,14 @@ export default function InstallationListScreen() {
         contentContainerStyle={{ padding: 5, paddingBottom: 50 }}
         ListEmptyComponent={
           <View style={{ alignItems: 'center', marginTop: 50 }}>
-            <Ionicons name="cube-outline" size={60} color="#ddd" />
-            <Text style={{ textAlign: 'center', marginTop: 10, color: 'gray' }}>No Installations Found</Text>
+            {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                <>
+                    <Ionicons name="cube-outline" size={60} color="#ddd" />
+                    <Text style={{ textAlign: 'center', marginTop: 10, color: 'gray' }}>No Installations Found</Text>
+                </>
+            )}
           </View>
         }
-        // 🔥 LOAD MORE BUTTON WRAPPED WITH VIEW FOR BOTTOM PADDING
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
                 {visibleCount < fullList.length ? (
@@ -584,9 +584,7 @@ export default function InstallationListScreen() {
         }
       />
 
-      {/* ========================================== */}
-      {/* 🔥 ADMIN EDIT MODAL WITH CALENDAR 🔥 */}
-      {/* ========================================== */}
+      {/* ADMIN EDIT MODAL WITH CALENDAR */}
       <Modal visible={editModalVisible} transparent animationType="slide">
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
               <View style={styles.modalContent}>
@@ -616,7 +614,7 @@ export default function InstallationListScreen() {
                       <Text style={styles.inputLabel}>Serial No *</Text>
                       <TextInput style={styles.editInput} value={editData.serialNo} onChangeText={t => setEditData({...editData, serialNo: t})} />
 
-                      {/* 🔥 NEW: CALENDAR FOR INSTALLATION DATE */}
+                      {/* CALENDAR FOR INSTALLATION DATE */}
                       <Text style={styles.inputLabel}>Installation Date</Text>
                       <TouchableOpacity style={styles.editDateBtn} onPress={() => setShowEditInstallDate(true)}>
                           <Text style={{color: '#333'}}>{editData.date}</Text>
@@ -636,7 +634,7 @@ export default function InstallationListScreen() {
                           />
                       )}
 
-                      {/* 🔥 NEW: CALENDAR FOR WARRANTY EXPIRY */}
+                      {/* CALENDAR FOR WARRANTY EXPIRY */}
                       <Text style={styles.inputLabel}>Warranty Expiry</Text>
                       <TouchableOpacity style={styles.editDateBtn} onPress={() => setShowEditExpiryDate(true)}>
                           <Text style={{color: '#333'}}>{editData.warrantyExpiry}</Text>
@@ -718,7 +716,7 @@ export default function InstallationListScreen() {
                   </View>
                 ) : null}
 
-                {/* 🔥 SHARE PDF BUTTON */}
+                {/* SHARE PDF BUTTON */}
                 <TouchableOpacity 
                     style={styles.pdfBtn}
                     onPress={() => generatePDF(selectedItem)}
@@ -773,10 +771,9 @@ export default function InstallationListScreen() {
   );
 }
 
-// Helper Component
 const DetailRow = ({ label, value, icon, highlight, color }: any) => (
   <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-    <View style={{ width: 30 }}><Ionicons name={icon} size={18} color={highlight ? "#3b5998" : "gray"} /></View>
+    <View style={{ width: 30 }}><Ionicons name={icon} size={20} color={highlight ? "#3b5998" : "gray"} /></View>
     <View style={{ flex: 1 }}>
       <Text style={{ fontSize: 11, color: 'gray' }}>{label}</Text>
       <Text style={{
@@ -795,7 +792,6 @@ const styles = StyleSheet.create({
   addBtn: { flexDirection: 'row', backgroundColor: '#3b5998', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, alignItems: 'center' },
   addBtnText: { color: 'white', fontWeight: 'bold', marginLeft: 5 },
 
-  // Filter UI
   tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', margin: 10, borderRadius: 8, padding: 2, marginBottom: 5 },
   tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
   activeTab: { backgroundColor: 'white', elevation: 2 },
@@ -810,7 +806,6 @@ const styles = StyleSheet.create({
   searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', paddingHorizontal: 10, borderRadius: 8, alignItems: 'center', height: 36 },
   input: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
 
-  // Card Styles
   card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 15, elevation: 2 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   hospitalName: { fontSize: 16, fontWeight: 'bold', color: '#333' },
@@ -829,9 +824,8 @@ const styles = StyleSheet.create({
   footer: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 5, borderTopWidth: 1, borderTopColor: '#f5f5f5', paddingTop: 5 },
   footerText: { fontSize: 11, color: 'gray' },
 
-  // Modal Styles
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { width: '100%', backgroundColor: 'white', borderRadius: 15, padding: 25, maxHeight: '85%', elevation: 5 }, 
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
+  modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 25, maxHeight: '85%', elevation: 5 }, 
   modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
   
   sectionHeaderBox: { backgroundColor: '#e3f2fd', padding: 6, borderRadius: 6, marginTop: 10, marginBottom: 10 },
@@ -849,7 +843,6 @@ const styles = StyleSheet.create({
   pickerHeader: { fontWeight: 'bold', fontSize: 16, marginBottom: 10, color: '#3b5998', textAlign: 'center' },
   pickerItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eee', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
 
-  // EDIT MODAL STYLES 🔥
   inputLabel: { fontSize: 12, color: 'gray', marginTop: 10, marginBottom: 5, fontWeight: 'bold' },
   editInput: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, fontSize: 14, color: '#333', backgroundColor: '#f9f9f9' },
   editDateBtn: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 12, backgroundColor: '#f9f9f9' },

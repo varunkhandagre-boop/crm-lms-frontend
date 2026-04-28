@@ -19,17 +19,27 @@ import {
     View
 } from 'react-native';
 
-import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+// 🔥 SAAS IMPORTS
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
-// 🔥 Import Helper Logic
 import { manageAttendanceReminders } from '../utils/notificationHelper';
 
 export default function DayInScreen() {
     useKeepAwake();
     const router = useRouter();
-    const { attendanceList, addAttendance, currentUser, holidayList, leaveList, userList } = useData();
+    
+    // 🔥 1. Context se sirf User nikalenge
+    const { currentUser } = useData();
+
+    // 🔥 2. Naya SaaS Engine
+    const { fetchSaaSData, addSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+
+    // 🔥 3. Lazy Loaded Lists
+    const [attendanceList, setAttendanceList] = useState<any[]>([]);
+    const [holidayList, setHolidayList] = useState<any[]>([]);
+    const [leaveList, setLeaveList] = useState<any[]>([]);
+    const [userList, setUserList] = useState<any[]>([]);
 
     // --- STATES ---
     const [location, setLocation] = useState<Location.LocationObject | null>(null);
@@ -54,7 +64,6 @@ export default function DayInScreen() {
     const [detailModalVisible, setDetailModalVisible] = useState(false);
     const [selectedItem, setSelectedItem] = useState<any>(null);
 
-    // 🔥 PAGINATION STATE
     const [visibleCount, setVisibleCount] = useState(20);
 
     useEffect(() => {
@@ -62,7 +71,27 @@ export default function DayInScreen() {
         else setVisibleCount(20);  
     }, [viewMode, currentDate, filterUser]);
 
-    const canManage = currentUser?.role === 'Admin' || currentUser?.role === 'Manager' || currentUser?.role === 'Hr' || currentUser?.role === 'Accountant';
+    const canManage = currentUser?.role === 'Admin' || currentUser?.role === 'Manager' || currentUser?.role === 'Hr' || currentUser?.role === 'Accountant' || currentUser?.role === 'SuperAdmin';
+
+    // 🔥 4. LOAD DATA ON MOUNT
+    const loadAllData = async () => {
+        if (currentUser?.companyId) {
+            const [attendance, holidays, leaves, users] = await Promise.all([
+                fetchSaaSData("attendance"),
+                fetchSaaSData("holidays"),
+                fetchSaaSData("leaves"),
+                fetchSaaSData("users")
+            ]);
+            setAttendanceList(attendance);
+            setHolidayList(holidays);
+            setLeaveList(leaves);
+            setUserList(users);
+        }
+    };
+
+    useEffect(() => {
+        loadAllData();
+    }, [currentUser]);
 
     // HELPER: Unique Users
     const uniqueUsers = useMemo(() => {
@@ -70,7 +99,6 @@ export default function DayInScreen() {
         return userList.map((u:any) => u.name).sort();
     }, [userList, canManage]);
 
-    // --- 🔥 NEW BULLETPROOF HELPERS 🔥 ---
     const normalizeDate = (dStr: string, isoStr?: string) => {
         if (isoStr && isoStr.includes('-')) return isoStr.split('T')[0];
         if (!dStr) return "";
@@ -107,7 +135,6 @@ export default function DayInScreen() {
         return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     };
 
-    // Date Navigation
     const changeDate = (direction: number) => {
         const newDate = new Date(currentDate);
         if (viewMode === 'Day') newDate.setDate(newDate.getDate() + direction);
@@ -115,13 +142,13 @@ export default function DayInScreen() {
         else newDate.setFullYear(newDate.getFullYear() + direction);
         setCurrentDate(newDate);
     };
+    
     const getHeaderDateText = () => {
         if (viewMode === 'Day') return formatFullDate(currentDate);
         if (viewMode === 'Month') return formatMonth(currentDate);
         return currentDate.getFullYear().toString();
     };
     
-    // Auto Calculate Total
     const handleExpenseChange = (field: string, value: string) => {
         const newExpenses = { ...expenses, [field]: value };
         const da = parseFloat(newExpenses.da) || 0;
@@ -132,7 +159,6 @@ export default function DayInScreen() {
         setExpenses({ ...newExpenses, totalAmount: total >= 0 ? total.toString() : '' });
     };
 
-    // --- Refresh Status whenever Screen Focuses ---
     useFocusEffect(
         useCallback(() => {
             const checkStatus = () => {
@@ -142,7 +168,7 @@ export default function DayInScreen() {
                 const todayStr = localDate.toISOString().split('T')[0];
                 
                 const myEntry = attendanceList.find((a: any) => 
-                    a.date === todayStr && (isSameUser(a.userName, currentUser?.name) || a.userId === currentUser?.id)
+                    a.date === todayStr && (isSameUser(a.userName, currentUser?.name) || a.userId === currentUser?.id || a.senderId === currentUser?.id)
                 );
 
                 if (myEntry) {
@@ -154,7 +180,7 @@ export default function DayInScreen() {
                     } else {
                         if (status === 'Completed') return;
                         setStatus('In');
-                        const start = new Date(myEntry.createdAt).getTime();
+                        const start = new Date(myEntry.createdAt || myEntry.timestamp).getTime();
                         setStartTime(start);
                         const diff = Math.floor((now.getTime() - start) / 1000);
                         setTimer(diff > 0 ? diff : 0);
@@ -186,7 +212,6 @@ export default function DayInScreen() {
         return () => clearInterval(interval);
     }, [status, startTime]);
 
-    // --- SMART STATUS CALCULATOR ---
     const getStatus = (item: any) => {
         if (item.type === 'LEAVE') return 'LEAVE';
         if (item.type === 'HOLIDAY') return 'HOLIDAY';
@@ -203,7 +228,6 @@ export default function DayInScreen() {
         return 'PRESENT';
     };
 
-    // --- 🔥 DATA GENERATION ENGINE 🔥 ---
     const getDisplayData = () => {
         let rawData: any[] = [];
 
@@ -217,7 +241,6 @@ export default function DayInScreen() {
             usersToCheck.forEach((emp: any) => {
                 if (!emp || !emp.name) return;
 
-                // 1. ATTENDANCE CHECK FIRST! (Priority 1)
                 const attendance = attendanceList.find((a: any) => 
                     (isSameUser(a.userName, emp.name) || isSameUser(a.senderName, emp.name)) && 
                     a.date === selectedDateStr
@@ -225,10 +248,9 @@ export default function DayInScreen() {
 
                 if (attendance) {
                     finalOutput.push({ ...attendance, type: 'ATTENDANCE', senderName: emp.name });
-                    return; // 🔥 STOP HERE. If present, ignore Leave/Holiday/Absent.
+                    return; 
                 }
 
-                // 2. LEAVE CHECK (Correct Date Comparison)
                 const leave = leaveList.find((l: any) => {
                     if (!isSameUser(l.senderName, emp.name) || l.status !== 'Approved') return false;
                     const startD = normalizeDate(l.fromDate, l.fromDateIso);
@@ -241,21 +263,18 @@ export default function DayInScreen() {
                     return;
                 }
 
-                // 3. HOLIDAY CHECK
                 const holiday = holidayList.find((h:any) => normalizeDate(h.date, h.dateIso) === selectedDateStr);
                 if (holiday) {
                     finalOutput.push({ id: `holiday-${selectedDateStr}-${emp.id}`, date: selectedDateStr, type: 'HOLIDAY', senderName: emp.name, outTime: holiday.name, workHrs: '0' });
                     return;
                 }
 
-                // 4. SUNDAY CHECK
                 const d = new Date(selectedDateStr);
                 if (d.getDay() === 0) {
                      finalOutput.push({ id: `sunday-${selectedDateStr}-${emp.id}`, date: selectedDateStr, type: 'HOLIDAY', senderName: emp.name, outTime: 'Sunday Off', workHrs: '0' });
                      return;
                 }
 
-                // 5. ABSENT CHECK (Only if date is past/today)
                 if (selectedDateStr <= new Date().toISOString().split('T')[0]) {
                     finalOutput.push({ id: `absent-${selectedDateStr}-${emp.id}`, date: selectedDateStr, type: 'ABSENT', senderName: emp.name, inTime: '-', outTime: '-', workHrs: '0' });
                 }
@@ -267,19 +286,16 @@ export default function DayInScreen() {
             let leaveSource = [...leaveList];
             const targetUser = (canManage && filterUser !== 'All') ? filterUser : (canManage ? null : currentUser?.name);
 
-            // Filter data by selected user
             if (targetUser) {
                 attSource = attSource.filter((item: any) => isSameUser(item.userName, targetUser) || isSameUser(item.senderName, targetUser));
                 leaveSource = leaveSource.filter((item: any) => isSameUser(item.senderName, targetUser));
             } else if (!canManage) {
-                attSource = attSource.filter((item: any) => item.userId === currentUser?.id);
-                leaveSource = leaveSource.filter((item: any) => item.userId === currentUser?.id);
+                attSource = attSource.filter((item: any) => item.userId === currentUser?.id || item.senderId === currentUser?.id);
+                leaveSource = leaveSource.filter((item: any) => item.userId === currentUser?.id || item.senderId === currentUser?.id);
             }
 
-            // Push Attendance
             attSource.forEach((att: any) => rawData.push({ ...att, type: 'ATTENDANCE', senderName: att.userName || att.senderName }));
             
-            // Expand Multi-Day Leaves
             leaveSource.forEach((leave: any) => {
                 if (leave.status === 'Approved') {
                     const startD = normalizeDate(leave.fromDate, leave.fromDateIso);
@@ -290,7 +306,6 @@ export default function DayInScreen() {
 
                     while (currDate <= lastDate) {
                         const dStr = currDate.toISOString().split('T')[0];
-                        // Only add leave if no attendance exists for this specific day
                         const hasAtt = attSource.some(a => a.date === dStr && (isSameUser(a.userName, leave.senderName) || isSameUser(a.senderName, leave.senderName)));
 
                         if (!hasAtt) {
@@ -350,20 +365,17 @@ export default function DayInScreen() {
     const finalData = getDisplayData();
     const displayData = finalData.slice(0, visibleCount);
 
-    // ==========================================
-    // 💡 SMART HOLIDAY REMINDER LOGIC
-    // ==========================================
     const todayObj = new Date();
     const tomorrowObj = new Date();
     tomorrowObj.setDate(todayObj.getDate() + 1);
 
-    const getStandardDate = (dateObj: Date) => {
+    const getStandardDateForHoliday = (dateObj: Date) => {
         const offset = dateObj.getTimezoneOffset() * 60000;
         return new Date(dateObj.getTime() - offset).toISOString().split('T')[0];
     };
 
-    const todayStrFull = getStandardDate(todayObj);
-    const tomorrowStrFull = getStandardDate(tomorrowObj);
+    const todayStrFull = getStandardDateForHoliday(todayObj);
+    const tomorrowStrFull = getStandardDateForHoliday(tomorrowObj);
 
     const todayIsSunday = todayObj.getDay() === 0;
     const tomorrowIsSunday = tomorrowObj.getDay() === 0;
@@ -386,17 +398,14 @@ export default function DayInScreen() {
     const leavesOrAbsent = finalData.filter(i => getStatus(i) === 'LEAVE' || getStatus(i) === 'ABSENT').length;
     const midLabel = "Leaves/Abs";
 
-    // ==========================================
-    // 🔥 CORE ACTIONS 
-    // ==========================================
+    // 🔥 5. SAAS DAY IN LOGIC
     const handleDayIn = async () => {
         setLoading(true);
         setAddress("Fetching GPS...");
         try {
             const now = new Date();
-            const todayStr = getStandardDate(now);
+            const todayStr = getStandardDateForHoliday(now);
             
-            // DUPLICATE CHECK (Case Insensitive)
             const existingEntry = attendanceList.find((a: any) => 
                 a.date === todayStr && (a.userId === currentUser?.id || isSameUser(a.userName, currentUser?.name) || isSameUser(a.senderName, currentUser?.name))
             );
@@ -409,10 +418,6 @@ export default function DayInScreen() {
             }
 
             let realName = currentUser?.name || 'Unknown';
-            if (currentUser?.email) {
-                const dbUser = userList.find((u: any) => u.email === currentUser.email || u.id === currentUser.id);
-                if (dbUser && dbUser.name) realName = dbUser.name;
-            }
 
             let { status: permStatus } = await Location.requestForegroundPermissionsAsync();
             if (permStatus !== 'granted') throw new Error("Denied");
@@ -441,22 +446,33 @@ export default function DayInScreen() {
 
             const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-            await addAttendance({
+            const newAttendanceData = {
                 date: todayStr,
+                dateIso: todayStr,
                 inTime: timeString,
                 outTime: '', workHrs: '', status: 'Present',
                 expenses: { da: '0', hotel: '0', misc: '0', totalAmount: '0' },
                 location: { address: currentAddr, latitude: loc.coords.latitude, longitude: loc.coords.longitude },
                 note: 'Marked via GPS',
                 userName: realName, 
-                senderName: realName
-            });
+                senderName: realName,
+                role: currentUser?.role || 'Employee'
+            };
+
+            const res = await addSaaSData("attendance", newAttendanceData);
             
-            setStatus('In');
-            setStartTime(now.getTime());
-            await manageAttendanceReminders('LOGGED_IN', holidayList);
-            Alert.alert("Success", `✅ Punched In at ${timeString}\n📍 ${currentAddr}`);
-            
+            if (res.success) {
+                setTodayDocId(res.id);
+                setStatus('In');
+                setStartTime(now.getTime());
+                await manageAttendanceReminders('LOGGED_IN', holidayList);
+                
+                // Silent refresh
+                await loadAllData();
+                Alert.alert("Success", `✅ Punched In at ${timeString}\n📍 ${currentAddr}`);
+            } else {
+                throw new Error("Could not save to SaaS DB");
+            }
         } catch (error) {
             console.log(error);
             Alert.alert("Error", "Check GPS/Internet or Permission");
@@ -472,6 +488,7 @@ export default function DayInScreen() {
         else Alert.alert("Done", "Aaj ka kaam ho gaya hai.");
     };
 
+    // 🔥 6. SAAS DAY OUT LOGIC
     const handleFinalizeDayOut = async () => {
         if (!todayDocId) return;
         if (!startTime) {
@@ -516,26 +533,31 @@ export default function DayInScreen() {
                 }
             } catch (e) { console.log("Out loc failed"); }
 
-            const docRef = doc(db, "attendance", todayDocId);
-            await updateDoc(docRef, {
+            const updatedData = {
                 outTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 workHrs: formatTime(finalSeconds), 
                 status: attendanceStatus,
                 expenses: finalExpenses,
                 outLocation: outLocData,
                 outAddress: outAddr
-            });
+            };
 
-            await Notifications.dismissAllNotificationsAsync();
-            await Notifications.cancelAllScheduledNotificationsAsync();
-            await manageAttendanceReminders('COMPLETED', holidayList);
+            const res = await updateSaaSData("attendance", todayDocId, updatedData);
 
-            setStatus('Completed');
-            setExpenseModalVisible(false);
-            setExpenses({ da: '', hotel: '', misc: '', totalAmount: '', note: '' });
+            if (res.success) {
+                await Notifications.dismissAllNotificationsAsync();
+                await Notifications.cancelAllScheduledNotificationsAsync();
+                await manageAttendanceReminders('COMPLETED', holidayList);
 
-            Alert.alert("Day End", `✅ Punched Out Successfully!\nTotal Expense: ₹${finalExpenses.totalAmount}`);
+                setStatus('Completed');
+                setExpenseModalVisible(false);
+                setExpenses({ da: '', hotel: '', misc: '', totalAmount: '', note: '' });
 
+                await loadAllData();
+                Alert.alert("Day End", `✅ Punched Out Successfully!\nTotal Expense: ₹${finalExpenses.totalAmount}`);
+            } else {
+                throw new Error("Failed to update in SaaS DB");
+            }
         } catch (error) {
             Alert.alert("Error", "Day Out Update Failed.");
         } finally {
@@ -671,7 +693,7 @@ export default function DayInScreen() {
                         renderItem={renderHistoryItem} 
                         scrollEnabled={false} 
                         contentContainerStyle={{paddingBottom: 20}}
-                        ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>No records found.</Text>}
+                        ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>{isDbLoading ? 'Loading data...' : 'No records found.'}</Text>}
                         
                         ListFooterComponent={
                             <View style={{ marginTop: 10 }}>

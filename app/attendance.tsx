@@ -1,7 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+
+// 🔥 SAAS IMPORTS (DataContext & Engine)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 import * as FileSystem from 'expo-file-system/legacy';
@@ -9,13 +12,20 @@ import * as Sharing from 'expo-sharing';
 
 export default function AttendanceScreen() {
   const router = useRouter();
-  const contextData = useData();
   
-  // 🔥 Safe Defaults
-  const { attendanceList = [], leaveList = [], holidayList = [], user, userList = [] } = contextData || {}; 
+  // 🔥 1. Context se sirf logged in User
+  const { currentUser } = useData();
   
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded Lists
+  const [attendanceList, setAttendanceList] = useState<any[]>([]);
+  const [leaveList, setLeaveList] = useState<any[]>([]);
+  const [holidayList, setHolidayList] = useState<any[]>([]);
+  const [userList, setUserList] = useState<any[]>([]);
+
   // States
-  // 🔥 CHANGED: 'Year' to 'FY'
   const [currentDate, setCurrentDate] = useState(new Date()); 
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY'>('Day'); 
   const [isCalendarView, setIsCalendarView] = useState(false); 
@@ -28,28 +38,52 @@ export default function AttendanceScreen() {
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [selectedCalDate, setSelectedCalDate] = useState<string | null>(null);
 
-  // 🔥 PAGINATION STATE (SMART LOAD MORE)
+  // PAGINATION STATE
   const [visibleCount, setVisibleCount] = useState(50); 
 
   useEffect(() => {
-      if (viewMode === 'Day') {
-          setVisibleCount(500); 
-      } else {
-          setVisibleCount(20);  
-      }
+      if (viewMode === 'Day') setVisibleCount(500); 
+      else setVisibleCount(20);  
   }, [viewMode, currentDate, filterUser]);
 
-  // 1. DEFINE VARIABLES
-  const DEFAULT_QUOTA = 18;
-  const canManage = ['Admin', 'Manager', 'Account', 'Accountant' ,'Hr'].includes(user?.role || '');
-  
-  const targetName = (filterUser === 'All' || !canManage) ? user?.name : filterUser;
+  // 🔥 4. MASSIVE DATA LOAD ON MOUNT
+  useEffect(() => {
+      const loadAllData = async () => {
+          if (currentUser?.companyId) {
+              const [attendance, leaves, holidays, users] = await Promise.all([
+                  fetchSaaSData("attendance"),
+                  fetchSaaSData("leaves"),
+                  fetchSaaSData("holidays"),
+                  fetchSaaSData("users")
+              ]);
+              setAttendanceList(attendance);
+              setLeaveList(leaves);
+              setHolidayList(holidays);
+              setUserList(users);
+          }
+      };
+      loadAllData();
+  }, [currentUser]);
 
-  // --- SORT USERS ---
+  // DEFINE VARIABLES
+  const DEFAULT_QUOTA = 18;
+  const canManage = ['Admin', 'Manager', 'Account', 'Accountant' ,'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
+  
+  const targetName = (filterUser === 'All' || !canManage) ? currentUser?.name : filterUser;
+
+  // SORT USERS
   const uniqueUsers = useMemo(() => {
     if (!canManage) return [];
     const safeList = Array.isArray(userList) ? userList : [];
-    return safeList.map((u: any) => ({ name: u.name, quota: u.yearlyLeaves || DEFAULT_QUOTA })).sort((a: any, b: any) => a.name.localeCompare(b.name));
+    
+    // Safer unique logic
+    const map = new Map();
+    safeList.forEach((u: any) => {
+        if (u.name && !map.has(u.name)) {
+            map.set(u.name, { name: u.name, quota: u.yearlyLeaves || DEFAULT_QUOTA });
+        }
+    });
+    return Array.from(map.values()).sort((a: any, b: any) => a.name.localeCompare(b.name));
   }, [userList, canManage]);
 
   // --- HELPER: Dates ---
@@ -95,7 +129,6 @@ export default function AttendanceScreen() {
       return d.toLocaleDateString('en-US', { weekday: 'short' });
   };
 
-  // 🔥 CHANGED: FY Navigation
   const changeDate = (direction: number) => {
       const newDate = new Date(currentDate);
       if (viewMode === 'Day') newDate.setDate(newDate.getDate() + direction);
@@ -104,7 +137,6 @@ export default function AttendanceScreen() {
       setCurrentDate(newDate);
   };
 
-  // 🔥 CHANGED: FY Header text
   const getHeaderDateText = () => {
       if (viewMode === 'Day') return formatFullDate(currentDate);
       if (viewMode === 'Month') return formatMonth(currentDate);
@@ -152,16 +184,14 @@ export default function AttendanceScreen() {
         startDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
         endDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
     } else if (viewMode === 'FY') {
-        // 🔥 CHANGED: FY Boundaries Logic
         const targetMonth = currentDate.getMonth();
         const targetYear = currentDate.getFullYear();
         const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
         
-        startDate = new Date(fyStartYear, 3, 1); // 1st April
-        endDate = new Date(fyStartYear + 1, 2, 31); // 31st March
+        startDate = new Date(fyStartYear, 3, 1); 
+        endDate = new Date(fyStartYear + 1, 2, 31); 
 
-        // 🔥 SMART FIX: Prevent calculating "Absent" before Jan 1, 2026
-        const APP_LAUNCH_DATE = new Date(2026, 0, 1); // 1st Jan 2026
+        const APP_LAUNCH_DATE = new Date(2026, 0, 1); 
         if (startDate < APP_LAUNCH_DATE) {
             startDate = APP_LAUNCH_DATE;
         }
@@ -185,9 +215,7 @@ export default function AttendanceScreen() {
         (a.userName === uName || a.senderName === uName) && getStandardDate(a.date) === dStr
     );
 
-    // ---------------------------------------------------------
     // CASE A: DAY VIEW
-    // ---------------------------------------------------------
     if (viewMode === 'Day') {
         const targetDateStr = getStandardDate(currentDate);
         const targetDayObj = new Date(targetDateStr);
@@ -200,11 +228,15 @@ export default function AttendanceScreen() {
         } else if (canManage) {
             targetUsers = safeUsers.filter((u:any) => u.name === filterUser);
         } else {
-            targetUsers = user ? [user] : [];
+            targetUsers = currentUser ? [currentUser] : [];
         }
 
         if (targetUsers.length > 0) {
-            targetUsers.forEach((u: any) => {
+            // Deduplicate target users
+            const uniqueTargetUsers = new Map();
+            targetUsers.forEach((u:any) => uniqueTargetUsers.set(u.name, u));
+
+            Array.from(uniqueTargetUsers.values()).forEach((u: any) => {
                 const att = findAttendance(u.name, targetDateStr);
                 const lv = findLeave(u.name, targetDateStr);
 
@@ -220,9 +252,7 @@ export default function AttendanceScreen() {
                 else if (isSunday) {
                     finalOutput.push({ id: `sun-${u.id}`, date: targetDateStr, type: 'HOLIDAY', senderName: u.name, outTime: 'Sunday Off' });
                 } 
-                // Only mark absent if the day has already started/passed
                 else if (targetDateStr <= todayStr) {
-                    // Prevent absent before Jan 1, 2026
                     if (targetDateStr >= "2026-01-01") {
                         finalOutput.push({ id: `abs-${u.id}`, date: targetDateStr, type: 'ABSENT', senderName: u.name, inTime: '-', outTime: '-', workHrs: '0' });
                     }
@@ -230,17 +260,14 @@ export default function AttendanceScreen() {
             });
         }
     } 
-    // ---------------------------------------------------------
     // CASE B: MONTH/FY VIEW
-    // ---------------------------------------------------------
     else {
-        const targetUserName = (filterUser === 'All' || !canManage) ? user?.name : filterUser;
+        const targetUserName = (filterUser === 'All' || !canManage) ? currentUser?.name : filterUser;
         let loop = new Date(startDate);
 
         while (loop <= endDate) {
             const dStr = getStandardDate(loop);
             
-            // Stop generating dates for the future (unless it's month view showing whole month pattern)
             if (dStr > todayStr && viewMode !== 'Month') break; 
 
             const isSunday = loop.getDay() === 0;
@@ -261,7 +288,6 @@ export default function AttendanceScreen() {
                 finalOutput.push({ id: `sun-${dStr}`, date: dStr, type: 'HOLIDAY', senderName: targetUserName, outTime: 'Sunday Off' });
             } 
             else if (dStr <= todayStr) {
-                // Ensure we don't mark absent before 1 Jan 2026 in loops
                 if (dStr >= "2026-01-01") {
                     finalOutput.push({ id: `abs-${dStr}`, date: dStr, type: 'ABSENT', senderName: targetUserName, inTime: '-', outTime: '-', workHrs: '0' });
                 }
@@ -277,7 +303,7 @@ export default function AttendanceScreen() {
   const finalData = getDisplayData();
   const displayData = finalData.slice(0, visibleCount);
 
-  // --- STATS CALCULATION (USING FULL DATA) ---
+  // --- STATS CALCULATION ---
   const todayStr = getStandardDate(new Date());
   
   const countStatus = (type: string) => finalData.filter((i: any) => {
@@ -299,13 +325,12 @@ export default function AttendanceScreen() {
       return acc;
   }, 0);
 
-  // Quota & Leaves Taken (Calculated based on FY boundaries)
+  // Quota & Leaves
   const safeUsersList = Array.isArray(userList) ? userList : [];
   const targetUserObj = safeUsersList.find((u:any) => u.name === targetName);
   
-  const userQuota = targetUserObj?.yearlyLeaves || user?.yearlyLeaves || DEFAULT_QUOTA;
+  const userQuota = targetUserObj?.yearlyLeaves || currentUser?.yearlyLeaves || DEFAULT_QUOTA;
   
-  // Calculate FY boundaries for leaves checking
   const targetMonth = currentDate.getMonth();
   const targetYear = currentDate.getFullYear();
   const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
@@ -327,7 +352,7 @@ export default function AttendanceScreen() {
       try {
           let csvHeader = "Date,Employee,Status,In Time,Out Time,Work Hrs,Total Expense,Note\n";
           let csvRows = "";
-          // 🔥 Download Full Data (Not Sliced)
+          
           finalData.forEach((item: any) => {
               const date = formatDateDisplay(item.date);
               const name = item.senderName || 'Unknown';
@@ -437,6 +462,7 @@ export default function AttendanceScreen() {
               <View style={styles.legendContainer}>
                   <View style={styles.legendItem}><View style={[styles.calDot, {backgroundColor: 'green', marginTop:0}]} /><Text style={styles.legendText}>Present</Text></View>
                   <View style={styles.legendItem}><View style={[styles.calDot, {backgroundColor: '#d32f2f', marginTop:0}]} /><Text style={styles.legendText}>Absent</Text></View>
+                  <View style={styles.legendItem}><View style={[styles.calDot, {backgroundColor: '#ff9800', marginTop:0}]} /><Text style={styles.legendText}>Short</Text></View>
                   <View style={styles.legendItem}><View style={[styles.calDot, {backgroundColor: '#e65100', marginTop:0}]} /><Text style={styles.legendText}>Leave</Text></View>
                   <View style={styles.legendItem}><View style={[styles.calDot, {backgroundColor: '#c2185b', marginTop:0}]} /><Text style={styles.legendText}>Holiday</Text></View>
               </View>
@@ -475,92 +501,116 @@ export default function AttendanceScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{paddingBottom:20}}>
-        {(filterUser !== 'All' || !canManage) && (
-            <View style={styles.compactCard}>
-                <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center'}}>
-                    <Text style={{fontWeight:'bold', color:'#555', fontSize:12}}>
-                        Leave Quota ({targetName?.split(' ')[0]})
-                    </Text>
-                    <Text style={{fontWeight:'bold', color:'#333', fontSize:12}}>
-                        {yearlyLeavesTaken}/{userQuota}
-                    </Text>
-                </View>
-                <View style={styles.progressBarBackground}>
-                    <View style={[styles.progressBarFill, { width: `${leavePercentage}%`, backgroundColor: isLeaveExceeded ? '#ff5252' : '#4caf50' }]} />
-                </View>
-                <View style={{flexDirection:'row', justifyContent:'space-between'}}>
-                    <Text style={{fontSize:10, color:'gray'}}>Used: {yearlyLeavesTaken}</Text>
-                    <Text style={{fontSize:10, color: isLeaveExceeded ? 'red' : 'green'}}>Bal: {isLeaveExceeded ? 0 : leaveBalance}</Text>
-                </View>
-            </View>
-        )}
-
-        <View style={styles.tabContainer}>
-            {/* 🔥 CHANGED: 'Year' replaced with 'FY' */}
-            {['Day', 'Month', 'FY'].map(m => (
-                <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => { setViewMode(m as any); if(m==='Day') setIsCalendarView(false); setCurrentDate(new Date()); }}>
-                    <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m === 'Day' ? 'Daily' : m === 'Month' ? 'Monthly' : 'FY (Yearly)'}</Text>
-                </TouchableOpacity>
-            ))}
-        </View>
-
-        <View style={{height: 70, marginBottom: 10}}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingHorizontal: 15, alignItems: 'center'}}>
-                <SummaryItem label="Present" value={daysPresent} color="#e8f5e9" textColor="green" />
-                <SummaryItem label="Absent" value={daysAbsent} color="#ffebee" textColor="#d32f2f" />
-                <SummaryItem label="Leave" value={daysLeave} color="#fff3e0" textColor="#e65100" />
-                <SummaryItem label="Short" value={daysShort} color="#fff8e1" textColor="#ff9800" />
-                <View style={[styles.summaryBox, { backgroundColor: '#fff8e1', borderColor: '#ffb300', borderWidth: 1 }]}>
-                    <Text style={[styles.summaryBoxValue, { color: '#ff6f00', fontSize: 13 }]}>₹{totalExpense}</Text>
-                    <Text style={[styles.summaryBoxLabel, { color: '#ff6f00' }]}>Expense</Text>
-                </View>
-                <SummaryItem label="Holiday" value={daysHoliday} color="#fce4ec" textColor="#c2185b" />
-                <View style={{width: 10}} />
-            </ScrollView>
-        </View>
-
-        {viewMode === 'Month' && isCalendarView ? renderCalendar() : (
-            <FlatList 
-                data={displayData} 
-                keyExtractor={(item, index) => item.id || `key-${index}`} 
-                renderItem={renderItem} 
-                scrollEnabled={false} 
-                contentContainerStyle={{paddingHorizontal: 15}} 
-                ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>No data for {getHeaderDateText()}</Text>} 
-                
-                ListFooterComponent={
-                    visibleCount < finalData.length ? (
-                        <TouchableOpacity 
-                            onPress={() => setVisibleCount(prev => prev + 20)} 
-                            style={{
-                                padding: 12, 
-                                backgroundColor: '#fff', 
-                                alignItems: 'center', 
-                                marginVertical: 15, 
-                                borderRadius: 8,
-                                borderWidth: 1,
-                                borderColor: '#ddd',
-                                elevation: 1
-                            }}
-                        >
-                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                                👇 Load More Records ({finalData.length - visibleCount} remaining)
+        {isDbLoading ? (
+            <ActivityIndicator size="large" color="#3b5998" style={{marginTop: 50}} />
+        ) : (
+            <>
+                {(filterUser !== 'All' || !canManage) && (
+                    <View style={styles.compactCard}>
+                        <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center'}}>
+                            <Text style={{fontWeight:'bold', color:'#555', fontSize:12}}>
+                                Leave Quota ({targetName?.split(' ')[0]})
                             </Text>
+                            <Text style={{fontWeight:'bold', color:'#333', fontSize:12}}>
+                                {yearlyLeavesTaken}/{userQuota}
+                            </Text>
+                        </View>
+                        <View style={styles.progressBarBackground}>
+                            <View style={[styles.progressBarFill, { width: `${leavePercentage}%`, backgroundColor: isLeaveExceeded ? '#ff5252' : '#4caf50' }]} />
+                        </View>
+                        <View style={{flexDirection:'row', justifyContent:'space-between'}}>
+                            <Text style={{fontSize:10, color:'gray'}}>Used: {yearlyLeavesTaken}</Text>
+                            <Text style={{fontSize:10, color: isLeaveExceeded ? 'red' : 'green'}}>Bal: {isLeaveExceeded ? 0 : leaveBalance}</Text>
+                        </View>
+                    </View>
+                )}
+
+                <View style={styles.tabContainer}>
+                    {['Day', 'Month', 'FY'].map(m => (
+                        <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => { setViewMode(m as any); if(m==='Day') setIsCalendarView(false); setCurrentDate(new Date()); }}>
+                            <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m === 'Day' ? 'Daily' : m === 'Month' ? 'Monthly' : 'FY (Yearly)'}</Text>
                         </TouchableOpacity>
-                    ) : (
-                        finalData.length > 0 ? (
-                            <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
-                                --- End of List ---
-                            </Text>
-                        ) : null
-                    )
-                }
-            />
+                    ))}
+                </View>
+
+                <View style={{height: 70, marginBottom: 10}}>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingHorizontal: 15, alignItems: 'center'}}>
+                        <SummaryItem label="Present" value={daysPresent} color="#e8f5e9" textColor="green" />
+                        <SummaryItem label="Absent" value={daysAbsent} color="#ffebee" textColor="#d32f2f" />
+                        <SummaryItem label="Leave" value={daysLeave} color="#fff3e0" textColor="#e65100" />
+                        <SummaryItem label="Short" value={daysShort} color="#fff8e1" textColor="#ff9800" />
+                        <View style={[styles.summaryBox, { backgroundColor: '#fff8e1', borderColor: '#ffb300', borderWidth: 1 }]}>
+                            <Text style={[styles.summaryBoxValue, { color: '#ff6f00', fontSize: 13 }]}>₹{totalExpense}</Text>
+                            <Text style={[styles.summaryBoxLabel, { color: '#ff6f00' }]}>Expense</Text>
+                        </View>
+                        <SummaryItem label="Holiday" value={daysHoliday} color="#fce4ec" textColor="#c2185b" />
+                        <View style={{width: 10}} />
+                    </ScrollView>
+                </View>
+
+                {viewMode === 'Month' && isCalendarView ? renderCalendar() : (
+                    <FlatList 
+                        data={displayData} 
+                        keyExtractor={(item, index) => item.id || `key-${index}`} 
+                        renderItem={renderItem} 
+                        scrollEnabled={false} 
+                        contentContainerStyle={{paddingHorizontal: 15}} 
+                        ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>No data for {getHeaderDateText()}</Text>} 
+                        
+                        ListFooterComponent={
+                            visibleCount < finalData.length ? (
+                                <TouchableOpacity 
+                                    onPress={() => setVisibleCount(prev => prev + 20)} 
+                                    style={{
+                                        padding: 12, 
+                                        backgroundColor: '#fff', 
+                                        alignItems: 'center', 
+                                        marginVertical: 15, 
+                                        borderRadius: 8,
+                                        borderWidth: 1,
+                                        borderColor: '#ddd',
+                                        elevation: 1
+                                    }}
+                                >
+                                    <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                                        👇 Load More Records ({finalData.length - visibleCount} remaining)
+                                    </Text>
+                                </TouchableOpacity>
+                            ) : (
+                                finalData.length > 0 ? (
+                                    <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
+                                        --- End of List ---
+                                    </Text>
+                                ) : null
+                            )
+                        }
+                    />
+                )}
+            </>
         )}
       </ScrollView>
 
       {/* USER MODAL */}
-      <Modal visible={showUserModal} transparent={true} animationType="slide"><View style={styles.modalOverlay}><View style={styles.userModalContent}><Text style={styles.modalTitle}>Select Employee</Text><ScrollView style={{maxHeight: 300}}><TouchableOpacity style={styles.userItem} onPress={() => { setFilterUser('All'); setShowUserModal(false); }}><Text style={{fontWeight: filterUser==='All'?'bold':'normal', color: filterUser==='All'?'#e67e22':'#333'}}>All Employees</Text></TouchableOpacity>{uniqueUsers.map((u:any, i:number) => (<TouchableOpacity key={i} style={styles.userItem} onPress={() => { setFilterUser(u.name); setShowUserModal(false); }}><Text style={{fontWeight: filterUser===u.name?'bold':'normal', color: filterUser===u.name?'#e67e22':'#333'}}>{u.name}</Text></TouchableOpacity>))}</ScrollView><TouchableOpacity style={styles.closeModalBtn} onPress={() => setShowUserModal(false)}><Text style={{color:'white'}}>Close</Text></TouchableOpacity></View></View></Modal>
+      <Modal visible={showUserModal} transparent={true} animationType="fade">
+        <View style={styles.modalOverlay}>
+            <View style={styles.userModalContent}>
+                <Text style={styles.modalTitle}>Select Employee</Text>
+                <ScrollView style={{maxHeight: 300}}>
+                    <TouchableOpacity style={styles.userItem} onPress={() => { setFilterUser('All'); setShowUserModal(false); }}>
+                        <Text style={{fontWeight: filterUser==='All'?'bold':'normal', color: filterUser==='All'?'#e67e22':'#333'}}>All Employees</Text>
+                    </TouchableOpacity>
+                    {uniqueUsers.map((u:any, i:number) => (
+                        <TouchableOpacity key={i} style={styles.userItem} onPress={() => { setFilterUser(u.name); setShowUserModal(false); }}>
+                            <Text style={{fontWeight: filterUser===u.name?'bold':'normal', color: filterUser===u.name?'#e67e22':'#333'}}>{u.name}</Text>
+                        </TouchableOpacity>
+                    ))}
+                </ScrollView>
+                <TouchableOpacity style={styles.closeModalBtn} onPress={() => setShowUserModal(false)}>
+                    <Text style={{color:'white'}}>Close</Text>
+                </TouchableOpacity>
+            </View>
+        </View>
+      </Modal>
 
       {/* FULL DETAILS MODAL */}
       <Modal visible={detailModalVisible} transparent={true} animationType="fade">
@@ -575,13 +625,15 @@ export default function AttendanceScreen() {
                 
                 {selectedItem && (
                     <ScrollView showsVerticalScrollIndicator={false}>
-                        <DetailRow label="Employee" value={selectedItem.senderName} highlight />
-                        <DetailRow label="Date" value={formatDateDisplay(selectedItem.date)} />
+                        {canManage && <View style={{backgroundColor:'#e3f2fd', padding:10, borderRadius:8, marginBottom:10}}><Text style={{color:'#1565c0', fontWeight:'bold', textAlign:'center'}}>👤 {selectedItem.senderName}</Text></View>}
+                        
+                        <DetailRow label="Date" value={formatDateDisplay(selectedItem.date)} icon="calendar" />
                         <DetailRow 
                             label="Status" 
                             value={getStatus(selectedItem) === 'SHORT' ? 'Short Day' : (getStatus(selectedItem) === 'PRESENT' ? 'Present' : selectedItem.type)} 
                             highlight 
                             color={getStatus(selectedItem) === 'PRESENT' ? 'green' : (getStatus(selectedItem) === 'SHORT' ? '#ff9800' : (getStatus(selectedItem) === 'LEAVE' ? '#e65100' : '#d32f2f'))} 
+                            icon="information-circle"
                         />
                         
                         {selectedItem.inTime && selectedItem.inTime !== '-' && selectedItem.inTime !== 'LEAVE' ? (
@@ -619,11 +671,11 @@ export default function AttendanceScreen() {
                                 <Text style={{fontSize:14, fontWeight:'bold', color:'#3b5998', marginBottom:8}}>💰 Today's Expenses</Text>
                                 {selectedItem.expenses ? (
                                     <View style={{backgroundColor:'#fff3e0', padding:10, borderRadius:8}}>
-                                        <DetailRow label="DA (Daily Allowance)" value={`₹${selectedItem.expenses.da || '0'}`} />
-                                        <DetailRow label="Hotel/Stay" value={`₹${selectedItem.expenses.hotel || '0'}`} />
-                                        <DetailRow label="Misc/Other" value={`₹${selectedItem.expenses.misc || '0'}`} />
+                                        <DetailRow label="DA (Daily Allowance)" value={`₹${selectedItem.expenses.da || '0'}`} icon="cash-outline" />
+                                        <DetailRow label="Hotel/Stay" value={`₹${selectedItem.expenses.hotel || '0'}`} icon="bed-outline" />
+                                        <DetailRow label="Misc/Other" value={`₹${selectedItem.expenses.misc || '0'}`} icon="layers-outline" />
                                         <View style={{height:1, backgroundColor:'#ccc', marginVertical:5}}/>
-                                        <DetailRow label="Total Amount" value={`₹${selectedItem.expenses.totalAmount || '0'}`} highlight color="#e65100" />
+                                        <DetailRow label="Total Amount" value={`₹${selectedItem.expenses.totalAmount || '0'}`} highlight color="#e65100" icon="wallet-outline" />
                                         {selectedItem.expenses.note ? (
                                             <View style={{marginTop: 5, backgroundColor:'#fffde7', padding:8, borderRadius:5, borderLeftWidth:3, borderLeftColor:'#fbc02d'}}>
                                                 <Text style={{fontSize:10, color:'#fbc02d', fontWeight:'bold'}}>REMARK:</Text>
@@ -647,18 +699,51 @@ export default function AttendanceScreen() {
       </Modal>
 
       {/* HOLIDAY LIST MODAL */}
-      <Modal visible={holidayModalVisible} transparent={true} animationType="slide"><View style={styles.modalOverlay}><View style={styles.detailCard}><View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:15}}><Text style={styles.modalTitle}>🎉 Holiday List</Text><TouchableOpacity onPress={() => setHolidayModalVisible(false)}><Ionicons name="close-circle" size={30} color="#d32f2f" /></TouchableOpacity></View><ScrollView style={{maxHeight:400}}>{Array.isArray(holidayList) && holidayList.length > 0 ? holidayList.map((h:any, i:number) => (<View key={i} style={{flexDirection:'row', padding:10, borderBottomWidth:1, borderColor:'#eee'}}><Text style={{fontWeight:'bold', width:100}}>{formatDateDisplay(h.date)}</Text><Text style={{flex:1, color:'#555'}}>{h.name}</Text></View>)) : <Text style={{textAlign:'center', color:'gray', padding:20}}>No holidays added yet.</Text>}</ScrollView></View></View></Modal>
+      <Modal visible={holidayModalVisible} transparent={true} animationType="slide">
+        <View style={styles.modalOverlay}>
+            <View style={styles.detailCard}>
+                <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:15}}>
+                    <Text style={styles.modalTitle}>🎉 Holiday List</Text>
+                    <TouchableOpacity onPress={() => setHolidayModalVisible(false)}>
+                        <Ionicons name="close-circle" size={30} color="#d32f2f" />
+                    </TouchableOpacity>
+                </View>
+                <ScrollView style={{maxHeight:400}}>
+                    {Array.isArray(holidayList) && holidayList.length > 0 ? holidayList.map((h:any, i:number) => (
+                        <View key={i} style={{flexDirection:'row', padding:10, borderBottomWidth:1, borderColor:'#eee'}}>
+                            <Text style={{fontWeight:'bold', width:100}}>{formatDateDisplay(h.date)}</Text>
+                            <Text style={{flex:1, color:'#555'}}>{h.name}</Text>
+                        </View>
+                    )) : <Text style={{textAlign:'center', color:'gray', padding:20}}>No holidays added yet.</Text>}
+                </ScrollView>
+            </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
-const SummaryItem = ({ label, value, color, textColor }: any) => (<View style={[styles.summaryBox, { backgroundColor: color }]}><Text style={[styles.summaryBoxValue, { color: textColor }]}>{value}</Text><Text style={[styles.summaryBoxLabel, { color: textColor }]}>{label}</Text></View>);
-const DetailRow = ({label, value, highlight, color}: any) => (<View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:8}}><Text style={{color:'gray', fontWeight:'600', fontSize:13}}>{label}</Text><Text style={{fontWeight:'bold', fontSize:13, color: color ? color : (highlight ? '#2e7d32' : '#333')}}>{value}</Text></View>);
+const SummaryItem = ({ label, value, color, textColor }: any) => (
+    <View style={[styles.summaryBox, { backgroundColor: color }]}>
+        <Text style={[styles.summaryBoxValue, { color: textColor }]}>{value}</Text>
+        <Text style={[styles.summaryBoxLabel, { color: textColor }]}>{label}</Text>
+    </View>
+);
+
+const DetailRow = ({label, value, highlight, color, icon}: any) => (
+    <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:8, alignItems: 'center'}}>
+        <View style={{flexDirection: 'row', alignItems: 'center'}}>
+            {icon && <Ionicons name={icon} size={16} color="gray" style={{marginRight: 5}} />}
+            <Text style={{color:'gray', fontWeight:'600', fontSize:13}}>{label}</Text>
+        </View>
+        <Text style={{fontWeight:'bold', fontSize:13, color: color ? color : (highlight ? '#2e7d32' : '#333')}}>{value}</Text>
+    </View>
+);
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8f9fa' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginLeft:10 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 4 },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 10 },
   backBtn: { padding: 5 }, 
   holidayBtn: { padding: 8, backgroundColor:'#fff3e0', borderRadius:20 },
   filterBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#3b5998', margin: 15, marginBottom:5, padding: 12, borderRadius: 8, elevation: 3 },

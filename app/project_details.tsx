@@ -19,9 +19,8 @@ import {
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
-// FIREBASE
-import { addDoc, collection, deleteDoc, doc, increment, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+// 🔥 SAAS IMPORTS (Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 const CloseButton = ({onPress}: any) => (
@@ -44,12 +43,16 @@ export default function ProjectDetailsScreen() {
   const rawId = params.id;
   const id = Array.isArray(rawId) ? rawId[0] : rawId; 
 
-  const { user } = useData();
+  // 🔥 1. Context se User
+  const { currentUser } = useData();
 
+  // 🔥 2. Naya SaaS Engine connect kiya
+  const { fetchSaaSData, addSaaSData, updateSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
+
+  // Master States
   const [project, setProject] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<'Overview' | 'Expenses' | 'Order'>('Overview'); 
   const [loading, setLoading] = useState(true);
-  
   const [searchText, setSearchText] = useState('');
 
   const [expensesList, setExpensesList] = useState<any[]>([]);
@@ -57,16 +60,15 @@ export default function ProjectDetailsScreen() {
   const [itemsList, setItemsList] = useState<any[]>([]);
   const [combinedHistory, setCombinedHistory] = useState<any[]>([]);
 
+  // Modal States
   const [expenseModalVisible, setExpenseModalVisible] = useState(false);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [itemModalVisible, setItemModalVisible] = useState(false);
-  
   const [deliveryModalVisible, setDeliveryModalVisible] = useState(false);
   const [selectedItemForDelivery, setSelectedItemForDelivery] = useState<any>(null);
   const [deliveryMode, setDeliveryMode] = useState('');
   const [deliveryDate, setDeliveryDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
-
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [selectedDetailItem, setSelectedDetailItem] = useState<any>(null);
   const [detailType, setDetailType] = useState(''); 
@@ -74,63 +76,63 @@ export default function ProjectDetailsScreen() {
   const [expAmount, setExpAmount] = useState('');
   const [expNote, setExpNote] = useState('');
   const [expCategory, setExpCategory] = useState('Civil/Vendor');
-
   const [payAmount, setPayAmount] = useState('');
   const [payMode, setPayMode] = useState('Bank Transfer');
   const [payNote, setPayNote] = useState('');
-
   const [itemName, setItemName] = useState('');
   const [itemQty, setItemQty] = useState('');
   const [itemValue, setItemValue] = useState('');
 
   const [isSaving, setIsSaving] = useState(false);
 
-  // 🔥 PROJECT EDIT STATES (Order Value & Description Edit)
+  // PROJECT EDIT STATES
   const [editProjectModalVisible, setEditProjectModalVisible] = useState(false);
   const [editTotalValue, setEditTotalValue] = useState('');
-  const [editDescription, setEditDescription] = useState(''); // 🔥 New State for Description
+  const [editDescription, setEditDescription] = useState(''); 
   const [isUpdatingProject, setIsUpdatingProject] = useState(false);
 
   const [visibleCount, setVisibleCount] = useState(20);
 
-  useEffect(() => {
-      setVisibleCount(20);
-  }, [searchText]);
-
   const categories = ['Civil/Vendor', 'Labor Wages', 'Food/Daily', 'Travel', 'Local Purchase', 'Other'];
   const payModes = ['Bank Transfer', 'Cheque', 'Cash', 'UPI'];
 
-  useEffect(() => {
-      if (!id) return;
-      
-      const qProject = query(collection(db, "projects"), where("id", "==", id as string));
-      
-      const unsubProject = onSnapshot(qProject, (querySnapshot) => {
-          if (!querySnapshot.empty) {
-              const docSnap = querySnapshot.docs[0];
-              setProject({ ...docSnap.data(), docId: docSnap.id });
-              setLoading(false);
-          } else {
-              Alert.alert("Data Error", `Project not found for ID: ${id}`);
-              router.back();
-          }
-      });
+  // 🔥 3. MASSIVE PROJECT DATA LOAD (Replaces onSnapshot)
+  const loadAllProjectDetails = async () => {
+    if (!id || !currentUser?.companyId) return;
+    try {
+        const [projects, expenses, payments, items] = await Promise.all([
+            fetchSaaSData("projects"),
+            fetchSaaSData("project_expenses"),
+            fetchSaaSData("project_payments"),
+            fetchSaaSData("project_items")
+        ]);
 
-      const qExp = query(collection(db, "project_expenses"), where("projectId", "==", id));
-      const unsubExpenses = onSnapshot(qExp, (s) => setExpensesList(s.docs.map(d => ({ id: d.id, ...d.data(), type: 'Expense' }))));
-      
-      const qPay = query(collection(db, "project_payments"), where("projectId", "==", id));
-      const unsubPayments = onSnapshot(qPay, (s) => setPaymentsList(s.docs.map(d => ({ id: d.id, ...d.data(), type: 'Payment' }))));
-      
-      const qItems = query(collection(db, "project_items"), where("projectId", "==", id));
-      const unsubItems = onSnapshot(qItems, (s) => setItemsList(s.docs.map(d => ({ id: d.id, ...d.data(), type: 'Item' }))));
-      
-      return () => { unsubProject(); unsubExpenses(); unsubPayments(); unsubItems(); };
-  }, [id]);
+        const foundProject = projects.find((p: any) => p.id === id);
+        if (foundProject) {
+            setProject(foundProject);
+        } else {
+            Alert.alert("Data Error", "Project not found.");
+            router.back();
+            return;
+        }
+
+        setExpensesList(expenses.filter((e:any) => e.projectId === id).map(d => ({ ...d, type: 'Expense' })));
+        setPaymentsList(payments.filter((p:any) => p.projectId === id).map(d => ({ ...d, type: 'Payment' })));
+        setItemsList(items.filter((i:any) => i.projectId === id).map(d => ({ ...d, type: 'Item' })));
+        
+        setLoading(false);
+    } catch (error) {
+        console.error("Load Error:", error);
+    }
+  };
+
+  useEffect(() => {
+      loadAllProjectDetails();
+  }, [id, currentUser]);
 
   useEffect(() => {
       const history = [...expensesList, ...paymentsList, ...itemsList];
-      history.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      history.sort((a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime());
       setCombinedHistory(history);
   }, [expensesList, paymentsList, itemsList]);
 
@@ -150,7 +152,8 @@ export default function ProjectDetailsScreen() {
       try {
           let csvContent = "Date,Type,Category/Mode,Description,Amount/Qty,Added By\n";
           combinedHistory.forEach(item => {
-              const date = new Date(item.date).toLocaleDateString('en-GB');
+              const dateVal = item.date || item.createdAt;
+              const date = dateVal ? new Date(dateVal).toLocaleDateString('en-GB') : '-';
               const type = item.type;
               const cat = item.category || item.mode || item.name || '-';
               const desc = (item.note || item.status || '-').replace(/,/g, ' '); 
@@ -160,39 +163,39 @@ export default function ProjectDetailsScreen() {
           });
 
           const fileName = `${project.name.replace(/\s+/g, '_')}_Report.csv`;
-          const dir = (FileSystem as any).cacheDirectory || (FileSystem as any).documentDirectory;
+          const dir = (FileSystem as any).cacheDirectory;
           const fileUri = dir + fileName;
 
           await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: 'utf8' });
-          
-          if (await Sharing.isAvailableAsync()) {
-              await Sharing.shareAsync(fileUri);
-          } else {
-              Alert.alert("Error", "Sharing not available");
-          }
+          if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(fileUri);
       } catch (error: any) {
-          console.log(error);
-          Alert.alert("Note", "File generated but sharing failed. Check permissions.");
+          Alert.alert("Note", "File generated but sharing failed.");
       }
   };
 
+  // 🔥 4. SAAS HANDLERS
   const handleAddExpense = async () => {
       if (!expAmount || !expNote) return Alert.alert("Missing", "Details required.");
       setIsSaving(true);
       try {
           const amount = parseFloat(expAmount);
-          await addDoc(collection(db, "project_expenses"), { 
+          const res = await addSaaSData("project_expenses", { 
               projectId: id, 
-              orgId: project?.orgId || '',       
-              orgName: project?.client || '',    
+              orgId: project?.orgId || '', 
+              orgName: project?.client || '', 
               amount, 
               category: expCategory, 
               note: expNote, 
               date: new Date().toISOString(), 
-              addedBy: user?.name 
+              addedBy: currentUser?.name 
           });
-          await updateDoc(doc(db, "projects", project.docId), { totalExpense: increment(amount) });
-          setExpenseModalVisible(false); setExpAmount(''); setExpNote('');
+
+          if (res.success) {
+              const newTotal = (project.totalExpense || 0) + amount;
+              await updateSaaSData("projects", project.id, { totalExpense: newTotal });
+              setExpenseModalVisible(false); setExpAmount(''); setExpNote('');
+              await loadAllProjectDetails(); // Silent Sync
+          }
       } catch (e:any) { Alert.alert("Error", e.message); }
       setIsSaving(false);
   };
@@ -202,18 +205,23 @@ export default function ProjectDetailsScreen() {
       setIsSaving(true);
       try {
           const amount = parseFloat(payAmount);
-          await addDoc(collection(db, "project_payments"), { 
+          const res = await addSaaSData("project_payments", { 
               projectId: id, 
-              orgId: project?.orgId || '',       
-              orgName: project?.client || '',    
+              orgId: project?.orgId || '', 
+              orgName: project?.client || '', 
               amount, 
               mode: payMode, 
               note: payNote, 
               date: new Date().toISOString(), 
-              addedBy: user?.name 
+              addedBy: currentUser?.name 
           });
-          await updateDoc(doc(db, "projects", project.docId), { totalReceived: increment(amount) });
-          setPaymentModalVisible(false); setPayAmount(''); setPayNote('');
+
+          if (res.success) {
+              const newReceived = (project.totalReceived || 0) + amount;
+              await updateSaaSData("projects", project.id, { totalReceived: newReceived });
+              setPaymentModalVisible(false); setPayAmount(''); setPayNote('');
+              await loadAllProjectDetails();
+          }
       } catch (e:any) { Alert.alert("Error", e.message); }
       setIsSaving(false);
   };
@@ -222,18 +230,21 @@ export default function ProjectDetailsScreen() {
       if (!itemName) return Alert.alert("Missing", "Name required.");
       setIsSaving(true);
       try {
-          await addDoc(collection(db, "project_items"), { 
+          const res = await addSaaSData("project_items", { 
               projectId: id, 
-              orgId: project?.orgId || '',       
-              orgName: project?.client || '',    
+              orgId: project?.orgId || '', 
+              orgName: project?.client || '', 
               name: itemName, 
               qty: itemQty || '1', 
               value: itemValue || '0', 
               status: 'Pending', 
-              addedBy: user?.name, 
+              addedBy: currentUser?.name, 
               date: new Date().toISOString() 
           });
-          setItemModalVisible(false); setItemName(''); setItemQty(''); setItemValue('');
+          if (res.success) {
+              setItemModalVisible(false); setItemName(''); setItemQty(''); setItemValue('');
+              await loadAllProjectDetails();
+          }
       } catch (e:any) { Alert.alert("Error", e.message); }
       setIsSaving(false);
   };
@@ -242,53 +253,55 @@ export default function ProjectDetailsScreen() {
       if (!deliveryMode) return Alert.alert("Missing", "Mode required.");
       setIsSaving(true);
       try {
-          await updateDoc(doc(db, "project_items", selectedItemForDelivery.id), { status: 'Delivered', deliveredBy: user?.name, deliveryMode, deliveryDate: deliveryDate.toISOString() });
-          setDeliveryModalVisible(false); setSelectedItemForDelivery(null);
+          const res = await updateSaaSData("project_items", selectedItemForDelivery.id, { 
+              status: 'Delivered', 
+              deliveredBy: currentUser?.name, 
+              deliveryMode, 
+              deliveryDate: deliveryDate.toISOString() 
+          });
+          if (res.success) {
+              setDeliveryModalVisible(false); setSelectedItemForDelivery(null);
+              await loadAllProjectDetails();
+          }
       } catch (e: any) { Alert.alert("Error", e.message); }
       setIsSaving(false);
   };
 
-  const openDetailsPopup = (item: any) => { setSelectedDetailItem(item); setDetailType(item.type); setDetailModalVisible(true); };
-  
-  const deleteItem = async (col: string, itemId: string) => {
+  const deleteProjectEntry = async (col: string, itemId: string) => {
       Alert.alert("Delete", "Are you sure?", [
           { text: "Cancel" }, 
-          { text: "Delete", onPress: async () => { 
-              await deleteDoc(doc(db, col, itemId)); 
-              setDetailModalVisible(false); 
+          { text: "Delete", style: 'destructive', onPress: async () => { 
+              const mappedCol = col === 'project_expenses' ? 'project_expenses' : col === 'project_payments' ? 'project_payments' : 'project_items';
+              const res = await deleteSaaSData(mappedCol, itemId); 
+              if (res.success) {
+                  setDetailModalVisible(false); 
+                  await loadAllProjectDetails();
+              }
           } }
       ]);
   };
 
-  // 🔥 UPDATE PROJECT LOGIC (Value + Description)
-  const openEditProject = () => {
-      setEditTotalValue(project.totalValue?.toString() || '0');
-      setEditDescription(project.description || ''); // 🔥 Initialize with existing desc
-      setEditProjectModalVisible(true);
-  };
-
   const handleUpdateProjectDetails = async () => {
-      if (!editTotalValue) {
-          Alert.alert("Error", "Order Value cannot be empty");
-          return;
-      }
+      if (!editTotalValue) return Alert.alert("Error", "Order Value cannot be empty");
       setIsUpdatingProject(true);
       try {
-          await updateDoc(doc(db, "projects", project.docId), { 
+          const res = await updateSaaSData("projects", project.id, { 
               totalValue: Number(editTotalValue),
-              description: editDescription // 🔥 Update description in Firebase
+              description: editDescription 
           });
-          setEditProjectModalVisible(false);
-          Alert.alert("Success", "Project details updated successfully! ✅");
+          if (res.success) {
+              setEditProjectModalVisible(false);
+              await loadAllProjectDetails();
+              Alert.alert("Success", "Project updated! ✅");
+          }
       } catch (error: any) {
-          Alert.alert("Error", "Could not update project details. " + error.message);
+          Alert.alert("Error", "Update failed.");
       } finally {
           setIsUpdatingProject(false);
       }
   };
 
   if (loading) return <View style={styles.center}><ActivityIndicator size="large" color="#1565c0" /></View>;
-  if (!project) return <View style={styles.center}><Text>Project not found.</Text></View>;
 
   const renderTabContent = () => {
       const profit = (project.totalReceived || 0) - (project.totalExpense || 0);
@@ -312,8 +325,8 @@ export default function ProjectDetailsScreen() {
                           <View>
                               <View style={{flexDirection: 'row', alignItems: 'center'}}>
                                   <Text style={styles.subLabel}>Order Value</Text>
-                                  {(user?.role === 'Admin' || user?.role === 'Manager' || user?.role === 'Accountant' || user?.role === 'Account') && (
-                                      <TouchableOpacity onPress={openEditProject} style={{marginLeft: 8, padding: 2}}>
+                                  {(currentUser?.role === 'Admin' || currentUser?.role === 'Manager') && (
+                                      <TouchableOpacity onPress={() => { setEditTotalValue(project.totalValue?.toString()); setEditDescription(project.description); setEditProjectModalVisible(true); }} style={{marginLeft: 8, padding: 2}}>
                                           <Ionicons name="pencil" size={14} color="#1565c0" />
                                       </TouchableOpacity>
                                   )}
@@ -332,16 +345,10 @@ export default function ProjectDetailsScreen() {
                       </View>
                   </View>
 
-                  {/* 🔥 PROJECT DESCRIPTION / ORDER DETAILS CARD */}
                   {project.description ? (
                       <View style={styles.card}>
                           <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
                               <Text style={styles.cardLabel}>Order Description / Scope</Text>
-                              {(user?.role === 'Admin' || user?.role === 'Manager') && (
-                                  <TouchableOpacity onPress={openEditProject}>
-                                      <Ionicons name="pencil" size={14} color="#1565c0" />
-                                  </TouchableOpacity>
-                              )}
                           </View>
                           <Text style={{color: '#333', marginTop: 8, lineHeight: 20}}>{project.description}</Text>
                       </View>
@@ -369,7 +376,7 @@ export default function ProjectDetailsScreen() {
                       }
 
                       return (
-                        <TouchableOpacity key={index} style={[styles.advItem, {backgroundColor: cardColor, borderColor: borderColor}]} onPress={() => openDetailsPopup(item)}>
+                        <TouchableOpacity key={index} style={[styles.advItem, {backgroundColor: cardColor, borderColor: borderColor}]} onPress={() => { setSelectedDetailItem(item); setDetailType(item.type); setDetailModalVisible(true); }}>
                             <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:5}}>
                                 <View style={{flexDirection:'row', alignItems:'center'}}>
                                     <Ionicons name={iconName as any} size={16} color={iconColor} />
@@ -389,25 +396,6 @@ export default function ProjectDetailsScreen() {
                         </TouchableOpacity>
                       );
                   })}
-                  
-                  {visibleCount < displayHistory.length && (
-                      <TouchableOpacity 
-                          onPress={() => setVisibleCount(prev => prev + 20)} 
-                          style={{
-                              padding: 12, 
-                              backgroundColor: '#fff', 
-                              alignItems: 'center', 
-                              marginVertical: 10, 
-                              borderRadius: 8,
-                              borderWidth: 1,
-                              borderColor: '#ddd'
-                          }}
-                      >
-                          <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                              👇 Load More Records ({displayHistory.length - visibleCount} remaining)
-                          </Text>
-                      </TouchableOpacity>
-                  )}
               </ScrollView>
           );
       }
@@ -420,7 +408,7 @@ export default function ProjectDetailsScreen() {
                   keyExtractor={i=>i.id} 
                   contentContainerStyle={{paddingBottom: 100}} 
                   renderItem={({item}) => (
-                      <TouchableOpacity style={styles.listItem} onPress={() => openDetailsPopup(item)}>
+                      <TouchableOpacity style={styles.listItem} onPress={() => { setSelectedDetailItem(item); setDetailType('Expense'); setDetailModalVisible(true); }}>
                           <View style={[styles.iconBox, {backgroundColor:'#ff9800'}]}><Ionicons name="receipt" size={18} color="white" /></View>
                           <View style={{flex:1, marginLeft:10}}><Text style={styles.listTitle}>{item.category}</Text><Text style={styles.listSub} numberOfLines={1}>{item.note}</Text><Text style={styles.listDate}>{new Date(item.date).toLocaleDateString('en-GB')}</Text></View>
                           <Text style={[styles.amountText, {color:'#d32f2f'}]}>- ₹{item.amount}</Text>
@@ -434,7 +422,7 @@ export default function ProjectDetailsScreen() {
           <ScrollView style={{flex:1}} showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom: 100}}>
               <View style={styles.actionRow}><Text style={styles.rowTitle}>Payments</Text><TouchableOpacity style={[styles.smallBtn, {backgroundColor:'#4caf50'}]} onPress={() => setPaymentModalVisible(true)}><Ionicons name="cash" size={18} color="white" /><Text style={styles.btnTxt}>Receive</Text></TouchableOpacity></View>
               {filterList(paymentsList).map((item:any) => (
-                  <TouchableOpacity key={item.id} style={styles.listItem} onPress={() => openDetailsPopup(item)}>
+                  <TouchableOpacity key={item.id} style={styles.listItem} onPress={() => { setSelectedDetailItem(item); setDetailType('Payment'); setDetailModalVisible(true); }}>
                       <View style={[styles.iconBox, {backgroundColor:'#4caf50'}]}><Ionicons name="wallet" size={18} color="white" /></View>
                       <View style={{flex:1, marginLeft:10}}><Text style={styles.listTitle}>{item.mode}</Text><Text style={styles.listSub}>{item.note || 'Recd'}</Text><Text style={styles.listDate}>{new Date(item.date).toLocaleDateString('en-GB')}</Text></View>
                       <Text style={[styles.amountText, {color:'#388e3c'}]}>+ ₹{item.amount}</Text>
@@ -443,7 +431,7 @@ export default function ProjectDetailsScreen() {
               <View style={styles.sectionDivider} />
               <View style={styles.actionRow}><Text style={styles.rowTitle}>Order Items</Text><TouchableOpacity style={[styles.smallBtn, {backgroundColor:'#1565c0'}]} onPress={() => setItemModalVisible(true)}><Ionicons name="cube" size={18} color="white" /><Text style={styles.btnTxt}>Add Item</Text></TouchableOpacity></View>
               {filterList(itemsList).map((item:any) => (
-                  <TouchableOpacity key={item.id} style={styles.productItem} onPress={() => openDetailsPopup(item)}>
+                  <TouchableOpacity key={item.id} style={styles.productItem} onPress={() => { setSelectedDetailItem(item); setDetailType('Item'); setDetailModalVisible(true); }}>
                       <View style={{flex:1}}><Text style={styles.prodName}>{item.name}</Text><Text style={styles.prodQty}>Qty: {item.qty} {item.value ? `(₹${item.value})` : ''}</Text>{item.status === 'Delivered' && <Text style={{fontSize:10, color:'gray'}}>Via {item.deliveryMode}</Text>}</View>
                       <TouchableOpacity style={[styles.statusPill, {backgroundColor: item.status === 'Delivered' ? '#e8f5e9' : '#ffebee'}]} onPress={() => { if(item.status!=='Delivered') { setSelectedItemForDelivery(item); setDeliveryModalVisible(true); }}}>
                           <Text style={{color: item.status === 'Delivered' ? 'green' : 'red', fontSize:11, fontWeight:'bold'}}>{item.status}</Text>
@@ -473,8 +461,8 @@ export default function ProjectDetailsScreen() {
       </View>
 
       <View style={styles.searchBar}>
-          <Ionicons name="search" size={20} color="gray" />
-          <TextInput style={{flex:1, marginLeft:10}} placeholder="Search expenses, payments, items..." value={searchText} onChangeText={setSearchText} />
+          {isDbLoading ? <ActivityIndicator size="small" color="#1565c0" /> : <Ionicons name="search" size={20} color="gray" />}
+          <TextInput style={{flex:1, marginLeft:10}} placeholder="Search..." value={searchText} onChangeText={setSearchText} />
           {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={18} color="gray" /></TouchableOpacity>}
       </View>
 
@@ -553,7 +541,7 @@ export default function ProjectDetailsScreen() {
                           {selectedDetailItem.status === 'Delivered' && <View style={{marginTop:15, backgroundColor:'#e8f5e9', padding:10}}><Text style={{color:'green', fontWeight:'bold'}}>✅ Delivered via {selectedDetailItem.deliveryMode}</Text><Text style={{fontSize:11}}>on {new Date(selectedDetailItem.deliveryDate).toLocaleDateString()}</Text></View>}
                           <TouchableOpacity style={{alignSelf:'center', marginTop:20}} onPress={()=>{
                               const col = detailType==='Expense'?'project_expenses':detailType==='Payment'?'project_payments':'project_items';
-                              deleteItem(col, selectedDetailItem.id); 
+                              deleteProjectEntry(col, selectedDetailItem.id); 
                           }}><Text style={{color:'red', fontWeight:'bold'}}>Delete Entry</Text></TouchableOpacity>
                       </View>
                   )}
@@ -561,7 +549,6 @@ export default function ProjectDetailsScreen() {
           </View>
       </Modal>
 
-      {/* 🔥 EDIT PROJECT ORDER VALUE & DESCRIPTION MODAL */}
       <Modal visible={editProjectModalVisible} transparent animationType="slide">
           <View style={styles.modalOverlay}>
               <View style={styles.modalContent}>
@@ -652,6 +639,5 @@ const styles = StyleSheet.create({
   chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, backgroundColor: '#eee', marginRight: 8 },
   activeChip: { backgroundColor: '#333' },
   chipText: { fontSize: 12, color: '#333' },
-  modalBtns: { flexDirection:'row', justifyContent:'flex-end', marginTop:10 },
   saveBtn: { backgroundColor: '#d32f2f', paddingHorizontal:20, paddingVertical:10, borderRadius:8, width:'100%', alignItems:'center' },
 });

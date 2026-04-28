@@ -1,24 +1,69 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+
+// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function UpdatedDashboard() {
   const router = useRouter();
   
-  const { 
-    leadsList = [], 
-    dueList = [], 
-    paymentList = [], 
-    orderList = [], 
-    taskList = [],
-    courierList = [],
-    serviceCallList = [], 
-    salesVisitList = [], 
-    attendanceList = [],
-    currentUser 
-  } = useData(); 
+  // 🔥 1. Context se sirf user
+  const { currentUser } = useData(); 
+
+  // 🔥 2. Naya SaaS Engine connect kiya
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded Dashboard Lists
+  const [leadsList, setLeadsList] = useState<any[]>([]);
+  const [dueList, setDueList] = useState<any[]>([]);
+  const [paymentList, setPaymentList] = useState<any[]>([]);
+  const [orderList, setOrderList] = useState<any[]>([]);
+  const [taskList, setTaskList] = useState<any[]>([]);
+  const [courierList, setCourierList] = useState<any[]>([]);
+  const [serviceCallList, setServiceCallList] = useState<any[]>([]);
+  const [salesVisitList, setSalesVisitList] = useState<any[]>([]);
+  const [attendanceList, setAttendanceList] = useState<any[]>([]);
+
+  const [refreshing, setRefreshing] = useState(false);
+
+  // 🔥 4. MASSIVE DATA LOAD FOR DASHBOARD
+  const loadDashboardData = async () => {
+      if (currentUser?.companyId) {
+          const [leads, dues, payments, orders, tasks, couriers, services, visits, attendance] = await Promise.all([
+              fetchSaaSData("leads"),
+              fetchSaaSData("advances"), // Mapping dueList to advances, adjust if collection name differs
+              fetchSaaSData("payments"),
+              fetchSaaSData("orders"),
+              fetchSaaSData("tasks"),
+              fetchSaaSData("couriers"),
+              fetchSaaSData("service_calls"),
+              fetchSaaSData("sales_reports"), // Mapping salesVisitList to sales_reports, adjust if collection name differs
+              fetchSaaSData("attendance")
+          ]);
+          setLeadsList(leads);
+          setDueList(dues);
+          setPaymentList(payments);
+          setOrderList(orders);
+          setTaskList(tasks);
+          setCourierList(couriers);
+          setServiceCallList(services);
+          setSalesVisitList(visits);
+          setAttendanceList(attendance);
+      }
+  };
+
+  useEffect(() => {
+      loadDashboardData();
+  }, [currentUser]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadDashboardData();
+    setRefreshing(false);
+  }, [currentUser]);
 
   // --- 🔥 ROLE CHECKS ---
   const userRole = (currentUser?.role || '').toLowerCase();
@@ -126,7 +171,7 @@ export default function UpdatedDashboard() {
   const totalMarketOutstanding = orderList
     .filter((order: any) => {
         const isApproved = ['Approved', 'Completed', 'Dispatched'].includes(order.status);
-        const isMine = isAdmin ? true : (order.senderId === currentUser?.id);
+        const isMine = isAdmin ? true : (order.senderId === currentUser?.id || order.senderId === currentUser?.uid);
         const isNotPaid = order.paymentStatus !== 'Paid';
         return isApproved && isMine && isNotPaid;
     })
@@ -138,7 +183,7 @@ export default function UpdatedDashboard() {
   // D. RECOVERY
   const totalRecoveryThisMonth = paymentList
     .filter((p: any) => {
-        const isMine = isAdmin ? true : (p.senderId === currentUser?.id);
+        const isMine = isAdmin ? true : (p.senderId === currentUser?.id || p.senderId === currentUser?.uid);
         const payDate = new Date(p.date || p.timestamp);
         return isMine && payDate.getMonth() === currentMonth && payDate.getFullYear() === currentYear;
     })
@@ -148,7 +193,7 @@ export default function UpdatedDashboard() {
   const todayStr = new Date().toISOString().split('T')[0];
   
   const todayAttendanceCount = attendanceList.filter((a: any) => 
-    isAdmin ? a.date === todayStr : (a.date === todayStr && a.senderId === currentUser?.id)
+    isAdmin ? a.date === todayStr : (a.date === todayStr && (a.senderId === currentUser?.id || a.senderId === currentUser?.uid))
   ).length;
 
   const myTodayEntry = attendanceList.find((a: any) => 
@@ -189,11 +234,11 @@ export default function UpdatedDashboard() {
       : (myPendingTasks + assignedPendingTasks);
 
   const pendingCourierCount = courierList.filter((c: any) => 
-    c.status === 'Pending' && (isLogisticsRole ? true : c.senderId === currentUser?.id)
+    c.status === 'Pending' && (isLogisticsRole ? true : (c.senderId === currentUser?.id || c.senderId === currentUser?.uid))
   ).length;
 
   const openServiceCount = serviceCallList.filter((s: any) => 
-    (s.status === 'Open' || s.status === 'Assigned') && (isAdmin ? true : s.senderId === currentUser?.id)
+    (s.status === 'Open' || s.status === 'Assigned') && (isAdmin ? true : (s.senderId === currentUser?.id || s.senderId === currentUser?.uid))
   ).length;
 
   // --- SALES ACTIVITY VARIABLES ---
@@ -206,22 +251,16 @@ export default function UpdatedDashboard() {
       return !(status === 'converted' || status === 'lost' || status === 'plan drop');
   };
 
-  const activeVisits = salesVisitList.filter((v: any) => (isAdmin ? true : v.senderId === currentUser?.uid) && isVisitActive(v)).length;
-  const activeLeads = leadsList.filter((l: any) => (isAdmin ? true : l.senderId === currentUser?.uid) && isLeadActive(l)).length;
+  const activeVisits = salesVisitList.filter((v: any) => (isAdmin ? true : (v.senderId === currentUser?.uid || v.senderId === currentUser?.id)) && isVisitActive(v)).length;
+  const activeLeads = leadsList.filter((l: any) => (isAdmin ? true : (l.senderId === currentUser?.uid || l.senderId === currentUser?.id)) && isLeadActive(l)).length;
   
   const totalSalesFollowUps = activeVisits + activeLeads;
 
   // --- 3. DUES LIST ---
   const topDues = [...dueList]
-    .filter((due: any) => isAdmin ? true : (due.assignedToUid === currentUser?.id || due.senderId === currentUser?.id))
+    .filter((due: any) => isAdmin ? true : (due.assignedToUid === currentUser?.id || due.assignedToUid === currentUser?.uid || due.senderId === currentUser?.id || due.senderId === currentUser?.uid))
     .sort((a, b) => Number(b.amount) - Number(a.amount))
     .slice(0, 3);
-
-  const [refreshing, setRefreshing] = useState(false);
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
-  }, []);
 
   return (
     <View style={styles.container}>
@@ -244,7 +283,7 @@ export default function UpdatedDashboard() {
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         
-        {/* 🔥 NEW: SMART REMINDERS WIDGET 🔥 */}
+        {/* SMART REMINDERS WIDGET */}
         <View style={styles.actionCardsRow}>
             <TouchableOpacity style={[styles.actionCard, { backgroundColor: '#ffebee', borderColor: '#d32f2f', borderWidth: 1 }]} onPress={() => router.push('/leads' as any)}>
                 <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#d32f2f' }}>{leadActionCounts.overdue}</Text>
@@ -260,7 +299,7 @@ export default function UpdatedDashboard() {
             </TouchableOpacity>
         </View>
 
-        {/* 🔥 SALES TARGET CARD */}
+        {/* SALES TARGET CARD */}
         {!isAdmin && (
             <TouchableOpacity style={styles.progressCard} onPress={() => router.push('/sales_team_report' as any)}>
                 <View style={styles.progressHeader}>
@@ -353,7 +392,7 @@ export default function UpdatedDashboard() {
                     </View>
                     <Text style={styles.dueAmount}>₹{Number(item.amount).toLocaleString()}</Text>
                 </View>
-            )) : <Text style={styles.emptyText}>No pending dues.</Text>}
+            )) : <Text style={styles.emptyText}>{isDbLoading ? 'Loading...' : 'No pending dues.'}</Text>}
         </View>
         <View style={{height: 80}} />
       </ScrollView>
@@ -391,7 +430,6 @@ const styles = StyleSheet.create({
   badge: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF5252', position: 'absolute', right: 10, top: 10, borderWidth: 1.5, borderColor: '#1A237E' },
   scrollContent: { padding: 18 },
   
-  // 🔥 ACTION CARDS WIDGET STYLES 🔥
   actionCardsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 18 },
   actionCard: { flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12, marginHorizontal: 4, elevation: 2 },
 

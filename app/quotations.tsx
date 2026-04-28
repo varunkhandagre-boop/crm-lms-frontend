@@ -2,20 +2,31 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { db } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS (Direct DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+
 
 export default function QuotationsListScreen() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
-    const { companyProfile, userList, currentUser } = useData(); 
     
+    // 🔥 1. Context se sirf current user & profile nikala
+    const { companyProfile, currentUser } = useData(); 
+    
+    // 🔥 2. Naya SaaS Engine
+    const { fetchSaaSData, isDbLoading } = useSaaSDB();
+
+    // 🔥 3. Lazy Loaded Master States
     const [quotations, setQuotations] = useState<any[]>([]);
+    const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
+
     const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
 
     const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('Month'); 
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -24,35 +35,52 @@ export default function QuotationsListScreen() {
     const [selectedQuote, setSelectedQuote] = useState<any>(null);
     const [pdfTheme, setPdfTheme] = useState<'theme1' | 'theme2'>('theme1');
 
-    const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
     const [selectedEmployeeName, setSelectedEmployeeName] = useState('All'); 
     const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
     const [visibleCount, setVisibleCount] = useState(20); 
-    const canManage = ['Admin', 'Manager', 'Account', 'Accountant'].includes(currentUser?.role || '');
+    const canManage = ['Admin', 'Manager', 'Account', 'Accountant', 'SuperAdmin'].includes(currentUser?.role || '');
 
     useEffect(() => {
         if (viewMode === 'Day') setVisibleCount(100);
         else setVisibleCount(20); 
     }, [viewMode, currentDate, selectedEmployeeName, searchText]);
 
-    useEffect(() => {
-        const q = query(collection(db, "quotations"), orderBy("createdAt", "desc"));
-        const unsub = onSnapshot(q, (snap) => {
-            const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            setQuotations(list);
+    // 🔥 4. LOAD SAAS DATA
+    const loadData = async () => {
+        if (!currentUser?.companyId) return;
+        setLoading(true);
+        try {
+            const [quotes, users] = await Promise.all([
+                fetchSaaSData("quotations"),
+                fetchSaaSData("users")
+            ]);
+            
+            // Sort Descending locally
+            quotes.sort((a: any, b: any) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
+            setQuotations(quotes);
+
+            if (canManage) {
+                const uniqueUsers = Array.from(new Set(users.map((u:any) => u.name)))
+                    .map(name => users.find((u:any) => u.name === name));
+                setEmployees([{ id: 'All', name: 'All' }, ...uniqueUsers as any]);
+            }
+        } catch (error) {
+            console.log(error);
+        } finally {
             setLoading(false);
-        });
-        return () => unsub();
-    }, []);
+        }
+    };
 
     useEffect(() => {
-        if (canManage && userList) {
-            const uniqueUsers = Array.from(new Set(userList.map((u:any) => u.name)))
-                .map(name => userList.find((u:any) => u.name === name));
-            setEmployees([{ id: 'All', name: 'All' }, ...uniqueUsers as any]);
-        }
-    }, [userList, canManage]);
+        loadData();
+    }, [currentUser]);
+
+    const onRefresh = async () => {
+        setRefreshing(true);
+        await loadData();
+        setRefreshing(false);
+    };
 
     const parseDate = (dateStr: any) => {
         if (!dateStr) return new Date();
@@ -88,7 +116,8 @@ export default function QuotationsListScreen() {
         if (canManage) {
             if(selectedEmployeeName !== 'All') data = data.filter((item: any) => item.senderName === selectedEmployeeName);
         } else {
-            data = data.filter((item: any) => item.senderId === currentUser?.id || item.senderId === currentUser?.uid);
+            const myId = currentUser?.id || currentUser?.uid;
+            data = data.filter((item: any) => item.senderId === myId);
         }
 
         if (viewMode !== 'All') {
@@ -100,8 +129,10 @@ export default function QuotationsListScreen() {
             const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime();
 
             data = data.filter(item => {
-                if(!item.date) return false;
-                const itemDate = parseDate(item.date);
+                const dateField = item.dateIso || item.createdAt || item.date;
+                if(!dateField) return false;
+                
+                const itemDate = parseDate(dateField);
                 const itemTime = itemDate.getTime();
                 
                 if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
@@ -140,7 +171,6 @@ export default function QuotationsListScreen() {
 
     const generateAndSharePDF = async (item: any) => {
         try {
-            // 🔥 RECALCULATE DYNAMIC GST ROWS FOR PDF
             const gstBreakdown: { [key: number]: number } = {};
             let totalQty = 0;
             
@@ -387,7 +417,7 @@ export default function QuotationsListScreen() {
 
                 <View style={{paddingHorizontal:15}}>
                     <View style={styles.searchBar}>
-                        <Ionicons name="search" size={20} color="gray" />
+                        {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
                         <TextInput 
                             style={styles.searchInput}
                             placeholder="Search Client, Estimate No..."
@@ -410,6 +440,7 @@ export default function QuotationsListScreen() {
                     keyExtractor={item => item.id}
                     renderItem={renderItem}
                     contentContainerStyle={{padding: 15, paddingBottom: 50}}
+                    refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                     ListEmptyComponent={
                         <Text style={{textAlign:'center', marginTop:50, color:'gray'}}>No quotations found.</Text>
                     }
@@ -506,7 +537,7 @@ export default function QuotationsListScreen() {
                                         onPress={() => { 
                                             const qId = selectedQuote.id; 
                                             setSelectedQuote(null); 
-                                            router.push({ pathname: '/add_quotation', params: { id: qId, mode: 'edit' }}); 
+                                            router.push({ pathname: '/add_quotation', params: { id: qId, mode: 'edit' }} as any); 
                                         }}
                                     >
                                         <Ionicons name="pencil" size={18} color="white" />
@@ -518,7 +549,7 @@ export default function QuotationsListScreen() {
                                         onPress={() => { 
                                             const qId = selectedQuote.id; 
                                             setSelectedQuote(null); 
-                                            router.push({ pathname: '/add_quotation', params: { id: qId, mode: 'duplicate' }}); 
+                                            router.push({ pathname: '/add_quotation', params: { id: qId, mode: 'duplicate' }} as any); 
                                         }}
                                     >
                                         <Ionicons name="copy" size={18} color="white" />
@@ -592,8 +623,8 @@ const styles = StyleSheet.create({
     chipText: { color: '#555', fontSize: 13, fontWeight: 'bold' },
     activeChipText: { color: 'white' },
 
-    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
-    modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 20, elevation: 5, maxHeight: '90%' },
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+    modalContent: { width: '90%', backgroundColor: 'white', borderRadius: 15, padding: 25, elevation: 5, maxHeight: '85%' },
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 15 },
     shareBtn: { backgroundColor: '#3b5998', padding: 15, borderRadius: 10, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 20 },
 

@@ -1,7 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-// Firebase Imports
-import { collection, doc, getDocs, query, updateDoc } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -10,6 +8,7 @@ import {
     KeyboardAvoidingView,
     Modal,
     Platform,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
@@ -17,29 +16,39 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function VisitingCardScreen() {
   const router = useRouter();
   
-  const { cardRequestList = [], currentUser, addNotification } = useData(); 
+  // 🔥 1. Context se sirf current user
+  const { currentUser } = useData(); 
+
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData, updateSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded States
+  const [cardRequestList, setCardRequestList] = useState<any[]>([]);
+  const [userList, setUserList] = useState<any[]>([]);
 
   // --- STATES ---
   const [searchText, setSearchText] = useState('');
   const [activeStatus, setActiveStatus] = useState('All');
-  // 🔥 CHANGED: 'Year' to 'FY'
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All');
   const [currentDate, setCurrentDate] = useState(new Date());
 
   // MODAL STATES
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<any>(null);
+  const [refreshing, setRefreshing] = useState(false);
   
   // State for Tracking No
   const [dispatchTracking, setDispatchTracking] = useState('');
 
-  // 🔥 LOADING STATES FOR BUTTONS
+  // LOADING STATES FOR BUTTONS
   const [isDispatching, setIsDispatching] = useState(false);
   const [isReceiving, setIsReceiving] = useState(false);
 
@@ -48,44 +57,49 @@ export default function VisitingCardScreen() {
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All'); 
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  // 🔥 PAGINATION STATE (SMART LOAD MORE)
   const [visibleCount, setVisibleCount] = useState(20);
 
   // ROLE CHECK
   const myRole = (currentUser?.role || '').toLowerCase();
-  const canViewAll = ['admin', 'manager', 'store', 'account', 'accountant', 'hr'].some(r => myRole.includes(r));
+  const canViewAll = ['admin', 'manager', 'store', 'account', 'accountant', 'hr', 'superadmin'].some(r => myRole.includes(r));
   const canDispatch = canViewAll; 
 
-  // 🔥 RESET PAGINATION ON FILTER CHANGE
   useEffect(() => {
       if (viewMode === 'Day' && activeStatus === 'All' && !searchText) {
-          setVisibleCount(500); // Day view me sab dikha do
+          setVisibleCount(500); 
       } else {
-          setVisibleCount(20); // Baki views me Load More use karo
+          setVisibleCount(20); 
       }
   }, [viewMode, currentDate, activeStatus, searchText, selectedEmployeeName]);
 
-  // 0. FETCH EMPLOYEES (For Admin/Store)
+  // 🔥 4. LOAD SAAS DATA ON MOUNT
+  const loadData = async () => {
+      if (currentUser?.companyId) {
+          const [cards, users] = await Promise.all([
+              fetchSaaSData("card_requests"),
+              fetchSaaSData("users")
+          ]);
+          setCardRequestList(cards);
+          setUserList(users);
+
+          if (canViewAll) {
+              const uniqueUsers = Array.from(new Set(users.map((a:any) => a.name)))
+                  .map(name => users.find((a:any) => a.name === name));
+              setEmployees([{ id: 'All', name: 'All' }, ...uniqueUsers as any]);
+          }
+      }
+  };
+
   useEffect(() => {
-    if (canViewAll) {
-      const fetchEmployees = async () => {
-        try {
-          const q = query(collection(db, "users"));
-          const querySnapshot = await getDocs(q);
-          const usersData = querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            name: doc.data().name || 'Unknown User'
-          }));
-          const uniqueUsers = Array.from(new Set(usersData.map(a => a.name)))
-            .map(name => usersData.find(a => a.name === name));
-          setEmployees([{ id: 'All', name: 'All' }, ...uniqueUsers as any]);
-        } catch (error) {}
-      };
-      fetchEmployees();
-    }
+      loadData();
   }, [currentUser]);
 
-  // --- HELPER: DATE PARSER ---
+  const onRefresh = async () => {
+      setRefreshing(true);
+      await loadData();
+      setRefreshing(false);
+  };
+
   const parseDate = (dateStr: any) => {
       if (!dateStr) return new Date();
       if (dateStr instanceof Date) return dateStr;
@@ -100,7 +114,6 @@ export default function VisitingCardScreen() {
       return new Date(dateStr);
   };
 
-  // 🔥 CHANGED: FY Navigation
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
       if (viewMode === 'Day') d.setDate(d.getDate() + dir);
@@ -109,7 +122,6 @@ export default function VisitingCardScreen() {
       setCurrentDate(d);
   };
 
-  // 🔥 CHANGED: Header Title logic for Financial Year
   const getHeaderDate = () => {
       if (viewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
       if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -122,27 +134,22 @@ export default function VisitingCardScreen() {
       return "All Time";
   };
 
-  // --- 🔥 FILTER LOGIC ---
+  // --- FILTER LOGIC ---
   const getFilteredData = () => {
       let data = [...cardRequestList];
 
-      // 1. Role / Employee Filter
       if (canViewAll) {
-          // If Admin selects specific employee
           if (selectedEmployeeName !== 'All') {
               data = data.filter((item: any) => item.userName === selectedEmployeeName);
           }
       } else {
-          // Regular User sees own data
-          data = data.filter((item: any) => item.senderId === currentUser?.id || item.userName === currentUser?.name);
+          data = data.filter((item: any) => item.senderId === currentUser?.id || item.senderId === currentUser?.uid || item.userName === currentUser?.name);
       }
 
-      // 2. Status Filter
       if (activeStatus !== 'All') {
           data = data.filter((item: any) => item.status === activeStatus);
       }
 
-      // 3. Search Filter
       if (searchText) {
           const lowerText = searchText.toLowerCase();
           data = data.filter((item: any) => {
@@ -151,19 +158,17 @@ export default function VisitingCardScreen() {
           });
       }
 
-      // 4. Date Filter (🔥 FY Boundaries added)
       if (viewMode !== 'All') {
           const targetYear = currentDate.getFullYear();
           const targetMonth = currentDate.getMonth();
           const targetDay = currentDate.getDate();
 
-          // FY Boundaries Logic
           const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // 1st April
-          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // 31st March
+          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
+          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
 
           data = data.filter((item: any) => {
-              const dateField = item.createdAt || item.date;
+              const dateField = item.dateIso || item.createdAt || item.date;
               if(!dateField) return false;
               const itemDate = parseDate(dateField);
               const itemTime = itemDate.getTime();
@@ -175,15 +180,12 @@ export default function VisitingCardScreen() {
           });
       }
 
-      // Sort Newest First
-      data.sort((a: any, b: any) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
+      data.sort((a: any, b: any) => new Date(b.dateIso || b.createdAt || b.date).getTime() - new Date(a.dateIso || a.createdAt || a.date).getTime());
 
       return data;
   };
 
-  const displayList = getFilteredData(); // 🔥 Full Data
-  
-  // 🔥 SLICE FOR LIST (Rendered Data)
+  const displayList = getFilteredData(); 
   const renderedList = displayList.slice(0, visibleCount);
 
   const openDetails = (item: any) => {
@@ -192,55 +194,63 @@ export default function VisitingCardScreen() {
       setModalVisible(true);
   };
 
-  // --- 🔥 UPDATED DISPATCH LOGIC (WITH LOADING) ---
+  // --- 🔥 SAAS ENGINE: DISPATCH LOGIC ---
   const handleDispatch = async () => {
       if (!dispatchTracking) {
           Alert.alert("Required", "Please enter Courier Name & Tracking Number");
           return;
       }
-      setIsDispatching(true); // Start Loading
+      setIsDispatching(true); 
       try {
-           const docRef = doc(db, "card_requests", selectedRequest.id);
-           await updateDoc(docRef, {
+          const res = await updateSaaSData("card_requests", selectedRequest.id, {
                status: 'Sent',
                trackingNo: dispatchTracking,
                outDate: new Date().toISOString().split('T')[0]
-           });
+          });
            
-           if (addNotification && selectedRequest.senderId) {
-               await addNotification({
-                   title: "Cards Dispatched 🚀",
-                   message: `Your visiting cards have been sent via ${dispatchTracking}.`,
-                   type: "success",
-                   userId: selectedRequest.senderId,
-                   to: selectedRequest.userName,
-                   route: '/visiting_card'
-               });
-           }
-           setModalVisible(false);
-           Alert.alert("Success", "Request Dispatched Successfully! 🚀");
+          if (res.success) {
+              if (selectedRequest.senderId) {
+                  await addSaaSData("notifications", {
+                      title: "Cards Dispatched 🚀",
+                      message: `Your visiting cards have been sent via ${dispatchTracking}.`,
+                      type: "success",
+                      userId: selectedRequest.senderId,
+                      to: selectedRequest.userName,
+                      route: '/visiting_card'
+                  });
+              }
+              setModalVisible(false);
+              await loadData();
+              Alert.alert("Success", "Request Dispatched Successfully! 🚀");
+          } else {
+              Alert.alert("Error", "Could not dispatch request.");
+          }
       } catch (error) {
            Alert.alert("Error", "Could not update status.");
       } finally {
-          setIsDispatching(false); // Stop Loading
+          setIsDispatching(false); 
       }
   };
 
-  // --- 🔥 UPDATED RECEIVE LOGIC (WITH LOADING) ---
+  // --- 🔥 SAAS ENGINE: RECEIVE LOGIC ---
   const handleReceive = () => {
       Alert.alert("Confirm Receipt", "Confirm that you received items?", [
           { text: "Cancel", style: "cancel" },
           { text: "Yes", onPress: async () => {
-              setIsReceiving(true); // Start Loading
+              setIsReceiving(true); 
               try {
-                  const docRef = doc(db, "card_requests", selectedRequest.id);
-                  await updateDoc(docRef, { status: 'Received' });
-                  setModalVisible(false);
-                  Alert.alert("Success", "Marked as Received! ✅");
+                  const res = await updateSaaSData("card_requests", selectedRequest.id, { status: 'Received' });
+                  if (res.success) {
+                      setModalVisible(false);
+                      await loadData();
+                      Alert.alert("Success", "Marked as Received! ✅");
+                  } else {
+                      Alert.alert("Error", "Could not update receipt status.");
+                  }
               } catch (error) { 
                   Alert.alert("Error", "Update failed."); 
               } finally {
-                  setIsReceiving(false); // Stop Loading
+                  setIsReceiving(false); 
               }
           }}
       ]);
@@ -257,7 +267,6 @@ export default function VisitingCardScreen() {
 
   return (
     <View style={styles.container}>
-      {/* HEADER */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
              <View style={{flexDirection:'row', alignItems:'center'}}>
@@ -274,11 +283,8 @@ export default function VisitingCardScreen() {
         </View>
       </View>
 
-      {/* FILTER UI */}
       <View style={{backgroundColor:'white', paddingBottom:10, marginBottom:5}}>
-          
           <View style={styles.tabContainer}>
-              {/* 🔥 CHANGED: 'Year' to 'FY' */}
               {['Day', 'Month', 'FY', 'All'].map((m) => (
                   <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
                       <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
@@ -286,7 +292,6 @@ export default function VisitingCardScreen() {
               ))}
           </View>
 
-          {/* ADMIN EMPLOYEE FILTER */}
           {canViewAll && (
               <TouchableOpacity style={styles.employeeFilterBtn} onPress={() => setShowEmployeePicker(true)}>
                   <Ionicons name="people" size={18} color="#2e7d32" />
@@ -306,7 +311,7 @@ export default function VisitingCardScreen() {
           )}
 
           <View style={styles.searchBar}>
-              <Ionicons name="search" size={20} color="#777" />
+              {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="#777" />}
               <TextInput style={styles.input} placeholder="Search ID, Name..." value={searchText} onChangeText={setSearchText} />
               {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={18} color="#777" /></TouchableOpacity>}
           </View>
@@ -324,14 +329,18 @@ export default function VisitingCardScreen() {
       </View>
 
       <FlatList 
-        // 🔥 Use Rendered List
         data={renderedList}
         keyExtractor={item => item.id}
         contentContainerStyle={styles.contentContainer}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListEmptyComponent={
             <View style={styles.emptyBox}>
-                <Ionicons name="documents-outline" size={60} color="#ccc" />
-                <Text style={styles.emptyText}>No requests found.</Text>
+                {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                    <>
+                        <Ionicons name="documents-outline" size={60} color="#ccc" />
+                        <Text style={styles.emptyText}>No requests found.</Text>
+                    </>
+                )}
             </View>
         }
         renderItem={({item}) => {
@@ -358,13 +367,13 @@ export default function VisitingCardScreen() {
                     </Text>
 
                     <View style={styles.cardFooter}>
-                        <Text style={styles.dateVal}>{item.date || item.createdAt?.split('T')[0]}</Text>
+                        <Text style={styles.dateVal}>{item.dateIso || item.date || item.createdAt?.split('T')[0]}</Text>
                         <Text style={styles.detailLink}>View Details ➔</Text>
                     </View>
                 </TouchableOpacity>
             );
         }}
-        // 🔥 LOAD MORE BUTTON FOOTER
+        
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
                 {visibleCount < displayList.length ? (
@@ -397,7 +406,7 @@ export default function VisitingCardScreen() {
       />
 
       {/* DETAILS MODAL */}
-      <Modal visible={modalVisible} transparent={true} animationType="fade">
+      <Modal visible={modalVisible} transparent={true} animationType="slide">
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{flex: 1}}>
           <View style={styles.modalOverlay}>
               <View style={styles.modalContent}>
@@ -412,7 +421,7 @@ export default function VisitingCardScreen() {
                       <ScrollView showsVerticalScrollIndicator={false}>
                           <DetailRow label="Requested By" value={selectedRequest.userName} />
                           <DetailRow label="ID" value={selectedRequest.reqId} />
-                          <DetailRow label="Date" value={selectedRequest.date || selectedRequest.createdAt?.split('T')[0]} />
+                          <DetailRow label="Date" value={selectedRequest.dateIso || selectedRequest.date || selectedRequest.createdAt?.split('T')[0]} />
                           <DetailRow label="Status" value={selectedRequest.status} color={getStatusTheme(selectedRequest.status).text} />
                           
                           {selectedRequest.trackingNo ? (
@@ -423,7 +432,6 @@ export default function VisitingCardScreen() {
                               </View>
                           ) : null}
 
-                          {/* 🔥 UPDATED DISPATCH ACTION WITH LOADING */}
                           {selectedRequest.status === 'Pending' && canDispatch && (
                               <View style={styles.adminActionBox}>
                                   <Text style={styles.adminActionTitle}>Dispatch Order</Text>
@@ -454,7 +462,6 @@ export default function VisitingCardScreen() {
                               ))}
                           </View>
 
-                          {/* 🔥 UPDATED RECEIVE ACTION WITH LOADING */}
                           {selectedRequest.status === 'Sent' && (
                               <TouchableOpacity 
                                   style={[styles.receiveBtn, isReceiving && { opacity: 0.6 }]} 
@@ -476,7 +483,7 @@ export default function VisitingCardScreen() {
           </KeyboardAvoidingView>
       </Modal>
 
-      {/* EMPLOYEE PICKER */}
+      {/* EMPLOYEE PICKER MODAL */}
       <Modal visible={showEmployeePicker} transparent animationType="fade">
           <TouchableOpacity style={styles.pickerOverlay} onPress={() => setShowEmployeePicker(false)}>
               <View style={styles.pickerContainer}>
@@ -505,12 +512,12 @@ const DetailRow = ({label, value, color}: any) => (
 );
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8F9FA' },
-  header: { backgroundColor: 'white', padding: 15, paddingTop: 50, borderBottomLeftRadius: 20, borderBottomRightRadius: 20, elevation: 3 },
+  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  header: { backgroundColor: 'white', paddingTop: 50, padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 4 },
   headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom:10 },
   backCircle: { backgroundColor: '#F0F0F0', padding: 8, borderRadius: 20 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#1A237E', marginLeft: 12 },
-  addBtn: { flexDirection:'row', backgroundColor: '#3B5998', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, alignItems: 'center' },
+  addBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#3B5998', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
   addBtnText: { color: 'white', fontWeight: 'bold', marginLeft: 4, fontSize: 13 },
   
   tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', margin: 15, borderRadius: 8, padding: 3, marginBottom: 10 },
@@ -518,6 +525,7 @@ const styles = StyleSheet.create({
   activeTab: { backgroundColor: 'white', elevation: 2 },
   tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
   activeTabText: { color: '#3b5998', fontWeight: 'bold' },
+  
   dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 10, marginHorizontal: 15, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#eee' },
   monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
   employeeFilterBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#e8f5e9', paddingHorizontal:12, paddingVertical:10, marginHorizontal:15, borderRadius:8, borderWidth:1, borderColor:'#2e7d32', marginBottom:10 },
@@ -531,7 +539,7 @@ const styles = StyleSheet.create({
   activeStatusTabText: { color: 'white' },
 
   contentContainer: { padding: 15, paddingBottom: 50 },
-  card: { backgroundColor: 'white', borderRadius: 15, padding: 16, marginBottom: 15, elevation: 2, borderLeftWidth: 4, borderLeftColor: '#3B5998' },
+  card: { backgroundColor: 'white', borderRadius: 15, padding: 16, marginBottom: 12, elevation: 2, borderLeftWidth: 4, borderLeftColor: '#3B5998' },
   cardHeader: { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom: 5 },
   indicator: { width: 8, height: 8, borderRadius: 4, marginRight: 8 },
   idText: { fontWeight: 'bold', fontSize: 15, color: '#333' },
@@ -545,8 +553,8 @@ const styles = StyleSheet.create({
   emptyBox: { alignItems:'center', marginTop:100 },
   emptyText: { textAlign:'center', marginTop:15, color:'#9E9E9E', fontSize: 14 },
 
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
-  modalContent: { width: '90%', backgroundColor: 'white', borderRadius: 20, padding: 25, maxHeight: '85%' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 20 },
+  modalContent: { backgroundColor: 'white', borderRadius: 20, padding: 25, maxHeight: '85%' },
   modalHeader: { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom: 20 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#1A237E' },
   detailRow: { flexDirection:'row', justifyContent:'space-between', marginBottom: 12, borderBottomWidth: 1, borderBottomColor: '#F5F5F5', paddingBottom: 8 },

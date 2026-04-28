@@ -2,8 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { addDoc, collection, doc, updateDoc } from 'firebase/firestore';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -20,19 +19,21 @@ import {
     View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { db } from '../firebaseConfig';
-import { useData } from './context/DataContext';
 
-// 🔥 VOICE IMPORT DISABLED FOR NOW
-//import Voice from '@react-native-voice/voice';
+// 🔥 SAAS IMPORTS (Firebase direct DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
+import { useData } from './context/DataContext';
 
 export default function LeadDetailsScreen() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
     const { id } = useLocalSearchParams();
     
-    // 🔥 Added productList to useData
-    const { leadsList, addLeadActivity, user, refreshData, productList = [] } = useData();
+    // 🔥 1. Context Se zaroori cheezein 
+    const { leadsList, addLeadActivity, currentUser, refreshData, productList = [] } = useData();
+
+    // 🔥 2. Naya SaaS Engine for Adds and Updates
+    const { addSaaSData, updateSaaSData } = useSaaSDB();
 
     const [lead, setLead] = useState<any>(null);
     const [isUpdating, setIsUpdating] = useState(false);
@@ -44,7 +45,7 @@ export default function LeadDetailsScreen() {
     const [editNote, setEditNote] = useState('');
     const [editNextDate, setEditNextDate] = useState(new Date());
     
-    // 🔥 NEW: Edit Product States
+    // Edit Product States
     const [editProduct, setEditProduct] = useState('');
     const [isOtherProduct, setIsOtherProduct] = useState(false);
     
@@ -54,9 +55,8 @@ export default function LeadDetailsScreen() {
     const [showStagePicker, setShowStagePicker] = useState(false);
     const [showProductPicker, setShowProductPicker] = useState(false);
 
-    // 🔥 VOICE TO TEXT STATES & REFS
+    // VOICE TO TEXT STATES (Dummy for now)
     const [isRecording, setIsRecording] = useState(false);
-    const originalNoteRef = useRef('');
 
     const outcomeOptions = ['Interested', 'Follow Up', 'Demo Planned', 'Order Expected', 'Order Closed', 'Lost', 'Not Interested'];
     const stageOptions = ['New', 'Introduction', 'Technical Review', 'Quotation', 'Negotiation', 'Order Closed', 'Lost'];
@@ -78,13 +78,9 @@ export default function LeadDetailsScreen() {
         }
     }, [id, leadsList]);
 
-
-    // --- 🎤 VOICE TO TEXT SETUP (DUMMY FUNCTION FOR NOW) ---
     const toggleRecording = () => {
         Alert.alert("Coming Soon 🎤", "Voice-to-Text feature will be available in the next update!");
     };
-    // ---------------------------------
-
 
     const handleCall = () => {
         if (lead?.mobile) Linking.openURL(`tel:${lead.mobile}`);
@@ -95,7 +91,7 @@ export default function LeadDetailsScreen() {
         const mobile = lead?.mobile || lead?.contactNumber || '';
         if (!mobile) return Alert.alert("Error", "No mobile number found.");
         const product = lead?.requirements || lead?.product || 'your inquiry';
-        let msg = `Hello ${lead.contactPerson},\n\nGreetings from our Sales Team.\nWe are following up regarding requirements for *${product}* at *${lead.org}*.\n\nRegards,\n*LMS Team*`;
+        let msg = `Hello ${lead.contactPerson},\n\nGreetings from our Sales Team.\nWe are following up regarding requirements for *${product}* at *${lead.org || lead.orgName}*.\n\nRegards,\n*Team*`;
         Linking.openURL(`whatsapp://send?phone=91${mobile}&text=${encodeURIComponent(msg)}`).catch(() => Alert.alert("Error", "WhatsApp not installed"));
     };
 
@@ -108,20 +104,21 @@ export default function LeadDetailsScreen() {
         } catch (error) { return null; }
     };
 
+    // 🔥 3. SAAS DUAL SAVE LOGIC
     const handleLogVisit = async () => {
         if (!editNote.trim()) return Alert.alert("Required", "Please enter discussion note.");
         if (isOtherProduct && !editProduct.trim()) return Alert.alert("Required", "Please type the new product name.");
+        if (!currentUser?.companyId) return Alert.alert("Error", "Company ID not found.");
         
         setIsUpdating(true);
         try {
             const locationData = await getCurrentLocation();
-            const safeUserId = user?.uid || user?.id || 'guest';
+            const safeUserId = currentUser?.uid || currentUser?.id || 'guest';
             const nextDateISO = editNextDate.toISOString().split('T')[0];
             const todayString = new Date().toLocaleDateString('en-GB');
 
-            // 1. CREATE DSR (Sales Visit)
+            // 1. CREATE DSR (Sales Visit) using SaaS Engine
             const newVisit = {
-                id: Date.now().toString(),
                 visitType: 'Follow Up',
                 hospital: lead.org || lead.orgName, 
                 orgName: lead.org || lead.orgName, 
@@ -135,19 +132,25 @@ export default function LeadDetailsScreen() {
                 outcome: editOutcome,
                 nextFollowUp: nextDateISO,
                 date: new Date().toISOString().split('T')[0],
-                senderId: safeUserId, senderName: user?.name || 'Unknown', role: user?.role || 'Employee',
-                timestamp: Date.now(), location: locationData || null,
+                dateIso: new Date().toISOString().split('T')[0],
+                senderId: safeUserId, 
+                senderName: currentUser?.name || 'Unknown', 
+                role: currentUser?.role || 'Employee',
+                timestamp: Date.now(), 
+                location: locationData || null,
             };
-            await addDoc(collection(db, "sales_reports"), newVisit);
+            
+            const visitRes = await addSaaSData("sales_reports", newVisit);
+            if (!visitRes.success) throw new Error("Failed to log visit report.");
 
-            // 2. UPDATE LEAD
+            // 2. UPDATE LEAD using SaaS Engine
             let finalStatus = editOutcome === 'Order Closed' ? 'Converted' : editOutcome;
             let leadType = editOutcome === 'Order Expected' ? 'Hot' : editOutcome === 'Order Closed' ? 'Won' : 'Warm';
 
             const logEntry = `📅 ${todayString}: Visit/Follow-up Logged.\nStatus: ${editOutcome} | Stage: ${editStage}\nProduct: ${editProduct}\nNote: ${editNote}`;
             const updatedDiscussion = lead.discussion ? `${logEntry}\n────────────────\n${lead.discussion}` : logEntry;
 
-            await updateDoc(doc(db, 'leads', lead.id), {
+            const updateRes = await updateSaaSData("leads", lead.id, {
                 status: finalStatus,
                 stage: editStage,
                 type: leadType,
@@ -159,13 +162,15 @@ export default function LeadDetailsScreen() {
                 discussion: updatedDiscussion
             });
 
+            if (!updateRes.success) throw new Error("Failed to update lead status.");
+
             // 3. ADD TO TIMELINE
             if (addLeadActivity) {
                 await addLeadActivity(lead.id, {
                     type: 'Visit',
                     msg: `Logged Visit: ${editNote}`, 
                     changeNote: `Status ➔ ${editOutcome}, Stage ➔ ${editStage}, Product ➔ ${editProduct}`,
-                    by: user?.name,
+                    by: currentUser?.name,
                     date: new Date().toLocaleString()
                 });
             }
@@ -173,6 +178,18 @@ export default function LeadDetailsScreen() {
             if (refreshData) await refreshData();
             setLogVisitModalVisible(false);
             setEditNote('');
+            
+            // Sync Local Lead Data Immediately
+            setLead((prev: any) => ({
+                ...prev,
+                status: finalStatus,
+                stage: editStage,
+                type: leadType,
+                product: editProduct,
+                nextDate: nextDateISO,
+                discussion: updatedDiscussion
+            }));
+            
             Alert.alert("Success", "Visit Logged & Lead Updated Successfully! 🚀");
             
         } catch (error: any) {
@@ -194,7 +211,7 @@ export default function LeadDetailsScreen() {
                 </View>
             );
         } else {
-            const isMe = item.by === user?.name;
+            const isMe = item.by === currentUser?.name;
             return (
                 <View key={index} style={[styles.chatBubble, isMe ? styles.chatBubbleMe : styles.chatBubbleOther, isVisit && {borderColor: '#4caf50', borderWidth: 1}]}>
                     <View style={styles.chatHeader}>
@@ -298,7 +315,7 @@ export default function LeadDetailsScreen() {
                         </View>
                     </View>
 
-                    {/* 🔥 NEW: GENERATE QUOTATION BUTTON */}
+                    {/* GENERATE QUOTATION BUTTON */}
                     <TouchableOpacity 
                         style={{backgroundColor: '#e3f2fd', padding: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 15, borderWidth: 1, borderColor: '#90caf9'}}
                         onPress={() => router.push({
@@ -312,13 +329,13 @@ export default function LeadDetailsScreen() {
                                 leadAddress: lead.address || '',
                                 leadProduct: lead.product || (lead.requirements && lead.requirements[0]) || ''
                             }
-                        })}
+                        } as any)} // 🔥 FIX: Added 'as any' here
                     >
                         <Ionicons name="document-text" size={20} color="#1565c0" />
                         <Text style={{color: '#1565c0', fontWeight: 'bold', marginLeft: 8}}>📄 Generate Quotation for this Lead</Text>
                     </TouchableOpacity>
 
-                    {/* 🔥 CONDITIONAL ORDER BUTTON: सिर्फ WON/Closed लीड्स पर दिखेगा */}
+                    {/* CONDITIONAL ORDER BUTTON: WON/Closed Leads */}
                     {(lead.stage === 'Order Closed' || lead.status === 'Converted') && (
                         <TouchableOpacity 
                             style={{backgroundColor: '#e8f5e9', padding: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 15, borderWidth: 1, borderColor: '#a5d6a7'}}
@@ -400,7 +417,7 @@ export default function LeadDetailsScreen() {
                                     </View>
                                 </View>
 
-                                {/* 🔥 NEW: PRODUCT DISCUSS / UPDATE */}
+                                {/* PRODUCT DISCUSS / UPDATE */}
                                 <Text style={styles.label}>Product Discussed:</Text>
                                 <TouchableOpacity style={styles.pickerBtn} onPress={() => setShowProductPicker(true)}>
                                     <Text style={{ color: editProduct && !isOtherProduct ? '#333' : 'gray', fontWeight: 'bold' }} numberOfLines={1}>
@@ -424,7 +441,6 @@ export default function LeadDetailsScreen() {
                                 </TouchableOpacity>
                                 {showNextDatePicker && <DateTimePicker value={editNextDate} mode="date" onChange={(e, d) => { setShowNextDatePicker(false); if (d) setEditNextDate(d); }} />}
 
-                                {/* 🔥 UPGRADED DISCUSSION NOTE (VOICE DISABLED) */}
                                 <Text style={[styles.label, {marginTop: 15}]}>Discussion Note <Text style={{color:'red'}}>*</Text></Text>
                                 <View style={styles.voiceInputContainer}>
                                     <TextInput 
@@ -487,7 +503,6 @@ export default function LeadDetailsScreen() {
                 </View>
             </Modal>
 
-            {/* 🔥 PRODUCT PICKER */}
             <Modal visible={showProductPicker} transparent animationType="fade">
                 <View style={styles.pickerOverlay}>
                     <TouchableOpacity style={StyleSheet.absoluteFill} onPress={() => setShowProductPicker(false)} />
@@ -578,15 +593,12 @@ const styles = StyleSheet.create({
     saveButton: { backgroundColor: '#4caf50', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 20 },
     saveBtnText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
     
-    // 🔥 NEW STYLES FOR VOICE INPUT
     voiceInputContainer: { flexDirection: 'row', alignItems: 'flex-start', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, backgroundColor: '#f9f9f9', paddingRight: 10 },
     voiceTextInput: { flex: 1, borderWidth: 0, backgroundColor: 'transparent', height: 80, textAlignVertical: 'top', padding: 10, fontSize: 14 },
     micBtn: { marginTop: 15, padding: 8, backgroundColor: '#e3f2fd', borderRadius: 25 },
-    micBtnActive: { backgroundColor: '#d32f2f' },
-    recordingText: { fontSize: 11, color: '#d32f2f', marginTop: 4, fontStyle: 'italic', fontWeight: 'bold', textAlign: 'right' },
-
+    
     pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
-    pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation: 10 },
-    pickerHeader: { fontWeight: 'bold', fontSize: 16, marginBottom: 10, color: '#3b5998', textAlign: 'center' },
-    pickerItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eee', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation:10 },
+    pickerHeader: { fontWeight:'bold', fontSize:16, marginBottom:10, color:'#3b5998', textAlign:'center' },
+    pickerItem: { paddingVertical:12, borderBottomWidth:1, borderBottomColor:'#eee', flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
 });

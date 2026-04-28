@@ -18,30 +18,36 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { useData } from './context/DataContext';
 
-// FIREBASE IMPORTS (🔥 doc, updateDoc added)
-import { collection, doc, getDocs, query, updateDoc } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+// 🔥 SAAS IMPORTS (Firebase direct DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
+import { useData } from './context/DataContext';
 
 // PDF IMPORTS
 import * as Print from 'expo-print';
 
 export default function OrderListScreen() {
   const router = useRouter();
-  const { orderList, user, updateOrderStatus, addNotification, companyProfile } = useData();
+
+  // 🔥 1. Context se sirf core User details and profile
+  const { currentUser, addNotification, companyProfile } = useData();
+
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded States
+  const [orderList, setOrderList] = useState<any[]>([]);
+  const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
 
   // STATES
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
-  // 🔥 CHANGED: 'Year' changed to 'FY'
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   
-  // 🔥 ADMIN EDIT STATES
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editData, setEditData] = useState<any>({});
   const [isSavingEdit, setIsSavingEdit] = useState(false);
@@ -49,16 +55,14 @@ export default function OrderListScreen() {
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
 
-  const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
   const [selectedEmployee, setSelectedEmployee] = useState('All'); 
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
   const [visibleCount, setVisibleCount] = useState(20);
 
-  const isAdmin = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr'].includes(user?.role || '');
-  // 🔥 ONLY PURE ADMIN CAN EDIT (Or add 'Manager' here if you want)
-  const isStrictAdmin = user?.role === 'Admin' || user?.role === 'Manager'; 
+  const isAdmin = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
+  const isStrictAdmin = currentUser?.role === 'Admin' || currentUser?.role === 'Manager' || currentUser?.role === 'SuperAdmin'; 
 
   useEffect(() => {
       if (viewMode === 'Day') {
@@ -68,24 +72,28 @@ export default function OrderListScreen() {
       }
   }, [viewMode, currentDate, searchText, statusFilter, selectedEmployee]);
 
+  // 🔥 4. LOAD SAAS DATA ON MOUNT
+  const loadData = async () => {
+      if (currentUser?.companyId) {
+          const [orders, users] = await Promise.all([
+              fetchSaaSData("orders"),
+              fetchSaaSData("users")
+          ]);
+          setOrderList(orders);
+
+          if (isAdmin) {
+              const mappedUsers = users.map((u: any) => ({
+                  id: u.id,
+                  name: u.name || 'Unknown User'
+              }));
+              setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
+          }
+      }
+  };
+
   useEffect(() => {
-    if (isAdmin) {
-      const fetchEmployees = async () => {
-        try {
-          const q = query(collection(db, "users"));
-          const querySnapshot = await getDocs(q);
-          const usersData = querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            name: doc.data().name || 'Unknown User'
-          }));
-          setEmployees([{ id: 'All', name: 'All Staff' }, ...usersData]);
-        } catch (error) {
-          console.log("Error fetching employees:", error);
-        }
-      };
-      fetchEmployees();
-    }
-  }, [user]);
+      loadData();
+  }, [currentUser]);
 
   const parseDate = (dateStr: any) => {
       if (!dateStr) return 0;
@@ -113,7 +121,6 @@ export default function OrderListScreen() {
       return isNaN(d.getTime()) ? 0 : d.getTime();
   };
 
-  // 🔥 CHANGED: FY Navigation Logic
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
       if (viewMode === 'Day') d.setDate(d.getDate() + dir);
@@ -122,7 +129,6 @@ export default function OrderListScreen() {
       setCurrentDate(d);
   };
 
-  // 🔥 CHANGED: Header Title to show Financial Year
   const getHeaderDate = () => {
       if (viewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
       if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -138,7 +144,6 @@ export default function OrderListScreen() {
       return "All Time";
   };
 
-  // --- PDF GENERATOR ---
   const generateOrderPDF = async (orderData: any) => {
     setGeneratingPdf(true);
     try {
@@ -211,7 +216,7 @@ export default function OrderListScreen() {
 
         const { uri } = await Print.printToFileAsync({ html: htmlContent });
         const cleanName = `Order_${orderData.orderId}.pdf`;
-        const newPath = `${FileSystem.cacheDirectory}${cleanName}`;
+        const newPath = `${(FileSystem as any).cacheDirectory}${cleanName}`;
 
         try {
             await FileSystem.copyAsync({ from: uri, to: newPath });
@@ -251,7 +256,6 @@ export default function OrderListScreen() {
       } catch (e: any) { Alert.alert("Error", "Could not open file."); }
   };
 
-  // 🔥 CHANGED: Filter logic to process Financial Year (April 1 to March 31)
   const getFilteredData = () => {
       let data = orderList ? [...orderList] : [];
 
@@ -266,7 +270,8 @@ export default function OrderListScreen() {
           );
       } 
       else if (!isAdmin) {
-          data = data.filter((item: any) => item.senderId === user?.uid || item.bookedBy === user?.name);
+          const myId = currentUser?.id || currentUser?.uid;
+          data = data.filter((item: any) => item.senderId === myId || item.bookedBy === currentUser?.name);
       }
 
       if (statusFilter !== 'All') data = data.filter((item: any) => item.status === statusFilter);
@@ -284,13 +289,12 @@ export default function OrderListScreen() {
           const targetMonth = currentDate.getMonth();
           const targetDay = currentDate.getDate();
 
-          // Calculate FY Boundaries
           const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); // April 1st
-          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); // March 31st
+          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
+          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
 
           data = data.filter((item: any) => {
-              const ts = parseDate(item.date || item.createdAt);
+              const ts = parseDate(item.dateIso || item.date || item.createdAt);
               if (ts === 0) return false;
               const itemDate = new Date(ts);
               
@@ -301,15 +305,16 @@ export default function OrderListScreen() {
           });
       }
 
-      data.sort((a: any, b: any) => parseDate(b.date) - parseDate(a.date));
+      data.sort((a: any, b: any) => parseDate(b.dateIso || b.date) - parseDate(a.dateIso || a.date));
       return data;
   };
 
   const fullList = getFilteredData(); 
   const renderedList = fullList.slice(0, visibleCount);
 
+  // 🔥 5. SAAS ORDER STATUS UPDATE
   const handleUpdateStatus = async (newStatus: string) => {
-      if (!selectedOrder || !updateOrderStatus) return;
+      if (!selectedOrder) return;
       Alert.alert("Confirm", `Mark as ${newStatus}?`, [
           { text: "Cancel", style: "cancel" },
           { 
@@ -317,18 +322,24 @@ export default function OrderListScreen() {
               onPress: async () => {
                   setIsUpdating(true);
                   try {
-                      await updateOrderStatus(selectedOrder.id, newStatus, selectedOrder);
-                      if (addNotification && selectedOrder.senderId) {
-                          await addNotification({
-                              title: `Order ${newStatus}`, 
-                              message: `Order for ${selectedOrder.hospitalName} (PO: ${selectedOrder.poNumber}) has been ${newStatus}.`,
-                              type: newStatus === 'Approved' ? 'success' : newStatus === 'Rejected' ? 'alert' : 'info',
-                              userId: selectedOrder.senderId,
-                              to: selectedOrder.senderName, 
-                              route: '/orders'
-                          });
+                      const res = await updateSaaSData("orders", selectedOrder.id, { status: newStatus });
+                      
+                      if (res.success) {
+                          if (addNotification && selectedOrder.senderId) {
+                              await addNotification({
+                                  title: `Order ${newStatus}`, 
+                                  message: `Order for ${selectedOrder.hospitalName} (PO: ${selectedOrder.poNumber}) has been ${newStatus}.`,
+                                  type: newStatus === 'Approved' ? 'success' : newStatus === 'Rejected' ? 'alert' : 'info',
+                                  userId: selectedOrder.senderId,
+                                  to: selectedOrder.senderName, 
+                                  route: '/orders'
+                              });
+                          }
+                          setOrderList(prev => prev.map(item => item.id === selectedOrder.id ? { ...item, status: newStatus } : item));
+                          setModalVisible(false);
+                      } else {
+                          Alert.alert("Error", "Failed to update status.");
                       }
-                      setModalVisible(false);
                   } catch (error) { Alert.alert("Error", "Failed to update status."); } 
                   finally { setIsUpdating(false); }
               }
@@ -336,7 +347,6 @@ export default function OrderListScreen() {
       ]);
   };
 
-  // 🔥 1. OPEN EDIT MODAL FUNCTION
   const openEditModal = (item: any) => {
       setEditData({
           id: item.id,
@@ -352,7 +362,7 @@ export default function OrderListScreen() {
       setEditModalVisible(true);
   };
 
-  // 🔥 2. SAVE EDITED DATA TO FIREBASE
+  // 🔥 6. SAAS ADMIN EDIT ORDER
   const handleSaveEdit = async () => {
       if (!editData.id) return;
       if (!editData.hospitalName || !editData.amount) {
@@ -361,8 +371,7 @@ export default function OrderListScreen() {
       }
       setIsSavingEdit(true);
       try {
-          const docRef = doc(db, "orders", editData.id);
-          await updateDoc(docRef, {
+          const res = await updateSaaSData("orders", editData.id, {
               hospitalName: editData.hospitalName,
               poNumber: editData.poNumber,
               amount: parseFloat(editData.amount),
@@ -370,19 +379,25 @@ export default function OrderListScreen() {
               paymentTerms: editData.paymentTerms,
               deliveryTerms: editData.deliveryTerms,
               notes: editData.notes,
-              status: editData.status // Allows admin to manually change status from edit too
+              status: editData.status 
           });
-          Alert.alert("Success", "Order details updated successfully!");
-          setEditModalVisible(false);
+
+          if (res.success) {
+              setOrderList(prev => prev.map(item => item.id === editData.id ? { ...item, ...editData } : item));
+              Alert.alert("Success", "Order details updated successfully!");
+              setEditModalVisible(false);
+          } else {
+              Alert.alert("Error", "Could not update order.");
+          }
       } catch (error: any) {
-          Alert.alert("Error", "Could not update order. " + error.message);
+          Alert.alert("Error", "Could not update order. ");
       } finally {
           setIsSavingEdit(false);
       }
   };
 
-  const userRole = user?.role?.toLowerCase() || '';
-  const canApprove = ['admin', 'manager', 'accountant', 'account'].includes(userRole);
+  const userRole = currentUser?.role?.toLowerCase() || '';
+  const canApprove = ['admin', 'manager', 'accountant', 'account', 'superadmin'].includes(userRole);
   const isStore = ['store', 'store keeper'].includes(userRole);
 
   const openDetails = (item: any) => {
@@ -401,7 +416,6 @@ export default function OrderListScreen() {
                     <View style={{flexDirection: 'row', alignItems: 'center'}}>
                         <Text style={styles.hospitalName} numberOfLines={1}>{item.hospitalName}</Text>
                         
-                        {/* 🔥 EDIT BUTTON FOR ADMIN ONLY */}
                         {isStrictAdmin && (
                             <TouchableOpacity style={{marginLeft: 10}} onPress={() => openEditModal(item)}>
                                 <Ionicons name="create" size={18} color="#d32f2f" />
@@ -470,7 +484,6 @@ export default function OrderListScreen() {
       </View>
 
       <View style={{backgroundColor:'white', paddingBottom:10, marginBottom:5}}>
-          {/* 🔥 CHANGED: Year tab mapped to FY */}
           <View style={styles.tabContainer}>
               {['Day', 'Month', 'FY', 'All'].map((m) => (
                   <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
@@ -500,7 +513,7 @@ export default function OrderListScreen() {
           )}
 
           <View style={styles.searchBar}>
-              <Ionicons name="search" size={20} color="gray" />
+              {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
               <TextInput style={styles.searchInput} placeholder="Search Hospital, PO, ID..." value={searchText} onChangeText={setSearchText} />
               {searchText.length > 0 && (
                   <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={18} color="gray" /></TouchableOpacity>
@@ -524,11 +537,13 @@ export default function OrderListScreen() {
           data={renderedList}
           keyExtractor={item => item.id}
           renderItem={renderItem}
-          // 🔥 CHANGED: Increased paddingBottom so the list content scroll further up
           contentContainerStyle={{padding: 5, paddingBottom: 100}} 
-          ListEmptyComponent={<Text style={{textAlign:'center', marginTop:50, color:'gray'}}>No Orders Found</Text>}
+          ListEmptyComponent={
+              <View style={{alignItems:'center', marginTop:50}}>
+                  {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{color:'gray'}}>No Orders Found</Text>}
+              </View>
+          }
           ListFooterComponent={
-            // 🔥 CHANGED: Wrapped Footer in a View with Extra padding Bottom
             <View style={{ paddingBottom: 80 }}>
                 {visibleCount < fullList.length ? (
                     <TouchableOpacity onPress={() => setVisibleCount(prev => prev + 20)} style={styles.loadMoreBtn}>
@@ -539,9 +554,7 @@ export default function OrderListScreen() {
         }
       />
 
-      {/* ========================================== */}
-      {/* 🔥 ADMIN EDIT MODAL 🔥 */}
-      {/* ========================================== */}
+      {/* ADMIN EDIT MODAL */}
       <Modal visible={editModalVisible} transparent animationType="slide">
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
               <View style={styles.modalContent}>
@@ -761,7 +774,7 @@ const styles = StyleSheet.create({
   dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 6, marginHorizontal: 15, borderRadius: 8, marginBottom: 5, borderWidth:1, borderColor:'#eee' },
   monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
 
-  searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', marginHorizontal: 15, paddingHorizontal: 10, borderRadius: 8, height:36, alignItems:'center' },
+  searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', marginHorizontal: 15, paddingHorizontal: 10, borderRadius: 8, height:36, alignItems:'center', marginBottom:10 },
   searchInput: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
 
   filterChip: { paddingHorizontal:15, paddingVertical:6, backgroundColor:'#eee', borderRadius:20, marginRight:10 },
@@ -801,7 +814,6 @@ const styles = StyleSheet.create({
   actionBtn: { flex:0.48, padding:12, borderRadius:8, alignItems:'center', justifyContent:'center' },
   btnText: { color:'white', fontWeight:'bold' },
 
-  // EDIT MODAL STYLES 🔥
   inputLabel: { fontSize: 12, color: 'gray', marginTop: 10, marginBottom: 5, fontWeight: 'bold' },
   editInput: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, fontSize: 14, color: '#333', backgroundColor: '#f9f9f9' },
   saveEditBtn: { backgroundColor: '#d32f2f', padding: 15, borderRadius: 8, alignItems: 'center', marginTop: 20 },

@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { collection, getDocs, query } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -14,12 +13,25 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function LeaveApplicationScreen() {
   const router = useRouter();
-  const { leaveList, updateLeaveStatus, user, addNotification, attendanceList, holidayList } = useData();
+
+  // 🔥 1. Context se sirf user aur notifications
+  const { currentUser, addNotification } = useData();
+
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded Master States
+  const [leaveList, setLeaveList] = useState<any[]>([]);
+  const [attendanceList, setAttendanceList] = useState<any[]>([]);
+  const [holidayList, setHolidayList] = useState<any[]>([]);
+  const [userList, setUserList] = useState<any[]>([]);
 
   // STATES
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All'); 
@@ -42,36 +54,48 @@ export default function LeaveApplicationScreen() {
 
   const [visibleCount, setVisibleCount] = useState(20);
 
-  // 🔥 FIX 1: Robust Role Checking (Case Insensitive)
-  const userRole = (user?.role || '').toLowerCase().trim();
-  const canManage = ['admin', 'manager', 'account', 'accountant', 'hr'].includes(userRole);
+  const userRole = (currentUser?.role || '').toLowerCase().trim();
+  const canManage = ['admin', 'manager', 'account', 'accountant', 'hr', 'superadmin'].includes(userRole);
 
   useEffect(() => {
       if (viewMode === 'Day') setVisibleCount(500); 
       else setVisibleCount(20); 
   }, [viewMode, currentDate, searchText, selectedEmployeeName]);
 
-  useEffect(() => {
-    if (canManage) {
-      const fetchEmployees = async () => {
-        try {
-          const q = query(collection(db, "users"));
-          const querySnapshot = await getDocs(q);
-          const usersData = querySnapshot.docs.map(doc => ({
-            name: doc.data().name || 'Unknown User', 
-            yearlyLeaves: doc.data().yearlyLeaves || 18,
-            joiningDate: doc.data().joiningDate || null,
-            createdAt: doc.data().createdAt || null
-          }));
-          const uniqueUsers = Array.from(new Set(usersData.map(a => a.name)))
-            .map(name => usersData.find(a => a.name === name));
+  // 🔥 4. LOAD DATA ON MOUNT
+  const loadAllData = async () => {
+      if (currentUser?.companyId) {
+          const [leaves, attendance, holidays, users] = await Promise.all([
+              fetchSaaSData("leaves"),
+              fetchSaaSData("attendance"),
+              fetchSaaSData("holidays"),
+              fetchSaaSData("users")
+          ]);
+          setLeaveList(leaves);
+          setAttendanceList(attendance);
+          setHolidayList(holidays);
+          setUserList(users);
 
-          setEmployees([{ name: 'All', yearlyLeaves: 0, joiningDate: null, createdAt: null }, ...uniqueUsers as any]);
-        } catch (error) {}
-      };
-      fetchEmployees();
-    }
-  }, [user]);
+          if (canManage) {
+              const uniqueUsersMap = new Map();
+              users.forEach((u: any) => {
+                  if (u.name && !uniqueUsersMap.has(u.name)) {
+                      uniqueUsersMap.set(u.name, {
+                          name: u.name,
+                          yearlyLeaves: u.yearlyLeaves || 18,
+                          joiningDate: u.joiningDate || null,
+                          createdAt: u.createdAt || null
+                      });
+                  }
+              });
+              setEmployees([{ name: 'All', yearlyLeaves: 0, joiningDate: null, createdAt: null }, ...Array.from(uniqueUsersMap.values())]);
+          }
+      }
+  };
+
+  useEffect(() => {
+      loadAllData();
+  }, [currentUser]);
 
   // DATE HELPERS
   const getTimestampFromDDMMYYYY = (dateStr: string) => {
@@ -102,22 +126,20 @@ export default function LeaveApplicationScreen() {
   // 🔥 CORE LOGIC: ADVANCED ATTENDANCE & LEAVE ENGINE
   // ==========================================
   useEffect(() => {
-      if (!leaveList || !attendanceList) return;
+      if (leaveList.length === 0 && attendanceList.length === 0) return;
 
       let generatedRecords: any[] = [];
       let totalBase = 0, totalEarned = 0, totalUsed = 0, totalAbsents = 0, totalShort = 0, totalCancelled = 0;
 
-      // 1. Determine users to process
       let usersToProcess = [];
       if (canManage && selectedEmployeeName === 'All') {
           usersToProcess = employees.filter(e => e.name !== 'All');
       } else if (canManage) {
           usersToProcess = employees.filter(e => e.name === selectedEmployeeName);
       } else {
-          usersToProcess = [{ name: user?.name, yearlyLeaves: user?.yearlyLeaves || 18, joiningDate: user?.joiningDate, createdAt: user?.createdAt }];
+          usersToProcess = [{ name: currentUser?.name, yearlyLeaves: currentUser?.yearlyLeaves || 18, joiningDate: currentUser?.joiningDate, createdAt: currentUser?.createdAt }];
       }
 
-      // 2. Determine ViewMode Boundaries
       const targetY = currentDate.getFullYear();
       const targetM = currentDate.getMonth();
       const targetD = currentDate.getDate();
@@ -129,13 +151,11 @@ export default function LeaveApplicationScreen() {
       const todayObj = new Date();
       const todayStr = getStandardDate(todayObj);
 
-      // 3. Process each user
       usersToProcess.forEach(emp => {
           if (!emp || !emp.name) return;
           const empName = emp.name;
           totalBase += (emp.yearlyLeaves || 18);
 
-          // Find start date for this employee
           let startOfCalculation = new Date(fYearStart, 3, 1); 
           const APP_LAUNCH_DATE = new Date(2026, 0, 1); 
           if (startOfCalculation < APP_LAUNCH_DATE) startOfCalculation = APP_LAUNCH_DATE;
@@ -158,17 +178,17 @@ export default function LeaveApplicationScreen() {
               const loopTime = d.getTime();
 
               const isSunday = d.getDay() === 0;
-              const isHoliday = holidayList?.some((h:any) => h.date === dateStr);
+              const isHoliday = holidayList?.some((h:any) => h.dateIso === dateStr || h.date === dateStr);
               
               const isOnLeave = leaveList?.some((l:any) => {
                   if (l.senderName !== empName || l.status !== 'Approved') return false;
-                  const startLeave = getTimestampFromDDMMYYYY(l.fromDate);
-                  const endLeave = getTimestampFromDDMMYYYY(l.toDate || l.fromDate);
+                  const startLeave = getTimestampFromDDMMYYYY(l.fromDateIso || l.fromDate);
+                  const endLeave = getTimestampFromDDMMYYYY(l.toDateIso || l.toDate || l.fromDateIso || l.fromDate);
                   return loopTime >= startLeave && loopTime <= endLeave;
               });
 
               const attRecord = attendanceList?.find((a:any) => 
-                  (a.userName === empName || a.senderName === empName) && a.date === dateStr && a.status !== 'Absent' && a.status !== 'ABSENT' && a.inTime && a.inTime !== '-'
+                  (a.userName === empName || a.senderName === empName) && (a.dateIso === dateStr || a.date === dateStr) && a.status !== 'Absent' && a.status !== 'ABSENT' && a.inTime && a.inTime !== '-'
               );
 
               const isToday = (dateStr === todayStr);
@@ -187,7 +207,6 @@ export default function LeaveApplicationScreen() {
                   else { if ((hasLoggedOut && hours < 4) || !hasLoggedOut) isHalfDay = true; }
               }
 
-              // Check if this day falls within our currently selected View Mode
               let shouldCountForStats = false;
               if (viewMode === 'All') shouldCountForStats = true;
               else if (viewMode === 'FY') shouldCountForStats = (loopTime >= fyStartMs && loopTime <= fyEndMs);
@@ -197,17 +216,14 @@ export default function LeaveApplicationScreen() {
               const parts = dateStr.split('-');
               const displayDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
 
-              // ADVANCED LOGIC KICK-IN
               if (isPresent) {
                   if (isOnLeave) {
-                      // Work on Leave Day -> Cancel Leave
                       if (shouldCountForStats) totalCancelled += (isHalfDay ? 0.5 : 1);
                       if (shouldCountForStats) generatedRecords.push({
                           id: `cancel-${dateStr}-${empName}`, isAutoRecord: true, isCancelled: true, senderName: empName, fromDate: displayDate,
                           days: `-${isHalfDay ? 0.5 : 1}`, type: 'Leave Cancelled', status: 'Worked', reason: 'Present on an approved leave day', createdAt: d.toISOString() 
                       });
                   } else if (isSunday || isHoliday) {
-                      // Work on Sunday/Holiday -> Earn Leave
                       if (shouldCountForStats) totalEarned += (isHalfDay ? 0.5 : 1);
                       if (shouldCountForStats) generatedRecords.push({
                           id: `earned-${dateStr}-${empName}`, isAutoRecord: true, isEarned: true, senderName: empName, fromDate: displayDate,
@@ -216,7 +232,6 @@ export default function LeaveApplicationScreen() {
                   }
                   
                   if (isHalfDay) {
-                      // Short Day -> Half Day Absent
                       if (shouldCountForStats) totalShort += 0.5;
                       if (shouldCountForStats) generatedRecords.push({
                           id: `half-${dateStr}-${empName}`, isAutoRecord: true, senderName: empName, fromDate: displayDate,
@@ -225,7 +240,6 @@ export default function LeaveApplicationScreen() {
                   }
               } else {
                   if (!isSunday && !isHoliday && !isOnLeave && dateStr <= todayStr) {
-                      // Unexplained Absence
                       if (shouldCountForStats) totalAbsents += 1;
                       if (shouldCountForStats) generatedRecords.push({
                           id: `absent-${dateStr}-${empName}`, isAutoRecord: true, senderName: empName, fromDate: displayDate,
@@ -237,20 +251,19 @@ export default function LeaveApplicationScreen() {
               d.setDate(d.getDate() + 1);
           }
 
-          // Count Approved Leaves from DB
           leaveList?.forEach((l: any) => {
               if (l.senderName === empName && l.status === 'Approved') {
-                  const lTime = getTimestampFromDDMMYYYY(l.fromDate);
+                  const lTime = getTimestampFromDDMMYYYY(l.fromDateIso || l.fromDate);
                   let shouldCount = false;
                   
                   if (viewMode === 'All') shouldCount = lTime >= startOfCalculation.getTime();
                   else if (viewMode === 'FY') shouldCount = (lTime >= fyStartMs && lTime <= fyEndMs);
                   else if (viewMode === 'Month') {
-                      const lDate = parseDate(l.fromDate);
+                      const lDate = parseDate(l.fromDateIso || l.fromDate);
                       shouldCount = (lDate.getFullYear() === targetY && lDate.getMonth() === targetM);
                   }
                   else if (viewMode === 'Day') {
-                      const lDate = parseDate(l.fromDate);
+                      const lDate = parseDate(l.fromDateIso || l.fromDate);
                       shouldCount = (lDate.getFullYear() === targetY && lDate.getMonth() === targetM && lDate.getDate() === targetD);
                   }
 
@@ -284,10 +297,9 @@ export default function LeaveApplicationScreen() {
           lwp: lwpDays
       });
 
-  }, [leaveList, attendanceList, holidayList, user, selectedEmployeeName, employees, viewMode, currentDate]);
+  }, [leaveList, attendanceList, holidayList, currentUser, selectedEmployeeName, employees, viewMode, currentDate]);
 
 
-  // NAVIGATION LOGIC
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
       if (viewMode === 'Day') d.setDate(d.getDate() + dir);
@@ -308,11 +320,9 @@ export default function LeaveApplicationScreen() {
       return "All Time";
   };
 
-  // FILTER LIST LOGIC
   const getFilteredData = () => {
     let combinedData = Array.isArray(leaveList) ? [...leaveList] : [];
     
-    // Merge DB leaves with our newly generated Absents/Earned/Cancelled Records
     combinedData = [...combinedData, ...autoRecords];
 
     let filtered = combinedData;
@@ -322,12 +332,12 @@ export default function LeaveApplicationScreen() {
             filtered = filtered.filter((item: any) => item.senderName === selectedEmployeeName);
         }
     } else {
-        if(user?.uid) {
-            filtered = filtered.filter((item: any) => item.senderId === user.uid || (item.isAutoRecord && item.senderName === user.name));
+        if(currentUser?.id || currentUser?.uid) {
+            const myId = currentUser.id || currentUser.uid;
+            filtered = filtered.filter((item: any) => item.senderId === myId || (item.isAutoRecord && item.senderName === currentUser.name));
         }
     }
 
-    // Filter DB Leaves by Date (Auto records are already filtered)
     if (viewMode !== 'All') {
         const targetYear = currentDate.getFullYear();
         const targetMonth = currentDate.getMonth();
@@ -340,7 +350,7 @@ export default function LeaveApplicationScreen() {
         filtered = filtered.filter(item => {
             if (item.isAutoRecord) return true; 
             
-            const dStr = item.fromDate || item.createdAt;
+            const dStr = item.fromDateIso || item.fromDate || item.createdAt;
             if(!dStr) return false;
             
             const itemDate = parseDate(dStr);
@@ -361,21 +371,17 @@ export default function LeaveApplicationScreen() {
         });
     }
 
-    // Sort uniquely generated UI records with database records
-    // 🔥 NEW SORTING: 'Pending' status at the absolute top, then by Date
     filtered.sort((a: any, b: any) => {
-        // 1. Pending Status Logic
         const aIsPending = a.status === 'Pending';
         const bIsPending = b.status === 'Pending';
 
-        if (aIsPending && !bIsPending) return -1; // 'a' goes up
-        if (!aIsPending && bIsPending) return 1;  // 'b' goes up
+        if (aIsPending && !bIsPending) return -1; 
+        if (!aIsPending && bIsPending) return 1;  
 
-        // 2. Date Logic (If both are pending, or both are not pending)
-        const dateA = a.isAutoRecord ? new Date(a.createdAt).getTime() : parseDate(a.createdAt).getTime();
-        const dateB = b.isAutoRecord ? new Date(b.createdAt).getTime() : parseDate(b.createdAt).getTime();
+        const dateA = a.isAutoRecord ? new Date(a.createdAt).getTime() : parseDate(a.createdAt || a.fromDate).getTime();
+        const dateB = b.isAutoRecord ? new Date(b.createdAt).getTime() : parseDate(b.createdAt || b.fromDate).getTime();
         
-        return dateB - dateA; // Newest first
+        return dateB - dateA; 
     });
 
     return filtered;
@@ -385,17 +391,19 @@ export default function LeaveApplicationScreen() {
   const renderedList = fullList.slice(0, visibleCount);
   const pendingCount = fullList.filter(i => i.status === 'Pending' && !i.isAutoRecord).length;
 
+  // 🔥 5. SAAS STATUS UPDATE LOGIC
   const handleStatusChange = async (status: string) => {
       if(selectedItem.isAutoRecord) {
           Alert.alert("Action Not Allowed", "This is an auto-generated system record.");
           return;
       }
-      if(updateLeaveStatus) {
-          setUpdatingStatus(status); 
-          try {
-              await updateLeaveStatus(selectedItem.id, status);
+      setUpdatingStatus(status); 
+      try {
+          const res = await updateSaaSData("leaves", selectedItem.id, { status: status });
+
+          if (res.success) {
               const targetUserId = selectedItem.senderId || selectedItem.userId;
-              if (addNotification && targetUserId && targetUserId !== user?.uid) {
+              if (addNotification && targetUserId && targetUserId !== (currentUser?.id || currentUser?.uid)) {
                   await addNotification({
                       title: `Leave ${status}`, 
                       message: `Your leave request for ${selectedItem.days} days has been ${status}.`,
@@ -405,10 +413,19 @@ export default function LeaveApplicationScreen() {
                       route: '/leave'
                   });
               }
+              
+              // Silent local reload
+              setLeaveList(prev => prev.map(item => item.id === selectedItem.id ? { ...item, status: status } : item));
+
               setModalVisible(false);
               Alert.alert("Updated", `Leave marked as ${status}`);
-          } catch (error) { Alert.alert("Error", "Could not update status."); } 
-          finally { setUpdatingStatus(null); }
+          } else {
+              Alert.alert("Error", "Could not update status.");
+          }
+      } catch (error) { 
+          Alert.alert("Error", "Could not update status."); 
+      } finally { 
+          setUpdatingStatus(null); 
       }
   };
 
@@ -420,7 +437,7 @@ export default function LeaveApplicationScreen() {
     const isCancelledRecord = item.isCancelled;
 
     let statusInfo = getStatusColor(item.status);
-    if (isCancelledRecord) statusInfo = { bg: '#e3f2fd', text: '#1565c0' }; // Blue for cancelled
+    if (isCancelledRecord) statusInfo = { bg: '#e3f2fd', text: '#1565c0' }; 
 
     let cardBorderColor = 'transparent';
     if (isAbsentRecord) cardBorderColor = item.type === 'Half Day' ? '#ff9800' : '#d32f2f';
@@ -458,7 +475,6 @@ export default function LeaveApplicationScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* 🔥 FIX 2: ALWAYS SHOW DASHBOARD CARDS TO EVERYONE */}
       <View style={styles.balanceContainer}>
           <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems:'center'}}>
               <View style={styles.statBox}>
@@ -538,7 +554,7 @@ export default function LeaveApplicationScreen() {
 
           <View style={{paddingHorizontal:15}}>
               <View style={styles.searchBar}>
-                  <Ionicons name="search" size={20} color="gray" />
+                  {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
                   <TextInput style={styles.searchInput} placeholder="Search..." value={searchText} onChangeText={setSearchText} />
                   {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={20} color="gray" /></TouchableOpacity>}
               </View>
@@ -548,10 +564,14 @@ export default function LeaveApplicationScreen() {
 
       <FlatList 
         data={renderedList} 
-        keyExtractor={item => item.id} 
+        keyExtractor={(item, index) => item.id || index.toString()} 
         renderItem={renderItem}
         contentContainerStyle={{padding: 15}}
-        ListEmptyComponent={<Text style={{textAlign:'center', marginTop:50, color:'gray'}}>No leave records found.</Text>}
+        ListEmptyComponent={
+            <View style={{alignItems: 'center', marginTop: 50}}>
+                {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{color:'gray'}}>No leave records found.</Text>}
+            </View>
+        }
         
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
@@ -576,7 +596,8 @@ export default function LeaveApplicationScreen() {
                   </View>
                   {selectedItem && (
                       <ScrollView>
-                          {canManage && <Text style={{color:'#1565c0', fontWeight:'bold', marginBottom:10}}>👤 {selectedItem.senderName}</Text>}
+                          {canManage && <View style={{backgroundColor:'#e3f2fd', padding:10, borderRadius:8, marginBottom:10}}><Text style={{color:'#1565c0', fontWeight:'bold', textAlign:'center'}}>👤 {selectedItem.senderName}</Text></View>}
+                          
                           <DetailRow label="Date" value={selectedItem.fromDate} />
                           {!selectedItem.isAutoRecord && <DetailRow label="To" value={selectedItem.toDate} />}
                           <DetailRow label={selectedItem.isEarned ? "Days Earned" : (selectedItem.isCancelled ? "Days Refunded" : "Days Deducted")} value={selectedItem.days} highlight />
@@ -641,7 +662,7 @@ const DetailRow = ({label, value, highlight, color}: any) => (
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 4 },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 10 },
   addBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#3b5998', borderRadius:5, paddingHorizontal:12, paddingVertical:8 },
   balanceContainer: { backgroundColor: 'white', margin: 15, borderRadius: 10, padding: 15, elevation: 3 },
   statBox: { alignItems: 'center', flex: 1 },
@@ -660,7 +681,7 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
   card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 15, elevation: 2 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom:5 },
-  date: { fontWeight:'bold', color:'gray' },
+  date: { fontWeight:'bold', color:'gray', fontSize:13 },
   statusBadge: { paddingHorizontal:8, paddingVertical:4, borderRadius:12 },
   statusText: { fontSize:10, fontWeight:'bold' },
   type: { fontWeight:'bold', fontSize:16, color:'#333', marginBottom:5 },

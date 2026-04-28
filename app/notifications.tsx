@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     FlatList,
     RefreshControl,
@@ -11,6 +12,9 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+
+// 🔥 SAAS IMPORTS (Removed DataContext notification functions)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 // Tab State Memory
@@ -19,19 +23,45 @@ let savedTabState = 'Unread';
 export default function NotificationScreen() {
   const router = useRouter();
   
-  const { notificationList = [], markNotificationRead, markAllNotificationsRead, currentUser } = useData();
+  // 🔥 1. Context se sirf current user nikala
+  const { currentUser } = useData();
   
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded States
+  const [notificationList, setNotificationList] = useState<any[]>([]);
+
   const [filter, setFilter] = useState(savedTabState);
   const [refreshing, setRefreshing] = useState(false);
   const [searchText, setSearchText] = useState(''); 
 
-  // 🔥 PAGINATION STATE (SMART LOAD MORE)
+  // PAGINATION STATE
   const [visibleCount, setVisibleCount] = useState(20);
 
-  // 🔥 RESET PAGINATION ON FILTER CHANGE
+  // RESET PAGINATION ON FILTER CHANGE
   useEffect(() => {
       setVisibleCount(20);
   }, [filter, searchText]);
+
+  // 🔥 4. LOAD SAAS DATA
+  const loadNotifications = async () => {
+      if (currentUser?.companyId) {
+          const data = await fetchSaaSData("notifications");
+          setNotificationList(data);
+      }
+  };
+
+  useEffect(() => {
+      loadNotifications();
+  }, [currentUser]);
+
+  // 🔥 5. PULL TO REFRESH LOGIC
+  const onRefresh = async () => {
+      setRefreshing(true);
+      await loadNotifications();
+      setRefreshing(false);
+  };
 
   const changeFilter = (newFilter: any) => {
       savedTabState = newFilter; 
@@ -39,7 +69,7 @@ export default function NotificationScreen() {
       setSearchText(''); 
   };
 
-  // --- 🔥 FILTER LOGIC ---
+  // --- FILTER LOGIC ---
   const getMyNotifications = () => {
       if (!currentUser || !notificationList) return [];
 
@@ -50,25 +80,20 @@ export default function NotificationScreen() {
       return notificationList.filter((n: any) => {
           const target = (n.to || '').toLowerCase().trim();
           if (target === myName) return true;
-          if (n.to === myId) return true;
+          if (n.to === myId || n.userId === myId) return true;
           if (target === myRole) return true;
           if (myRole === 'admin' && target === 'admin') return true;
           return false;
       });
   };
 
-  // 1. Get My Notifications
   let myData = getMyNotifications();
-
-  // 2. Sort (Newest First)
   myData.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-  // 3. Apply Tab Filter
   let displayList = myData;
   if (filter === 'Unread') displayList = myData.filter((item: any) => !item.read);
   if (filter === 'Read') displayList = myData.filter((item: any) => item.read);
 
-  // 4. 🔥 SUPER SEARCH LOGIC (Only for 'All' Tab)
   if (filter === 'All' && searchText.trim() !== '') {
       const query = searchText.toLowerCase().trim();
       
@@ -86,8 +111,21 @@ export default function NotificationScreen() {
       });
   }
 
-  // 🔥 SLICE FOR LIST (Rendered Data)
   const renderedList = displayList.slice(0, visibleCount);
+
+  // 🔥 6. SAAS MARK AS READ
+  const markNotificationRead = async (id: string) => {
+      try {
+          if (id && typeof id === 'string' && id.length > 10) {
+              const res = await updateSaaSData("notifications", id, { read: true });
+              if (res.success) {
+                  setNotificationList(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+              }
+          }
+      } catch (error) {
+          console.log("❌ Notification update failed:", error);
+      }
+  };
 
   const handlePress = async (item: any) => {
       let targetRoute = item.route || item.screen;
@@ -106,21 +144,11 @@ export default function NotificationScreen() {
       if (targetRoute === 'tasks' || item.title?.includes('Task')) targetRoute = '/tasks';
 
       if (!item.read) {
-          item.read = true;
+          item.read = true; // Optimistic UI update
           if(filter === 'Unread') {
-             setRefreshing(true);
-             setTimeout(() => setRefreshing(false), 100);
+             // Let it disappear smoothly
           }
-
-          try {
-              if (item.id && typeof item.id === 'string' && item.id.length > 15 && isNaN(Number(item.id))) {
-                  await markNotificationRead(item.id);
-              } else {
-                  console.log("⚠️ Invalid ID detected, skipping Firebase update:", item.id);
-              }
-          } catch (error) {
-              console.log("❌ Notification update failed (Old/Deleted data):", error);
-          }
+          await markNotificationRead(item.id);
       }
 
       if (targetRoute) {
@@ -135,11 +163,23 @@ export default function NotificationScreen() {
       }
   };
 
+  // 🔥 7. SAAS BATCH MARK ALL READ
   const handleMarkAll = () => {
       if (displayList.length === 0) return;
       Alert.alert("Mark All Read", "Are you sure?", [
           { text: "Cancel", style: "cancel" },
-          { text: "Yes", onPress: markAllNotificationsRead }
+          { text: "Yes", onPress: async () => {
+              const unreadItems = displayList.filter(item => !item.read);
+              const promises = unreadItems.map(item => updateSaaSData("notifications", item.id, { read: true }));
+              
+              await Promise.all(promises);
+              
+              setNotificationList(prev => prev.map(n => {
+                  if (unreadItems.some(ui => ui.id === n.id)) return { ...n, read: true };
+                  return n;
+              }));
+              Alert.alert("Success", "All notifications marked as read.");
+          }}
       ]);
   };
 
@@ -201,7 +241,7 @@ export default function NotificationScreen() {
           ))}
       </View>
 
-      {/* SEARCH BAR (Visible Only when 'All' is selected) */}
+      {/* SEARCH BAR */}
       {filter === 'All' && (
           <View style={styles.searchWrapper}>
               <View style={styles.searchBar}>
@@ -235,13 +275,17 @@ export default function NotificationScreen() {
         keyExtractor={(item: any) => item.id}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={()=>{setRefreshing(true); setTimeout(()=>setRefreshing(false), 1000)}} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListEmptyComponent={
             <View style={styles.emptyBox}>
-                <Ionicons name={searchText ? "search" : "notifications-off-outline"} size={60} color="#DDD" />
-                <Text style={styles.emptyText}>
-                    {searchText ? `No match for "${searchText}"` : `No notifications in ${filter}`}
-                </Text>
+                {isDbLoading ? <ActivityIndicator size="large" color="#1A237E" /> : (
+                    <>
+                        <Ionicons name={searchText ? "search" : "notifications-off-outline"} size={60} color="#DDD" />
+                        <Text style={styles.emptyText}>
+                            {searchText ? `No match for "${searchText}"` : `No notifications in ${filter}`}
+                        </Text>
+                    </>
+                )}
             </View>
         }
         renderItem={({ item }: any) => {
@@ -277,7 +321,6 @@ export default function NotificationScreen() {
             );
         }}
         
-        // 🔥 LOAD MORE BUTTON FOOTER (FIXED WITH PADDING)
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
                 {visibleCount < displayList.length ? (
@@ -328,7 +371,6 @@ const styles = StyleSheet.create({
   activeTabText: { color: 'white' },
   unreadDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#FF5252', marginLeft: 5 },
   
-  // SEARCH BAR STYLES
   searchWrapper: { paddingHorizontal: 15, marginBottom: 5, marginTop: 5 },
   searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', borderRadius: 12, paddingHorizontal: 12, height: 45, borderWidth: 1, borderColor: '#E0E0E0' },
   searchInput: { flex: 1, fontSize: 14, color: '#333' },

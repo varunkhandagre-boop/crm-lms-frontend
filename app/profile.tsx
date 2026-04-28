@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -15,7 +14,9 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS (Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 import * as FileSystem from 'expo-file-system/legacy';
@@ -24,23 +25,33 @@ import * as Sharing from 'expo-sharing';
 
 export default function ProfileScreen() {
   const router = useRouter();
+  
+  // 🔥 1. Context se global details
   const { currentUser, logout, companyProfile } = useData();
+  
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData, updateSaaSData } = useSaaSDB();
+
   const [uploading, setUploading] = useState(false);
   const [sharing, setSharing] = useState(false);
   
-  const [currentImage, setCurrentImage] = useState(currentUser?.profileImage || null);
-  const [userData, setUserData] = useState(currentUser);
+  // 🔥 Type assertion (as any) add kiya gaya hai
+  const [currentImage, setCurrentImage] = useState((currentUser as any)?.profileImage || null);
+  const [userData, setUserData] = useState<any>(currentUser);
 
+  // 🔥 3. LOAD PROFILE DATA (SAAS IMPLEMENTATION)
   useEffect(() => {
     const fetchLatestProfile = async () => {
-      if (currentUser?.id) {
+      if ((currentUser as any)?.email) {
         try {
-          // Firebase se fresh data lo
-          const userDoc = await getDoc(doc(db, "users", currentUser.email.toLowerCase()));
+          const users = await fetchSaaSData("users");
+          const userEmail = (currentUser as any).email.toLowerCase();
           
-          if (userDoc.exists()) {
-            const data = userDoc.data();
-            // 1. Photo update karo
+          // Find the current user in the tenant's user list
+          const data: any = users.find((u: any) => u.id === userEmail || u.email === userEmail);
+          
+          if (data) {
+            // 1. Photo update karo (data ko any type diya gaya hai)
             setCurrentImage(data.profileImage || null);
             // 2. Baki details (City, State) bhi update karo
             setUserData({ ...currentUser, ...data });
@@ -51,12 +62,12 @@ export default function ProfileScreen() {
       }
     };
     fetchLatestProfile();
-  }, [currentUser?.id]);
+  }, [currentUser]);
 
   const handleLogout = async () => {
     Alert.alert("Logout", "Are you sure?", [
       { text: "Cancel", style: "cancel" },
-      { text: "Logout", style: 'destructive', onPress: async () => { if (logout) await logout(); router.replace('/'); } }
+      { text: "Logout", style: 'destructive', onPress: async () => { if (logout) await logout(); router.replace('/' as any); } }
     ]);
   };
 
@@ -69,14 +80,20 @@ export default function ProfileScreen() {
       ]);
   };
 
+  // 🔥 4. SAAS PHOTO REMOVAL
   const removeProfilePhoto = async () => {
-      if (!currentUser?.id) return;
+      if (!currentUser?.email) return;
       setUploading(true);
       try {
-          const userRef = doc(db, "users", currentUser.email.toLowerCase());
-          await setDoc(userRef, { profileImage: null, updatedAt: new Date().toISOString() }, { merge: true });
-          setCurrentImage(null);
-          Alert.alert("Success", "Profile photo removed.");
+          const userEmail = currentUser.email.toLowerCase();
+          const res = await updateSaaSData("users", userEmail, { profileImage: null, updatedAt: new Date().toISOString() });
+          
+          if (res.success) {
+              setCurrentImage(null);
+              Alert.alert("Success", "Profile photo removed.");
+          } else {
+              throw new Error("Failed to remove photo.");
+          }
       } catch (error) { Alert.alert("Error", "Failed to remove photo."); } 
       finally { setUploading(false); }
   };
@@ -94,15 +111,22 @@ export default function ProfileScreen() {
       } catch (error) { Alert.alert("Error", "Could not open gallery."); }
   };
 
+  // 🔥 5. SAAS PHOTO UPDATE
   const savePhotoToFirebase = async (localUri: string, base64: string) => {
-      if (!currentUser?.id) return;
+      if (!currentUser?.email) return;
       setUploading(true);
       try {
           const imageString = `data:image/jpeg;base64,${base64}`;
-          setCurrentImage(imageString);
-          const userRef = doc(db, "users", currentUser.email.toLowerCase());
-          await setDoc(userRef, { profileImage: imageString, updatedAt: new Date().toISOString() }, { merge: true });
-          Alert.alert("Success", "Profile Photo Updated!");
+          const userEmail = currentUser.email.toLowerCase();
+          
+          const res = await updateSaaSData("users", userEmail, { profileImage: imageString, updatedAt: new Date().toISOString() });
+          
+          if (res.success) {
+              setCurrentImage(imageString);
+              Alert.alert("Success", "Profile Photo Updated!");
+          } else {
+              throw new Error("Update failed.");
+          }
       } catch (error: any) { Alert.alert("Error", "Failed to save photo."); } 
       finally { setUploading(false); }
   };
@@ -282,12 +306,11 @@ export default function ProfileScreen() {
                     <Text style={styles.value}>{currentUser?.role || 'Staff'}</Text>
                 </View>
                 <View style={styles.infoItem}>
-    <Text style={styles.label}>Location</Text>
-    <Text style={styles.value}>
-        {/* Ab ye 'userData' se fresh city uthayega */}
-        {userData?.city ? `${userData?.city} ${userData?.state ? ', ' + userData.state : ''}` : (userData?.address || 'Not Set')}
-    </Text>
-</View>
+                    <Text style={styles.label}>Location</Text>
+                    <Text style={styles.value}>
+                        {userData?.city ? `${userData?.city} ${userData?.state ? ', ' + userData.state : ''}` : (userData?.address || 'Not Set')}
+                    </Text>
+                </View>
             </View>
 
             {/* COMPANY DETAILS */}

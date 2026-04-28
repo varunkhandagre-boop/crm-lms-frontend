@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { collection, getDocs, query } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     FlatList,
     Modal,
@@ -14,22 +14,33 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS (Direct DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function SalesReportScreen() {
   const router = useRouter();
-  // 🔥 1. यहाँ markAllNotificationsRead को ऐड किया गया है
-  const { salesVisitList = [], user, orgList = [], markAllNotificationsRead } = useData();
+  
+  // 🔥 1. Context se sirf user aur notification action nikala
+  const { currentUser, markAllNotificationsRead } = useData();
 
-  // 🔥 2. नया useEffect यहाँ डाल दिया गया है (पेज खुलते ही लाल बैज 0 हो जाएगा)
+  // 🔥 2. Naya SaaS Engine
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+
+  // 🔥 3. Lazy Loaded States
+  const [salesVisitList, setSalesVisitList] = useState<any[]>([]);
+  const [orgList, setOrgList] = useState<any[]>([]);
+  const [userList, setUserList] = useState<any[]>([]);
+  const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
+
   useEffect(() => {
       if (markAllNotificationsRead) {
           markAllNotificationsRead();
       }
   }, []);
 
-  // 🔥 NEW STATES: Filter by Visit Type instead of Status
+  // STATES
   const [visitTypeFilter, setVisitTypeFilter] = useState<'Cold Call' | 'Follow Up' | 'All'>('All');
   const [searchText, setSearchText] = useState('');
   
@@ -37,16 +48,18 @@ export default function SalesReportScreen() {
   const [currentDate, setCurrentDate] = useState(new Date());
 
   // EMPLOYEE FILTER
-  const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
   const [selectedEmployee, setSelectedEmployee] = useState('All'); 
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  // READ-ONLY MODAL (For non-lead visits)
+  // READ-ONLY MODAL
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
 
   const [visibleCount, setVisibleCount] = useState(20);
+
+  const userRole = currentUser?.role ? currentUser.role.toLowerCase() : 'unknown';
+  const isAdmin = userRole === 'admin' || userRole === 'manager' || userRole === 'accountant' || userRole === 'hr' || userRole === 'store' || userRole === 'superadmin';
 
   useEffect(() => {
       if (viewMode === 'Day' && visitTypeFilter === 'All' && !searchText) {
@@ -56,23 +69,30 @@ export default function SalesReportScreen() {
       }
   }, [viewMode, currentDate, visitTypeFilter, searchText, selectedEmployee]);
 
-  const userRole = user?.role ? user.role.toLowerCase() : 'unknown';
-  const isAdmin = userRole === 'admin' || userRole === 'manager' || userRole === 'accountant' || userRole === 'hr' || userRole === 'store';
-
-  // --- FETCH EMPLOYEES (ADMIN ONLY) ---
+  // 🔥 4. LOAD SAAS DATA ON MOUNT
   useEffect(() => {
-    if (isAdmin) {
-      const fetchEmployees = async () => {
-        try {
-          const q = query(collection(db, "users"));
-          const querySnapshot = await getDocs(q);
-          const usersData = querySnapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name || 'Unknown User' }));
-          setEmployees([{ id: 'All', name: 'All Staff' }, ...usersData]);
-        } catch (error) {}
+      const loadData = async () => {
+          if (currentUser?.companyId) {
+              const [visits, orgs, users] = await Promise.all([
+                  fetchSaaSData("sales_reports"),
+                  fetchSaaSData("organizations"),
+                  fetchSaaSData("users")
+              ]);
+              setSalesVisitList(visits);
+              setOrgList(orgs);
+              setUserList(users);
+
+              if (isAdmin) {
+                  const mappedUsers = users.map((u: any) => ({
+                      id: u.id,
+                      name: u.name || 'Unknown User'
+                  }));
+                  setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
+              }
+          }
       };
-      fetchEmployees();
-    }
-  }, [user]);
+      loadData();
+  }, [currentUser]);
 
   const getCity = (item: any) => {
       if (item.city) return item.city;
@@ -123,15 +143,15 @@ export default function SalesReportScreen() {
 
   // --- FILTER LOGIC ---
   const getData = () => {
-      let list = salesVisitList || [];
+      let list = salesVisitList ? [...salesVisitList] : [];
 
       if (!isAdmin) {
-          list = list.filter((item: any) => item.senderId === user?.uid || item.senderUid === user?.uid);
+          const myId = currentUser?.uid || currentUser?.id;
+          list = list.filter((item: any) => item.senderId === myId || item.senderUid === myId);
       } else if (selectedEmployee !== 'All') {
           list = list.filter((item: any) => (item.senderId === selectedEmployee) || (item.senderUid === selectedEmployee) || (item.senderName === selectedEmployeeName));
       }
 
-      // 🔥 NEW LOGIC: Filter by Visit Type (Cold Call vs Follow Up)
       if (visitTypeFilter === 'Cold Call') list = list.filter((i: any) => i.visitType === 'Cold Call');
       else if (visitTypeFilter === 'Follow Up') list = list.filter((i: any) => i.visitType === 'Follow Up');
 
@@ -153,7 +173,7 @@ export default function SalesReportScreen() {
           const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime();
 
           list = list.filter((item: any) => {
-              const dateField = item.date || item.createdAt;
+              const dateField = item.dateIso || item.date || item.createdAt;
               if(!dateField) return false;
               const itemDate = new Date(parseDate(dateField));
               const itemTime = itemDate.getTime();
@@ -166,9 +186,9 @@ export default function SalesReportScreen() {
       }
 
       return list.sort((a: any, b: any) => {
-          const dateA = a.nextFollowUp ? parseDate(a.nextFollowUp) : parseDate(a.date);
-          const dateB = b.nextFollowUp ? parseDate(b.nextFollowUp) : parseDate(b.date);
-          return dateB - dateA; // Sorted by recent
+          const dateA = a.nextFollowUp ? parseDate(a.nextFollowUp) : parseDate(a.dateIso || a.date);
+          const dateB = b.nextFollowUp ? parseDate(b.nextFollowUp) : parseDate(b.dateIso || b.date);
+          return dateB - dateA; 
       });
   };
 
@@ -180,21 +200,21 @@ export default function SalesReportScreen() {
       const localTodayStr = now.toISOString().split('T')[0];
 
       const todaysVisits = salesVisitList.filter((item: any) => {
-          const isDateMatch = item.date === localTodayStr;
-          const targetId = selectedEmployee !== 'All' ? selectedEmployee : user?.uid;
-          const isUserMatch = item.senderId === targetId || item.senderId === user?.id; 
+          const isDateMatch = (item.dateIso === localTodayStr || item.date === localTodayStr);
+          const targetId = selectedEmployee !== 'All' ? selectedEmployee : (currentUser?.uid || currentUser?.id);
+          const isUserMatch = item.senderId === targetId || item.senderUid === targetId; 
           return isDateMatch && isUserMatch;
       });
 
       if (todaysVisits.length === 0) return Alert.alert("No Data", `No visits found for date: ${localTodayStr}`);
 
-      const reportName = selectedEmployee !== 'All' ? selectedEmployeeName : (user?.name || 'Sales Person');
+      const reportName = selectedEmployee !== 'All' ? selectedEmployeeName : (currentUser?.name || 'Sales Person');
       let message = `📅 *Daily Sales Report (DSR)* \n👤 *${reportName}*\n📆 Date: ${now.toLocaleDateString('en-GB')}\n\n`;
 
       todaysVisits.forEach((visit: any, index: number) => {
           const note = (visit.discussion || '-').split('\n')[0].substring(0, 30);
           const productLine = visit.product ? `   └ 📦 Item: ${visit.product}\n` : ''; 
-          message += `${index + 1}. *[${visit.visitType || 'Visit'}] ${visit.hospital}*\n${productLine}   └ 📊 Status: ${visit.outcome}\n   └ 📝 Note: ${note}...\n\n`;
+          message += `${index + 1}. *[${visit.visitType || 'Visit'}] ${visit.hospital || visit.hospitalName}*\n${productLine}   └ 📊 Status: ${visit.outcome}\n   └ 📝 Note: ${note}...\n\n`;
       });
 
       message += `------------------\n*Total Visits: ${todaysVisits.length}* 🚀`;
@@ -222,7 +242,7 @@ export default function SalesReportScreen() {
           >
               <View style={styles.cardHeader}>
                   <View style={{flex:1, marginRight: 5}}>
-                      <Text style={styles.hospitalName} numberOfLines={1}>{item.hospital}</Text>
+                      <Text style={styles.hospitalName} numberOfLines={1}>{item.hospital || item.hospitalName}</Text>
                       
                       {item.product ? (
                           <View style={{flexDirection:'row', alignItems:'center', marginTop:2}}>
@@ -251,7 +271,7 @@ export default function SalesReportScreen() {
               </View>
               <View style={styles.divider} />
               <View style={{flexDirection:'row', justifyContent:'space-between'}}>
-                  <Text style={styles.dateText}>📅 {formatDateDisplay(item.date)}</Text>
+                  <Text style={styles.dateText}>📅 {formatDateDisplay(item.dateIso || item.date)}</Text>
                   {item.nextFollowUp && <Text style={[styles.dateText, {color: '#d32f2f', fontWeight:'bold'}]}>⏰ {item.nextFollowUp}</Text>}
               </View>
               {item.discussion ? <Text style={styles.noteText} numberOfLines={1}>📝 {item.discussion.split('\n')[0]}</Text> : null}
@@ -282,7 +302,6 @@ export default function SalesReportScreen() {
         </View>
       </View>
 
-      {/* 🔥 NEW UI: Visit Type Filter */}
       <View style={styles.subTabContainer}>
           <TouchableOpacity style={[styles.subTab, visitTypeFilter === 'Cold Call' && styles.activeSubTabColdCall]} onPress={() => setVisitTypeFilter('Cold Call')}>
               <Text style={[styles.subTabText, visitTypeFilter === 'Cold Call' && {color:'white'}]}>Cold Calls</Text>
@@ -297,7 +316,7 @@ export default function SalesReportScreen() {
 
       <View style={{backgroundColor:'white', padding:10, marginBottom:5}}>
           <View style={styles.searchBar}>
-              <Ionicons name="search" size={24} color="#1565c0" /> 
+              {isDbLoading ? <ActivityIndicator size="small" color="#1565c0" style={{marginRight: 5}}/> : <Ionicons name="search" size={24} color="#1565c0" />} 
               <TextInput style={styles.input} placeholder="Search: Hospital, City..." value={searchText} onChangeText={setSearchText} />
               {searchText.length > 0 && (
                   <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={20} color="#d32f2f" /></TouchableOpacity>
@@ -353,7 +372,16 @@ export default function SalesReportScreen() {
           keyExtractor={item => item.id}
           contentContainerStyle={styles.listContent}
           renderItem={renderItem}
-          ListEmptyComponent={<View style={{alignItems:'center', marginTop:50}}><Ionicons name="folder-open-outline" size={60} color="#ddd" /><Text style={{color:'gray', marginTop:0}}>No Visits Found.</Text></View>}
+          ListEmptyComponent={
+              <View style={{alignItems:'center', marginTop:50}}>
+                  {isDbLoading ? <ActivityIndicator size="large" color="#1565c0"/> : (
+                      <>
+                        <Ionicons name="folder-open-outline" size={60} color="#ddd" />
+                        <Text style={{color:'gray', marginTop:0}}>No Visits Found.</Text>
+                      </>
+                  )}
+              </View>
+          }
           
           ListFooterComponent={
               <View style={{ paddingBottom: 80 }}>
@@ -379,7 +407,7 @@ export default function SalesReportScreen() {
           }
       />
 
-      {/* READ-ONLY MODAL (For non-lead visits) */}
+      {/* READ-ONLY MODAL */}
       <Modal visible={modalVisible} transparent={true} animationType="slide">
           <View style={styles.modalOverlay}>
               <View style={styles.modalContent}>
@@ -392,7 +420,7 @@ export default function SalesReportScreen() {
                   {selectedItem && (
                       <ScrollView showsVerticalScrollIndicator={false}>
                           <View style={styles.readOnlyBox}>
-                              <Text style={styles.roTitle}>{selectedItem.hospital}</Text>
+                              <Text style={styles.roTitle}>{selectedItem.hospital || selectedItem.hospitalName}</Text>
                               <Text style={styles.roSub}>{selectedItem.person} • {getCity(selectedItem)}</Text>
                               {selectedItem.product && <Text style={{marginTop:5, fontWeight:'bold', color:'#333'}}>📦 {selectedItem.product}</Text>}
                           </View>
@@ -400,7 +428,7 @@ export default function SalesReportScreen() {
                           <View style={styles.historyBox}>
                               <Text style={{fontWeight: 'bold', color: '#555', marginBottom: 5}}>Type: <Text style={{color: '#1565c0'}}>{selectedItem.visitType || 'Visit'}</Text></Text>
                               <Text style={{fontWeight: 'bold', color: '#555', marginBottom: 5}}>Outcome: <Text style={{color: '#d32f2f'}}>{selectedItem.outcome}</Text></Text>
-                              <Text style={{fontWeight: 'bold', color: '#555', marginBottom: 10}}>Date: <Text style={{color: '#3b5998'}}>{formatDateDisplay(selectedItem.date)}</Text></Text>
+                              <Text style={{fontWeight: 'bold', color: '#555', marginBottom: 10}}>Date: <Text style={{color: '#3b5998'}}>{formatDateDisplay(selectedItem.dateIso || selectedItem.date)}</Text></Text>
                               <View style={styles.divider} />
                               <Text style={styles.sectionHeader}>DISCUSSION NOTE</Text>
                               <Text style={styles.historyText}>{selectedItem.discussion || 'No discussion notes recorded.'}</Text>

@@ -1,7 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { getAuth } from 'firebase/auth';
-import { addDoc, collection, deleteDoc, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -17,15 +15,21 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db } from '../firebaseConfig';
 
-// 🔥 VOICE IMPORT DISABLED FOR NOW
-// import Voice from '@react-native-voice/voice';
+// 🔥 SAAS IMPORTS (Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
+import { useData } from './context/DataContext';
 
 const NOTE_COLORS = ['#fff9c4', '#bbdefb', '#c8e6c9', '#f8bbd0', '#ffecb3', '#e1bee7'];
 
 export default function PersonalNotesScreen() {
     const router = useRouter();
+
+    // 🔥 1. Context se current user nikalenge
+    const { currentUser } = useData();
+
+    // 🔥 2. Naya SaaS Engine connect karenge
+    const { fetchSaaSData, addSaaSData, updateSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
 
     // STATES
     const [notes, setNotes] = useState<any[]>([]);
@@ -48,38 +52,40 @@ export default function PersonalNotesScreen() {
     const [isPinned, setIsPinned] = useState(false); 
     const [isSaving, setIsSaving] = useState(false);
 
-    // FETCH NOTES
-    useEffect(() => {
-        const auth = getAuth();
-        const currentUser = auth.currentUser;
+    // 🔥 3. LOAD DATA (SAAS IMPLEMENTATION)
+    const loadNotes = async () => {
+        if (!currentUser) return;
+        setLoading(true);
+        try {
+            const data = await fetchSaaSData("personal_notes");
+            
+            // Filter strictly for this user 
+            // Note: SaaS Engine usually scopes by companyId, but for notes we strictly scope by userId too.
+            const userNotes = data.filter((n: any) => n.userId === (currentUser.uid || currentUser.id));
 
-        if (!currentUser) { setLoading(false); return; }
-
-        const q = query(collection(db, "personal_notes"), where("userId", "==", currentUser.uid));
-
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-            // 📌 Sorting: Pinned first, then latest edited
-            list.sort((a: any, b: any) => {
+            // Sorting: Pinned first, then latest edited
+            userNotes.sort((a: any, b: any) => {
                 if (a.isPinned && !b.isPinned) return -1;
                 if (!a.isPinned && b.isPinned) return 1;
-                return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+                return new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime();
             });
 
-            setNotes(list);
+            setNotes(userNotes);
+        } catch (error) {
+            console.log(error);
+        } finally {
             setLoading(false);
-        });
+        }
+    };
 
-        return () => unsubscribe();
-    }, []);
+    useEffect(() => {
+        loadNotes();
+    }, [currentUser]);
 
 
-    // --- 🎤 VOICE TO TEXT (DUMMY FUNCTION FOR NOW) ---
     const toggleRecording = () => {
         Alert.alert("Coming Soon 🎤", "Voice-to-Text feature will be available in the next update!");
     };
-    // ---------------------------------
 
     // Filter Logic (Search + Archive)
     const filteredNotes = notes.filter(note => {
@@ -104,42 +110,61 @@ export default function PersonalNotesScreen() {
         setIsPinned(note.isPinned || false); setModalVisible(true);
     };
 
+    // 🔥 4. SAAS SAVE / UPDATE
     const handleSave = async () => {
         if (!title.trim() && !content.trim()) { Alert.alert("Empty", "Please write something."); return; }
-        const auth = getAuth(); const currentUser = auth.currentUser;
         if (!currentUser) return;
 
         setIsSaving(true);
         try {
             const noteData = {
-                title: title || 'Untitled', content: content, color: selectedColor, 
-                isPinned: isPinned, updatedAt: new Date().toISOString(), userId: currentUser.uid,
+                title: title || 'Untitled', 
+                content: content, 
+                color: selectedColor, 
+                isPinned: isPinned, 
+                updatedAt: new Date().toISOString(), 
+                userId: currentUser.uid || currentUser.id,
                 isArchived: false 
             };
 
             if (isEditing) {
-                await updateDoc(doc(db, "personal_notes", selectedNoteId), noteData);
+                await updateSaaSData("personal_notes", selectedNoteId, noteData);
             } else {
-                await addDoc(collection(db, "personal_notes"), { ...noteData, createdAt: new Date().toISOString() });
+                await addSaaSData("personal_notes", { ...noteData, createdAt: new Date().toISOString() });
             }
+            
             setModalVisible(false);
-        } catch (error: any) { Alert.alert("Error", error.message); } 
-        finally { setIsSaving(false); }
+            await loadNotes(); // Reload lists
+        } catch (error: any) { 
+            Alert.alert("Error", error.message); 
+        } finally { 
+            setIsSaving(false); 
+        }
     };
 
+    // 🔥 5. SAAS DELETE
     const handleDelete = (id: string) => {
         Alert.alert("Delete Note?", "This action cannot be undone.", [
             { text: "Cancel", style: "cancel" },
-            { text: "Delete", style: 'destructive', onPress: async () => await deleteDoc(doc(db, "personal_notes", id)) }
+            { 
+                text: "Delete", 
+                style: 'destructive', 
+                onPress: async () => {
+                    await deleteSaaSData("personal_notes", id);
+                    await loadNotes();
+                }
+            }
         ]);
     };
 
+    // 🔥 6. SAAS TOGGLE ARCHIVE
     const toggleArchive = async (note: any) => {
         try {
-            await updateDoc(doc(db, "personal_notes", note.id), { 
+            await updateSaaSData("personal_notes", note.id, { 
                 isArchived: !note.isArchived,
                 isPinned: false 
             });
+            await loadNotes();
         } catch (error: any) { Alert.alert("Error", error.message); }
     };
 
@@ -170,7 +195,7 @@ export default function PersonalNotesScreen() {
             <Text style={styles.cardContent} numberOfLines={isGridView ? 5 : undefined}>{item.content}</Text>
             
             <View style={styles.cardFooter}>
-                <Text style={styles.dateText}>{formatSmartDate(item.updatedAt)}</Text>
+                <Text style={styles.dateText}>{formatSmartDate(item.updatedAt || item.createdAt)}</Text>
                 <View style={{flexDirection: 'row', gap: 12}}>
                     <TouchableOpacity onPress={() => handleShare(item)}><Ionicons name="share-social-outline" size={18} color="#555" /></TouchableOpacity>
                     <TouchableOpacity onPress={() => toggleArchive(item)}>
@@ -202,7 +227,7 @@ export default function PersonalNotesScreen() {
 
             {/* Smart Search Bar */}
             <View style={styles.searchContainer}>
-                <Ionicons name="search" size={20} color="#888" style={{marginLeft: 10}} />
+                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" style={{marginLeft: 10}}/> : <Ionicons name="search" size={20} color="#888" style={{marginLeft: 10}} />}
                 <TextInput 
                     style={styles.searchInput}
                     placeholder="Search your notes..."
@@ -311,11 +336,9 @@ const styles = StyleSheet.create({
     header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, paddingTop: 50, backgroundColor: 'white', alignItems:'center' },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
     
-    // Search Bar
     searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e0e0e0', margin: 15, borderRadius: 25, height: 45, paddingHorizontal: 5 },
     searchInput: { flex: 1, marginLeft: 10, fontSize: 15, color: '#333' },
 
-    // Card Styles
     card: { width: '48%', padding: 15, borderRadius: 12, marginBottom: 15, elevation: 2, borderWidth: 1, borderColor: 'rgba(0,0,0,0.05)', shadowColor: '#000', shadowOpacity: 0.1, shadowOffset: {width: 0, height: 2} },
     cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 5 },
     cardTitle: { fontWeight: 'bold', fontSize: 16, color: '#333', flex:1 },

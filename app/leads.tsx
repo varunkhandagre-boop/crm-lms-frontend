@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { collection, getDocs, query } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     FlatList,
     Linking,
@@ -14,12 +14,23 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db } from '../firebaseConfig';
+
+// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function LeadsScreen() {
     const router = useRouter();
-    const { leadsList = [], user } = useData();
+    
+    // 🔥 1. Context se sirf user
+    const { currentUser } = useData();
+
+    // 🔥 2. Naya SaaS Engine
+    const { fetchSaaSData, isDbLoading } = useSaaSDB();
+
+    // 🔥 3. Lazy Loaded States
+    const [leadsList, setLeadsList] = useState<any[]>([]);
+    const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
 
     // --- STATES ---
     const [activeFilter, setActiveFilter] = useState('All');
@@ -30,7 +41,6 @@ export default function LeadsScreen() {
     const [currentDate, setCurrentDate] = useState(new Date());
 
     // EMPLOYEE FILTER
-    const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
     const [selectedEmployee, setSelectedEmployee] = useState('All');
     const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
     const [showEmployeePicker, setShowEmployeePicker] = useState(false);
@@ -41,6 +51,10 @@ export default function LeadsScreen() {
     
     const [visibleCount, setVisibleCount] = useState(20);
 
+    const userRole = currentUser?.role ? currentUser.role.toLowerCase() : 'employee';
+    const canViewEmployeeFilter = ['admin', 'manager', 'accountant', 'hr'].includes(userRole);
+    const isMaster = ['admin', 'manager', 'accountant', 'hr', 'store', 'superadmin'].includes(userRole);
+
     useEffect(() => {
         if (viewMode === 'Day' && !quickFilter && !searchText) setVisibleCount(500); 
         else setVisibleCount(20); 
@@ -50,21 +64,27 @@ export default function LeadsScreen() {
     const leadStatuses = ['All', 'Interested', 'Follow Up', 'Demo Planned', 'Order Expected', 'Converted (Win)', 'Lost'];
     const leadStages = ['All', 'New', 'Introduction', 'Technical Review', 'Quotation', 'Negotiation', 'Order Closed'];
 
-    const canViewEmployeeFilter = ['Admin', 'Manager', 'Accountant', 'Hr'].includes(user?.role || '');
-
+    // 🔥 4. MASSIVE SAAS DATA LOAD ON MOUNT
     useEffect(() => {
-        if (canViewEmployeeFilter) {
-            const fetchEmployees = async () => {
-                try {
-                    const q = query(collection(db, "users"));
-                    const querySnapshot = await getDocs(q);
-                    const usersData = querySnapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name || 'Unknown User' }));
-                    setEmployees([{ id: 'All', name: 'All Staff' }, ...usersData]);
-                } catch (error) {}
-            };
-            fetchEmployees();
-        }
-    }, [user]);
+        const loadData = async () => {
+            if (currentUser?.companyId) {
+                const [leads, users] = await Promise.all([
+                    fetchSaaSData("leads"),
+                    fetchSaaSData("users")
+                ]);
+                setLeadsList(leads);
+
+                if (canViewEmployeeFilter) {
+                    const mappedUsers = users.map((u: any) => ({
+                        id: u.id,
+                        name: u.name || 'Unknown User'
+                    }));
+                    setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
+                }
+            }
+        };
+        loadData();
+    }, [currentUser]);
 
     const parseDate = (dateStr: any) => {
         if (!dateStr) return new Date(0);
@@ -129,12 +149,11 @@ export default function LeadsScreen() {
 
     const getFilteredData = () => {
         let data = Array.isArray(leadsList) ? [...leadsList] : [];
-        const userRole = user?.role ? user.role.toLowerCase() : 'employee';
-        const isMaster = ['admin', 'manager', 'accountant', 'hr', 'store'].includes(userRole);
 
         if (!isMaster) {
+            const myId = currentUser?.id || currentUser?.uid;
             data = data.filter((item: any) => 
-                item.userId === user?.uid || item.assignedTo === user?.uid || item.senderId === user?.uid || item.senderUid === user?.uid
+                item.userId === myId || item.assignedTo === myId || item.senderId === myId || item.senderUid === myId
             );
         }
 
@@ -202,7 +221,7 @@ export default function LeadsScreen() {
             const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
 
             data = data.filter((item: any) => {
-                const dateToCheck = item.nextDate || item.date || item.createdAt;
+                const dateToCheck = item.nextDate || item.dateIso || item.createdAt || item.date;
                 if (!dateToCheck) return false;
                 const itemDate = parseDate(dateToCheck);
                 const itemTime = itemDate.getTime();
@@ -229,11 +248,14 @@ export default function LeadsScreen() {
 
     const getActionCounts = () => {
         let baseData = Array.isArray(leadsList) ? [...leadsList] : [];
-        const userRole = user?.role ? user.role.toLowerCase() : 'employee';
-        const isMaster = ['admin', 'manager', 'accountant', 'hr', 'store'].includes(userRole);
         
-        if (!isMaster) baseData = baseData.filter((item: any) => item.userId === user?.uid || item.assignedTo === user?.uid || item.senderId === user?.uid);
-        if (isMaster && selectedEmployee !== 'All') baseData = baseData.filter((item: any) => item.senderUid === selectedEmployee || item.userId === selectedEmployee || item.senderName === selectedEmployeeName);
+        if (!isMaster) {
+            const myId = currentUser?.id || currentUser?.uid;
+            baseData = baseData.filter((item: any) => item.userId === myId || item.assignedTo === myId || item.senderId === myId);
+        }
+        if (isMaster && selectedEmployee !== 'All') {
+            baseData = baseData.filter((item: any) => item.senderUid === selectedEmployee || item.userId === selectedEmployee || item.senderName === selectedEmployeeName);
+        }
 
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -264,7 +286,7 @@ export default function LeadsScreen() {
                         <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
                         <Text style={styles.headerTitle}>Leads Pipeline</Text>
                     </View>
-                    <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_sales')}>
+                    <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_sales' as any)}>
                         <Ionicons name="add" size={20} color="white" />
                         <Text style={{ color: 'white', fontWeight: 'bold', marginLeft: 2 }}>Cold Call</Text>
                     </TouchableOpacity>
@@ -288,7 +310,7 @@ export default function LeadsScreen() {
                 </View>
 
                 <View style={styles.searchBar}>
-                    <Ionicons name="search" size={20} color="#1565c0" />
+                    {isDbLoading ? <ActivityIndicator size="small" color="#1565c0" /> : <Ionicons name="search" size={20} color="#1565c0" />}
                     <TextInput style={styles.input} placeholder="Search Leads..." value={searchText} onChangeText={setSearchText} />
                     {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={20} color="#d32f2f" /></TouchableOpacity>}
                 </View>
@@ -338,7 +360,13 @@ export default function LeadsScreen() {
                 data={renderedList}
                 keyExtractor={item => item.id}
                 contentContainerStyle={styles.contentContainer}
-                ListEmptyComponent={<Text style={{ textAlign: 'center', marginTop: 50, color: 'gray' }}>No Leads Found</Text>}
+                ListEmptyComponent={
+                    <View style={{ alignItems: 'center', marginTop: 50 }}>
+                        {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                            <Text style={{ textAlign: 'center', color: 'gray' }}>No Leads Found</Text>
+                        )}
+                    </View>
+                }
                 renderItem={({ item }) => {
                     const dateStatus = getFollowUpStatus(item.nextDate);
                     const productInfo = item.requirements || item.product || null;
@@ -348,7 +376,7 @@ export default function LeadsScreen() {
                     return (
                         <TouchableOpacity 
                             style={[styles.card, { borderLeftColor: getStageColor(item.stage), borderLeftWidth: 4 }]} 
-                            onPress={() => router.push({ pathname: '/lead_details', params: { id: item.id } })}
+                            onPress={() => router.push({ pathname: '/lead_details', params: { id: item.id } } as any)}
                         >
                             <View style={styles.cardHeader}>
                                 <View style={{ flex: 1 }}>
