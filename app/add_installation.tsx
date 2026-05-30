@@ -78,6 +78,8 @@ export default function AddInstallationScreen() {
   // --- MACHINE DETAILS ---
   const [product, setProduct] = useState('');
   const [model, setModel] = useState('');
+  const [customProduct, setCustomProduct] = useState('');
+  const [customModel, setCustomModel] = useState('');
   const [serialNo, setSerialNo] = useState('');
   const [warrantyYears, setWarrantyYears] = useState('1 Year');
   const [notes, setNotes] = useState('');
@@ -467,21 +469,29 @@ export default function AddInstallationScreen() {
       const finalWarrantyText = warrantyYears === 'Other' ? customWarranty : warrantyYears;
       const finalExpiryDate = warrantyYears === 'Other' ? manualExpiry.toISOString().split('T')[0] : getWarrantyExpiry(installDate, warrantyYears);
 
-      if (!product || !serialNo || !finalWarrantyText) {
+      // 🔥 NAYA LOGIC: Agar "Other" hai toh custom wala naam lo, warna dropdown wala
+      const finalProduct = product === 'Other' ? customProduct : product;
+      const finalModel = model === 'Other' ? customModel : model;
+
+      if (!finalProduct || !serialNo || !finalWarrantyText) {
           Alert.alert("Missing Info", "Product Name, Serial No, and Warranty are required.");
           return;
       }
 
       const machineEntry = {
           id: Date.now().toString(),
-          product, model, serialNo,
+          product: finalProduct, 
+          model: finalModel, 
+          serialNo,
           warrantyYears: finalWarrantyText,
           warrantyExpiry: finalExpiryDate,
           note: notes
       };
 
       setAddedMachines([...addedMachines, machineEntry]);
+      // 🔥 Sab kuch clear (reset) kar do agli machine ke liye
       setProduct(''); setModel(''); setSerialNo(''); setNotes(''); setCustomWarranty('');
+      setCustomProduct(''); setCustomModel(''); 
   };
 
   const removeMachine = (index: number) => {
@@ -620,14 +630,14 @@ export default function AddInstallationScreen() {
                 <Text style={{color: product ? 'black' : 'gray'}}>{product || 'Select Product'}</Text>
                 <Ionicons name="cube-outline" size={18} color="gray" />
             </TouchableOpacity>
-            {product === 'Other' && <TextInput style={[styles.input, {marginTop:5, borderColor:'#3b5998'}]} placeholder="Type Product Name..." onChangeText={setProduct} />}
+            {product === 'Other' && <TextInput value={customProduct} style={[styles.input, {marginTop:5, borderColor:'#3b5998'}]} placeholder="Type Product Name..." onChangeText={setCustomProduct} />}
 
             <Text style={styles.label}>Model Name</Text>
             <TouchableOpacity style={styles.dropdown} onPress={() => { if(!product) Alert.alert("Wait", "Select Product first."); else openModal('Model'); }}>
                 <Text style={{color: model ? 'black' : 'gray'}}>{model || 'Select Model'}</Text>
                 <Ionicons name="layers-outline" size={18} color="gray" />
             </TouchableOpacity>
-            {model === 'Other' && <TextInput style={[styles.input, {marginTop:5}]} placeholder="Type Model Name..." onChangeText={setModel} />}
+            {model === 'Other' && <TextInput value={customModel} style={[styles.input, {marginTop:5}]} placeholder="Type Model Name..." onChangeText={setCustomModel} />}
 
             <Text style={styles.label}>Serial Number *</Text>
             <TextInput style={styles.input} placeholder="e.g. AN-2025-XX" value={serialNo} onChangeText={setSerialNo} />

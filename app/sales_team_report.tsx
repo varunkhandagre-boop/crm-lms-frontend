@@ -20,14 +20,14 @@ import { useData } from './context/DataContext';
 export default function SalesTeamReport() {
     const router = useRouter();
     
-    // 🔥 1. Context se sirf user
+    // 🔥 Context se sirf user
     const { currentUser, user } = useData();
     const activeUser = currentUser || user;
 
-    // 🔥 2. Naya SaaS Engine
+    // 🔥 Naya SaaS Engine
     const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-    // 🔥 3. Lazy Loaded States
+    // 🔥 Lazy Loaded States
     const [userList, setUserList] = useState<any[]>([]);
     const [orderList, setOrderList] = useState<any[]>([]);
     const [paymentList, setPaymentList] = useState<any[]>([]);
@@ -67,7 +67,7 @@ export default function SalesTeamReport() {
         setVisibleCount(20);
     }, [viewMode, currentDate, selectedUserId]);
 
-    // 🔥 4. LOAD SAAS DATA ON MOUNT
+    // 🔥 LOAD SAAS DATA ON MOUNT
     useEffect(() => {
         const loadData = async () => {
             if (activeUser?.companyId) {
@@ -176,7 +176,7 @@ export default function SalesTeamReport() {
                 }
 
                 const userMatch = (order.senderId === u.id || order.userId === u.id || order.senderName === u.name || order.senderId === u.uid);
-                const statusMatch = order.status === 'Approved' || order.status === 'Completed' || order.status === 'Dispatched';
+                const statusMatch = order.status === 'Approved' || order.status === 'Completed' || order.status === 'Dispatched' || order.status === 'Billed';
 
                 return dateMatch && userMatch && statusMatch;
             });
@@ -195,11 +195,16 @@ export default function SalesTeamReport() {
                     dateMatch = payDateStr >= fyStartDateStr && payDateStr <= fyEndDateStr; 
                 }
 
-                const userMatch = (payment.senderId === u.id || payment.userName === u.name || payment.senderId === u.uid);
+                const userMatch = (payment.senderId === u.id || payment.userName === u.name || payment.senderId === u.uid || payment.addedBy === u.name);
                 return dateMatch && userMatch;
             });
 
             const totalSales = userOrders.reduce((sum: number, o: any) => sum + Number(o.amount || 0), 0);
+            
+            // 🔥 Calculate Cash and Credit split for Popup
+            const cashSales = userOrders.filter((o:any) => o.saleType === 'Cash').reduce((sum: number, o: any) => sum + Number(o.amount || 0), 0);
+            const creditSales = totalSales - cashSales;
+
             const totalCollected = userPayments.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
             const incentive = getIncentiveAmount(totalSales, effectiveTarget, effectiveTier2);
 
@@ -211,6 +216,8 @@ export default function SalesTeamReport() {
                 isCustomTarget: !!(u.monthlyTarget && Number(u.monthlyTarget) > 0),
                 orderCount: userOrders.length,
                 totalSales: totalSales,
+                cashSales: cashSales, 
+                creditSales: creditSales, 
                 collectionCount: userPayments.length,
                 totalCollected: totalCollected,
                 incentive: incentive,
@@ -247,22 +254,25 @@ export default function SalesTeamReport() {
             const actualYear = index > 8 ? fyStartYear + 1 : fyStartYear; 
             const monthIndex = index > 8 ? index - 9 : index + 3; 
 
-            const monthlySales = orderList.filter((o: any) => {
+            const monthlyOrders = orderList.filter((o: any) => {
                 const dStr = getValidDateStr(o);
                 const d = new Date(dStr);
                 return d.getMonth() === monthIndex && d.getFullYear() === actualYear && 
                        (o.senderId === u.id || o.senderName === u.name || o.senderId === u.uid) && 
-                       (o.status === 'Approved' || o.status === 'Completed' || o.status === 'Dispatched');
-            }).reduce((sum: number, x: any) => sum + Number(x.amount || 0), 0);
+                       (o.status === 'Approved' || o.status === 'Completed' || o.status === 'Dispatched' || o.status === 'Billed');
+            });
+
+            const monthlySales = monthlyOrders.reduce((sum: number, x: any) => sum + Number(x.amount || 0), 0);
+            const monthlyCash = monthlyOrders.filter((o:any) => o.saleType === 'Cash').reduce((sum: number, x: any) => sum + Number(x.amount || 0), 0);
 
             const monthlyColl = paymentList.filter((p: any) => {
                 const dStr = getValidDateStr(p);
                 const d = new Date(dStr);
                 return d.getMonth() === monthIndex && d.getFullYear() === actualYear && 
-                       (p.senderId === u.id || p.userName === u.name || p.senderId === u.uid);
+                       (p.senderId === u.id || p.userName === u.name || p.senderId === u.uid || p.addedBy === u.name);
             }).reduce((sum: number, x: any) => sum + Number(x.amount || 0), 0);
 
-            return { month: m, sales: monthlySales, collection: monthlyColl };
+            return { month: m, sales: monthlySales, cash: monthlyCash, credit: monthlySales - monthlyCash, collection: monthlyColl };
         });
 
         setMonthlyStats(stats);
@@ -277,10 +287,9 @@ export default function SalesTeamReport() {
         const fyStartDateStr = `${fyStartYear}-04-01`; 
         const fyEndDateStr = `${fyStartYear + 1}-03-31`;
 
-        // Filter Orders for Modal
         const allUserOrders = orderList.filter((o:any) => {
             const isUser = (o.senderId === item.id || o.senderId === item.uid || o.senderName === item.name);
-            const isStatus = (o.status === 'Approved' || o.status === 'Completed' || o.status === 'Dispatched');
+            const isStatus = (o.status === 'Approved' || o.status === 'Completed' || o.status === 'Dispatched' || o.status === 'Billed');
             if(!isUser || !isStatus) return false;
 
             const dStr = getValidDateStr(o);
@@ -292,9 +301,8 @@ export default function SalesTeamReport() {
             }
         });
 
-        // Filter Payments for Modal
         const allUserPayments = paymentList.filter((p:any) => {
-            const isUser = (p.senderId === item.id || p.senderId === item.uid || p.userName === item.name);
+            const isUser = (p.senderId === item.id || p.senderId === item.uid || p.userName === item.name || p.addedBy === item.name);
             if(!isUser) return false;
 
             const dStr = getValidDateStr(p);
@@ -472,6 +480,24 @@ export default function SalesTeamReport() {
                             </TouchableOpacity>
                         </View>
 
+                        {/* 🔥 CASH & CREDIT SUMMARY IN POPUP */}
+                        <View style={{flexDirection:'row', backgroundColor:'#f0f4f8', padding:10, borderRadius:8, marginBottom: 15, justifyContent:'space-between', borderWidth:1, borderColor:'#e0e0e0'}}>
+                             <View style={{alignItems:'center', flex:1}}>
+                                 <Text style={{fontSize:10, color:'gray', marginBottom:2}}>💵 Cash Sales</Text>
+                                 <Text style={{fontWeight:'bold', color:'#2e7d32', fontSize:13}}>₹{selectedStaff?.cashSales?.toLocaleString()}</Text>
+                             </View>
+                             <View style={{width:1, backgroundColor:'#ccc'}} />
+                             <View style={{alignItems:'center', flex:1}}>
+                                 <Text style={{fontSize:10, color:'gray', marginBottom:2}}>📄 Credit (Billed)</Text>
+                                 <Text style={{fontWeight:'bold', color:'#1565c0', fontSize:13}}>₹{selectedStaff?.creditSales?.toLocaleString()}</Text>
+                             </View>
+                             <View style={{width:1, backgroundColor:'#ccc'}} />
+                             <View style={{alignItems:'center', flex:1}}>
+                                 <Text style={{fontSize:10, color:'gray', marginBottom:2}}>💰 Total Sales</Text>
+                                 <Text style={{fontWeight:'bold', color:'#333', fontSize:13}}>₹{selectedStaff?.totalSales?.toLocaleString()}</Text>
+                             </View>
+                        </View>
+
                         <View style={styles.tabContainer}>
                             <TouchableOpacity style={[styles.tab, detailTab==='Monthly' && styles.activeTab]} onPress={()=>setDetailTab('Monthly')}>
                                 <Text style={[styles.tabText, detailTab==='Monthly' && styles.activeTabText]}>Monthly 📅</Text>
@@ -500,7 +526,13 @@ export default function SalesTeamReport() {
                                         </View>
                                     ))}
                                     <View style={{marginTop:15, padding:10, backgroundColor:'#e3f2fd', borderRadius:8}}>
-                                        <Text style={{textAlign:'center', fontSize:12, color:'#1565c0'}}>Total {viewMode === 'FY' ? 'FY' : 'Year'} Sales: ₹{monthlyStats.reduce((a,b)=>a+b.sales,0).toLocaleString()}</Text>
+                                        <Text style={{textAlign:'center', fontSize:12, color:'#1565c0', fontWeight:'bold', marginBottom:4}}>
+                                            Total {viewMode === 'FY' ? 'FY' : 'Year'} Sales: ₹{monthlyStats.reduce((a,b)=>a+b.sales,0).toLocaleString()}
+                                        </Text>
+                                        <View style={{flexDirection:'row', justifyContent:'center', gap:15}}>
+                                             <Text style={{fontSize:10, color:'#2e7d32'}}>Cash: ₹{monthlyStats.reduce((a,b)=>a+b.cash,0).toLocaleString()}</Text>
+                                             <Text style={{fontSize:10, color:'#1565c0'}}>Credit: ₹{monthlyStats.reduce((a,b)=>a+b.credit,0).toLocaleString()}</Text>
+                                        </View>
                                     </View>
                                 </View>
                             )}
@@ -513,7 +545,9 @@ export default function SalesTeamReport() {
                                             <Text style={styles.itemTitle}>{order.hospitalName || 'Unknown'}</Text>
                                             <Text style={styles.itemAmount}>₹{order.amount.toLocaleString()}</Text>
                                         </View>
-                                        <Text style={styles.itemSub}>{formatDateShort(getValidDateStr(order))} • {order.status}</Text>
+                                        <Text style={styles.itemSub}>
+                                            {formatDateShort(getValidDateStr(order))} • {order.status} • {order.saleType === 'Cash' ? '💵 Cash' : '📄 Credit'}
+                                        </Text>
                                         {order.productDetails && <Text style={styles.itemProd}>{order.productDetails}</Text>}
                                     </View>
                                 ))

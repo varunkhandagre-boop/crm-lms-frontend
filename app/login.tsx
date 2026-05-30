@@ -69,7 +69,7 @@ export default function LoginScreen() {
           const success = await login(email.trim().toLowerCase(), password);
           
           if (success) {
-              router.replace('/'); 
+              router.replace('/' as any); 
           } else {
               setIsLoading(false); 
           }
@@ -147,6 +147,13 @@ export default function LoginScreen() {
                   )}
               </TouchableOpacity>
 
+              {/* 🔥 NEW: REGISTER COMPANY LINK 🔥 */}
+              <TouchableOpacity onPress={() => router.push('/register_company' as any)} style={{ marginTop: 25 }}>
+                  <Text style={{ textAlign: 'center', color: '#3b5998', fontWeight: 'bold', fontSize: 15 }}>
+                      Don't have an account? Register Company
+                  </Text>
+              </TouchableOpacity>
+
               <Text style={styles.footerText}>Need Help? Contact Admin</Text>
           </View>
 
@@ -192,5 +199,5 @@ const styles = StyleSheet.create({
   },
   loginText: { color: 'white', fontSize: 18, fontWeight: 'bold' },
 
-  footerText: { textAlign: 'center', color: '#aaa', marginTop: 25, fontSize: 13 },
+  footerText: { textAlign: 'center', color: '#aaa', marginTop: 20, fontSize: 13 },
 });

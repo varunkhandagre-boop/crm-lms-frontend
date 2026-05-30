@@ -6,30 +6,22 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+// 🔥 SAAS IMPORTS
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
-
 
 export default function AddQuotationScreen() {
     const router = useRouter();
     const insets = useSafeAreaInsets(); 
     
-    // Catching Lead Parameters for Auto-Fill
     const { id, mode, leadOrg, leadPerson, leadMobile, leadCity, leadAddress, leadProduct } = useLocalSearchParams(); 
-    
-    // 🔥 1. Context se sirf user aur profile nikala
     const { companyProfile, currentUser } = useData();
-
-    // 🔥 2. Naya SaaS Engine
     const { fetchSaaSData, addSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
 
-    // 🔥 3. Lazy Loaded Lists
     const [orgList, setOrgList] = useState<any[]>([]);
     const [productList, setProductList] = useState<any[]>([]);
-    const [quotationList, setQuotationList] = useState<any[]>([]); // For ID calculation
+    const [quotationList, setQuotationList] = useState<any[]>([]); 
 
-    // --- STATES ---
     const [selectedOrg, setSelectedOrg] = useState<any>(null);
     const [showOrgModal, setShowOrgModal] = useState(false);
     const [orgSearch, setOrgSearch] = useState(''); 
@@ -47,7 +39,6 @@ export default function AddQuotationScreen() {
     const [isSaving, setIsSaving] = useState(false); 
     const [existingEstimateNo, setExistingEstimateNo] = useState(''); 
 
-    // 🔥 4. LOAD DATA ON MOUNT
     useEffect(() => {
         const loadData = async () => {
             if (currentUser?.companyId) {
@@ -64,7 +55,6 @@ export default function AddQuotationScreen() {
         loadData();
     }, [currentUser]);
 
-    // --- LOAD DATA FOR EDIT, DUPLICATE, OR LEAD AUTO-FILL ---
     useEffect(() => {
         if (mode === 'from_lead') {
             setSelectedOrg({
@@ -85,14 +75,14 @@ export default function AddQuotationScreen() {
                     specifications: '',
                     qty: 1,
                     price: 0,
-                    gstRate: 18
+                    gstRate: 18,
+                    isCustom: true // Treat lead product as custom so user can edit details
                 }]);
             }
             setTerms(defaultTC);
         } 
         else if (id && quotationList.length > 0) {
             const data = quotationList.find((q:any) => q.id === id);
-            
             if (data) {
                 setItems(data.items || []);
                 setTerms(data.termsAndConditions || defaultTC);
@@ -132,22 +122,40 @@ export default function AddQuotationScreen() {
     };
 
     const filteredOrgs = orgList.filter((o: any) => (o.name || o.orgName || '').toLowerCase().includes(orgSearch.toLowerCase()));
-    const filteredProds = productList.filter((p: any) => (p.name || p.model || '').toLowerCase().includes(prodSearch.toLowerCase()));
+    
+    // 🔥 NAYA PRODUCT FILTER LOGIC: Always add "Other" option at the end
+    const searchTxt = prodSearch.toLowerCase();
+    const baseFilteredProds = productList.filter((p: any) => (p.name || p.model || '').toLowerCase().includes(searchTxt));
+    const filteredProds = [
+        ...baseFilteredProds, 
+        { id: 'custom_other', name: 'Other (Type Manually)', model: '', price: 0, gstRate: 18 }
+    ];
 
     const selectProduct = (prod: any) => {
+        const isCustom = prod.id === 'custom_other';
         const newItem = {
-            id: prod.id, name: prod.name, model: prod.model, specifications: prod.specifications || '',
-            qty: 1, price: prod.price || 0, gstRate: prod.gstRate || 0,
+            id: Date.now().toString(), 
+            name: isCustom ? '' : prod.name, 
+            model: isCustom ? '' : prod.model, 
+            specifications: prod.specifications || '',
+            qty: 1, 
+            price: prod.price || 0, 
+            gstRate: prod.gstRate || 18,
+            isCustom: isCustom // Yeh flag UI ko batayega ki Name aur Model ke textboxes dikhane hain
         };
         setItems([...items, newItem]);
         setShowProductModal(false);
         setProdSearch('');
     };
 
+    // 🔥 FIX: Ab string values (Name, Model) ko bhi update allow karta hai
     const updateItemField = (index: number, field: string, value: string) => {
         const newItems = [...items];
-        if (field === 'specifications') newItems[index][field] = value;
-        else newItems[index][field] = Number(value);
+        if (field === 'specifications' || field === 'name' || field === 'model') {
+            newItems[index][field] = value;
+        } else {
+            newItems[index][field] = Number(value);
+        }
         setItems(newItems);
     };
 
@@ -347,10 +355,10 @@ export default function AddQuotationScreen() {
         }
     };
 
-    // 🔥 5. SAAS SAVE LOGIC
     const handleSaveQuotation = async () => {
         if (!selectedOrg) return Alert.alert("Required", "Please select a client organization.");
         if (items.length === 0) return Alert.alert("Required", "Please add at least one item.");
+        if (items.some(item => !item.name)) return Alert.alert("Required", "Please provide a name for all Custom Products.");
 
         setIsSaving(true);
         const fy = getFinancialYear();
@@ -359,14 +367,12 @@ export default function AddQuotationScreen() {
         try {
             let finalEstimateNo = existingEstimateNo;
 
-            // Generate New ID if not editing
             if (mode !== 'edit' || !existingEstimateNo) {
                 const count = quotationList ? quotationList.filter((q: any) => q.estimateNo?.includes(fy)).length + 1 : 1;
                 const serialNumber = count.toString().padStart(3, '0');
                 finalEstimateNo = `${shortName}/${fy}/${serialNumber}`;
             }
 
-            // Clean Payload for SaaS
             const quotationData = {
                 estimateNo: finalEstimateNo,
                 orgId: selectedOrg.id || '',
@@ -376,7 +382,8 @@ export default function AddQuotationScreen() {
                 items: items.map(item => ({
                     id: item.id || '', name: item.name || '', model: item.model || '',
                     specifications: item.specifications || '', qty: item.qty || 0,
-                    price: item.price || 0, gstRate: item.gstRate || 0
+                    price: item.price || 0, gstRate: item.gstRate || 0,
+                    isCustom: item.isCustom || false
                 })),
                 termsAndConditions: terms, 
                 taxType: taxType, 
@@ -436,11 +443,30 @@ export default function AddQuotationScreen() {
 
                     <Text style={styles.sectionTitle}>Items ({items.length})</Text>
                     {items.map((item, index) => (
-                        <View key={index} style={styles.itemCard}>
-                            <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10}}>
-                                <View style={{flexDirection: 'row', alignItems: 'center', flex:1}}>
-                                    <Ionicons name="cube" size={20} color="#3b5998" style={{marginRight: 8}}/>
-                                    <Text style={styles.itemName} numberOfLines={1}>{item.name} {item.model ? `(${item.model})` : ''}</Text>
+                        <View key={item.id || index} style={styles.itemCard}>
+                            <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10}}>
+                                <View style={{flex: 1, marginRight: 10}}>
+                                    {item.isCustom ? (
+                                        <>
+                                            <TextInput 
+                                                style={[styles.input, {marginBottom: 6, borderColor: '#3b5998'}]} 
+                                                placeholder="Type Product Name *" 
+                                                value={item.name} 
+                                                onChangeText={(val) => updateItemField(index, 'name', val)} 
+                                            />
+                                            <TextInput 
+                                                style={[styles.input, {marginBottom: 6}]} 
+                                                placeholder="Type Model Name (Optional)" 
+                                                value={item.model} 
+                                                onChangeText={(val) => updateItemField(index, 'model', val)} 
+                                            />
+                                        </>
+                                    ) : (
+                                        <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                                            <Ionicons name="cube" size={20} color="#3b5998" style={{marginRight: 8}}/>
+                                            <Text style={styles.itemName} numberOfLines={1}>{item.name} {item.model ? `(${item.model})` : ''}</Text>
+                                        </View>
+                                    )}
                                 </View>
                                 <TouchableOpacity onPress={() => removeItem(index)} style={{padding:5}}>
                                     <Ionicons name="trash-outline" size={20} color="red" />

@@ -18,22 +18,23 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Firebase direct DB imports removed)
+// 🔥 SAAS IMPORTS (No direct Firebase DB imports)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
+// PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
 export default function PaymentCollection() {
     const router = useRouter();
-    
-    // 🔥 1. Context se sirf user aur company profile nikala
+
+    // 🔥 1. Context se User aur Profile nikala
     const { currentUser, companyProfile } = useData();
 
-    // 🔥 2. Naya SaaS Engine connect kiya
-    const { fetchSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+    // 🔥 2. Naya SaaS Engine connect kiya (fetch, update, delete)
+    const { fetchSaaSData, updateSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
 
     // 🔥 3. Lazy Loaded Master States
     const [paymentList, setPaymentList] = useState<any[]>([]);
@@ -63,14 +64,17 @@ export default function PaymentCollection() {
     const [visibleCount, setVisibleCount] = useState(20);
     const paymentModes = ['Cash', 'UPI', 'NEFT', 'RTGS', 'Cheque'];
 
-    const isAdmin = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
+    const userRole = currentUser?.role ? currentUser.role.toLowerCase() : '';
+    const isAdmin = ['admin', 'manager', 'account', 'accountant', 'hr', 'superadmin'].includes(userRole);
+    // 🔥 NEW: STRICT ADMIN CHECK FOR DELETE POWER
+    const isStrictAdmin = ['admin', 'manager', 'superadmin'].includes(userRole);
 
     useEffect(() => {
         if (viewMode === 'Day') setVisibleCount(500); 
         else setVisibleCount(20); 
     }, [viewMode, historyDate, historySearch, selectedEmployee]);
 
-    // 🔥 4. MASSIVE DATA LOAD ON MOUNT
+    // 🔥 4. LOAD SAAS DATA ON MOUNT
     const loadData = async () => {
         if (currentUser?.companyId) {
             const [payments, orgs, users] = await Promise.all([
@@ -113,6 +117,7 @@ export default function PaymentCollection() {
         return banks;
     }, [companyProfile]);
 
+    // 🔥 SMART LABEL HELPER
     const getRefLabel = (mode: string) => {
         if (mode === 'UPI') return 'UPI Transaction ID';
         if (mode === 'NEFT' || mode === 'RTGS') return 'UTR Number';
@@ -120,6 +125,7 @@ export default function PaymentCollection() {
         return 'Reference Number';
     };
 
+    // Reset Edit State
     useEffect(() => {
         if (selectedHistoryItem) {
             setIsEditing(false);
@@ -215,11 +221,13 @@ export default function PaymentCollection() {
                   ${logoHTML}
                   ${companyProfile?.logoUrl ? `<div class="title">${companyProfile.companyName}</div>` : ''}
                   
-                  <div class="sub-title">${companyProfile?.address}</div>
+                  <div class="sub-title">${companyProfile?.address || ''}</div>
+                  
                   <div class="sub-title">
-                    Phone: ${companyProfile?.contactPhone || companyProfile?.phone} | 
+                    Phone: ${companyProfile?.contactPhone || companyProfile?.phone || '-'} | 
                     Email: ${companyProfile?.contactEmail || companyProfile?.email || '-'}
                   </div>
+
                   <div class="sub-title">
                     ${companyProfile?.gstNumber ? `GSTIN: ${companyProfile.gstNumber}` : ''}
                   </div>
@@ -244,31 +252,18 @@ export default function PaymentCollection() {
                   </p>
                   <table class="split-table">
                     <tr>
-                      <td>
-                          <span class="label" style="text-decoration: underline;">Payment Mode Details:</span><br>
-                          ${paymentDetailsHTML}
-                      </td>
-                      <td style="padding-left: 20px;">
-                          <span class="label" style="text-decoration: underline;">Against Bill / Invoice No:</span><br>
-                          <span style="font-size: 15px; font-weight:500;">${paymentData.billRef || 'On Account'}</span>
-                          ${paymentData.orderRef ? `<br><span style="font-size:10px; color:gray">Order ID: ${paymentData.orderRef}</span>` : ''}
-                      </td>
+                      <td><span class="label" style="text-decoration: underline;">Payment Mode:</span><br>${paymentDetailsHTML}</td>
+                      <td style="padding-left: 20px;"><span class="label" style="text-decoration: underline;">Against:</span><br><span style="font-size: 15px; font-weight:500;">${paymentData.billRef || paymentData.orderRef || 'On Account'}</span></td>
                     </tr>
                   </table>
                 </div>
-
                 <div class="amount-wrapper">
                     <div style="font-weight:bold; margin-bottom:5px;">Total Payment Received</div>
                     <div class="amount-box">₹ ${paymentData.amount}/-</div>
                 </div>
-
                 ${companyBankHTML}
-
                 <div class="footer">
-                  <div style="font-size:10px; max-width:250px; color:#333;">
-                    *Subject to realisation of Cheque/DD.<br>
-                    *This is a computer generated receipt.
-                  </div>
+                  <div style="font-size:10px; max-width:250px; color:#333;">*Computer Generated Receipt.</div>
                   <div class="sign-box">
                     <div style="margin-bottom: 10px; font-size:12px;">For, ${companyProfile?.companyName}</div>
                     ${signatureHTML}
@@ -329,6 +324,89 @@ export default function PaymentCollection() {
         }
     };
 
+    // 🔥 NEW: ADMIN DELETE FUNCTION (WITH SAFE REVERSE LOGIC)
+    const handleDeletePayment = async () => {
+        if (!selectedHistoryItem) return;
+        Alert.alert(
+            "Delete Payment?",
+            "Are you sure? This will delete the receipt and ADD the amount back to the pending due.",
+            [
+                { text: "Cancel", style: "cancel" },
+                { 
+                    text: "Delete & Reverse", 
+                    style: "destructive", 
+                    onPress: async () => {
+                        setLoading(true);
+                        try {
+                            const paymentAmt = parseFloat(selectedHistoryItem.amount) || 0;
+                            const linkedId = selectedHistoryItem.linkedId;
+
+                            // 1. REVERSE THE BALANCE IN DUES / ORDERS
+                            const [dues, orders] = await Promise.all([
+                                fetchSaaSData("payment_dues"),
+                                fetchSaaSData("orders")
+                            ]);
+
+                            let targetDoc: any = null;
+                            let targetCollection = '';
+
+                            // Match by ID, OrderRef, or BillNo
+                            targetDoc = dues.find((d: any) => d.id === linkedId || d.id === selectedHistoryItem.orderId || d.billNo === selectedHistoryItem.billRef);
+                            if (targetDoc) targetCollection = 'payment_dues';
+
+                            if (!targetDoc) {
+                                targetDoc = orders.find((o: any) => o.id === linkedId || o.id === selectedHistoryItem.orderId || o.orderId === selectedHistoryItem.orderRef || o.billNo === selectedHistoryItem.billRef);
+                                if (targetDoc) targetCollection = 'orders';
+                            }
+
+                            if (targetDoc && targetCollection) {
+                                const currentBal = parseFloat(targetDoc.balance !== undefined ? targetDoc.balance : targetDoc.amount) || 0;
+                                const currentRec = parseFloat(targetDoc.received) || 0;
+                                const totalAmt = parseFloat(targetDoc.amount) || 0;
+                                
+                                const newBalance = currentBal + paymentAmt;
+                                const newReceived = Math.max(0, currentRec - paymentAmt);
+                                const newPaymentState = newBalance >= totalAmt ? 'Pending' : 'Partial';
+
+                                if (targetCollection === 'orders') {
+                                    // 🔥 FIX: Order ka main status nahi chhedna hai (wo Billed hi rehna chahiye)
+                                    // Sirf balance aur paymentStatus badlenge
+                                    await updateSaaSData(targetCollection, targetDoc.id, {
+                                        balance: newBalance,
+                                        received: newReceived,
+                                        paymentStatus: newPaymentState
+                                    });
+                                } else {
+                                    // Manual due ke liye main status badalna theek hai
+                                    await updateSaaSData(targetCollection, targetDoc.id, {
+                                        balance: newBalance,
+                                        received: newReceived,
+                                        status: newPaymentState
+                                    });
+                                }
+                            }
+
+                            // 2. DELETE THE PAYMENT ENTRY
+                            const res = await deleteSaaSData("payments", selectedHistoryItem.id);
+                            
+                            if(res.success) {
+                                setPaymentList(prev => prev.filter(item => item.id !== selectedHistoryItem.id));
+                                setSelectedHistoryItem(null);
+                                Alert.alert("Deleted & Reversed", "Payment deleted and due balance restored successfully.");
+                            } else {
+                                Alert.alert("Error", "Failed to delete payment.");
+                            }
+                        } catch (error: any) {
+                            Alert.alert("Error", error.message);
+                        } finally {
+                            setLoading(false);
+                        }
+                    } 
+                }
+            ]
+        );
+    };
+
     const getModeStyles = (mode: string) => {
         switch (mode) {
             case 'Cash': return { bg: '#e8f5e9', text: '#2e7d32', icon: 'cash' };
@@ -385,7 +463,7 @@ export default function PaymentCollection() {
     };
 
     const getMyFilteredHistory = () => {
-        let data = paymentList;
+        let data = paymentList ? [...paymentList] : [];
         if (isAdmin && selectedEmployee !== 'All') {
             data = data.filter((p: any) => p.userName === selectedEmployee || p.senderName === selectedEmployee);
         } else if (!isAdmin) {
@@ -712,6 +790,22 @@ export default function PaymentCollection() {
                                                 </View>
                                             </TouchableOpacity>
                                         )}
+                                        
+                                        {/* 🔥 NEW: ADMIN DELETE BUTTON */}
+                                        {!isEditing && isStrictAdmin && (
+                                            <TouchableOpacity 
+                                                style={{marginTop: 15, backgroundColor: '#ffebee', padding: 12, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#ef9a9a'}} 
+                                                onPress={handleDeletePayment}
+                                                disabled={loading}
+                                            >
+                                                <View style={{flexDirection:'row', alignItems:'center'}}>
+                                                    {loading ? <ActivityIndicator size="small" color="#d32f2f" /> : <Ionicons name="trash-outline" size={18} color="#d32f2f" />}
+                                                    <Text style={{color: '#d32f2f', fontWeight: 'bold', marginLeft: 8}}>
+                                                        {loading ? "Deleting..." : "Delete Entry"}
+                                                    </Text>
+                                                </View>
+                                            </TouchableOpacity>
+                                        )}
                                     </View>
                                 )}
 
@@ -739,18 +833,23 @@ export default function PaymentCollection() {
             </Modal>
 
             <Modal visible={showEmployeeModal} transparent={true} animationType="slide">
-                <View style={styles.modalOverlayCenter}>
-                    <View style={styles.detailCard}>
-                        <Text style={styles.modalTitle}>Select Employee</Text>
-                        <FlatList data={employeeList as string[]} keyExtractor={(item) => item} renderItem={({item}) => (
+                <TouchableOpacity style={styles.modalOverlay} onPress={() => setShowEmployeeModal(false)}>
+                    <View style={styles.pickerContainer}>
+                        <Text style={styles.pickerHeader}>Select Employee View</Text>
+                        <FlatList 
+                          data={employeeList as string[]} 
+                          keyExtractor={(item) => item} 
+                          renderItem={({item}) => (
                             <TouchableOpacity style={[styles.empItem, selectedEmployee === item && {backgroundColor:'#e3f2fd'}]} onPress={() => { setSelectedEmployee(item); setShowEmployeeModal(false); }}>
-                                <Text style={{fontSize:16, fontWeight: selectedEmployee === item ? 'bold' : 'normal'}}>{item}</Text>
-                                {selectedEmployee === item && <Ionicons name="checkmark" size={20} color="#3b5998" />}
+                                <View style={{flexDirection:'row', alignItems:'center'}}>
+                                   <Ionicons name="person-circle" size={24} color="#555" style={{marginRight:10}}/>
+                                   <Text style={{fontSize:16, color:'#333'}}>{item}</Text>
+                                </View>
+                                {selectedEmployee === item && <Ionicons name="checkmark" size={18} color="green" />}
                             </TouchableOpacity>
                         )} />
-                        <TouchableOpacity style={styles.closeBtnPopup} onPress={() => setShowEmployeeModal(false)}><Text style={{color:'white', fontWeight:'bold'}}>Close</Text></TouchableOpacity>
                     </View>
-                </View>
+                </TouchableOpacity>
             </Modal>
 
             <Modal visible={showBankModal} transparent={true} animationType="slide">
@@ -790,7 +889,6 @@ export default function PaymentCollection() {
                             )) : (
                                 <Text style={{textAlign:'center', color:'gray', marginVertical:20}}>No Bank Details Added in Profile.</Text>
                             )}
-
                         </ScrollView>
                     </View>
                 </View>
@@ -836,6 +934,7 @@ const styles = StyleSheet.create({
     hUser: { fontSize: 11, color: 'gray', marginLeft: 4 },
     hDate: { fontSize: 11, color: 'gray', marginTop: 2 },
     hAmount: { fontWeight: 'bold', color: '#27ae60', fontSize: 16 },
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
     modalOverlayCenter: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
     detailCard: { width: '85%', backgroundColor: 'white', borderRadius: 20, padding: 25, maxHeight:'85%' },
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
@@ -850,5 +949,9 @@ const styles = StyleSheet.create({
     
     editInput: { borderWidth:1, borderColor:'#3b5998', borderRadius:8, padding:10, fontSize:15, width:'100%', backgroundColor:'#f0f4ff', marginBottom:10 },
     editDropdown: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth:1, borderColor:'#3b5998', borderRadius:8, padding:10, backgroundColor:'#f0f4ff', marginBottom:10 },
-    actionBtn: { padding:12, borderRadius:8, alignItems:'center' }
+    actionBtn: { padding:12, borderRadius:8, alignItems:'center' },
+
+    pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
+    pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation:10 },
+    pickerHeader: { fontWeight:'bold', fontSize:16, marginBottom:10, color:'#3b5998', textAlign:'center' }
 });

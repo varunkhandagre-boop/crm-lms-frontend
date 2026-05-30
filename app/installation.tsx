@@ -17,7 +17,7 @@ import {
   View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS
+// 🔥 SAAS IMPORTS (No Direct Firebase DB calls)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
@@ -28,17 +28,12 @@ import * as Sharing from 'expo-sharing';
 export default function InstallationListScreen() {
   const router = useRouter();
   
-  // 🔥 1. Context se sirf global variables 
   const { currentUser, companyProfile } = useData(); 
+  const { fetchSaaSData, updateSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
 
-  // 🔥 2. Naya SaaS Engine
-  const { fetchSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
-
-  // 🔥 3. Lazy Loaded States
   const [installList, setInstallList] = useState<any[]>([]);
   const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
 
-  // --- STATES ---
   const [searchText, setSearchText] = useState('');
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -46,8 +41,8 @@ export default function InstallationListScreen() {
   const [selectedItem, setSelectedItem] = useState<any>(null); 
   const [modalVisible, setModalVisible] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false); 
+  const [isDeleting, setIsDeleting] = useState(false); 
 
-  // ADMIN EDIT STATES
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editData, setEditData] = useState<any>({});
   const [isSavingEdit, setIsSavingEdit] = useState(false);
@@ -64,20 +59,21 @@ export default function InstallationListScreen() {
   const [visibleCount, setVisibleCount] = useState(20);
 
   const isAdmin = ['Admin', 'Manager', 'Hr', 'Account', 'Accountant', 'SuperAdmin'].includes(currentUser?.role || '');
-  const isStrictAdmin = currentUser?.role === 'Admin' || currentUser?.role === 'Manager' || currentUser?.role === 'SuperAdmin';
+  const isStrictAdmin = ['Admin', 'Manager', 'SuperAdmin'].includes(currentUser?.role || '');
 
   useEffect(() => {
       if (viewMode === 'Day') setVisibleCount(500); 
       else setVisibleCount(20); 
   }, [viewMode, currentDate, searchText, selectedEmployee]);
 
-  // 🔥 4. MASSIVE SAAS DATA LOAD ON MOUNT
   const loadData = async () => {
       if (currentUser?.companyId) {
           const [installs, users] = await Promise.all([
               fetchSaaSData("installations"),
               fetchSaaSData("users")
           ]);
+          console.log("🔥 FETCHED INSTALLS:", installs.length);
+          if (installs.length > 0) console.log("🔥 FIRST ITEM:", installs[0]);
           setInstallList(installs);
 
           if (isAdmin) {
@@ -94,7 +90,6 @@ export default function InstallationListScreen() {
       loadData();
   }, [currentUser]);
 
-  // --- UNIVERSAL DATE PARSER ---
   const parseDate = (dateStr: any) => {
     if (!dateStr) return 0;
     if (typeof dateStr === 'number') return dateStr;
@@ -188,7 +183,7 @@ export default function InstallationListScreen() {
               <div style="font-size: 14px;"><b>Address:</b> ${item.address || ''}, ${item.city || ''}</div>
               <div style="font-size: 14px;"><b>Contact:</b> ${item.contactPerson || '-'} (${item.mobile || '-'})</div>
               <div style="font-size: 14px; margin-top:5px;"><b>Department:</b> ${item.department || '-'}</div>
-              <div style="font-size: 14px;"><b>Installation Date:</b> ${item.date}</div>
+              <div style="font-size: 14px;"><b>Installation Date:</b> ${item.date || item.displayDate || item.dateIso || '-'}</div>
             </div>
 
             <table class="table">
@@ -223,7 +218,7 @@ export default function InstallationListScreen() {
               </div>
 
               <div class="sign-box">
-                <div style="font-weight: bold; font-size: 12px;">Installed By: ${item.engineer || item.senderName}</div>
+                <div style="font-weight: bold; font-size: 12px;">Installed By: ${item.engineer || item.senderName || '-'}</div>
                 ${signatureHTML}
                 <div class="sign-line"></div>
                 <div style="font-weight: bold;">Engineer Signature</div>
@@ -234,8 +229,7 @@ export default function InstallationListScreen() {
 
         const { uri } = await Print.printToFileAsync({ html: htmlContent });
         const cleanName = `Installation_${(item.orgName || 'Client').replace(/ /g, '_')}_${Date.now()}.pdf`;
-        // @ts-ignore
-        const newPath = `${FileSystem.cacheDirectory}${cleanName}`;
+        const newPath = `${(FileSystem as any).cacheDirectory}${cleanName}`;
 
         try {
             await FileSystem.copyAsync({ from: uri, to: newPath });
@@ -250,7 +244,6 @@ export default function InstallationListScreen() {
     }
   };
 
-  // --- SORTING & FILTER LOGIC ---
   const getSortedAndFilteredData = () => {
     let data = installList ? [...installList] : [];
 
@@ -300,10 +293,13 @@ export default function InstallationListScreen() {
       const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
 
       data = data.filter((item: any) => {
-        const dateField = item.dateIso || item.createdAt || item.date;
-        if (!dateField) return false;
-        const ts = parseDate(dateField);
-        if (ts === 0) return false;
+        // 🔥 FIX: Ab yeh directly timestamp ya createdAt ka use karega (Bulletproof)
+        let ts = item.timestamp;
+        if (!ts && item.createdAt) ts = new Date(item.createdAt).getTime();
+        if (!ts) ts = parseDate(item.dateIso || item.date || item.displayDate);
+        
+        if (!ts || isNaN(ts)) return false;
+        
         const itemDate = new Date(ts);
         const itemTime = itemDate.getTime();
 
@@ -314,10 +310,15 @@ export default function InstallationListScreen() {
       });
     }
 
+    // 🔥 FIX: Sorting bhi ab createdAt ke hisaab se ekdum perfect hogi
     data.sort((a: any, b: any) => {
-      const dateA = parseDate(a.dateIso || a.createdAt || a.date);
-      const dateB = parseDate(b.dateIso || b.createdAt || b.date);
-      return dateB - dateA;
+        let tsA = a.timestamp || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+        if (!tsA) tsA = parseDate(a.dateIso || a.date || a.displayDate);
+
+        let tsB = b.timestamp || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+        if (!tsB) tsB = parseDate(b.dateIso || b.date || b.displayDate);
+
+        return tsB - tsA; // Newest first
     });
 
     return data;
@@ -332,7 +333,7 @@ export default function InstallationListScreen() {
   };
 
   const openEditModal = (item: any) => {
-      const installTs = parseDate(item.date);
+      const installTs = parseDate(item.dateIso || item.date || item.displayDate);
       if (installTs > 0) setEditInstallDateObj(new Date(installTs));
       else setEditInstallDateObj(new Date());
 
@@ -350,14 +351,13 @@ export default function InstallationListScreen() {
           product: item.product || item.productName || '',
           model: item.model || '',
           serialNo: item.serialNo || '',
-          date: item.date || '',
+          date: item.date || item.displayDate || item.dateIso || '',
           warrantyExpiry: item.warrantyExpiry || '',
           note: item.note || ''
       });
       setEditModalVisible(true);
   };
 
-  // 🔥 5. SAAS ENGINE UPDATE LOGIC
   const handleSaveEdit = async () => {
       if (!editData.id) return;
       if (!editData.hospital || !editData.serialNo) {
@@ -378,6 +378,7 @@ export default function InstallationListScreen() {
               model: editData.model,
               serialNo: editData.serialNo,
               date: editData.date,
+              displayDate: editData.date,
               warrantyExpiry: editData.warrantyExpiry,
               note: editData.note
           });
@@ -394,6 +395,38 @@ export default function InstallationListScreen() {
       } finally {
           setIsSavingEdit(false);
       }
+  };
+
+  const handleDeleteInstallation = async () => {
+      if (!selectedItem) return;
+      Alert.alert(
+          "Delete Installation?",
+          "Are you sure you want to permanently delete this installation record?",
+          [
+              { text: "Cancel", style: "cancel" },
+              {
+                  text: "Delete",
+                  style: "destructive",
+                  onPress: async () => {
+                      setIsDeleting(true);
+                      try {
+                          const res = await deleteSaaSData("installations", selectedItem.id);
+                          if(res.success) {
+                              setInstallList(prev => prev.filter(i => i.id !== selectedItem.id));
+                              setModalVisible(false);
+                              Alert.alert("Deleted", "Installation record has been deleted successfully.");
+                          } else {
+                              Alert.alert("Error", "Failed to delete installation.");
+                          }
+                      } catch (error: any) {
+                          Alert.alert("Error", error.message);
+                      } finally {
+                          setIsDeleting(false);
+                      }
+                  }
+              }
+          ]
+      );
   };
 
   const getWarrantyStatus = (expiryDate: string) => {
@@ -459,14 +492,14 @@ export default function InstallationListScreen() {
           </View>
           <View style={styles.infoBox}>
             <Text style={styles.label}>Install Date</Text>
-            <Text style={styles.value}>{item.date}</Text>
+            <Text style={styles.value}>{item.date || item.displayDate || item.dateIso || '-'}</Text>
           </View>
         </View>
 
         <View style={{ height: 5 }} />
 
         <View style={styles.footer}>
-          <Text style={styles.footerText}>Eng: {item.engineer}</Text>
+          <Text style={styles.footerText}>Eng: {item.engineer || item.senderName || '-'}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <Ionicons name="person-circle-outline" size={14} color="#3b5998" />
             <Text style={[styles.footerText, { color: '#3b5998', marginLeft: 2 }]}>
@@ -480,7 +513,6 @@ export default function InstallationListScreen() {
 
   return (
     <View style={styles.container}>
-      {/* HEADER */}
       <View style={styles.header}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <TouchableOpacity onPress={() => router.back()}>
@@ -494,7 +526,6 @@ export default function InstallationListScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* FILTER UI */}
       <View style={{ backgroundColor: 'white', paddingBottom: 10 }}>
         <View style={styles.tabContainer}>
           {['Day', 'Month', 'FY', 'All'].map((m) => (
@@ -548,7 +579,6 @@ export default function InstallationListScreen() {
         </View>
       </View>
 
-      {/* LIST */}
       <FlatList
         data={renderedList}
         keyExtractor={item => item.id}
@@ -614,7 +644,6 @@ export default function InstallationListScreen() {
                       <Text style={styles.inputLabel}>Serial No *</Text>
                       <TextInput style={styles.editInput} value={editData.serialNo} onChangeText={t => setEditData({...editData, serialNo: t})} />
 
-                      {/* CALENDAR FOR INSTALLATION DATE */}
                       <Text style={styles.inputLabel}>Installation Date</Text>
                       <TouchableOpacity style={styles.editDateBtn} onPress={() => setShowEditInstallDate(true)}>
                           <Text style={{color: '#333'}}>{editData.date}</Text>
@@ -634,7 +663,6 @@ export default function InstallationListScreen() {
                           />
                       )}
 
-                      {/* CALENDAR FOR WARRANTY EXPIRY */}
                       <Text style={styles.inputLabel}>Warranty Expiry</Text>
                       <TouchableOpacity style={styles.editDateBtn} onPress={() => setShowEditExpiryDate(true)}>
                           <Text style={{color: '#333'}}>{editData.warrantyExpiry}</Text>
@@ -691,7 +719,7 @@ export default function InstallationListScreen() {
                 <DetailRow label="Hospital" value={selectedItem.orgName || selectedItem.hospital} icon="business" highlight />
                 <DetailRow label="City" value={selectedItem.city} icon="location" />
                 <DetailRow label="Department" value={selectedItem.department || 'N/A'} icon="medkit" />
-                <DetailRow label="Engineer" value={selectedItem.engineer} icon="construct" />
+                <DetailRow label="Engineer" value={selectedItem.engineer || selectedItem.senderName || '-'} icon="construct" />
 
                 <View style={styles.sectionHeaderBox}>
                     <Text style={styles.sectionHeaderText}>⚙️ Machine Info</Text>
@@ -703,7 +731,7 @@ export default function InstallationListScreen() {
                 <View style={styles.sectionHeaderBox}>
                     <Text style={styles.sectionHeaderText}>📅 Warranty Info</Text>
                 </View>
-                <DetailRow label="Installed On" value={selectedItem.date} icon="calendar" />
+                <DetailRow label="Installed On" value={selectedItem.date || selectedItem.displayDate || selectedItem.dateIso || '-'} icon="calendar" />
                 <DetailRow label="Warranty Expiry" value={selectedItem.warrantyExpiry} icon="hourglass" color="#d32f2f" />
 
                 <View style={styles.divider} />
@@ -716,7 +744,6 @@ export default function InstallationListScreen() {
                   </View>
                 ) : null}
 
-                {/* SHARE PDF BUTTON */}
                 <TouchableOpacity 
                     style={styles.pdfBtn}
                     onPress={() => generatePDF(selectedItem)}
@@ -731,6 +758,22 @@ export default function InstallationListScreen() {
                         </>
                     )}
                 </TouchableOpacity>
+
+                {/* ADMIN DELETE BUTTON */}
+                {isStrictAdmin && (
+                    <TouchableOpacity 
+                        style={{marginTop: 15, backgroundColor: '#ffebee', padding: 12, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#ef9a9a'}}
+                        onPress={handleDeleteInstallation}
+                        disabled={isDeleting}
+                    >
+                        <View style={{flexDirection:'row', alignItems:'center'}}>
+                            {isDeleting ? <ActivityIndicator size="small" color="#d32f2f" /> : <Ionicons name="trash-outline" size={18} color="#d32f2f" />}
+                            <Text style={{color: '#d32f2f', fontWeight: 'bold', marginLeft: 8}}>
+                                {isDeleting ? "Deleting..." : "Delete Installation"}
+                            </Text>
+                        </View>
+                    </TouchableOpacity>
+                )}
 
                 <View style={{height: 20}} />
               </ScrollView>
@@ -773,7 +816,7 @@ export default function InstallationListScreen() {
 
 const DetailRow = ({ label, value, icon, highlight, color }: any) => (
   <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-    <View style={{ width: 30 }}><Ionicons name={icon} size={20} color={highlight ? "#3b5998" : "gray"} /></View>
+    <View style={{ width: 30 }}><Ionicons name={icon} size={18} color={highlight ? "#3b5998" : "gray"} /></View>
     <View style={{ flex: 1 }}>
       <Text style={{ fontSize: 11, color: 'gray' }}>{label}</Text>
       <Text style={{
@@ -824,8 +867,8 @@ const styles = StyleSheet.create({
   footer: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 5, borderTopWidth: 1, borderTopColor: '#f5f5f5', paddingTop: 5 },
   footerText: { fontSize: 11, color: 'gray' },
 
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
-  modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 25, maxHeight: '85%', elevation: 5 }, 
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalContent: { width: '100%', backgroundColor: 'white', borderRadius: 15, padding: 25, maxHeight: '85%', elevation: 5 }, 
   modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
   
   sectionHeaderBox: { backgroundColor: '#e3f2fd', padding: 6, borderRadius: 6, marginTop: 10, marginBottom: 10 },

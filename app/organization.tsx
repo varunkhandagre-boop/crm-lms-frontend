@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
+    Alert,
     FlatList,
     Linking,
     Modal,
@@ -14,36 +15,40 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct DB imports removed)
+// 🔥 SAAS IMPORTS (No Direct Firebase DB calls)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function OrganizationScreen() {
   const router = useRouter();
   
-  // 🔥 1. Context se sirf current user nikala
-  const { currentUser } = useData();
+  // 🔥 Context se Sirf User (Baaki SaaS engine handle karega)
+  const { currentUser, user } = useData(); 
+  const activeUser = currentUser || user;
 
-  // 🔥 2. Naya SaaS Engine
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
-
-  // 🔥 3. Lazy Loaded States
+  // 🔥 Naya SaaS Engine
+  const { fetchSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
   const [orgList, setOrgList] = useState<any[]>([]);
 
   // --- STATES ---
   const [searchText, setSearchText] = useState('');
   const [selectedOrg, setSelectedOrg] = useState<any>(null); 
   const [detailsModalVisible, setDetailsModalVisible] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false); 
 
   const [visibleCount, setVisibleCount] = useState(20);
+
+  // 🔥 ROLE CHECK
+  const userRole = (activeUser?.role || '').toLowerCase().trim();
+  const isStrictAdmin = ['admin', 'manager', 'superadmin'].includes(userRole);
 
   useEffect(() => {
       setVisibleCount(20);
   }, [searchText]);
 
-  // 🔥 4. LOAD SAAS DATA ON MOUNT
+  // 🔥 LOAD SAAS DATA ON MOUNT
   const loadData = async () => {
-      if (currentUser?.companyId) {
+      if (activeUser?.companyId) {
           const orgs = await fetchSaaSData("organizations");
           setOrgList(orgs);
       }
@@ -51,7 +56,7 @@ export default function OrganizationScreen() {
 
   useEffect(() => {
       loadData();
-  }, [currentUser]);
+  }, [activeUser]);
 
   const getFilteredData = () => {
     let data = orgList ? [...orgList] : [];
@@ -92,28 +97,84 @@ export default function OrganizationScreen() {
 
   const handleCall = (number: string) => {
       if(number) Linking.openURL(`tel:${number}`);
+      else Alert.alert("Error", "No mobile number available.");
+  };
+
+  // 🔥 SAAS ISOLATED DELETE FUNCTION
+  const handleDeleteOrg = async () => {
+      if (!selectedOrg) return;
+      Alert.alert(
+          "Delete Organization?",
+          "Are you sure you want to permanently delete this organization? (Note: It may break linked reports)",
+          [
+              { text: "Cancel", style: "cancel" },
+              {
+                  text: "Delete",
+                  style: "destructive",
+                  onPress: async () => {
+                      setIsDeleting(true);
+                      try {
+                          const res = await deleteSaaSData("organizations", selectedOrg.id);
+                          if (res.success) {
+                              setOrgList(prev => prev.filter(o => o.id !== selectedOrg.id));
+                              setDetailsModalVisible(false);
+                              Alert.alert("Deleted", "Organization has been deleted.");
+                          } else {
+                              Alert.alert("Error", "Could not delete organization.");
+                          }
+                      } catch (error: any) {
+                          Alert.alert("Error", error.message);
+                      } finally {
+                          setIsDeleting(false);
+                      }
+                  }
+              }
+          ]
+      );
   };
 
   const renderItem = ({ item }: any) => (
     <TouchableOpacity style={styles.card} onPress={() => openDetails(item)}>
-        <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center'}}>
-            <View style={{flex:1}}>
+        <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'flex-start'}}>
+            <View style={{flex:1, paddingRight: 10}}>
                 <Text style={styles.orgName} numberOfLines={1}>{item.name || item.orgName}</Text>
-                <Text style={styles.subText}>
-                    {item.type} • {item.city}{item.state ? `, ${item.state}` : ''}
-                </Text>
+                
+                <View style={{flexDirection: 'row', alignItems: 'center', marginTop: 4}}>
+                    <View style={styles.typeBadge}>
+                        <Text style={styles.typeBadgeText}>{item.type || 'Clinic'}</Text>
+                    </View>
+                    <Text style={styles.subText} numberOfLines={1}>
+                        📍 {item.city}{item.state ? `, ${item.state}` : ''}
+                    </Text>
+                </View>
             </View>
             <View style={styles.initialsCircle}>
                 <Text style={styles.initialsText}>{(item.name || item.orgName || 'O').charAt(0).toUpperCase()}</Text>
             </View>
         </View>
 
-        {item.contactPerson && (
-             <View style={{marginTop: 8, flexDirection: 'row', alignItems: 'center'}}>
-                 <Ionicons name="person-outline" size={14} color="#555" />
-                 <Text style={{fontSize: 12, color: '#555', marginLeft: 5}}>{item.contactPerson} ({item.mobile})</Text>
+        <View style={styles.divider} />
+
+        <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
+             <View style={{flexDirection: 'row', alignItems: 'center', flex: 1}}>
+                 <Ionicons name="person-circle-outline" size={16} color="#555" />
+                 <Text style={{fontSize: 12, color: '#444', marginLeft: 5}} numberOfLines={1}>
+                     {item.contactPerson || 'No Contact Person'}
+                 </Text>
              </View>
-        )}
+             
+             {item.mobile ? (
+                 <TouchableOpacity 
+                     onPress={() => handleCall(item.mobile)} 
+                     style={styles.quickCallBtn}
+                 >
+                     <Ionicons name="call" size={12} color="#2e7d32" />
+                     <Text style={{fontSize: 11, color: '#2e7d32', fontWeight: 'bold', marginLeft: 4}}>Call</Text>
+                 </TouchableOpacity>
+             ) : (
+                 <Text style={{fontSize: 10, color: '#aaa', fontStyle: 'italic'}}>No Number</Text>
+             )}
+        </View>
     </TouchableOpacity>
   );
 
@@ -132,7 +193,7 @@ export default function OrganizationScreen() {
                  <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/')}>
                      <Ionicons name="home" size={20} color="#3b5998" />
                  </TouchableOpacity>
-                 <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_organization' as any)}>
+                 <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_organization')}>
                      <Ionicons name="add" size={20} color="white" />
                      <Text style={{color:'white', fontWeight:'bold', marginLeft:2}}>Add New</Text>
                  </TouchableOpacity>
@@ -238,21 +299,37 @@ export default function OrganizationScreen() {
                               <DetailRow label="Email" value={selectedOrg.email || 'N/A'} icon="mail" />
                           </ScrollView>
 
-                          <View style={styles.divider} />
+                          {/* 🔥 ADMIN ONLY EDIT & DELETE BUTTONS */}
+                          {isStrictAdmin && (
+                              <View style={{flexDirection: 'row', gap: 10, marginTop: 15, paddingTop: 10, borderTopWidth: 1, borderColor: '#eee'}}>
+                                  <TouchableOpacity 
+                                      style={[styles.editBtn, {flex: 1}]} 
+                                      onPress={() => {
+                                          setDetailsModalVisible(false);
+                                          router.push({ 
+                                              pathname: '/add_organization', 
+                                              params: { editId: selectedOrg.id } 
+                                          });
+                                      }}
+                                  >
+                                      <Ionicons name="create" size={18} color="white" />
+                                      <Text style={{color:'white', fontWeight:'bold', marginLeft:5}}>Edit</Text>
+                                  </TouchableOpacity>
 
-                          <TouchableOpacity 
-                              style={styles.editBtn} 
-                              onPress={() => {
-                                  setDetailsModalVisible(false);
-                                  router.push({ 
-                                      pathname: '/add_organization', 
-                                      params: { editId: selectedOrg.id } 
-                                  } as any);
-                              }}
-                          >
-                              <Ionicons name="create" size={18} color="white" />
-                              <Text style={{color:'white', fontWeight:'bold', marginLeft:5}}>Edit Details</Text>
-                          </TouchableOpacity>
+                                  <TouchableOpacity 
+                                      style={[styles.deleteBtn, {flex: 1}]} 
+                                      onPress={handleDeleteOrg}
+                                      disabled={isDeleting}
+                                  >
+                                      {isDeleting ? <ActivityIndicator size="small" color="white" /> : (
+                                          <>
+                                              <Ionicons name="trash-outline" size={18} color="white" />
+                                              <Text style={{color:'white', fontWeight:'bold', marginLeft:5}}>Delete</Text>
+                                          </>
+                                      )}
+                                  </TouchableOpacity>
+                              </View>
+                          )}
                       </>
                   )}
               </View>
@@ -287,10 +364,16 @@ const styles = StyleSheet.create({
   
   card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 15, elevation: 2, borderLeftWidth:4, borderLeftColor:'#3b5998' },
   orgName: { fontWeight: 'bold', fontSize: 16, marginBottom: 2, color:'#333' },
-  subText: { color: 'gray', fontSize: 12, marginBottom: 2 },
+  subText: { color: 'gray', fontSize: 12, marginLeft: 8 },
+  
+  typeBadge: { backgroundColor: '#e3f2fd', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  typeBadgeText: { fontSize: 10, color: '#1565c0', fontWeight: 'bold' },
+
   initialsCircle: { width:35, height:35, borderRadius:20, backgroundColor:'#e8eaf6', justifyContent:'center', alignItems:'center' },
   initialsText: { color:'#3b5998', fontWeight:'bold', fontSize:16 },
   
+  quickCallBtn: { backgroundColor: '#e8f5e9', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, flexDirection: 'row', alignItems: 'center' },
+
   divider: { height: 1, backgroundColor: '#eee', marginVertical: 10 },
   
   limitContainer: { flexDirection:'row', alignItems:'center', paddingHorizontal:15, marginTop:10, paddingBottom:5 },
@@ -299,5 +382,7 @@ const styles = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
   modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 25, elevation: 5, maxHeight: '80%' },
   modalTitle: { fontSize: 20, fontWeight: 'bold', color:'#3b5998', marginBottom:10, flex:1 },
-  editBtn: { flexDirection:'row', backgroundColor:'#3b5998', padding:12, borderRadius:8, justifyContent:'center', alignItems:'center', marginTop:10 }
+  
+  editBtn: { flexDirection:'row', backgroundColor:'#3b5998', padding:12, borderRadius:8, justifyContent:'center', alignItems:'center' },
+  deleteBtn: { flexDirection:'row', backgroundColor:'#d32f2f', padding:12, borderRadius:8, justifyContent:'center', alignItems:'center' }
 });

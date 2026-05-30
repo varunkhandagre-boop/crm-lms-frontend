@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Print from 'expo-print';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import React, { useEffect, useState } from 'react';
@@ -19,41 +20,29 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Firebase direct DB imports removed)
+// 🔥 SAAS IMPORTS (No direct Firebase DB imports)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
-
-// PDF IMPORTS
-import * as Print from 'expo-print';
 
 export default function OrderListScreen() {
   const router = useRouter();
 
-  // 🔥 1. Context se sirf core User details and profile
+  // 🔥 1. Context se sirf Core User, Notification & Profile
   const { currentUser, addNotification, companyProfile } = useData();
 
-  // 🔥 2. Naya SaaS Engine
-  const { fetchSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 2. Naya SaaS Engine (fetch, update, delete)
+  const { fetchSaaSData, updateSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
 
-  // 🔥 3. Lazy Loaded States
+  // 🔥 3. States for SaaS Data
   const [orderList, setOrderList] = useState<any[]>([]);
+  const [paymentList, setPaymentList] = useState<any[]>([]);
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
 
-  // STATES
+  // SEARCH & FILTER STATES
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
-
-  const [modalVisible, setModalVisible] = useState(false);
-  const [selectedOrder, setSelectedOrder] = useState<any>(null);
-  
-  const [editModalVisible, setEditModalVisible] = useState(false);
-  const [editData, setEditData] = useState<any>({});
-  const [isSavingEdit, setIsSavingEdit] = useState(false);
-  
-  const [generatingPdf, setGeneratingPdf] = useState(false);
-  const [isUpdating, setIsUpdating] = useState(false);
 
   const [selectedEmployee, setSelectedEmployee] = useState('All'); 
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
@@ -61,25 +50,43 @@ export default function OrderListScreen() {
 
   const [visibleCount, setVisibleCount] = useState(20);
 
-  const isAdmin = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
-  const isStrictAdmin = currentUser?.role === 'Admin' || currentUser?.role === 'Manager' || currentUser?.role === 'SuperAdmin'; 
+  // MODAL STATES
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<any>(null);
+  
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editData, setEditData] = useState<any>({});
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  const [billedModalVisible, setBilledModalVisible] = useState(false);
+  const [billingData, setBillingData] = useState({ finalAmount: '', paymentMode: 'Credit' });
+  const [isBilling, setIsBilling] = useState(false);
+  
+  const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  // ROLES
+  const userRole = (currentUser?.role || '').toLowerCase().trim();
+  const isAdmin = ['admin', 'manager', 'account', 'accountant', 'hr', 'superadmin'].includes(userRole);
+  const isStrictAdmin = ['admin', 'manager', 'accountant', 'account', 'superadmin'].includes(userRole); 
 
   useEffect(() => {
-      if (viewMode === 'Day') {
-          setVisibleCount(500); 
-      } else {
-          setVisibleCount(20); 
-      }
+      if (viewMode === 'Day') setVisibleCount(500); 
+      else setVisibleCount(20); 
   }, [viewMode, currentDate, searchText, statusFilter, selectedEmployee]);
 
   // 🔥 4. LOAD SAAS DATA ON MOUNT
   const loadData = async () => {
       if (currentUser?.companyId) {
-          const [orders, users] = await Promise.all([
+          // Fetch Orders, Payments (for billing calc), and Users
+          const [orders, payments, users] = await Promise.all([
               fetchSaaSData("orders"),
+              fetchSaaSData("payments"),
               fetchSaaSData("users")
           ]);
+          
           setOrderList(orders);
+          setPaymentList(payments);
 
           if (isAdmin) {
               const mappedUsers = users.map((u: any) => ({
@@ -135,15 +142,14 @@ export default function OrderListScreen() {
       if (viewMode === 'FY') {
           const currentMonth = currentDate.getMonth(); 
           const currentYear = currentDate.getFullYear();
-          
           const fyStartYear = currentMonth >= 3 ? currentYear : currentYear - 1;
           const fyEndYear = fyStartYear + 1;
-          
           return `FY ${fyStartYear.toString().slice(-2)}-${fyEndYear.toString().slice(-2)}`;
       }
       return "All Time";
   };
 
+  // 🔥 ADVANCED PDF GENERATION WITH COMPANY PROFILE
   const generateOrderPDF = async (orderData: any) => {
     setGeneratingPdf(true);
     try {
@@ -152,71 +158,125 @@ export default function OrderListScreen() {
             : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
 
         const signatureHTML = companyProfile?.signatureUrl 
-            ? `<img src="${companyProfile.signatureUrl}" style="height: 50px; margin-top: 10px;" />` 
+            ? `<img src="${companyProfile.signatureUrl}" style="max-height: 60px; max-width: 150px;" />` 
             : `<div style="font-weight: bold; margin-top: 30px;">Authorized Signatory</div>`;
+
+        const companyBankHTML = companyProfile?.bankDetails1?.accountNo 
+            ? `<div style="margin-top: 20px; font-size: 10px; border: 1px dashed #ccc; padding: 10px; background:#f5f5f5;">
+                <b>Our Bank Details:</b> ${companyProfile.bankDetails1.bankName} | 
+                A/C: ${companyProfile.bankDetails1.accountNo} | 
+                IFSC: ${companyProfile.bankDetails1.ifsc}
+               </div>` 
+            : '';
+
+        const formattedProducts = orderData.productDetails ? orderData.productDetails.replace(/,|\n/g, '<br>• ') : '';
 
         const htmlContent = `
         <html>
-          <head>
+        <head>
             <style>
-              body { font-family: 'Helvetica', sans-serif; padding: 30px; border: 2px solid #333; }
-              .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px; }
-              .title { font-size: 22px; font-weight: bold; color: #1a237e; text-transform: uppercase; }
-              .sub-title { font-size: 12px; margin-top: 2px; color: #333; line-height: 1.4; }
-              .row { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 14px; }
-              .label { font-weight: bold; color: #444; }
-              .box { border: 1px solid #000; padding: 15px; margin-top: 10px; background-color: #fcfcfc; }
-              .amount-box { display: inline-block; border: 2px solid #000; padding: 8px 25px; font-weight: bold; font-size: 18px; margin-top: 10px; }
-              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; }
-              .sign-box { text-align: center; }
+                body { font-family: 'Helvetica', 'Arial', sans-serif; padding: 20px; color: #333; }
+                .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #3b5998; padding-bottom: 10px; }
+                .company-name { font-size: 24px; font-weight: bold; color: #3b5998; text-transform: uppercase; }
+                .details-container { display: flex; justify-content: space-between; margin-bottom: 20px; }
+                .box { width: 48%; padding: 10px; border: 1px solid #eee; border-radius: 5px; background: #f9f9f9; }
+                .box-title { font-size: 12px; color: #888; margin-bottom: 5px; text-transform: uppercase; }
+                table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+                th { background-color: #e3f2fd; color: #1565c0; font-weight: bold; padding: 10px; text-align: left; font-size: 12px; border: 1px solid #bbdefb; }
+                td { padding: 10px; border: 1px solid #ddd; font-size: 13px; vertical-align: top; }
+                .summary { border: 1px solid #ddd; border-radius: 5px; width: 40%; float: right; margin-bottom: 20px;}
+                .summary-row { display: flex; justify-content: space-between; padding: 8px 10px; border-bottom: 1px solid #eee; font-size: 13px; }
+                .summary-row.total { background-color: #e3f2fd; font-weight: bold; font-size: 16px; border-bottom: none; color: #1565c0; }
             </style>
-          </head>
-          <body>
+        </head>
+        <body>
             <div class="header">
-              ${logoHTML}
-              ${companyProfile?.logoUrl ? `<div class="title">${companyProfile.companyName}</div>` : ''}
-              <div class="sub-title">${companyProfile?.address || ''}</div>
-              <div class="sub-title">Phone: ${companyProfile?.contactPhone || '-'} | Email: ${companyProfile?.contactEmail || '-'}</div>
-              <div class="sub-title">${companyProfile?.gstNumber ? `GSTIN: ${companyProfile.gstNumber}` : ''}</div>
+                <div style="flex: 1;">
+                    <div class="company-name" style="margin-top: 0;">${companyProfile?.companyName || 'Our Company'}</div>
+                    <div style="font-size: 12px; margin-top: 5px; max-width: 280px; line-height: 1.5;">${companyProfile?.address || companyProfile?.addressLine || ''}</div>
+                    <div style="font-size: 12px; margin-top: 4px;">Phone: ${companyProfile?.contactPhone || '-'} | Email: ${companyProfile?.contactEmail || '-'}</div>
+                    <div style="font-size: 12px; font-weight: bold; margin-top: 5px;">GSTIN: ${companyProfile?.gstNumber || '-'}</div>
+                </div>
+                <div style="width: 250px; text-align: right; margin-top: 0; padding-top: 0;">
+                    ${companyProfile?.logoUrl ? `<img src="${companyProfile.logoUrl}" style="max-height: 120px; max-width: 240px; object-fit: contain; object-position: top; display: block; margin-left: auto;" />` : ''}
+                </div>
             </div>
-            <h3 style="text-align: center; text-decoration: underline;">ORDER ACKNOWLEDGEMENT</h3>
-            <div class="row">
-              <div><span class="label">Order ID:</span> <b>${orderData.orderId}</b></div>
-              <div><span class="label">Date:</span> ${new Date(orderData.date).toLocaleDateString('en-GB')}</div>
+
+            <div style="text-align: center; margin: 15px 0;">
+                <h2 style="margin:0; font-size: 22px; color: #1565c0; text-decoration: underline;">SALES ORDER</h2>
             </div>
-            <div class="box">
-              <div class="label" style="text-decoration: underline; margin-bottom: 5px;">Client Details:</div>
-              <div style="font-size: 16px; font-weight: bold;">${orderData.hospitalName}</div>
-              <div>${orderData.address || ''}, ${orderData.city || ''}</div>
-              <div style="margin-top: 5px;">Contact: ${orderData.contactPerson || ''} (${orderData.mobile || ''})</div>
+
+            <div class="details-container">
+                <div class="box">
+                    <div class="box-title">Client Details</div>
+                    <div style="font-weight: bold; font-size: 16px; color: #1565c0;">${orderData.hospitalName}</div>
+                    <div style="font-size: 12px; margin-top: 5px;">${orderData.address || ''}, ${orderData.city || ''}</div>
+                    <div style="font-size: 12px;">Contact: ${orderData.contactPerson || ''} (${orderData.mobile || ''})</div>
+                </div>
+                <div style="text-align: right; font-size: 13px; line-height: 1.8;">
+                    <div><strong>Order ID:</strong> ${orderData.orderId}</div>
+                    <div><strong>Date:</strong> ${new Date(orderData.date).toLocaleDateString('en-GB')}</div>
+                    <div><strong>PO Number:</strong> ${orderData.poNumber}</div>
+                    <div style="margin-top: 5px; display: inline-block; padding: 4px 8px; background-color: #fff3e0; border-radius: 4px; color: #e65100; font-weight: bold;">Status: ${orderData.status}</div>
+                </div>
             </div>
-            <div class="box">
-              <div class="label" style="text-decoration: underline; margin-bottom: 5px;">Order Details:</div>
-              <div><span class="label">PO Number:</span> ${orderData.poNumber}</div>
-              <div style="margin-top: 5px;"><span class="label">Product Config:</span><br>${orderData.productDetails?.replace(/\n/g, '<br>') || ''}</div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th width="70%">Product Configuration</th>
+                        <th width="30%" style="text-align:right;">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>
+                            <strong>As per PO Details:</strong><br>
+                            <span style="font-size: 11px; color: #555; white-space: pre-wrap; line-height: 1.6;">• ${formattedProducts}</span>
+                        </td>
+                        <td style="text-align:right; font-weight:bold; vertical-align: middle; font-size: 16px;">
+                            ₹${Number(orderData.amount).toLocaleString('en-IN')}
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="summary">
+                <div class="summary-row"><span>Total Order Value</span> <span>₹${Number(orderData.amount).toLocaleString('en-IN')}</span></div>
+                ${orderData.advanceAmount && Number(orderData.advanceAmount) > 0 ? `<div class="summary-row" style="color: green;"><span>Advance Received</span> <span>- ₹${Number(orderData.advanceAmount).toLocaleString('en-IN')}</span></div>` : ''}
+                <div class="summary-row total"><span>Balance Due</span> <span>₹${(Number(orderData.amount) - (Number(orderData.advanceAmount) || 0)).toLocaleString('en-IN')}</span></div>
             </div>
-            <div class="box">
-              <div><span class="label">Payment Terms:</span> ${orderData.paymentTerms || 'Standard'}</div>
-              <div><span class="label">Delivery Terms:</span> ${orderData.deliveryTerms || 'Standard'}</div>
-              ${orderData.notes ? `<div style="margin-top:5px;"><span class="label">Notes:</span> ${orderData.notes}</div>` : ''}
+
+            <div style="clear: both;"></div>
+
+            <div style="margin-top: 10px;">
+                <div class="tc-title" style="color:#1565c0; font-size: 12px; font-weight: bold;">Order Terms:</div>
+                <div style="margin-top: 5px; font-size: 11px;"><strong>Payment Terms:</strong> ${orderData.paymentTerms || 'As agreed'}</div>
+                <div style="font-size: 11px;"><strong>Delivery Terms:</strong> ${orderData.deliveryTerms || 'As agreed'}</div>
+                ${orderData.notes ? `<div style="font-size: 11px; margin-top: 5px;"><strong>Notes:</strong> ${orderData.notes}</div>` : ''}
             </div>
-            <div style="text-align: right; margin-top: 20px;">
-              <div style="font-weight: bold;">Total Order Value</div>
-              <div class="amount-box">₹ ${Number(orderData.amount).toLocaleString('en-IN')}/-</div>
+
+            ${companyBankHTML}
+
+            <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-top: 40px;">
+                <div style="font-size:10px; max-width:250px; color:#333;">
+                    *This is a computer generated document.<br>
+                    *Subject to Jurisdiction.
+                </div>
+                <div class="signature-box" style="text-align: center;">
+                    <div style="font-weight:bold; margin-bottom: 5px; font-size: 12px;">For: ${companyProfile?.companyName || 'Our Company'}</div>
+                    <div style="height: 60px; display:flex; align-items:center; justify-content:center;">
+                        ${signatureHTML}
+                    </div>
+                    <div style="border-top: 1px solid #333; margin-top: 5px; padding-top: 5px; font-size: 11px; width: 150px;">Authorized Signatory<br><span style="font-size: 9px; color: gray;">(Booked By: ${orderData.senderName})</span></div>
+                </div>
             </div>
-            <div class="footer">
-              <div>* This is a computer generated document.</div>
-              <div class="sign-box">
-                <div style="margin-bottom: 5px;">Booked By: <b>${orderData.senderName}</b></div>
-                ${signatureHTML}
-              </div>
-            </div>
-          </body>
+        </body>
         </html>`;
 
         const { uri } = await Print.printToFileAsync({ html: htmlContent });
         const cleanName = `Order_${orderData.orderId}.pdf`;
-        const newPath = `${(FileSystem as any).cacheDirectory}${cleanName}`;
+        const newPath = `${FileSystem.cacheDirectory}${cleanName}`;
 
         try {
             await FileSystem.copyAsync({ from: uri, to: newPath });
@@ -256,6 +316,7 @@ export default function OrderListScreen() {
       } catch (e: any) { Alert.alert("Error", "Could not open file."); }
   };
 
+  // 🔥 FILTER LOGIC (Priority Sorting: Pending/Approved at Top)
   const getFilteredData = () => {
       let data = orderList ? [...orderList] : [];
 
@@ -291,7 +352,7 @@ export default function OrderListScreen() {
 
           const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
           const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
+          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime();
 
           data = data.filter((item: any) => {
               const ts = parseDate(item.dateIso || item.date || item.createdAt);
@@ -305,14 +366,34 @@ export default function OrderListScreen() {
           });
       }
 
-      data.sort((a: any, b: any) => parseDate(b.dateIso || b.date) - parseDate(a.dateIso || a.date));
+      data.sort((a: any, b: any) => {
+          const aStatus = (a.status || '').toLowerCase().trim();
+          const bStatus = (b.status || '').toLowerCase().trim();
+          
+          const aIsPriority = (aStatus === 'pending' || aStatus === 'approved') ? 1 : 0;
+          const bIsPriority = (bStatus === 'pending' || bStatus === 'approved') ? 1 : 0;
+
+          if (aIsPriority !== bIsPriority) {
+              return bIsPriority - aIsPriority; 
+          }
+          return parseDate(b.dateIso || b.date) - parseDate(a.dateIso || a.date);
+      });
       return data;
   };
 
   const fullList = getFilteredData(); 
   const renderedList = fullList.slice(0, visibleCount);
 
-  // 🔥 5. SAAS ORDER STATUS UPDATE
+  // HELPER FOR BILLING CALCULATION
+  const getOrderPayments = (order: any) => {
+      return paymentList.filter((p:any) => 
+          (p.orderId && p.orderId === order.id) || 
+          (p.orderId && p.orderId === order.orderId) ||
+          (p.orderRef && p.orderRef === order.orderId)
+      );
+  };
+
+  // 🔥 SAAS ORDER STATUS UPDATE
   const handleUpdateStatus = async (newStatus: string) => {
       if (!selectedOrder) return;
       Alert.alert("Confirm", `Mark as ${newStatus}?`, [
@@ -357,12 +438,13 @@ export default function OrderListScreen() {
           paymentTerms: item.paymentTerms || '',
           deliveryTerms: item.deliveryTerms || '',
           notes: item.notes || '',
+          saleType: item.saleType || 'Credit', 
           status: item.status || 'Pending'
       });
       setEditModalVisible(true);
   };
 
-  // 🔥 6. SAAS ADMIN EDIT ORDER
+  // 🔥 SAAS ADMIN EDIT ORDER
   const handleSaveEdit = async () => {
       if (!editData.id) return;
       if (!editData.hospitalName || !editData.amount) {
@@ -371,7 +453,7 @@ export default function OrderListScreen() {
       }
       setIsSavingEdit(true);
       try {
-          const res = await updateSaaSData("orders", editData.id, {
+          const updates = {
               hospitalName: editData.hospitalName,
               poNumber: editData.poNumber,
               amount: parseFloat(editData.amount),
@@ -379,11 +461,13 @@ export default function OrderListScreen() {
               paymentTerms: editData.paymentTerms,
               deliveryTerms: editData.deliveryTerms,
               notes: editData.notes,
+              saleType: editData.saleType,
               status: editData.status 
-          });
+          };
+          const res = await updateSaaSData("orders", editData.id, updates);
 
           if (res.success) {
-              setOrderList(prev => prev.map(item => item.id === editData.id ? { ...item, ...editData } : item));
+              setOrderList(prev => prev.map(item => item.id === editData.id ? { ...item, ...updates } : item));
               Alert.alert("Success", "Order details updated successfully!");
               setEditModalVisible(false);
           } else {
@@ -396,9 +480,101 @@ export default function OrderListScreen() {
       }
   };
 
-  const userRole = currentUser?.role?.toLowerCase() || '';
-  const canApprove = ['admin', 'manager', 'accountant', 'account', 'superadmin'].includes(userRole);
-  const isStore = ['store', 'store keeper'].includes(userRole);
+  // 🔥 SAAS BILLED CALCULATION & UPDATE
+  const openBillingModal = () => {
+      setBillingData({ finalAmount: selectedOrder.amount.toString(), paymentMode: 'Credit' });
+      setBilledModalVisible(true);
+  };
+
+  const handleConfirmBilling = async () => {
+      if (!billingData.finalAmount) return Alert.alert("Required", "Final bill amount is required.");
+      setIsBilling(true);
+      
+      try {
+          const finalAmountNum = parseFloat(String(billingData.finalAmount).replace(/[^0-9.]/g, '')) || 0;
+          
+          const orderPayments = paymentList.filter((p: any) => 
+              p.orderId === selectedOrder.id || p.orderRef === selectedOrder.orderId
+          );
+          const totalPaidSoFar = orderPayments.reduce((sum: number, p: any) => sum + (parseFloat(p.amount) || 0), 0);
+          
+          const advanceNum = parseFloat(String(selectedOrder.advanceAmount || '0').replace(/[^0-9.]/g, '')) || 0;
+          const actualPaid = Math.max(totalPaidSoFar, advanceNum);
+          
+          const newBalance = finalAmountNum - actualPaid; 
+          const finalBalance = newBalance < 0 ? 0 : newBalance; 
+          
+          const newStatus = finalBalance <= 0 ? 'Completed' : 'Billed';
+          
+          const updates = {
+              status: newStatus,
+              finalBillAmount: finalAmountNum,
+              balance: finalBalance,
+              paymentStatus: finalBalance <= 0 ? 'Paid' : 'Pending', 
+              billedDate: new Date().toISOString()
+          };
+
+          const res = await updateSaaSData("orders", selectedOrder.id, updates);
+          
+          if(res.success){
+              setOrderList(prev => prev.map(item => item.id === selectedOrder.id ? { ...item, ...updates } : item));
+              Alert.alert("Success", `Billing Done! Auto-calculated balance: ₹${finalBalance}.`);
+              setBilledModalVisible(false);
+              setModalVisible(false); 
+          } else {
+              Alert.alert("Error", "Failed to mark order as billed.");
+          }
+          
+      } catch (error) {
+          Alert.alert("Error", "Failed to mark order as billed.");
+      } finally {
+          setIsBilling(false);
+      }
+  };
+
+  // 🔥 SAAS ADMIN DELETE ORDER
+  const handleDeleteOrder = async () => {
+      if (!selectedOrder) return;
+      Alert.alert(
+          "Delete Order?",
+          "Are you sure you want to permanently delete this order?",
+          [
+              { text: "Cancel", style: "cancel" },
+              { 
+                  text: "Delete", 
+                  style: "destructive", 
+                  onPress: async () => {
+                      setIsUpdating(true);
+                      try {
+                          const res = await deleteSaaSData("orders", selectedOrder.id);
+                          if(res.success) {
+                              setOrderList(prev => prev.filter(item => item.id !== selectedOrder.id));
+                              setModalVisible(false);
+                              Alert.alert("Deleted", "Order has been deleted successfully.");
+                          } else {
+                              Alert.alert("Error", "Failed to delete order.");
+                          }
+                      } catch (error: any) {
+                          Alert.alert("Error", error.message);
+                      } finally {
+                          setIsUpdating(false);
+                      }
+                  } 
+              }
+          ]
+      );
+  };
+
+  const renderProductList = (productsStr: string) => {
+      if (!productsStr) return <Text style={{fontSize: 12, color: 'gray'}}>None</Text>;
+      const productsArray = productsStr.split(/,|\n/).map(s => s.trim()).filter(Boolean); 
+      return productsArray.map((prod, idx) => (
+          <View key={idx} style={{flexDirection:'row', alignItems:'center', marginTop: 4}}>
+              <Ionicons name="checkmark-circle-outline" size={14} color="#3b5998" />
+              <Text style={{fontSize:13, color:'#444', marginLeft:6}}>{prod}</Text>
+          </View>
+      ));
+  };
 
   const openDetails = (item: any) => {
       setSelectedOrder(item);
@@ -406,19 +582,28 @@ export default function OrderListScreen() {
   };
 
   const renderItem = ({ item }: any) => {
-      const isApproved = item.status === 'Approved' || item.status === 'Completed' || item.status === 'Dispatched';
-      const isRejected = item.status === 'Rejected';
+      const currentStatus = (item.status || '').trim(); 
+      const lowerStatus = currentStatus.toLowerCase();
+
+      const isApproved = currentStatus === 'Approved' || currentStatus === 'Dispatched';
+      const isBilledOrCompleted = currentStatus === 'Billed' || currentStatus === 'Completed';
+      const isRejected = currentStatus === 'Rejected';
+
+      const isPendingOrApproved = lowerStatus === 'pending' || lowerStatus === 'approved';
+      const showEditBtn = isStrictAdmin && isPendingOrApproved;
+
+      const orderType = item.saleType || 'Credit';
 
       return (
-        <TouchableOpacity style={[styles.card, isApproved && styles.cardApproved, isRejected && styles.cardRejected]} onPress={() => openDetails(item)}>
+        <TouchableOpacity style={[styles.card, isApproved && styles.cardApproved, isBilledOrCompleted && styles.cardBilled, isRejected && styles.cardRejected]} onPress={() => openDetails(item)}>
             <View style={styles.cardHeader}>
                 <View style={{flex:1}}>
                     <View style={{flexDirection: 'row', alignItems: 'center'}}>
                         <Text style={styles.hospitalName} numberOfLines={1}>{item.hospitalName}</Text>
                         
-                        {isStrictAdmin && (
-                            <TouchableOpacity style={{marginLeft: 10}} onPress={() => openEditModal(item)}>
-                                <Ionicons name="create" size={18} color="#d32f2f" />
+                        {showEditBtn && (
+                            <TouchableOpacity style={{marginLeft: 10, padding: 5}} onPress={() => openEditModal(item)}>
+                                <Ionicons name="create" size={20} color="#d32f2f" />
                             </TouchableOpacity>
                         )}
                     </View>
@@ -430,9 +615,9 @@ export default function OrderListScreen() {
                     ) : null}
                     <Text style={styles.poNumber}>PO: {item.poNumber}</Text>
                 </View>
-                <View style={[styles.statusBadge, { backgroundColor: isApproved ? '#e8f5e9' : (isRejected ? '#ffebee' : '#fff3e0') }]}>
-                    <Text style={{color: isApproved ? 'green' : (isRejected ? 'red' : 'orange'), fontWeight:'bold', fontSize:10}}>
-                        {item.status}
+                <View style={[styles.statusBadge, { backgroundColor: isBilledOrCompleted ? '#e3f2fd' : isApproved ? '#e8f5e9' : (isRejected ? '#ffebee' : '#fff3e0') }]}>
+                    <Text style={{color: isBilledOrCompleted ? '#1976d2' : isApproved ? 'green' : (isRejected ? 'red' : 'orange'), fontWeight:'bold', fontSize:10}}>
+                        {currentStatus}
                     </Text>
                 </View>
             </View>
@@ -440,8 +625,19 @@ export default function OrderListScreen() {
             <Text style={styles.productText} numberOfLines={1}>📦 {item.productDetails}</Text>
 
             <View style={styles.row}>
-                <Text style={styles.amount}>₹ {item.amount}</Text>
-                <Text style={styles.date}>{item.date}</Text>
+                <View>
+                    <Text style={styles.amount}>₹ {item.amount}</Text>
+                    {item.advanceAmount ? <Text style={{fontSize:10, color:'green', fontWeight:'bold'}}>Adv: ₹{item.advanceAmount}</Text> : null}
+                </View>
+                <View style={{alignItems: 'flex-end'}}>
+                    <Text style={styles.date}>{item.date}</Text>
+                    
+                    <View style={{backgroundColor: orderType === 'Cash' ? '#e8f5e9' : '#e3f2fd', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginTop: 4}}>
+                        <Text style={{fontSize: 9, fontWeight: 'bold', color: orderType === 'Cash' ? '#2e7d32' : '#1565c0'}}>
+                            {orderType === 'Cash' ? '💵 CASH SALE' : '📄 CREDIT SALE'}
+                        </Text>
+                    </View>
+                </View>
             </View>
 
             <View style={styles.divider} />
@@ -454,7 +650,6 @@ export default function OrderListScreen() {
                              {item.senderName || item.userName || 'Unknown'}
                         </Text>
                     </View>
-
                     {item.bookedBy && item.bookedBy !== item.senderName && (
                         <Text style={{fontSize: 10, color: 'gray', marginLeft: 20}}>
                             (Entry by: {item.bookedBy})
@@ -492,7 +687,7 @@ export default function OrderListScreen() {
               ))}
           </View>
 
-          {isAdmin && (
+          {isStrictAdmin && (
             <View style={{paddingHorizontal: 15, marginBottom: 10}}>
                <TouchableOpacity style={styles.employeeFilterBtn} onPress={() => setShowEmployeePicker(true)}>
                    <Ionicons name="people" size={18} color="#2e7d32" />
@@ -521,7 +716,7 @@ export default function OrderListScreen() {
           </View>
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingLeft:15, paddingVertical:10}}>
-              {['All', 'Pending', 'Approved', 'Rejected', 'Dispatched'].map(s => (
+              {['All', 'Pending', 'Approved', 'Dispatched', 'Billed', 'Rejected'].map(s => (
                   <TouchableOpacity key={s} style={[styles.filterChip, statusFilter === s && styles.activeChip]} onPress={() => setStatusFilter(s)}>
                       <Text style={[styles.chipText, statusFilter === s && {color:'white'}]}>{s}</Text>
                   </TouchableOpacity>
@@ -575,6 +770,22 @@ export default function OrderListScreen() {
                       <Text style={styles.inputLabel}>Amount (₹) *</Text>
                       <TextInput style={styles.editInput} keyboardType="numeric" value={editData.amount} onChangeText={t => setEditData({...editData, amount: t})} />
 
+                      <Text style={styles.inputLabel}>Order Type</Text>
+                      <View style={{flexDirection: 'row', gap: 10, marginBottom: 15}}>
+                          <TouchableOpacity 
+                              style={{ flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: editData.saleType === 'Cash' ? '#2e7d32' : '#f0f0f0', alignItems: 'center' }} 
+                              onPress={() => setEditData({...editData, saleType: 'Cash'})}
+                          >
+                              <Text style={{fontSize: 12, fontWeight: 'bold', color: editData.saleType === 'Cash' ? 'white' : '#555'}}>💵 Cash Sale</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity 
+                              style={{ flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: (!editData.saleType || editData.saleType === 'Credit') ? '#1565c0' : '#f0f0f0', alignItems: 'center' }} 
+                              onPress={() => setEditData({...editData, saleType: 'Credit'})}
+                          >
+                              <Text style={{fontSize: 12, fontWeight: 'bold', color: (!editData.saleType || editData.saleType === 'Credit') ? 'white' : '#555'}}>📄 Billed (Credit)</Text>
+                          </TouchableOpacity>
+                      </View>
+
                       <Text style={styles.inputLabel}>Status</Text>
                       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom: 10}}>
                           {['Pending', 'Approved', 'Rejected', 'Dispatched', 'Completed'].map(st => (
@@ -608,6 +819,36 @@ export default function OrderListScreen() {
                   >
                       {isSavingEdit ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Save Changes</Text>}
                   </TouchableOpacity>
+              </View>
+          </KeyboardAvoidingView>
+      </Modal>
+
+      {/* BILLED MODAL */}
+      <Modal visible={billedModalVisible} transparent animationType="slide">
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                  <Text style={styles.modalTitle}>Complete Billing</Text>
+                  <Text style={{color: 'gray', marginBottom: 15, fontSize: 12}}>Generate invoice and send it to Payment Dues.</Text>
+                  
+                  <Text style={styles.inputLabel}>Final Bill Amount (₹) *</Text>
+                  <TextInput 
+                      style={styles.editInput} 
+                      keyboardType="numeric" 
+                      value={billingData.finalAmount} 
+                      onChangeText={t => setBillingData({...billingData, finalAmount: t})} 
+                  />
+                  <Text style={{fontSize: 10, color: 'green', marginTop: 2, marginBottom: 25}}>
+                      Advance Already Received: ₹ {selectedOrder?.advanceAmount || 0}
+                  </Text>
+
+                  <View style={{flexDirection: 'row', gap: 10}}>
+                      <TouchableOpacity style={[styles.saveEditBtn, {flex: 1, backgroundColor: 'gray', marginTop: 0}]} onPress={() => setBilledModalVisible(false)}>
+                          <Text style={styles.btnText}>Cancel</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[styles.saveEditBtn, {flex: 1, backgroundColor: '#2e7d32', marginTop: 0}]} onPress={handleConfirmBilling} disabled={isBilling}>
+                          {isBilling ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Confirm Billing</Text>}
+                      </TouchableOpacity>
+                  </View>
               </View>
           </KeyboardAvoidingView>
       </Modal>
@@ -646,12 +887,16 @@ export default function OrderListScreen() {
                           <DetailRow label="Email" value={selectedOrder.email} />
 
                           <Text style={styles.sectionHeader}>📦 Order Info</Text>
-                          <DetailRow label="Amount" value={`₹ ${selectedOrder.amount}`} highlight />
+                          <DetailRow label="Order Type" value={selectedOrder.saleType === 'Cash' ? '💵 Cash Sale' : '📄 Billed (Credit)'} highlight />
+                          <DetailRow label="Total Value" value={`₹ ${selectedOrder.amount}`} />
+                          <DetailRow label="Advance Rcvd." value={selectedOrder.advanceAmount ? `₹ ${selectedOrder.advanceAmount}` : '0'} />
                           <DetailRow label="Date" value={selectedOrder.date} />
+                          
                           <View style={styles.textBox}>
-                              <Text style={styles.textLabel}>Products:</Text>
-                              <Text style={styles.textValue}>{selectedOrder.productDetails}</Text>
+                              <Text style={styles.textLabel}>Products Config:</Text>
+                              {renderProductList(selectedOrder.productDetails)}
                           </View>
+
                           <DetailRow label="Payment" value={selectedOrder.paymentTerms} />
                           <DetailRow label="Delivery" value={selectedOrder.deliveryTerms} />
 
@@ -693,7 +938,7 @@ export default function OrderListScreen() {
                               <Text style={{fontWeight:'bold', color:'#333', fontSize:16}}>{selectedOrder.status}</Text>
                           </View>
 
-                          {canApprove && selectedOrder.status === 'Pending' && (
+                          {isStrictAdmin && selectedOrder.status === 'Pending' && (
                               <View style={styles.actionRow}>
                                   <TouchableOpacity style={[styles.actionBtn, {backgroundColor:'#d32f2f', opacity: isUpdating ? 0.6 : 1}]} onPress={() => handleUpdateStatus('Rejected')} disabled={isUpdating}>
                                       <Text style={styles.btnText}>Reject</Text>
@@ -705,9 +950,24 @@ export default function OrderListScreen() {
                               </View>
                           )}
                           
-                          {isStore && selectedOrder.status === 'Approved' && (
-                              <TouchableOpacity style={[styles.actionBtn, {backgroundColor:'#1976d2', marginTop:15, opacity: isUpdating ? 0.6 : 1}]} onPress={() => handleUpdateStatus('Dispatched')} disabled={isUpdating}>
-                                  {isUpdating ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Mark as Dispatched</Text>}
+                          {isStrictAdmin && (selectedOrder.status === 'Approved' || selectedOrder.status === 'Dispatched') && (
+                              <TouchableOpacity style={[styles.actionBtn, {backgroundColor:'#1976d2', marginTop:15}]} onPress={openBillingModal}>
+                                  <Text style={styles.btnText}>✅ Mark as Billed (Generate Due)</Text>
+                              </TouchableOpacity>
+                          )}
+
+                          {isStrictAdmin && (
+                              <TouchableOpacity 
+                                  style={{marginTop: 15, backgroundColor: '#ffebee', padding: 12, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#ef9a9a'}} 
+                                  onPress={handleDeleteOrder}
+                                  disabled={isUpdating}
+                              >
+                                  <View style={{flexDirection:'row', alignItems:'center'}}>
+                                      {isUpdating ? <ActivityIndicator size="small" color="#d32f2f" /> : <Ionicons name="trash-outline" size={18} color="#d32f2f" />}
+                                      <Text style={{color: '#d32f2f', fontWeight: 'bold', marginLeft: 8}}>
+                                          {isUpdating ? "Deleting..." : "Delete Order"}
+                                      </Text>
+                                  </View>
                               </TouchableOpacity>
                           )}
                       </ScrollView>
@@ -724,14 +984,7 @@ export default function OrderListScreen() {
                     data={employees} 
                     keyExtractor={item => item.id} 
                     renderItem={({item}) => (
-                      <TouchableOpacity 
-                        style={styles.pickerItem} 
-                        onPress={() => { 
-                            setSelectedEmployee(item.id); 
-                            setSelectedEmployeeName(item.name);
-                            setShowEmployeePicker(false); 
-                        }}
-                      >
+                      <TouchableOpacity style={styles.pickerItem} onPress={() => { setSelectedEmployee(item.id); setSelectedEmployeeName(item.name); setShowEmployeePicker(false); }}>
                           <View style={{flexDirection:'row', alignItems:'center'}}>
                              <Ionicons name="person-circle" size={24} color="#555" style={{marginRight:10}}/>
                              <Text style={{fontSize:16, color:'#333'}}>{item.name}</Text>
@@ -783,6 +1036,7 @@ const styles = StyleSheet.create({
   
   card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 10, elevation: 2, borderLeftWidth:4, borderLeftColor:'#ff9800' },
   cardApproved: { borderLeftColor: '#4caf50' },
+  cardBilled: { borderLeftColor: '#1976d2' },
   cardRejected: { borderLeftColor: '#f44336' },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   hospitalName: { fontWeight: 'bold', fontSize: 16, color: '#333', flex:1 },

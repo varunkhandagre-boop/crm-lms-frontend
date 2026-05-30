@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
-// Firebase Authentication zaroori hai naye accounts banate waqt
+
+// 🔥 Auth Imports (Sirf Background Account Creation ke liye, Database ke liye nahi)
 import { initializeApp } from "firebase/app";
 import { createUserWithEmailAndPassword, getAuth, signOut } from "firebase/auth";
 import React, { useEffect, useState } from 'react';
@@ -23,8 +24,8 @@ import {
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 
-// 🔥 SAAS IMPORTS (Firestore direct calls removed)
-import { firebaseConfig } from '../firebaseConfig'; // Still need config for secondary Auth
+// 🔥 SAAS IMPORTS (No direct Firestore DB calls!)
+import { firebaseConfig } from '../firebaseConfig';
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
@@ -82,7 +83,7 @@ export default function ManageTeamScreen() {
 }
 
 // ====================================================================
-// 1️⃣ USERS TAB (SAAS UPDATED)
+// 1️⃣ USERS TAB (100% SAAS ARCHITECTURE)
 // ====================================================================
 const UsersTab = () => {
     const { currentUser } = useData();
@@ -140,7 +141,7 @@ const UsersTab = () => {
                 bankDetails: bankDetailsString,
                 monthlyTarget: Number(formData.monthlyTarget),
                 yearlyLeaves: Number(formData.yearlyLeaves),
-                companyId: currentUser?.companyId // Explicitly ensuring SaaS tie
+                companyId: currentUser?.companyId 
             };
 
             if (formData.password) {
@@ -150,30 +151,47 @@ const UsersTab = () => {
             }
 
             if (editData) {
+                // EDIT EXISTING EMPLOYEE
                 await updateSaaSData("users", editData.id, payload);
                 Alert.alert("Success", "User Details Updated!");
             } else {
-                // Secondary App Auth creation logic remains same as it hits global Auth
+                // 🔥 NAYA EMPLOYEE ADD KARNA: 100% SAAS LIMIT CHECK
+                const currentEmployees = await fetchSaaSData("users");
+                const myCompanyData = await fetchSaaSData("companies"); 
+                
+                let maxLimit = 10; // Default limit
+                if (myCompanyData && myCompanyData.length > 0) {
+                    maxLimit = (myCompanyData[0] as any).maxEmployees || 10;
+                }
+
+                if (currentEmployees.length >= maxLimit) {
+                    Alert.alert(
+                        "Limit Reached 🛑", 
+                        `Your plan only allows up to ${maxLimit} employees. Please upgrade your plan to add more.`
+                    );
+                    setIsProcessing(false);
+                    return; // Stop execution!
+                }
+
+                // 🔥 SAFE USER CREATION: Secondary App Trick (For Firebase Auth Only)
                 const secondaryApp = initializeApp(firebaseConfig, "Secondary");
                 const secondaryAuth = getAuth(secondaryApp);
-                await createUserWithEmailAndPassword(secondaryAuth, formData.email, formData.password);
-                await signOut(secondaryAuth);
+                await createUserWithEmailAndPassword(secondaryAuth, formData.email.toLowerCase(), formData.password);
+                await signOut(secondaryAuth); // Sign out background user
 
-                // Need custom ID for Users collection, we simulate by passing email as custom ID flag 
-                // Since our SaaS engine uses addDoc by default, we modify slightly or let it auto ID. 
-                // Assuming your auth maps emails to custom doc IDs, we use the SaaS addData.
-                // NOTE: If your DB strictly requires doc ID to be email, you might need a custom endpoint.
-                // Assuming standard SaaS approach here:
+                // Save to Firestore via SaaS Hook
                 payload.id = formData.email.toLowerCase();
                 payload.status = "Active";
                 await addSaaSData("users", payload); 
                 
-                Alert.alert("Success", `User Created: ${formData.empId}`);
+                Alert.alert("Success ✅", `User Created: ${formData.empId}`);
             }
             setModalVisible(false);
             fetchUsers();
         } catch (e: any) {
-            Alert.alert("Error", e.message);
+            let msg = e.message;
+            if (msg.includes("email-already-in-use")) msg = "This email is already registered.";
+            Alert.alert("Error", msg);
         }
         setIsProcessing(false);
     };
@@ -372,7 +390,7 @@ const UsersTab = () => {
 };
 
 // ====================================================================
-// 2️⃣ PERMISSIONS TAB (SAAS UPDATED)
+// 2️⃣ PERMISSIONS TAB
 // ====================================================================
 const PermissionsTab = () => {
     const { currentUser } = useData();
@@ -403,8 +421,6 @@ const PermissionsTab = () => {
             const usersData = await fetchSaaSData("users");
             setUsers(usersData);
 
-            // Using global settings object for now. In pure SaaS, this should be "company_settings" collection
-            // Assumed "settings" collection has docs with custom IDs. Let's use our custom SaaS engine standard.
             try {
                const permData: any[] = await fetchSaaSData("settings_permissions");
                if (permData && permData.length > 0) {
@@ -535,7 +551,7 @@ const PermissionsTab = () => {
 };
 
 // ====================================================================
-// 3️⃣ HOLIDAYS TAB (SAAS UPDATED)
+// 3️⃣ HOLIDAYS TAB
 // ====================================================================
 const HolidaysTab = () => {
     const { currentUser } = useData();
@@ -627,7 +643,7 @@ const HolidaysTab = () => {
 };
 
 // ====================================================================
-// 4️⃣ TRACKING TAB (SAAS UPDATED)
+// 4️⃣ TRACKING TAB
 // ====================================================================
 const TrackingTab = () => {
     const { currentUser } = useData();
@@ -638,7 +654,6 @@ const TrackingTab = () => {
     const [selectedUser, setSelectedUser] = useState("All");
     const [loading, setLoading] = useState(false);
     
-    // 📅 Date Filter State
     const [mapDate, setMapDate] = useState(new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
 
@@ -665,9 +680,6 @@ const TrackingTab = () => {
             const day = String(mapDate.getDate()).padStart(2, '0');
             const dateQuery = `${year}-${month}-${day}`; 
 
-            // Custom Fetch logic since useSaaSDB fetches entire collection
-            // For production with massive tracking logs, you should pass a specific query to the hook
-            // But for now, we filter locally from the tenant's data
             let data = await fetchSaaSData("location_logs");
             data = data.filter((d:any) => d.date === dateQuery || d.dateIso === dateQuery);
 
@@ -692,10 +704,7 @@ const TrackingTab = () => {
 
     return (
         <View style={{flex: 1, borderRadius: 10, overflow: 'hidden'}}>
-            
-            {/* 🛠️ FILTERS HEADER */}
             <View style={{backgroundColor: 'white', padding: 10, elevation: 2}}>
-                
                 <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
                     <View>
                         <Text style={{fontSize: 10, color: 'gray', fontWeight:'bold'}}>SELECT DATE</Text>
@@ -730,7 +739,6 @@ const TrackingTab = () => {
                 </ScrollView>
             </View>
 
-            {/* 🗺️ MAP VIEW */}
             <View style={{flex: 1}}>
                 {loading && <ActivityIndicator size="large" color="#3b5998" style={{position:'absolute', top: 20, alignSelf:'center', zIndex:10}} />}
                 

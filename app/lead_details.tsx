@@ -20,7 +20,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-// 🔥 SAAS IMPORTS (Firebase direct DB imports removed)
+// 🔥 SAAS IMPORTS (No direct Firebase DB imports)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
@@ -29,14 +29,15 @@ export default function LeadDetailsScreen() {
     const insets = useSafeAreaInsets();
     const { id } = useLocalSearchParams();
     
-    // 🔥 1. Context Se zaroori cheezein 
+    // 🔥 Context se SaaS ready properties
     const { leadsList, addLeadActivity, currentUser, refreshData, productList = [] } = useData();
 
-    // 🔥 2. Naya SaaS Engine for Adds and Updates
-    const { addSaaSData, updateSaaSData } = useSaaSDB();
+    // 🔥 Naya SaaS Engine (add, update, aur delete)
+    const { addSaaSData, updateSaaSData, deleteSaaSData } = useSaaSDB();
 
     const [lead, setLead] = useState<any>(null);
     const [isUpdating, setIsUpdating] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false); // 🔥 DELETE LOADER
 
     // Log Visit Modal States
     const [logModalVisible, setLogVisitModalVisible] = useState(false);
@@ -45,9 +46,10 @@ export default function LeadDetailsScreen() {
     const [editNote, setEditNote] = useState('');
     const [editNextDate, setEditNextDate] = useState(new Date());
     
-    // Edit Product States
-    const [editProduct, setEditProduct] = useState('');
-    const [isOtherProduct, setIsOtherProduct] = useState(false);
+    // 🔥 Multiple Product & Search States
+    const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
+    const [otherProductText, setOtherProductText] = useState('');
+    const [productSearchText, setProductSearchText] = useState(''); 
     
     // Pickers
     const [showNextDatePicker, setShowNextDatePicker] = useState(false);
@@ -55,12 +57,15 @@ export default function LeadDetailsScreen() {
     const [showStagePicker, setShowStagePicker] = useState(false);
     const [showProductPicker, setShowProductPicker] = useState(false);
 
-    // VOICE TO TEXT STATES (Dummy for now)
     const [isRecording, setIsRecording] = useState(false);
 
     const outcomeOptions = ['Interested', 'Follow Up', 'Demo Planned', 'Order Expected', 'Order Closed', 'Lost', 'Not Interested'];
     const stageOptions = ['New', 'Introduction', 'Technical Review', 'Quotation', 'Negotiation', 'Order Closed', 'Lost'];
     const pipelineStages = ['New', 'Introduction', 'Technical Review', 'Quotation', 'Negotiation', 'Order Closed'];
+
+    // 🔥 STRICT ADMIN FOR DELETE
+    const userRole = (currentUser?.role || '').toLowerCase().trim();
+    const isStrictAdmin = ['admin', 'manager', 'superadmin'].includes(userRole);
 
     const getProductOptions = () => {
         const dbProducts = productList.map((p: any) => p.model ? `${p.name} - ${p.model}` : p.name);
@@ -73,7 +78,20 @@ export default function LeadDetailsScreen() {
             setLead(found);
             setEditOutcome(found.status || 'Follow Up');
             setEditStage(found.stage || 'New');
-            setEditProduct(found.product || (found.requirements && found.requirements[0]) || '');
+            
+            // 🔥 Initialize Multiple Products safely
+            let initialProducts: string[] = [];
+            if (Array.isArray(found.requirements) && found.requirements.length > 0) {
+                initialProducts = found.requirements;
+            } else if (found.product) {
+                if (Array.isArray(found.product)) {
+                    initialProducts = found.product;
+                } else if (typeof found.product === 'string' && found.product.trim() !== '') {
+                    initialProducts = [found.product];
+                }
+            }
+            setSelectedProducts(initialProducts);
+
             if (found.nextDate) setEditNextDate(new Date(found.nextDate));
         }
     }, [id, leadsList]);
@@ -90,7 +108,7 @@ export default function LeadDetailsScreen() {
     const openWhatsApp = () => {
         const mobile = lead?.mobile || lead?.contactNumber || '';
         if (!mobile) return Alert.alert("Error", "No mobile number found.");
-        const product = lead?.requirements || lead?.product || 'your inquiry';
+        const product = Array.isArray(lead?.requirements) ? lead.requirements.join(', ') : (lead?.product || 'your inquiry');
         let msg = `Hello ${lead.contactPerson},\n\nGreetings from our Sales Team.\nWe are following up regarding requirements for *${product}* at *${lead.org || lead.orgName}*.\n\nRegards,\n*Team*`;
         Linking.openURL(`whatsapp://send?phone=91${mobile}&text=${encodeURIComponent(msg)}`).catch(() => Alert.alert("Error", "WhatsApp not installed"));
     };
@@ -104,10 +122,60 @@ export default function LeadDetailsScreen() {
         } catch (error) { return null; }
     };
 
-    // 🔥 3. SAAS DUAL SAVE LOGIC
+    // 🔥 Toggle Multiple Products
+    const toggleProductSelection = (item: string) => {
+        setSelectedProducts(prev => {
+            if (prev.includes(item)) {
+                if (item === 'Other') setOtherProductText('');
+                return prev.filter(p => p !== item);
+            } else {
+                return [...prev, item];
+            }
+        });
+    };
+
+    const getSelectedProductsText = () => {
+        if (selectedProducts.length === 0) return '';
+        let displayText = selectedProducts.filter(p => p !== 'Other').join(', ');
+        if (selectedProducts.includes('Other') && otherProductText) {
+             displayText += displayText ? `, ${otherProductText}` : otherProductText;
+        } else if (selectedProducts.includes('Other')) {
+             displayText += displayText ? `, Other` : 'Other';
+        }
+        return displayText;
+    };
+
+    const renderProductList = (productData: any) => {
+        if (!productData) return null;
+        if (Array.isArray(productData) && productData.length > 0) {
+            return (
+                <View style={{ marginTop: 4 }}>
+                    {productData.map((prod, idx) => (
+                        <View key={idx} style={{flexDirection:'row', alignItems:'flex-start', marginTop: 3}}>
+                            <Ionicons name="cube-outline" size={12} color="#1565c0" style={{marginTop: 2}} />
+                            <Text style={{fontSize:13, color:'#333', marginLeft:6, fontWeight:'500', flex: 1}}>
+                                {prod}
+                            </Text>
+                        </View>
+                    ))}
+                </View>
+            );
+        }
+        if (typeof productData === 'string' && productData.trim() !== '') {
+            return (
+                <View style={{flexDirection:'row', alignItems:'center', marginTop:4}}>
+                    <Ionicons name="cube-outline" size={12} color="#1565c0" />
+                    <Text style={{fontSize:13, color:'#333', marginLeft:6, fontWeight:'500'}}>{productData}</Text>
+                </View>
+            );
+        }
+        return null;
+    };
+
+    // 🔥 SAAS DUAL SAVE LOGIC (Log Visit + Update Lead)
     const handleLogVisit = async () => {
         if (!editNote.trim()) return Alert.alert("Required", "Please enter discussion note.");
-        if (isOtherProduct && !editProduct.trim()) return Alert.alert("Required", "Please type the new product name.");
+        if (selectedProducts.includes('Other') && !otherProductText.trim()) return Alert.alert("Required", "Please type the new product name.");
         if (!currentUser?.companyId) return Alert.alert("Error", "Company ID not found.");
         
         setIsUpdating(true);
@@ -117,7 +185,14 @@ export default function LeadDetailsScreen() {
             const nextDateISO = editNextDate.toISOString().split('T')[0];
             const todayString = new Date().toLocaleDateString('en-GB');
 
-            // 1. CREATE DSR (Sales Visit) using SaaS Engine
+            // Prepare final product list
+            let finalProductsToSave = selectedProducts.filter(p => p !== 'Other');
+            if (selectedProducts.includes('Other') && otherProductText.trim()) {
+                finalProductsToSave.push(otherProductText.trim());
+            }
+            const productDisplayString = finalProductsToSave.join(', ');
+
+            // 1. CREATE DSR (Sales Visit)
             const newVisit = {
                 visitType: 'Follow Up',
                 hospital: lead.org || lead.orgName, 
@@ -127,7 +202,7 @@ export default function LeadDetailsScreen() {
                 person: lead.contactPerson || '', 
                 mobile: lead.mobile || '', 
                 city: lead.city || '', 
-                product: editProduct, 
+                product: finalProductsToSave, // Array
                 discussion: editNote, 
                 outcome: editOutcome,
                 nextFollowUp: nextDateISO,
@@ -143,19 +218,19 @@ export default function LeadDetailsScreen() {
             const visitRes = await addSaaSData("sales_reports", newVisit);
             if (!visitRes.success) throw new Error("Failed to log visit report.");
 
-            // 2. UPDATE LEAD using SaaS Engine
+            // 2. UPDATE LEAD
             let finalStatus = editOutcome === 'Order Closed' ? 'Converted' : editOutcome;
             let leadType = editOutcome === 'Order Expected' ? 'Hot' : editOutcome === 'Order Closed' ? 'Won' : 'Warm';
 
-            const logEntry = `📅 ${todayString}: Visit/Follow-up Logged.\nStatus: ${editOutcome} | Stage: ${editStage}\nProduct: ${editProduct}\nNote: ${editNote}`;
+            const logEntry = `📅 ${todayString}: Visit/Follow-up Logged.\nStatus: ${editOutcome} | Stage: ${editStage}\nProducts: ${productDisplayString}\nNote: ${editNote}`;
             const updatedDiscussion = lead.discussion ? `${logEntry}\n────────────────\n${lead.discussion}` : logEntry;
 
             const updateRes = await updateSaaSData("leads", lead.id, {
                 status: finalStatus,
                 stage: editStage,
                 type: leadType,
-                product: editProduct,
-                requirements: editProduct ? [editProduct] : [],
+                product: productDisplayString, // Save string for legacy
+                requirements: finalProductsToSave, // Save array for modern UI
                 isHot: leadType === 'Hot',
                 nextDate: nextDateISO,
                 lastUpdated: new Date().toISOString(),
@@ -169,7 +244,7 @@ export default function LeadDetailsScreen() {
                 await addLeadActivity(lead.id, {
                     type: 'Visit',
                     msg: `Logged Visit: ${editNote}`, 
-                    changeNote: `Status ➔ ${editOutcome}, Stage ➔ ${editStage}, Product ➔ ${editProduct}`,
+                    changeNote: `Status ➔ ${editOutcome}, Stage ➔ ${editStage}, Products ➔ ${productDisplayString}`,
                     by: currentUser?.name,
                     date: new Date().toLocaleString()
                 });
@@ -179,13 +254,14 @@ export default function LeadDetailsScreen() {
             setLogVisitModalVisible(false);
             setEditNote('');
             
-            // Sync Local Lead Data Immediately
+            // Sync Local Data
             setLead((prev: any) => ({
                 ...prev,
                 status: finalStatus,
                 stage: editStage,
                 type: leadType,
-                product: editProduct,
+                requirements: finalProductsToSave,
+                product: productDisplayString,
                 nextDate: nextDateISO,
                 discussion: updatedDiscussion
             }));
@@ -197,6 +273,39 @@ export default function LeadDetailsScreen() {
         } finally {
             setIsUpdating(false);
         }
+    };
+
+    // 🔥 NEW: ADMIN DELETE FUNCTION (SAAS INTEGRATED)
+    const handleDeleteLead = async () => {
+        if (!lead) return;
+        Alert.alert(
+            "Delete Lead?",
+            "Are you sure you want to permanently delete this lead? This action cannot be undone.",
+            [
+                { text: "Cancel", style: "cancel" },
+                { 
+                    text: "Delete", 
+                    style: "destructive", 
+                    onPress: async () => {
+                        setIsDeleting(true);
+                        try {
+                            const res = await deleteSaaSData("leads", lead.id);
+                            if(res.success) {
+                                Alert.alert("Deleted", "Lead has been deleted successfully.");
+                                if (refreshData) await refreshData();
+                                router.back(); 
+                            } else {
+                                Alert.alert("Error", "Failed to delete lead.");
+                            }
+                        } catch (error: any) {
+                            Alert.alert("Error", error.message);
+                        } finally {
+                            setIsDeleting(false);
+                        }
+                    } 
+                }
+            ]
+        );
     };
 
     const renderHistoryItem = (item: any, index: number) => {
@@ -227,7 +336,6 @@ export default function LeadDetailsScreen() {
 
     if (!lead) return <View style={styles.container}><ActivityIndicator size="large" style={{marginTop: 50}} color="#3b5998" /></View>;
     
-    const reqList = lead.requirements && lead.requirements.length > 0 ? lead.requirements.join(', ') : lead.product;
     const history = lead.history ? [...lead.history].reverse() : [];
 
     return (
@@ -294,12 +402,11 @@ export default function LeadDetailsScreen() {
                         
                         <View style={styles.divider}/>
                         
-                        {reqList ? (
-                            <View style={styles.reqBox}>
-                                <Ionicons name="cube-outline" size={16} color="#1565c0" />
-                                <Text style={styles.reqText}>{reqList}</Text>
-                            </View>
-                        ) : null}
+                        {/* 🔥 UPGRADED LIST VIEW FOR PRODUCTS */}
+                        <View style={styles.reqBox}>
+                            <Text style={{fontSize: 12, fontWeight: 'bold', color: 'gray', marginBottom: 2}}>Requirements / Products</Text>
+                            {renderProductList(lead.requirements || lead.product) || <Text style={{fontSize: 13, color: '#444'}}>None</Text>}
+                        </View>
                         
                         <View style={styles.row}>
                             <View style={styles.actionPill}>
@@ -315,7 +422,7 @@ export default function LeadDetailsScreen() {
                         </View>
                     </View>
 
-                    {/* GENERATE QUOTATION BUTTON */}
+                    {/* 🔥 GENERATE QUOTATION BUTTON */}
                     <TouchableOpacity 
                         style={{backgroundColor: '#e3f2fd', padding: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 15, borderWidth: 1, borderColor: '#90caf9'}}
                         onPress={() => router.push({
@@ -327,15 +434,15 @@ export default function LeadDetailsScreen() {
                                 leadMobile: lead.mobile || '',
                                 leadCity: lead.city || '',
                                 leadAddress: lead.address || '',
-                                leadProduct: lead.product || (lead.requirements && lead.requirements[0]) || ''
+                                leadProduct: Array.isArray(lead.requirements) ? lead.requirements.join(', ') : lead.product || ''
                             }
-                        } as any)} // 🔥 FIX: Added 'as any' here
+                        })}
                     >
                         <Ionicons name="document-text" size={20} color="#1565c0" />
                         <Text style={{color: '#1565c0', fontWeight: 'bold', marginLeft: 8}}>📄 Generate Quotation for this Lead</Text>
                     </TouchableOpacity>
 
-                    {/* CONDITIONAL ORDER BUTTON: WON/Closed Leads */}
+                    {/* 🔥 CONDITIONAL ORDER BUTTON */}
                     {(lead.stage === 'Order Closed' || lead.status === 'Converted') && (
                         <TouchableOpacity 
                             style={{backgroundColor: '#e8f5e9', padding: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 15, borderWidth: 1, borderColor: '#a5d6a7'}}
@@ -351,12 +458,26 @@ export default function LeadDetailsScreen() {
                                     leadEmail: lead.email || '',
                                     leadCity: lead.city || '',
                                     leadAddress: lead.address || '',
-                                    leadProduct: lead.product || (lead.requirements && lead.requirements[0]) || ''
+                                    leadProduct: Array.isArray(lead.requirements) ? lead.requirements.join(', ') : lead.product || ''
                                 }
                             })}
                         >
                             <Ionicons name="cart" size={20} color="#2e7d32" />
                             <Text style={{color: '#2e7d32', fontWeight: 'bold', marginLeft: 8}}>🎉 Convert Deal to Order (Won)</Text>
+                        </TouchableOpacity>
+                    )}
+
+                    {/* 🔥 ADMIN DELETE BUTTON */}
+                    {isStrictAdmin && (
+                        <TouchableOpacity 
+                            style={{backgroundColor: '#ffebee', padding: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 15, borderWidth: 1, borderColor: '#ef9a9a'}}
+                            onPress={handleDeleteLead}
+                            disabled={isDeleting}
+                        >
+                            {isDeleting ? <ActivityIndicator size="small" color="#d32f2f" /> : <Ionicons name="trash-outline" size={20} color="#d32f2f" />}
+                            <Text style={{color: '#d32f2f', fontWeight: 'bold', marginLeft: 8}}>
+                                {isDeleting ? "Deleting..." : "Delete Lead Permanently"}
+                            </Text>
                         </TouchableOpacity>
                     )}
 
@@ -417,20 +538,20 @@ export default function LeadDetailsScreen() {
                                     </View>
                                 </View>
 
-                                {/* PRODUCT DISCUSS / UPDATE */}
-                                <Text style={styles.label}>Product Discussed:</Text>
-                                <TouchableOpacity style={styles.pickerBtn} onPress={() => setShowProductPicker(true)}>
-                                    <Text style={{ color: editProduct && !isOtherProduct ? '#333' : 'gray', fontWeight: 'bold' }} numberOfLines={1}>
-                                        {isOtherProduct ? 'Other' : (editProduct || 'Select Product')}
+                                {/* 🔥 MULTIPLE PRODUCT DISCUSS / UPDATE */}
+                                <Text style={styles.label}>Products Discussed:</Text>
+                                <TouchableOpacity style={styles.pickerBtn} onPress={() => { setProductSearchText(''); setShowProductPicker(true); }}>
+                                    <Text style={{ color: selectedProducts.length > 0 ? '#333' : 'gray', fontWeight: 'bold', flex: 1 }} numberOfLines={1}>
+                                        {getSelectedProductsText() || "Select Product(s)..."}
                                     </Text>
                                     <Ionicons name="cube-outline" size={16} color="gray" />
                                 </TouchableOpacity>
-                                {isOtherProduct && (
+                                {selectedProducts.includes('Other') && (
                                     <TextInput 
                                         style={[styles.pickerBtn, {marginTop: 10, backgroundColor: 'white'}]} 
-                                        placeholder="Type New Product Name..." 
-                                        value={editProduct} 
-                                        onChangeText={setEditProduct} 
+                                        placeholder="Type Other Product Name(s)..." 
+                                        value={otherProductText} 
+                                        onChangeText={setOtherProductText} 
                                     />
                                 )}
 
@@ -476,7 +597,7 @@ export default function LeadDetailsScreen() {
             <Modal visible={showOutcomePicker} transparent animationType="fade">
                 <View style={styles.pickerOverlay}>
                     <TouchableOpacity style={StyleSheet.absoluteFill} onPress={() => setShowOutcomePicker(false)} />
-                    <View style={styles.pickerContainer}>
+                    <View style={styles.pickerContainerSmall}>
                         <Text style={styles.pickerHeader}>Select Outcome</Text>
                         <FlatList data={outcomeOptions} keyExtractor={item => item} renderItem={({ item }) => (
                             <TouchableOpacity style={styles.pickerItem} onPress={() => { setEditOutcome(item); setShowOutcomePicker(false); }}>
@@ -491,7 +612,7 @@ export default function LeadDetailsScreen() {
             <Modal visible={showStagePicker} transparent animationType="fade">
                 <View style={styles.pickerOverlay}>
                     <TouchableOpacity style={StyleSheet.absoluteFill} onPress={() => setShowStagePicker(false)} />
-                    <View style={styles.pickerContainer}>
+                    <View style={styles.pickerContainerSmall}>
                         <Text style={styles.pickerHeader}>Select Stage</Text>
                         <FlatList data={stageOptions} keyExtractor={item => item} renderItem={({ item }) => (
                             <TouchableOpacity style={styles.pickerItem} onPress={() => { setEditStage(item); setShowStagePicker(false); }}>
@@ -503,26 +624,47 @@ export default function LeadDetailsScreen() {
                 </View>
             </Modal>
 
+            {/* 🔥 PRODUCT MULTI-SELECT PICKER WITH SEARCH BAR */}
             <Modal visible={showProductPicker} transparent animationType="fade">
                 <View style={styles.pickerOverlay}>
                     <TouchableOpacity style={StyleSheet.absoluteFill} onPress={() => setShowProductPicker(false)} />
-                    <View style={styles.pickerContainer}>
-                        <Text style={styles.pickerHeader}>Select Product</Text>
-                        <FlatList data={getProductOptions()} keyExtractor={(item, index) => index.toString()} renderItem={({ item }) => (
-                            <TouchableOpacity style={styles.pickerItem} onPress={() => { 
-                                if (item === 'Other') {
-                                    setIsOtherProduct(true);
-                                    setEditProduct('');
-                                } else {
-                                    setIsOtherProduct(false);
-                                    setEditProduct(item);
-                                }
-                                setShowProductPicker(false); 
-                            }}>
-                                <Text style={{ fontSize: 16, color: '#333', fontWeight: editProduct === item ? 'bold' : 'normal' }}>{item}</Text>
-                                {editProduct === item && <Ionicons name="checkmark" size={18} color="green" />}
-                            </TouchableOpacity>
-                        )} />
+                    <View style={styles.pickerContainerLarge}>
+                        <Text style={styles.pickerHeader}>Select Product(s)</Text>
+                        
+                        <View style={styles.modalSearchBox}>
+                            <Ionicons name="search" size={20} color="gray" />
+                            <TextInput 
+                                style={{flex:1, marginLeft:10, fontSize:15}} 
+                                placeholder="Search Product..." 
+                                value={productSearchText} 
+                                onChangeText={setProductSearchText} 
+                            />
+                            {productSearchText.length > 0 && (
+                                <TouchableOpacity onPress={() => setProductSearchText('')}>
+                                    <Ionicons name="close-circle" size={18} color="gray" />
+                                </TouchableOpacity>
+                            )}
+                        </View>
+
+                        <FlatList 
+                            data={getProductOptions().filter(p => p.toLowerCase().includes(productSearchText.toLowerCase()))} 
+                            keyExtractor={(item, index) => index.toString()} 
+                            renderItem={({ item }) => {
+                                const isSelected = selectedProducts.includes(item);
+                                return (
+                                <TouchableOpacity 
+                                    style={[styles.pickerItem, isSelected && {backgroundColor: '#e3f2fd'}]} 
+                                    onPress={() => toggleProductSelection(item)}
+                                >
+                                    <Text style={{ fontSize: 15, color: isSelected ? '#1976d2' : '#333', fontWeight: isSelected ? 'bold' : 'normal', flex:1 }}>{item}</Text>
+                                    <Ionicons name={isSelected ? "checkbox" : "square-outline"} size={24} color={isSelected ? "#1976d2" : "gray"} />
+                                </TouchableOpacity>
+                            )}} 
+                            ListEmptyComponent={<Text style={{textAlign:'center', color:'gray', marginTop:20}}>No product found.</Text>}
+                        />
+                        <TouchableOpacity style={[styles.closeBtn, {backgroundColor: '#3b5998', borderRadius: 8, marginTop: 15}]} onPress={() => setShowProductPicker(false)}>
+                            <Text style={{color:'white', fontWeight:'bold', fontSize: 16}}>Done</Text>
+                        </TouchableOpacity>
                     </View>
                 </View>
             </Modal>
@@ -554,7 +696,7 @@ const styles = StyleSheet.create({
     statusTag: { paddingHorizontal:8, paddingVertical:4, borderRadius:6 },
     
     divider: { height: 1, backgroundColor: '#eee', marginVertical: 10 },
-    reqBox: { flexDirection:'row', alignItems:'center', backgroundColor:'#e3f2fd', padding:8, borderRadius:6, marginBottom:10 },
+    reqBox: { backgroundColor:'#f9f9f9', padding:12, borderRadius:8, marginBottom:10, borderWidth: 1, borderColor: '#eee' },
     reqText: { color:'#1565c0', marginLeft:5, fontSize:13, fontWeight:'bold' },
 
     row: { flexDirection:'row', justifyContent:'space-between', gap:10 },
@@ -598,7 +740,11 @@ const styles = StyleSheet.create({
     micBtn: { marginTop: 15, padding: 8, backgroundColor: '#e3f2fd', borderRadius: 25 },
     
     pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
-    pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation:10 },
-    pickerHeader: { fontWeight:'bold', fontSize:16, marginBottom:10, color:'#3b5998', textAlign:'center' },
-    pickerItem: { paddingVertical:12, borderBottomWidth:1, borderBottomColor:'#eee', flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
+    pickerContainerSmall: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation: 10 },
+    pickerContainerLarge: { width: '90%', height: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: '90%', elevation: 10 },
+    pickerHeader: { fontWeight: 'bold', fontSize: 16, marginBottom: 10, color: '#3b5998', textAlign: 'center' },
+    pickerItem: { paddingVertical: 12, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: '#eee', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderRadius: 5 },
+    closeBtn: { marginTop: 15, alignItems:'center', padding: 12 },
+    
+    modalSearchBox: { flexDirection:'row', alignItems:'center', backgroundColor:'#f0f0f0', borderRadius:8, padding:10, marginBottom:10 },
 });

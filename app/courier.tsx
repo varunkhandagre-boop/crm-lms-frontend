@@ -770,7 +770,7 @@ export default function CourierScreen() {
                               </TouchableOpacity>
                           )}
 
-                          {canManage && (
+                          {isStrictAdmin && (
                               <TouchableOpacity 
                                   style={{marginTop: 20, backgroundColor: '#ffebee', padding: 12, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#ef9a9a', opacity: loading ? 0.5 : 1}} 
                                   onPress={handleDelete}

@@ -41,7 +41,7 @@ export default function CombinedActivityScreen() {
   const [travelList, setTravelList] = useState<any[]>([]);
   const [orgList, setOrgList] = useState<any[]>([]);
 
-  // 🔥 4. LOAD ALL MODULE DATA
+  // 🔥 4. LOAD ALL MODULE DATA VIA SAAS
   const loadAllData = async () => {
       if (currentUser?.companyId) {
           const [
@@ -461,7 +461,7 @@ export default function CombinedActivityScreen() {
   };
 
   // ==========================================
-  // 🟣 VIEW 3: MAIN DOWNLOAD REPORTS
+  // 🟣 VIEW 3: MAIN DOWNLOAD REPORTS (SAAS UPGRADED)
   // ==========================================
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState('');
@@ -470,7 +470,9 @@ export default function CombinedActivityScreen() {
   const [modules, setModules] = useState({
       orders: true, collections: true, expenses: true, leads: true, attendance: true,
       installations: false, pms: false, service: false, demos: false, couriers: false,
-      tasks: false, advances: false, travel: false, leaves: false, projects: false, organizations: false 
+      tasks: false, advances: false, travel: false, leaves: false, projects: false, organizations: false,
+      // 🔥 NEW EXPORT MODULES
+      dues: false, quotations: false, employees: false 
   });
 
   const filterDataForExport = (data: any[], dateField: string, userField: string, isOrg: boolean = false) => {
@@ -499,8 +501,8 @@ export default function CombinedActivityScreen() {
       });
   };
 
-  // 🔥 SAAS EXCEL FETCH LOGIC
-  const fetchAndAddSheet = async (wb: any, colName: string, sheetName: string, dateField: string, userField: string, isOrg: boolean = false) => {
+  // 🔥 SAAS EXCEL FETCH LOGIC with bypassFilters flag
+  const fetchAndAddSheet = async (wb: any, colName: string, sheetName: string, dateField: string, userField: string, isOrg: boolean = false, bypassFilters: boolean = false) => {
       if (!modules[sheetName.toLowerCase() as keyof typeof modules] && !modules[colName as keyof typeof modules]) return false;
       setProgress(`Fetching ${sheetName}...`);
       try {
@@ -509,7 +511,7 @@ export default function CombinedActivityScreen() {
               const { location, items, history, ...cleanData } = d; 
               return cleanData;
           });
-          const filtered = filterDataForExport(cleanRawData, dateField, userField, isOrg);
+          const filtered = bypassFilters ? cleanRawData : filterDataForExport(cleanRawData, dateField, userField, isOrg);
           if (filtered.length > 0) {
               const ws = XLSX.utils.json_to_sheet(filtered);
               XLSX.utils.book_append_sheet(wb, ws, sheetName);
@@ -524,6 +526,7 @@ export default function CombinedActivityScreen() {
       try {
           const wb = XLSX.utils.book_new(); 
           let hasData = false;
+          
           if(await fetchAndAddSheet(wb, "orders", "Orders", "dateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "payments", "Collections", "dateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "expenses", "Expenses", "dateIso", "userId")) hasData = true;
@@ -540,6 +543,11 @@ export default function CombinedActivityScreen() {
           if(await fetchAndAddSheet(wb, "leaves", "Leaves", "fromDateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "projects", "Projects", "dateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "organizations", "Organizations", "dateIso", "addedBy", true)) hasData = true;
+          
+          // 🔥 NEW: Dues, Quotations, and bypassed Employees
+          if(await fetchAndAddSheet(wb, "payment_dues", "Dues", "dateIso", "addedBy")) hasData = true;
+          if(await fetchAndAddSheet(wb, "quotations", "Quotations", "dateIso", "senderId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "users", "Employees", "", "", false, true)) hasData = true; // bypassFilters = true
 
           if (!hasData) {
               Alert.alert("No Data", "No records found for the selected criteria.");
@@ -791,11 +799,40 @@ export default function CombinedActivityScreen() {
 
                   <View style={styles.dlCard}>
                       <Text style={styles.dlCardHeader}>3. Select Data</Text>
-                      <View style={styles.grid}><View style={styles.col}><ToggleRow label="Orders" field="orders" /><ToggleRow label="Collections" field="collections" /><ToggleRow label="Expenses" field="expenses" /><ToggleRow label="Leads" field="leads" /><ToggleRow label="Attendance" field="attendance" /></View><View style={styles.col}><ToggleRow label="Service Calls" field="service" /><ToggleRow label="PMS Reports" field="pms" /><ToggleRow label="Installations" field="installations" /><ToggleRow label="Travel" field="travel" /><ToggleRow label="Leaves" field="leaves" /></View></View>
-                      <View style={styles.grid}><View style={styles.col}><ToggleRow label="Couriers" field="couriers" /><ToggleRow label="Advances" field="advances" /></View><View style={styles.col}><ToggleRow label="Demos" field="demos" /><ToggleRow label="Tasks" field="tasks" /></View></View>
                       <View style={styles.grid}>
-                          <View style={styles.col}><ToggleRow label="Projects" field="projects" /></View>
-                          <View style={styles.col}><ToggleRow label="Organizations" field="organizations" /></View>
+                          <View style={styles.col}>
+                              <ToggleRow label="Orders" field="orders" />
+                              <ToggleRow label="Collections" field="collections" />
+                              <ToggleRow label="Expenses" field="expenses" />
+                              <ToggleRow label="Leads" field="leads" />
+                              <ToggleRow label="Attendance" field="attendance" />
+                              <ToggleRow label="Quotations" field="quotations" />
+                          </View>
+                          <View style={styles.col}>
+                              <ToggleRow label="Service Calls" field="service" />
+                              <ToggleRow label="PMS Reports" field="pms" />
+                              <ToggleRow label="Installations" field="installations" />
+                              <ToggleRow label="Travel" field="travel" />
+                              <ToggleRow label="Leaves" field="leaves" />
+                              <ToggleRow label="Pending Dues" field="dues" />
+                          </View>
+                      </View>
+                      <View style={styles.grid}>
+                          <View style={styles.col}>
+                              <ToggleRow label="Couriers" field="couriers" />
+                              <ToggleRow label="Advances" field="advances" />
+                              <ToggleRow label="Projects" field="projects" />
+                          </View>
+                          <View style={styles.col}>
+                              <ToggleRow label="Demos" field="demos" />
+                              <ToggleRow label="Tasks" field="tasks" />
+                              <ToggleRow label="Organizations" field="organizations" />
+                          </View>
+                      </View>
+                      <View style={styles.grid}>
+                          <View style={styles.col}>
+                              <ToggleRow label="Employees List" field="employees" />
+                          </View>
                       </View>
                   </View>
 
@@ -1004,13 +1041,6 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   header: { padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 10 },
-  sectionHeader: { 
-      fontSize: 16, 
-      fontWeight: 'bold', 
-      color: '#3b5998', 
-      marginTop: 20, 
-      marginBottom: 10 
-  },
   
   // Tabs
   tabContainer: { flexDirection: 'row', padding: 10, backgroundColor: 'white', paddingBottom: 15 },
@@ -1077,6 +1107,7 @@ const styles = StyleSheet.create({
   btnText: { color: 'white', fontSize: 16, fontWeight: 'bold', marginLeft: 10 },
 
   // Shared
+  sectionHeader: { fontSize: 14, fontWeight: 'bold', color: 'gray', marginBottom: 10, marginTop: 5, textTransform: 'uppercase' },
   centerState: { alignItems: 'center', marginTop: 50 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 20, maxHeight: 400 },

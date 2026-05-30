@@ -17,28 +17,36 @@ export const useSaaSDB = () => {
     const [loading, setLoading] = useState(false);
 
     // 1. FETCH DATA (Optimized with useCallback)
-    const fetchSaaSData = useCallback(async (collectionName: string) => {
-        // 🔥 Aapka Original Super Admin Logic Retained
-        if (currentUser?.role === 'SuperAdmin') {
-            console.log("Super Admin restricted from viewing client data.");
-            return []; 
-        }
+    // 🔥 isGlobal = true ka matlab hai bina companyId ke filter kiye data lana (Sirf SuperAdmin ke liye)
+    const fetchSaaSData = useCallback(async (collectionName: string, isGlobal: boolean = false) => {
+        // Agar isGlobal false hai (matlab regular employee/admin call kar raha hai)
+        if (!isGlobal) {
+            // Super Admin restricted logic
+            if (currentUser?.role === 'SuperAdmin' && collectionName !== 'companies') {
+                console.log("Super Admin restricted from viewing client data.");
+                return []; 
+            }
 
-        if (!currentUser?.companyId) return [];
+            if (!currentUser?.companyId) return [];
+        }
 
         setLoading(true);
         try {
-            const q = query(
-                collection(db, collectionName),
-                where("companyId", "==", currentUser.companyId)
-                // Note: orderBy hata diya gaya hai kyunki har collection me createdAt nahi hota, 
-                // jisse Firebase Index error de sakta hai. Hum data UI me sort karenge.
-            );
+            let q;
+            // Agar global true hai toh poora collection lao (SuperAdmin ke liye)
+            if (isGlobal) {
+                 q = collection(db, collectionName);
+            } else {
+                 q = query(
+                     collection(db, collectionName),
+                     where("companyId", "==", currentUser?.companyId)
+                 );
+            }
 
             const snapshot = await getDocs(q);
             const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             
-            // Client side pe sort kar rahe hain (Taaki Firebase par Index ban banane ka jhanjhat na rahe)
+            // Client side sorting
             return data.sort((a: any, b: any) => {
                 const dateA = new Date(b.createdAt || b.timestamp || 0).getTime();
                 const dateB = new Date(a.createdAt || a.timestamp || 0).getTime();
@@ -54,23 +62,22 @@ export const useSaaSDB = () => {
     }, [currentUser]);
 
     // 2. ADD DATA (Optimized for Cost & "On Behalf Of")
-    const addSaaSData = async (collectionName: string, payload: any) => {
-        if (!currentUser?.companyId) return { success: false, error: "Company ID required" };
+    // 🔥 isGlobal = true is for creating a new company during registration
+    const addSaaSData = async (collectionName: string, payload: any, isGlobal: boolean = false) => {
+        if (!isGlobal && !currentUser?.companyId) return { success: false, error: "Company ID required" };
 
         setLoading(true);
         try {
             const finalData = {
                 ...payload,
-                companyId: currentUser.companyId,
-                // 🔥 SMART INJECTION: Agar payload me senderId hai toh wo lo, warna currentUser lo
-                senderId: payload.senderId || currentUser.id || currentUser.uid,
-                senderName: payload.senderName || currentUser.name,
+                companyId: isGlobal ? (payload.companyId || 'GLOBAL') : currentUser?.companyId,
+                senderId: payload.senderId || currentUser?.id || currentUser?.uid || 'System',
+                senderName: payload.senderName || currentUser?.name || 'System',
                 createdAt: payload.createdAt || new Date().toISOString(),
                 timestamp: payload.timestamp || Date.now()
             };
 
             const docRef = await addDoc(collection(db, collectionName), finalData);
-            // 🔥 Double Write Hata diya gaya hai bill bachane ke liye!
             
             return { success: true, id: docRef.id };
         } catch (error: any) {
@@ -89,7 +96,7 @@ export const useSaaSDB = () => {
             await updateDoc(docRef, {
                 ...updatedFields,
                 updatedAt: new Date().toISOString(),
-                updatedBy: currentUser?.name
+                updatedBy: currentUser?.name || 'SuperAdmin'
             });
             return { success: true };
         } catch (error: any) {

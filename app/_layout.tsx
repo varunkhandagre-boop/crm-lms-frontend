@@ -1,20 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
+import NetInfo from '@react-native-community/netinfo';
 import { Slot, usePathname, useRouter } from 'expo-router';
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DataProvider, useData } from './context/DataContext';
 
-// 🔥 1. NOTIFICATIONS SETUP
 import * as Notifications from 'expo-notifications';
 import { manageAttendanceReminders, setupNotificationPermissions } from '../utils/notificationHelper';
 
-// 🔥 2. LOCATION & DB IMPORTS
 import * as Location from 'expo-location';
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+// 🔥 Firestore direct imports minimized
 
-// Notification Handler Settings
+// 🔥 SAAS IMPORT
+import { useSaaSDB } from '../hooks/useSaaSDB';
+
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -33,106 +33,139 @@ export default function Layout() {
   );
 }
 
+// 🔥 BULLETPROOF NETWORK & FIREBASE INDICATOR 🔥
+function NetworkIndicator() {
+    const [isConnected, setIsConnected] = useState<boolean | null>(null);
+    const insets = useSafeAreaInsets();
+    const pathname = usePathname();
+    
+    const { isFirebaseSynced, currentUser } = useData(); 
+
+    useEffect(() => {
+        // 🔥 '(state: any)' add kar diya gaya hai TS error hatane ke liye
+        const unsubscribe = NetInfo.addEventListener((state: any) => {
+            setIsConnected(state.isConnected === false ? false : true);
+        });
+        return () => unsubscribe();
+    }, []);
+
+    if (pathname !== '/') return null;
+
+    if (isConnected === false) {
+        return (
+            <View style={[styles.networkPill, { top: insets.top + 50 }]}>
+                <View style={[styles.netDot, { backgroundColor: '#f44336' }]} />
+                <Text style={styles.netText}>Offline</Text>
+            </View>
+        );
+    }
+
+    if (isConnected === true && currentUser && isFirebaseSynced === false) {
+         return (
+             <View style={[styles.networkPill, { top: insets.top + 50 }]}>
+                 <ActivityIndicator size="small" color="#f57c00" style={{ marginRight: 6, transform: [{ scale: 0.6 }] }} />
+                 <Text style={[styles.netText, { color: '#f57c00' }]}>Syncing...</Text>
+             </View>
+         );
+    }
+
+    return (
+        <View style={[styles.networkPill, { top: insets.top + 50 }]}>
+            <View style={[styles.netDot, { backgroundColor: '#4caf50' }]} />
+            <Text style={styles.netText}></Text>
+        </View>
+    );
+}
+
 function NavigationLayout() {
   const router = useRouter();
   const pathname = usePathname();
   
-  // 🔥 SaaS Update: Replace 'user' with 'currentUser'
-  const { currentUser, appPermissions, loading, attendanceList, taskList = [] } = useData();
+  // 🔥 SAAS ENGINE HOOK INJECTED HERE
+  const { addSaaSData } = useSaaSDB();
+
+  const { 
+      currentUser, 
+      appPermissions, 
+      loading, 
+      attendanceList, 
+      taskList = [],
+      leadList = [],         
+      serviceCallList = [],  
+      orgList = []           
+  } = useData();
   
   const insets = useSafeAreaInsets(); 
 
-  // 🔥 SAAS FILTERING FOR BADGE
-  const myCompanyId = currentUser?.companyId;
-  const myTasks = (Array.isArray(taskList) ? taskList : []).filter((item:any) => 
-      !myCompanyId || item.companyId === myCompanyId
-  );
-
-  // ==========================================
-  // 🔥 NOTIFICATION CLICK LISTENER (FIXED)
-  // ==========================================
   useEffect(() => {
+    let isMounted = true;
+
     const subscription = Notifications.addNotificationResponseReceivedListener(response => {
+      if (!isMounted) return;
+
       const data = response.notification.request.content.data as any;
-      console.log("🔔 Notification Clicked Data:", data);
+      let targetPath = data?.route || data?.url || data?.screen || "";
 
-      // Step 1: Target Path nikalo
-      const targetPath = data?.route || data?.screen || data?.url || "";
+      if (!targetPath) return; 
 
-      // ✅ 2. ORGANIZATION CHECK
-      if (
-          targetPath === 'organization' || 
-          (typeof targetPath === 'string' && targetPath.includes('organization'))
-      ) {
-          setTimeout(() => router.push('/organization'), 500);
-          return; 
+      if (typeof targetPath === 'string') {
+          if (!targetPath.startsWith('/')) {
+              targetPath = '/' + targetPath;
+          }
       }
 
-      // ✅ 3. SERVICE CALL CHECK (Critical Fix)
-      if (
-          targetPath === 'service_call' || 
-          targetPath === 'service_calls' || 
-          targetPath === '/service_calls' || 
-          (typeof targetPath === 'string' && targetPath.includes('service_call'))
-      ) {
-          setTimeout(() => {
-              // 👇 Force Navigate to correct file
-              router.push('/service_call' as any); 
-          }, 500);
-          return;
-      }
-
-      // ✅ 4. GENERIC URL LOGIC (Backup)
-      if (targetPath && typeof targetPath === 'string') {
-        let cleanUrl = targetPath;
-        if (!cleanUrl.startsWith('/')) {
-            cleanUrl = '/' + cleanUrl;
-        }
-        setTimeout(() => router.push(cleanUrl as any), 500);
-      }
+      setTimeout(() => {
+          try {
+              router.push(targetPath as any);
+          } catch (error) {
+              router.push('/');
+          }
+      }, 800); 
     });
 
-    return () => subscription.remove();
+    return () => {
+        isMounted = false;
+        subscription.remove();
+    };
   }, []);
 
-  // ==========================================
-  // 🔥 BADGE LOGIC (TASKS) - SAAS FILTERED
-  // ==========================================
+  const isBoss = currentUser?.role === 'Admin' || currentUser?.role === 'Manager';
+  const todayStr = new Date().toISOString().split('T')[0];
+
   const calculateTaskBadge = () => {
       if (!currentUser) return 0;
-      
-      const isAdmin = currentUser.role === 'Admin' || currentUser.role === 'Manager';
-
-      // 1. Received Pending (Using myTasks)
-      const myPending = myTasks.filter((t: any) => 
-          (t.to === 'Self' || t.to === currentUser?.name) && t.status === 'Pending'
-      ).length;
-
-      // 2. Assigned Pending (Using myTasks)
-      const assignedPending = myTasks.filter((t: any) => 
-          t.from === currentUser?.name && t.to !== 'Self' && t.to !== currentUser?.name && t.status === 'Pending'
-      ).length;
-
-      // Admin sees ALL pending in company, User sees (My + Assigned)
-      return isAdmin 
-          ? myTasks.filter((t:any) => t.status === 'Pending').length 
-          : (myPending + assignedPending);
+      const myPending = taskList.filter((t: any) => (t.to === 'Self' || t.to === currentUser?.name) && t.status === 'Pending').length;
+      const assignedPending = taskList.filter((t: any) => t.from === currentUser?.name && t.to !== 'Self' && t.to !== currentUser?.name && t.status === 'Pending').length;
+      return isBoss ? taskList.filter((t:any) => t.status === 'Pending').length : (myPending + assignedPending);
   };
-
   const taskCount = calculateTaskBadge();
 
+  const leadCount = leadList.filter((l: any) => {
+      if (l.status === 'Closed' || l.status === 'Converted') return false; 
+      return isBoss || l.senderId === currentUser?.uid || l.userId === currentUser?.uid;
+  }).length;
+
+  const serviceCount = serviceCallList.filter((s: any) => {
+      if (s.status !== 'Open' && s.status !== 'Assigned') return false;
+      return isBoss || s.senderId === currentUser?.uid || s.engineerId === currentUser?.uid || s.engineerId === currentUser?.id;
+  }).length;
+
+  const orgCount = orgList.filter((o: any) => {
+      const itemDate = o.createdAt ? o.createdAt.split('T')[0] : '';
+      return itemDate === todayStr; 
+  }).length;
+
   // ==========================================
-  // 🕵️‍♂️ AUTO LOCATION TRACKER (OFFICE + FIELD MODE)
+  // 🕵️‍♂️ AUTO LOCATION TRACKER (🔥 UPGRADED TO SAAS)
   // ==========================================
   useEffect(() => {
     if (loading || !currentUser) return;
 
     let locationSubscription: any = null;
-    let lastUpdateTimestamp = 0; // 🔥 Ye variable spam rokega
+    let lastUpdateTimestamp = 0; 
 
     const startTracking = async () => {
         try {
-            // 1. Permissions
             const { status: foreStatus } = await Location.requestForegroundPermissionsAsync();
             if (foreStatus !== 'granted') return;
 
@@ -141,43 +174,35 @@ function NavigationLayout() {
                 if (backStatus !== 'granted') console.log("Bg Permission denied");
             } catch (err) { }
 
-            // 2. Start Watcher
-            // Hum OS ko bol rahe hain: "Har 5 min me check karo, chahe banda hile ya na hile"
             locationSubscription = await Location.watchPositionAsync(
                 {
                     accuracy: Location.Accuracy.Balanced, 
-                    timeInterval: 5 * 60 * 1000,  // OS har 5 min me wake up karega (Internal Check)
-                    distanceInterval: 0           // 🔥 Zero Distance: Baithe hue bande ki bhi location lega
+                    timeInterval: 5 * 60 * 1000,  
+                    distanceInterval: 0           
                 },
                 async (loc) => {
                     const now = Date.now();
                     const THIRTY_MINUTES = 30 * 60 * 1000; 
 
-                    // 🛑 GATEKEEPER: Agar 30 min nahi hue, to yahi ruk jao. Firebase mat bhejo.
                     if (lastUpdateTimestamp !== 0 && (now - lastUpdateTimestamp) < THIRTY_MINUTES) {
-                        return; // ⏳ Silent Skip (Quota Bachao)
+                        return; 
                     }
 
-                    // ✅ 30 Min ho gaye -> Ab Firebase me daalo
                     lastUpdateTimestamp = now;
-                    console.log("📍 Tracking Update Sent (30 min logic):", loc.coords.latitude);
 
                     try {
-                        await addDoc(collection(db, "location_logs"), {
-                            userId: currentUser.email || currentUser.uid,
+                        // 🔥 COMPANY ID ATTACHED USING addSaaSData INSTEAD OF addDoc
+                        await addSaaSData("location_logs", {
+                            userId: currentUser.email || currentUser.uid || currentUser.id,
                             userName: currentUser.name || "App User",
-                            
-                            // 🔥 SAAS UPDATE: Add Company ID
-                            companyId: currentUser.companyId, 
-                            
                             latitude: loc.coords.latitude,
                             longitude: loc.coords.longitude,
-                            timestamp: serverTimestamp(),
+                            timestamp: new Date().toISOString(), // SaaS uses ISO strings easily
                             date: new Date().toISOString().split('T')[0],
                             time: new Date().toLocaleTimeString(),
                             type: "🟣 Auto-Track (30 min)", 
                             device: "App",
-                            isStationary: true // Flag ki banda shayad baitha hai ya slow hai
+                            isStationary: true 
                         });
                     } catch (dbError) {
                         console.error("DB Error:", dbError);
@@ -200,10 +225,6 @@ function NavigationLayout() {
 
   }, [currentUser, loading]);
 
-
-  // ==========================================
-  // ⏰ SMART ATTENDANCE REMINDER
-  // ==========================================
   useEffect(() => {
     if (loading || !currentUser) return;
 
@@ -212,8 +233,6 @@ function NavigationLayout() {
         
         const now = new Date();
         const todayStr = now.toISOString().split('T')[0];
-        
-        // 🔥 Use Filtered Attendance List if needed, but currentUser check is enough here
         const myEntry = attendanceList.find((a: any) => 
             a.date === todayStr && a.userName === currentUser.name
         );
@@ -232,12 +251,12 @@ function NavigationLayout() {
   }, [attendanceList, currentUser, loading]);
 
   if (loading) {
-      return <View style={{flex:1, justifyContent:'center', alignItems:'center'}}><ActivityIndicator size="large" color="#3b5998"/></View>;
+     return <View style={{flex:1, justifyContent:'center', alignItems:'center'}}><ActivityIndicator size="large" color="#3b5998"/></View>;
   }
 
   const canSeeTab = (moduleKey: string) => {
       const userRole = currentUser?.role || 'Service Engineer';
-      if (userRole === 'Admin') return true;
+      if (userRole === 'Admin' || userRole === 'SuperAdmin') return true;
       const myPerms = appPermissions?.[userRole];
       if (!myPerms) return true;
       return myPerms[moduleKey] === true;
@@ -249,6 +268,9 @@ function NavigationLayout() {
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="white" />
       
+      {/* 🔥 GLOBAL NETWORK INDICATOR */}
+      <NetworkIndicator />
+
       <View style={styles.content}>
         <Slot />
       </View>
@@ -264,7 +286,6 @@ function NavigationLayout() {
                 <NavButton title="Act Plan" iconName="calendar" active={pathname === '/activity_plan'} onPress={() => router.push('/activity_plan')} />
             )}
 
-            {/* 🔥 UPDATED TASK BUTTON WITH BADGE */}
             {canSeeTab('tasks') && (
                 <NavButton 
                     title="Task" 
@@ -276,15 +297,33 @@ function NavigationLayout() {
             )}
             
             {canSeeTab('leads') && (
-                <NavButton title="Leads" iconName="funnel" active={pathname === '/leads'} onPress={() => router.push('/leads')} />
+                <NavButton 
+                    title="Leads" 
+                    iconName="funnel" 
+                    active={pathname === '/leads'} 
+                    onPress={() => router.push('/leads')} 
+                    badgeCount={leadCount}
+                />
             )}
 
             {canSeeTab('tickets') && (
-                <NavButton title="Service" iconName="settings" active={pathname === '/service_call'} onPress={() => router.push('/service_call')} />
+                <NavButton 
+                    title="Service" 
+                    iconName="settings" 
+                    active={pathname === '/service_call'} 
+                    onPress={() => router.push('/service_call')} 
+                    badgeCount={serviceCount}
+                />
             )}
 
             {canSeeTab('organizations') && (
-                <NavButton title="Org" iconName="people" active={pathname === '/organization'} onPress={() => router.push('/organization')} />
+                <NavButton 
+                    title="Org" 
+                    iconName="people" 
+                    active={pathname === '/organization'} 
+                    onPress={() => router.push('/organization')} 
+                    badgeCount={orgCount}
+                />
             )}
 
             </View>
@@ -299,7 +338,6 @@ const NavButton = ({ title, iconName, active, onPress, badgeCount }: any) => (
   <TouchableOpacity style={styles.navItem} onPress={onPress} activeOpacity={0.7}>
     <View>
         <Ionicons name={iconName} size={24} color={active ? "#3b5998" : "#9e9e9e"} />
-        {/* 🔴 RED BADGE CIRCLE */}
         {badgeCount > 0 && (
             <View style={styles.navBadge}>
                 <Text style={styles.navBadgeText}>{badgeCount > 99 ? '99+' : badgeCount}</Text>
@@ -316,6 +354,26 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   content: { flex: 1 }, 
   
+  // 🔥 NETWORK INDICATOR STYLES
+  networkPill: {
+      position: 'absolute',
+      right: 15,
+      zIndex: 9999,
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: 'rgba(255,255,255,0.9)',
+      paddingHorizontal: 8,
+      paddingVertical: 5,
+      borderRadius: 15,
+      elevation: 5,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.2,
+      shadowRadius: 4,
+  },
+  netDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
+  netText: { fontSize: 10, fontWeight: 'bold', color: '#555' },
+
   bottomNavContainer: {
     position: 'absolute',
     left: 15,
@@ -347,22 +405,23 @@ const styles = StyleSheet.create({
 
   navBadge: {
       position: 'absolute',
-      top: -5,
-      right: -8,
+      top: -6,
+      right: -14, 
       backgroundColor: '#D32F2F',
-      borderRadius: 10,
-      minWidth: 18,
-      height: 18,
+      borderRadius: 10, 
+      minWidth: 20,     
+      height: 20,       
       justifyContent: 'center',
       alignItems: 'center',
       borderWidth: 1.5,
       borderColor: 'white',
       zIndex: 10,
-      paddingHorizontal: 3
+      paddingHorizontal: 5, 
   },
   navBadgeText: {
       color: 'white',
-      fontSize: 9,
-      fontWeight: 'bold'
+      fontSize: 10, 
+      fontWeight: 'bold',
+      textAlign: 'center'
   }
 });

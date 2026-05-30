@@ -18,7 +18,7 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+// 🔥 SAAS IMPORTS
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
@@ -26,7 +26,7 @@ import { useData } from './context/DataContext';
 // NOTIFICATION IMPORTS
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc } from 'firebase/firestore';
 import { db } from './../firebaseConfig';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -46,7 +46,6 @@ Notifications.setNotificationHandler({
 export default function HomeScreen() {
   const router = useRouter();
   
-  // 🔥 1. Context se sirf global variables nikale (Arrays hata diye)
   const { 
       activeSection, setActiveSection, 
       currentUser, logout, 
@@ -54,10 +53,8 @@ export default function HomeScreen() {
       appPermissions, notificationCount, companyProfile 
   } = useData();
 
-  // 🔥 2. Naya SaaS Engine
   const { fetchSaaSData } = useSaaSDB();
 
-  // 🔥 3. Local States for Counts (Lazy Loaded)
   const [taskList, setTaskList] = useState<any[]>([]);
   const [leadList, setLeadList] = useState<any[]>([]);
   const [pmsList, setPmsList] = useState<any[]>([]);
@@ -78,7 +75,6 @@ export default function HomeScreen() {
   const [sidebarVisible, setSidebarVisible] = useState(false); 
   const [expoPushToken, setExpoPushToken] = useState('');
 
-  // 🔥 4. LOAD ALL DATA ON FOCUS (For Live Badges)
   useFocusEffect(
       useCallback(() => {
           const loadCountsData = async () => {
@@ -109,7 +105,6 @@ export default function HomeScreen() {
       }, [currentUser, shouldOpenSidebar])
   );
 
-  // 🔥 DYNAMIC BRANDING STATE
   const [branding, setBranding] = useState({
       name: 'LMS',
       logo: null as string | null
@@ -150,8 +145,6 @@ export default function HomeScreen() {
   
   const isBoss = ['Admin', 'Manager', 'SuperAdmin'].includes(currentUser?.role);
   const isHRBoss = ['Admin', 'Manager', 'Hr', 'Account', 'Accountant', 'SuperAdmin'].includes(currentUser?.role);
-
-  // --- 🔥 COUNTS LOGIC ---
 
   const pendingTaskCount = taskList.filter((t:any) => {
       if (t.status !== 'Pending') return false;
@@ -212,9 +205,7 @@ export default function HomeScreen() {
           const outcome = (v.outcome || '').toLowerCase();
           const isClosed = outcome.includes('order closed') || outcome.includes('lost') || outcome.includes('not interested');
           const isMine = isBoss || v.senderId === currentUser?.uid || v.senderId === currentUser?.id;
-          
           const isDueToday = v.nextFollowUp && v.nextFollowUp === todayStr;
-          
           return !isClosed && isMine && isDueToday;
       }).length;
 
@@ -222,9 +213,7 @@ export default function HomeScreen() {
           const status = (l.status || '').toLowerCase();
           const isClosed = status.includes('converted') || status.includes('lost') || status.includes('drop');
           const isMine = isBoss || l.senderId === currentUser?.uid || l.senderId === currentUser?.id;
-          
           const isDueToday = l.nextFollowUp && l.nextFollowUp === todayStr;
-
           return !isClosed && isMine && isDueToday;
       }).length;
 
@@ -266,10 +255,9 @@ export default function HomeScreen() {
       return c.senderId === currentUser?.id || c.userId === currentUser?.id;
   }).length;
 
-  // --- ⏰ LOGIC: TODAY'S ATTENDANCE STATUS ---
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStrStr = new Date().toISOString().split('T')[0];
   const myEntry = attendanceList.find((a: any) => 
-      a.date === todayStr && (a.userName === currentUser?.name || a.userId === currentUser?.id || a.senderId === currentUser?.id)
+      a.date === todayStrStr && (a.userName === currentUser?.name || a.userId === currentUser?.id || a.senderId === currentUser?.id)
   );
 
   let statusText = "Not Marked";
@@ -288,21 +276,20 @@ export default function HomeScreen() {
       }
   }
 
-  // --- 🔥 DASHBOARD TEXT LOGIC ---
   let dashboardLabel = "Follow-ups";
   let dashboardCount = salesFollowUpCount; 
 
-  const myRole = (currentUser?.role || '').toLowerCase();
+  const myRoleStr = (currentUser?.role || '').toLowerCase();
 
-  if (myRole.includes('store')) {
+  if (myRoleStr.includes('store')) {
       dashboardLabel = "Pending Courier";
       dashboardCount = pendingCourierCount;
   } 
-  else if (myRole.includes('account')) {
+  else if (myRoleStr.includes('account')) {
       dashboardLabel = "Pending Dues";
       dashboardCount = pendingDueCount;
   } 
-  else if (myRole.includes('service') || myRole.includes('engineer')) {
+  else if (myRoleStr.includes('service') || myRoleStr.includes('engineer')) {
       dashboardLabel = "Open Tickets";
       dashboardCount = pendingServiceCount;
   }
@@ -320,14 +307,17 @@ export default function HomeScreen() {
       }
   }, [currentUser]);
 
-  const saveTokenToDatabase = async (token: string) => {
-      if (!currentUser?.email) return;
+const saveTokenToDatabase = async (token: string) => {
+      // 🔥 FIX: email ki jagah id (uid) use karenge
+      if (!currentUser?.id) return; 
       try {
-          const emailKey = currentUser.email.toLowerCase();
-          const userRef = doc(db, "users", emailKey);
-          await updateDoc(userRef, { pushToken: token });
-      } catch (e) { console.log("❌ Error saving token:", e); }
-  };
+          const userRef = doc(db, "users", currentUser.id);
+          // 🔥 FIX: updateDoc ki jagah setDoc use karenge with { merge: true }
+          await setDoc(userRef, { pushToken: token }, { merge: true });
+      } catch (e) { 
+          console.log("❌ Error saving token:", e); 
+      }
+};
 
   async function registerForPushNotificationsAsync() {
       let token;
@@ -347,7 +337,7 @@ export default function HomeScreen() {
               finalStatus = status;
           }
           if (finalStatus !== 'granted') return;
-          const projectId = "fabfded8-69a3-4648-9d6f-63e2a0c5f618"; // Do not change
+          const projectId = "fabfded8-69a3-4648-9d6f-63e2a0c5f618"; 
           try { token = (await Notifications.getExpoPushTokenAsync({ projectId })).data; } catch (e) { console.log("Token error:", e); }
       } 
       return token;
@@ -369,30 +359,44 @@ export default function HomeScreen() {
   };
 
   const canSee = (moduleKey: string) => {
-    if (currentUser?.role === 'Admin' || currentUser?.role === 'SuperAdmin') return true; 
+    // 1. Agar currentUser load nahi hua, toh hide karo
+    if (!currentUser?.role) return false; 
+    
+    // Common modules sabko dikhenge
     if (moduleKey === 'common') return true;
 
-    let rawRole = (currentUser?.role || '').toLowerCase(); 
-    let userRole = 'Sales Executive'; 
+    // 2. Role ko lowercase mein convert karo (Admin, ADMIN, admin sab same ho jayega)
+    const myRole = currentUser.role.toLowerCase().trim();
 
-    if (rawRole.includes('sales')) userRole = 'Sales Executive';
-    else if (rawRole.includes('engineer') || rawRole.includes('service')) userRole = 'Service Engineer';
-    else if (rawRole.includes('account')) userRole = 'Accountant';
-    else if (rawRole.includes('store') || rawRole.includes('back office')) userRole = 'Store Keeper';
-    else if (rawRole.includes('hr')) userRole = 'Hr';
-    else if (rawRole.includes('manager')) userRole = 'Manager';
-    else if (currentUser?.role) userRole = currentUser.role;
+    // 3. Strict Admin Check (Ab case mismatch ki problem nahi hogi)
+    if (myRole === 'admin' || myRole === 'superadmin') return true; 
 
-    const rolePerms = appPermissions?.[userRole] || {};
-    const userSpecificPerms = appPermissions?.[currentUser?.id] || appPermissions?.[currentUser?.email] || {};
+    // 4. Employee Mapping
+    let userRoleKey = 'Sales Executive'; 
+    if (myRole.includes('sales')) userRoleKey = 'Sales Executive';
+    else if (myRole.includes('engineer') || myRole.includes('service')) userRoleKey = 'Service Engineer';
+    else if (myRole.includes('account')) userRoleKey = 'Accountant';
+    else if (myRole.includes('store') || myRole.includes('back office')) userRoleKey = 'Store Keeper';
+    else if (myRole.includes('hr')) userRoleKey = 'Hr';
+    else if (myRole.includes('manager')) userRoleKey = 'Manager';
+    else userRoleKey = currentUser.role; // Default fallback
 
+    // 5. Firebase Permissions Object (Agar net slow hai toh {} default manega)
+    const rolePerms = appPermissions?.[userRoleKey] || {};
+    const userSpecificPerms = appPermissions?.[currentUser.id] || appPermissions?.[currentUser.email] || {};
+
+    // 6. User-specific permission hamesha pehle check hogi
     if (userSpecificPerms[moduleKey] !== undefined) {
         return userSpecificPerms[moduleKey] === true; 
     }
+    
+    // 7. Warna general role permission return karega
     return rolePerms[moduleKey] === true; 
   };
   
   const sidebarItems = [
+      // 🔥 NEW: Super Admin Panel Link added here
+      { id: '999', title: 'Super Admin Panel', icon: 'globe', route: '/super_admin', module: 'superadmin_only' },      
       { id: '1', title: 'Serial Number', icon: 'pricetag', route: '/serial_number', module: 'asset_history' }, 
       { id: '7', title: 'Attendance Report', icon: 'person', route: '/attendance', module: 'attendance' },
       { id: '5', title: 'Spare Part Book', icon: 'book', route: '/spare_parts', module: 'spares' },
@@ -433,9 +437,12 @@ export default function HomeScreen() {
       { title: "Pending Dues", icon: "time", color: "#c0392b", route: '/payment_duelist', count: pendingDueCount, module: 'payment_due' },
   ];
 
+  // 🔥 UPDATE: Added logic to restrict superadmin_only module
   const filterItems = (items: any[]) => {
     return items.filter(i => {
         if (i.module === 'personal_notes') return true;
+        // Specifically block "superadmin_only" modules from regular Admins
+        if (i.module === 'superadmin_only') return currentUser?.role === 'SuperAdmin';
         return canSee(i.module);
     });
   };

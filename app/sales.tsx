@@ -15,20 +15,20 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct DB imports removed)
+// 🔥 SAAS IMPORTS (No direct Firebase DB imports!)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function SalesReportScreen() {
   const router = useRouter();
   
-  // 🔥 1. Context se sirf user aur notification action nikala
+  // 🔥 Context se sirf user aur notification action nikala
   const { currentUser, markAllNotificationsRead } = useData();
 
-  // 🔥 2. Naya SaaS Engine
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 Naya SaaS Engine (isDbLoading, fetchSaaSData, aur deleteSaaSData)
+  const { fetchSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
 
-  // 🔥 3. Lazy Loaded States
+  // 🔥 Lazy Loaded States
   const [salesVisitList, setSalesVisitList] = useState<any[]>([]);
   const [orgList, setOrgList] = useState<any[]>([]);
   const [userList, setUserList] = useState<any[]>([]);
@@ -52,14 +52,16 @@ export default function SalesReportScreen() {
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  // READ-ONLY MODAL
+  // READ-ONLY MODAL & DELETE
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const [visibleCount, setVisibleCount] = useState(20);
 
   const userRole = currentUser?.role ? currentUser.role.toLowerCase() : 'unknown';
   const isAdmin = userRole === 'admin' || userRole === 'manager' || userRole === 'accountant' || userRole === 'hr' || userRole === 'store' || userRole === 'superadmin';
+  const isStrictAdmin = userRole === 'admin' || userRole === 'manager';
 
   useEffect(() => {
       if (viewMode === 'Day' && visitTypeFilter === 'All' && !searchText) {
@@ -69,28 +71,29 @@ export default function SalesReportScreen() {
       }
   }, [viewMode, currentDate, visitTypeFilter, searchText, selectedEmployee]);
 
-  // 🔥 4. LOAD SAAS DATA ON MOUNT
-  useEffect(() => {
-      const loadData = async () => {
-          if (currentUser?.companyId) {
-              const [visits, orgs, users] = await Promise.all([
-                  fetchSaaSData("sales_reports"),
-                  fetchSaaSData("organizations"),
-                  fetchSaaSData("users")
-              ]);
-              setSalesVisitList(visits);
-              setOrgList(orgs);
-              setUserList(users);
+  // 🔥 LOAD SAAS DATA ON MOUNT
+  const loadData = async () => {
+      if (currentUser?.companyId) {
+          const [visits, orgs, users] = await Promise.all([
+              fetchSaaSData("sales_reports"),
+              fetchSaaSData("organizations"),
+              fetchSaaSData("users")
+          ]);
+          setSalesVisitList(visits);
+          setOrgList(orgs);
+          setUserList(users);
 
-              if (isAdmin) {
-                  const mappedUsers = users.map((u: any) => ({
-                      id: u.id,
-                      name: u.name || 'Unknown User'
-                  }));
-                  setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
-              }
+          if (isAdmin) {
+              const mappedUsers = users.map((u: any) => ({
+                  id: u.id,
+                  name: u.name || 'Unknown User'
+              }));
+              setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
           }
-      };
+      }
+  };
+
+  useEffect(() => {
       loadData();
   }, [currentUser]);
 
@@ -141,6 +144,42 @@ export default function SalesReportScreen() {
       return "All Time";
   };
 
+  // 🔥 MULTIPLE PRODUCTS RENDER HELPER
+  const getProductDisplay = (productData: any) => {
+      if (!productData) return '';
+      if (Array.isArray(productData)) return productData.join(', ');
+      return String(productData);
+  };
+
+  const renderProductList = (productData: any) => {
+      if (!productData) return null;
+
+      if (Array.isArray(productData) && productData.length > 0) {
+          return (
+              <View style={{ marginTop: 4 }}>
+                  {productData.map((prod, idx) => (
+                      <View key={idx} style={{flexDirection:'row', alignItems:'flex-start', marginTop: 3}}>
+                          <Ionicons name="cube-outline" size={12} color="#555" style={{marginTop: 2}} />
+                          <Text style={{fontSize:12, color:'#444', marginLeft:4, fontWeight:'500', flex: 1}}>
+                              {prod}
+                          </Text>
+                      </View>
+                  ))}
+              </View>
+          );
+      }
+
+      if (typeof productData === 'string' && productData.trim() !== '') {
+          return (
+              <View style={{flexDirection:'row', alignItems:'center', marginTop:4}}>
+                  <Ionicons name="cube-outline" size={12} color="#555" />
+                  <Text style={{fontSize:12, color:'#444', marginLeft:4, fontWeight:'500'}}>{productData}</Text>
+              </View>
+          );
+      }
+      return null;
+  };
+
   // --- FILTER LOGIC ---
   const getData = () => {
       let list = salesVisitList ? [...salesVisitList] : [];
@@ -159,7 +198,8 @@ export default function SalesReportScreen() {
           const term = searchText.toLowerCase();
           list = list.filter((item: any) => {
               const city = getCity(item).toLowerCase();
-              const mainText = `${item.hospital || ''} ${city} ${item.person || ''} ${item.senderName || ''} ${item.outcome || ''} ${item.product || ''}`.toLowerCase();
+              const prodStr = getProductDisplay(item.product);
+              const mainText = `${item.hospital || ''} ${city} ${item.person || ''} ${item.senderName || ''} ${item.outcome || ''} ${prodStr}`.toLowerCase();
               return mainText.includes(term);
           });
       } 
@@ -213,7 +253,8 @@ export default function SalesReportScreen() {
 
       todaysVisits.forEach((visit: any, index: number) => {
           const note = (visit.discussion || '-').split('\n')[0].substring(0, 30);
-          const productLine = visit.product ? `   └ 📦 Item: ${visit.product}\n` : ''; 
+          const prodStr = getProductDisplay(visit.product);
+          const productLine = prodStr ? `   └ 📦 Item: ${prodStr}\n` : ''; 
           message += `${index + 1}. *[${visit.visitType || 'Visit'}] ${visit.hospital || visit.hospitalName}*\n${productLine}   └ 📊 Status: ${visit.outcome}\n   └ 📝 Note: ${note}...\n\n`;
       });
 
@@ -230,6 +271,35 @@ export default function SalesReportScreen() {
       }
   };
 
+  // 🔥 SAAS ISOLATED DELETE FUNCTION
+  const handleDeleteVisit = async () => {
+      if (!selectedItem) return;
+      Alert.alert(
+          "Delete Visit?",
+          "Are you sure you want to permanently delete this visit record?",
+          [
+              { text: "Cancel", style: "cancel" },
+              { 
+                  text: "Delete", 
+                  style: "destructive", 
+                  onPress: async () => {
+                      setIsDeleting(true);
+                      try {
+                          await deleteSaaSData("sales_reports", selectedItem.id);
+                          setModalVisible(false);
+                          Alert.alert("Deleted", "Visit record has been deleted successfully.");
+                          loadData(); // 🔥 Refresh list after deletion
+                      } catch (error: any) {
+                          Alert.alert("Error", error.message);
+                      } finally {
+                          setIsDeleting(false);
+                      }
+                  } 
+              }
+          ]
+      );
+  };
+
   const renderItem = ({ item }: any) => {
       const isColdCall = item.visitType === 'Cold Call';
       const city = getCity(item); 
@@ -244,12 +314,8 @@ export default function SalesReportScreen() {
                   <View style={{flex:1, marginRight: 5}}>
                       <Text style={styles.hospitalName} numberOfLines={1}>{item.hospital || item.hospitalName}</Text>
                       
-                      {item.product ? (
-                          <View style={{flexDirection:'row', alignItems:'center', marginTop:2}}>
-                                <Ionicons name="cube-outline" size={12} color="#555" />
-                                <Text style={{fontSize:12, color:'#444', marginLeft:4, fontWeight:'500'}}>{item.product}</Text>
-                          </View>
-                      ) : null}
+                      {/* 🔥 Show Multiple Products */}
+                      {renderProductList(item.product)}
 
                       <Text style={styles.subText} numberOfLines={1}>
                           {city ? `📍 ${city} • ` : ''} {item.person}
@@ -422,7 +488,11 @@ export default function SalesReportScreen() {
                           <View style={styles.readOnlyBox}>
                               <Text style={styles.roTitle}>{selectedItem.hospital || selectedItem.hospitalName}</Text>
                               <Text style={styles.roSub}>{selectedItem.person} • {getCity(selectedItem)}</Text>
-                              {selectedItem.product && <Text style={{marginTop:5, fontWeight:'bold', color:'#333'}}>📦 {selectedItem.product}</Text>}
+                              
+                              <View style={{marginTop: 5}}>
+                                  <Text style={{fontWeight:'bold', color:'#333', marginBottom: 2}}>Products Discussed:</Text>
+                                  {renderProductList(selectedItem.product) || <Text style={{fontSize: 12, color: 'gray'}}>None</Text>}
+                              </View>
                           </View>
                           
                           <View style={styles.historyBox}>
@@ -433,6 +503,23 @@ export default function SalesReportScreen() {
                               <Text style={styles.sectionHeader}>DISCUSSION NOTE</Text>
                               <Text style={styles.historyText}>{selectedItem.discussion || 'No discussion notes recorded.'}</Text>
                           </View>
+
+                          {/* 🔥 NEW ADMIN DELETE BUTTON */}
+                          {isStrictAdmin && (
+                              <TouchableOpacity 
+                                  style={{marginTop: 5, marginBottom: 20, backgroundColor: '#ffebee', padding: 12, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#ef9a9a'}} 
+                                  onPress={handleDeleteVisit}
+                                  disabled={isDeleting}
+                              >
+                                  <View style={{flexDirection:'row', alignItems:'center'}}>
+                                      {isDeleting ? <ActivityIndicator size="small" color="#d32f2f" /> : <Ionicons name="trash-outline" size={18} color="#d32f2f" />}
+                                      <Text style={{color: '#d32f2f', fontWeight: 'bold', marginLeft: 8}}>
+                                          {isDeleting ? "Deleting..." : "Delete Visit Entry"}
+                                      </Text>
+                                  </View>
+                              </TouchableOpacity>
+                          )}
+
                       </ScrollView>
                   )}
               </View>

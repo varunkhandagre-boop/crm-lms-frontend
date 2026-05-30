@@ -14,26 +14,27 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct DB imports removed)
+// 🔥 SAAS IMPORTS (No Direct Firebase calls)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function PaymentDueList() {
     const router = useRouter();
     
-    // 🔥 1. Context se sirf global settings aur user nikalenge
+    // 🔥 1. Context se Core Info
     const { currentUser, companyProfile } = useData(); 
     
-    // 🔥 2. Naya SaaS Engine connect karenge
-    const { fetchSaaSData, addSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+    // 🔥 2. Naya SaaS Engine
+    const { fetchSaaSData, updateSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
 
-    // 🔥 3. Lazy Loaded States for DB
+    // 🔥 3. Lazy Loaded States
     const [dueList, setDueList] = useState<any[]>([]);
+    const [orderList, setOrderList] = useState<any[]>([]);
     const [paymentList, setPaymentList] = useState<any[]>([]);
     const [orgList, setOrgList] = useState<any[]>([]);
 
     // STATES
-    const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
+    const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All');
     const [currentDate, setCurrentDate] = useState(new Date());
     const [searchTerm, setSearchTerm] = useState('');
     
@@ -42,22 +43,21 @@ export default function PaymentDueList() {
     const [visibleCount, setVisibleCount] = useState(20);
 
     useEffect(() => {
-        if (viewMode === 'Day') {
-            setVisibleCount(500); 
-        } else {
-            setVisibleCount(20); 
-        }
+        if (viewMode === 'Day') setVisibleCount(500); 
+        else setVisibleCount(20); 
     }, [viewMode, currentDate, searchTerm]);
 
     // 🔥 4. LOAD SAAS DATA ON MOUNT
     const loadData = async () => {
         if (currentUser?.companyId) {
-            const [dues, payments, orgs] = await Promise.all([
-                fetchSaaSData("dues"), // Change to "advances" or "dues" depending on your schema mapping
+            const [dues, orders, payments, orgs] = await Promise.all([
+                fetchSaaSData("payment_dues"), 
+                fetchSaaSData("orders"),
                 fetchSaaSData("payments"),
                 fetchSaaSData("organizations")
             ]);
             setDueList(dues);
+            setOrderList(orders);
             setPaymentList(payments);
             setOrgList(orgs);
         }
@@ -93,10 +93,8 @@ export default function PaymentDueList() {
         if (viewMode === 'FY') {
             const currentMonth = currentDate.getMonth(); 
             const currentYear = currentDate.getFullYear();
-            
             const fyStartYear = currentMonth >= 3 ? currentYear : currentYear - 1;
             const fyEndYear = fyStartYear + 1;
-            
             return `FY ${fyStartYear.toString().slice(-2)}-${fyEndYear.toString().slice(-2)}`;
         }
         return "All Time";
@@ -134,7 +132,6 @@ export default function PaymentDueList() {
                             const timestampStr = new Date().toLocaleString('en-GB');
 
                             // 1. Queue the message in SaaS (Global outbox simulation)
-                            // This might need a specialized SaaS hook if your engine requires tenant tagging for messages
                             await addSaaSData('outbound_messages', {
                                 type: 'whatsapp',
                                 to: finalTo,
@@ -149,20 +146,31 @@ export default function PaymentDueList() {
                                 retryCount: 0
                             });
 
-                            // 2. Update Tracking in Due Record using SaaS
+                            // 2. Update Tracking in Due/Order Record using SaaS
                             const updatedHistory = item.reminderHistory ? [...item.reminderHistory] : [];
                             updatedHistory.push({
                                 date: timestampStr,
                                 sentBy: currentUser?.name || 'System'
                             });
 
-                            const res = await updateSaaSData("dues", item.id, {
+                            const collectionName = item.collectionName || 'payment_dues';
+
+                            const res = await updateSaaSData(collectionName, item.id, {
                                 lastReminderDate: todayStr,
                                 reminderHistory: updatedHistory
                             });
 
                             if(res.success) {
-                                setDueList(prev => prev.map(d => d.id === item.id ? { ...d, lastReminderDate: todayStr, reminderHistory: updatedHistory } : d));
+                                // Sync local state depending on where it came from
+                                if (collectionName === 'payment_dues') {
+                                    setDueList(prev => prev.map(d => d.id === item.id ? { ...d, lastReminderDate: todayStr, reminderHistory: updatedHistory } : d));
+                                } else {
+                                    setOrderList(prev => prev.map(o => o.id === item.id ? { ...o, lastReminderDate: todayStr, reminderHistory: updatedHistory } : o));
+                                }
+                                
+                                // Also update the popup if open
+                                setSelectedItem((prev: any) => ({ ...prev, lastReminderDate: todayStr, reminderHistory: updatedHistory }));
+                                
                                 Alert.alert("Success ✅", "Reminder sent and tracked!");
                             } else {
                                 throw new Error("Update Failed");
@@ -177,18 +185,50 @@ export default function PaymentDueList() {
         );
     };
 
+    // 🔥 FIX: MERGING MANUAL DUES AND SYSTEM ORDERS
     const getData = () => {
-        let filtered = dueList.filter((d:any) => {
-            const currentBal = d.balance !== undefined ? parseFloat(d.balance) : parseFloat(d.amount);
+        // 1. Get Manual Dues
+        const validDues = dueList ? dueList.filter((d:any) => {
+            const rawBal = d.balance !== undefined ? d.balance : d.amount;
+            const currentBal = parseFloat(String(rawBal).replace(/[^0-9.-]/g, '')) || 0;
             if (currentBal <= 0) return false;
-            if (d.status === 'Collected' || d.status === 'Paid' || d.paymentStatus === 'Paid') return false;
+            
+            const oStatus = (d.status || '').trim().toLowerCase();
+            const payStatus = (d.paymentStatus || '').trim().toLowerCase();
+            if (oStatus === 'collected' || oStatus === 'paid' || payStatus === 'paid') return false;
+            
+            // System Orders ko ignore karega taaki duplicate na ho
+            if (d.orderId && typeof d.orderId === 'string' && d.orderId.startsWith('ORD')) return false; 
+            
             return true;
-        });
+        }).map((d: any) => ({ ...d, collectionName: 'payment_dues' })) : [];
+
+        // 2. Get Billed System Orders (Credit Only) - 🔥 BULLETPROOF CHECK
+        const validOrders = orderList ? orderList.filter((o:any) => {
+            const rawBal = o.balance !== undefined ? o.balance : o.amount;
+            const currentBal = parseFloat(String(rawBal).replace(/[^0-9.-]/g, '')) || 0;
+            if (currentBal <= 0) return false;
+            
+            const oStatus = (o.status || '').trim().toLowerCase();
+            const payStatus = (o.paymentStatus || '').trim().toLowerCase();
+            const payMode = (o.paymentMode || '').trim().toLowerCase();
+
+            if (oStatus === 'collected' || payStatus === 'paid') return false;
+            
+            // 🔥 'Billed' orders hi yahan aayenge
+            if (oStatus !== 'billed') return false; 
+            if (payMode === 'cash') return false; 
+            
+            return true;
+        }).map((o: any) => ({ ...o, collectionName: 'orders' })) : [];
+
+        // 3. Combine both lists
+        let filtered = [...validDues, ...validOrders];
 
         if (searchTerm) {
             const lowerTerm = searchTerm.toLowerCase();
             filtered = filtered.filter((item:any) => {
-                const fullString = `${item.orgName} ${item.amount} ${item.billNo || item.billRef} ${item.dateIso || item.date} ${item.dueDate || ''} ${item.orderId || ''}`.toLowerCase();
+                const fullString = `${item.orgName || item.hospitalName} ${item.amount} ${item.billNo || item.poNumber} ${item.date} ${item.dueDate || ''} ${item.orderId || ''}`.toLowerCase();
                 return fullString.includes(lowerTerm);
             });
         }
@@ -203,11 +243,10 @@ export default function PaymentDueList() {
             const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59);
 
             filtered = filtered.filter((item: any) => {
-                const dateVal = item.dateIso || item.date || item.createdAt;
+                const dateVal = item.date || item.createdAt;
                 if(!dateVal) return false;
                 
                 const itemDate = parseDate(dateVal);
-                
                 if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
                 if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
                 if (viewMode === 'FY') return itemDate >= fyStartDate && itemDate <= fyEndDate;
@@ -216,8 +255,8 @@ export default function PaymentDueList() {
         }
         
         return filtered.sort((a: any, b: any) => {
-            const dateA = a.dateIso || a.date || a.createdAt;
-            const dateB = b.dateIso || b.date || b.createdAt;
+            const dateA = a.date || a.createdAt;
+            const dateB = b.date || b.createdAt;
             return parseDate(dateA).getTime() - parseDate(dateB).getTime();
         });
     };
@@ -241,25 +280,46 @@ export default function PaymentDueList() {
         return diffDays > 0 ? diffDays : 0;
     };
 
+   // 🔥 FIX: BULLETPROOF SMART MATCHING (Ignores spaces and cases)
     const getPartyHistory = (partyItem: any) => {
-        if (!partyItem) return [];
+        if (!partyItem || !paymentList) return [];
+
         return paymentList
             .filter((p: any) => {
-                if (partyItem.orgId && p.orgId && partyItem.orgId === p.orgId) return true;
-                const targetName = partyItem.orgName || partyItem.hospitalName;
-                return p.orgName === targetName;
+                // 1. Sabhi IDs ko string banakar spaces hata do aur lowercase kar do taaki perfect match ho
+                const pLinkedId = String(p.linkedId || '').trim().toLowerCase();
+                const pOrderRef = String(p.orderRef || '').trim().toLowerCase();
+                const pOrderId = String(p.orderId || '').trim().toLowerCase();
+                const pBillRef = String(p.billRef || '').trim().toLowerCase();
+
+                const partyId = String(partyItem.id || '').trim().toLowerCase();
+                const partyOrderId = String(partyItem.orderId || '').trim().toLowerCase();
+                const partyBillNo = String(partyItem.billNo || partyItem.poNumber || '').trim().toLowerCase();
+
+                // 2. Direct DB ID Match (Jab 'Collect' button dabakar payment liya ho)
+                if (partyId && (pLinkedId === partyId || pOrderId === partyId)) return true;
+
+                // 3. Order ID Match (ORD-XXXX)
+                if (partyOrderId && (pOrderRef === partyOrderId || pOrderId === partyOrderId)) return true;
+
+                // 4. Bill No / PO Match (Manual Entry ke liye)
+                if (partyBillNo && (pBillRef === partyBillNo || pOrderRef === partyBillNo)) return true;
+
+                // Agar koi bhi ID match nahi hui toh is specific due ke liye yeh payment nahi hai
+                return false;
             })
-            .sort((a: any, b: any) => parseDate(b.dateIso || b.date).getTime() - parseDate(a.dateIso || a.date).getTime())
-            .slice(0, 5); 
+            .sort((a: any, b: any) => {
+                // 🔥 Date sorting using dateIso for safety
+                const dateA = parseDate(a.dateIso || a.date || a.createdAt).getTime();
+                const dateB = parseDate(b.dateIso || b.date || b.createdAt).getTime();
+                return dateB - dateA;
+            })
+            .slice(0, 5); // Sirf latest 5 payments dikhayega
     };
 
     const handleCollect = (item: any) => {
         const currentDue = item.balance !== undefined ? item.balance : item.amount;
-        
-        let sourceCollection = 'payment_dues';
-        if (item.orderId && typeof item.orderId === 'string' && item.orderId.startsWith('ORD')) {
-            sourceCollection = 'orders';
-        }
+        const sourceCollection = item.collectionName || 'payment_dues';
 
         setSelectedItem(null); 
 
@@ -277,7 +337,7 @@ export default function PaymentDueList() {
     };
 
     const renderItem = ({ item }: any) => {
-        const dateToShow = item.dateIso || item.date || item.createdAt;
+        const dateToShow = item.date || item.createdAt;
         const daysOutstanding = getOverdueDays(dateToShow);
         const displayAmount = item.balance !== undefined ? item.balance : item.amount;
         
@@ -446,7 +506,7 @@ export default function PaymentDueList() {
                                 <DetailRow label="Customer" value={selectedItem?.orgName || selectedItem?.hospitalName} />
                                 <DetailRow label={selectedItem.orderId ? "Order ID" : "Bill No"} value={selectedItem?.orderId || selectedItem?.billNo || 'N/A'} />
                                 
-                                <DetailRow label="Bill Date" value={selectedItem?.dateIso || selectedItem?.date || selectedItem?.createdAt} />
+                                <DetailRow label="Bill Date" value={selectedItem?.date || selectedItem?.createdAt} />
                                 {selectedItem?.dueDate && <DetailRow label="Target Due Date" value={selectedItem.dueDate} />}
                                 
                                 <DetailRow label="Original Amount" value={`₹ ${selectedItem?.amount}`} />
@@ -458,7 +518,6 @@ export default function PaymentDueList() {
                                     </View>
                                 ) : null}
 
-                                {/* REMINDER HISTORY SECTION */}
                                 <View style={{marginTop:20, paddingTop:10, borderTopWidth:1, borderTopColor:'#eee'}}>
                                     <Text style={{fontSize:12, fontWeight:'bold', color:'#e65100', marginBottom:10}}>REMINDER LOGS</Text>
                                     {selectedItem.reminderHistory && selectedItem.reminderHistory.length > 0 ? (
@@ -474,7 +533,7 @@ export default function PaymentDueList() {
                                 </View>
 
                                 <View style={{marginTop:20, paddingTop:10, borderTopWidth:1, borderTopColor:'#eee'}}>
-                                    <Text style={{fontSize:12, fontWeight:'bold', color:'#3b5998', marginBottom:10}}>RECENT PAYMENTS FROM PARTY</Text>
+                                    <Text style={{fontSize:12, fontWeight:'bold', color:'#3b5998', marginBottom:10}}>PAYMENTS FOR THIS ENTRY</Text>
                                     {getPartyHistory(selectedItem).length > 0 ? (
                                         getPartyHistory(selectedItem).map((p: any) => (
                                             <View key={p.id} style={{flexDirection:'row', justifyContent:'space-between', paddingVertical:6, borderBottomWidth:1, borderBottomColor:'#f0f0f0'}}>
@@ -532,7 +591,7 @@ const DetailRow = ({label, value}: any) => (
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 0, alignItems:'center' },
+    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 4, alignItems:'center' },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
     backBtn: { paddingRight: 10 },
     addBtn: { flexDirection:'row', backgroundColor:'#3b5998', paddingVertical:6, paddingHorizontal:12, borderRadius:20, alignItems:'center' },
@@ -565,6 +624,6 @@ const styles = StyleSheet.create({
     modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
     receiptRow: { marginBottom: 12, flexDirection:'row', justifyContent:'space-between', alignItems:'center', borderBottomWidth:1, borderBottomColor:'#f0f0f0', paddingBottom:5 },
     receiptLabel: { fontSize: 12, color: 'gray' },
-    receiptValue: { fontSize: 14, fontWeight: 'bold', color: '#333', maxWidth:'65%', textAlign:'right' },
+    receiptValue: { fontSize: 14, fontWeight: 'bold', color: '#333' },
     modalCollectBtn: { backgroundColor:'#27ae60', padding:15, borderRadius:10, alignItems:'center', width:'100%', justifyContent:'center' },
 });

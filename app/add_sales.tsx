@@ -18,20 +18,19 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+// 🔥 SAAS IMPORTS (No direct Firebase DB imports)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function AddSalesScreen() {
     const router = useRouter();
     
-    // 🔥 1. Context se sirf user aur notification engine nikala
+    // 🔥 Context se current user aur global Notification engine
     const { currentUser, addNotification } = useData(); 
 
-    // 🔥 2. Naya SaaS Engine connect kiya
+    // 🔥 SaaS Engine for Tenant Data
     const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
 
-    // 🔥 3. Lazy Loaded Lists
     const [orgList, setOrgList] = useState<any[]>([]);
     const [productList, setProductList] = useState<any[]>([]);
 
@@ -45,7 +44,10 @@ export default function AddSalesScreen() {
     const [city, setCity] = useState('');
     const [address, setAddress] = useState('');
 
-    const [product, setProduct] = useState('');
+    // 🔥 UPGRADED: Product is now an array for multiple selections
+    const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
+    const [otherProductText, setOtherProductText] = useState(''); 
+    
     const [discussion, setDiscussion] = useState('');
     const [outcome, setOutcome] = useState('Interested');
     
@@ -59,14 +61,13 @@ export default function AddSalesScreen() {
     const [filteredData, setFilteredData] = useState<any[]>([]);
     const [currentModalType, setCurrentModalType] = useState('');
 
-    // 🔥 VOICE TO TEXT STATES & REFS
+    // Voice States
     const [isRecording, setIsRecording] = useState(false);
-    const originalDiscussionRef = useRef(''); // बोलने से पहले का टेक्स्ट सेव रखने के लिए
+    const originalDiscussionRef = useRef(''); 
 
-    // Sirf Cold Call wale options
     const outcomeOptions = ['Interested', 'Not Interested', 'Follow Up', 'Demo Planned'];
 
-    // 🔥 4. LOAD DATA ON MOUNT
+    // 🔥 LOAD DATA ON MOUNT (SAAS)
     useEffect(() => {
         const loadData = async () => {
             if (currentUser?.companyId) {
@@ -81,11 +82,9 @@ export default function AddSalesScreen() {
         loadData();
     }, [currentUser]);
 
-    // --- 🎤 VOICE TO TEXT SETUP (DUMMY FUNCTION FOR NOW) ---
     const toggleRecording = () => {
         Alert.alert("Coming Soon 🎤", "Voice-to-Text feature will be available in the next update!");
     };
-    // ---------------------------------
 
     const getProductOptions = () => {
         const dbProducts = productList.map((p: any) => p.model ? `${p.name} - ${p.model}` : p.name);
@@ -134,6 +133,18 @@ export default function AddSalesScreen() {
         }
     };
 
+    // 🔥 UPGRADED: Handle multiple product selection
+    const toggleProductSelection = (item: string) => {
+        setSelectedProducts(prev => {
+            if (prev.includes(item)) {
+                if (item === 'Other') setOtherProductText('');
+                return prev.filter(p => p !== item);
+            } else {
+                return [...prev, item];
+            }
+        });
+    };
+
     const handleSelect = (item: any) => {
         if (currentModalType === 'Hospital') {
             if (typeof item !== 'string') {
@@ -147,35 +158,63 @@ export default function AddSalesScreen() {
             } else {
                 setHospital(item); setOrgId(''); 
             }
+            setModalVisible(false);
         }
-        else if (currentModalType === 'Product') setProduct(item);
-        else if (currentModalType === 'Outcome') setOutcome(item);
-        
-        setModalVisible(false);
+        else if (currentModalType === 'Outcome') {
+            setOutcome(item);
+            setModalVisible(false);
+        }
+        else if (currentModalType === 'Product') {
+             toggleProductSelection(item);
+             // Note: Modal intentionally left open for multiple selections
+        }
+    };
+
+    // Helper to display selected products in the UI
+    const getSelectedProductsText = () => {
+        if (selectedProducts.length === 0) return '';
+        let displayText = selectedProducts.filter(p => p !== 'Other').join(', ');
+        if (selectedProducts.includes('Other') && otherProductText) {
+             displayText += displayText ? `, ${otherProductText}` : otherProductText;
+        } else if (selectedProducts.includes('Other')) {
+             displayText += displayText ? `, Other` : 'Other';
+        }
+        return displayText;
     };
 
     const triggerAutomatedMessages = async (data: any) => {
         console.log(`\n🚀 [AUTOMATION TRIGGERED] Sending New Lead message to: ${data.person}`);
     };
 
-    // 🔥 5. SAAS SAVE LOGIC
+    // 🔥 SAAS SAVE LOGIC
     const handleSave = async () => {
         if (isSubmitting) return;
         if (!hospital || !discussion) return Alert.alert("Missing Fields", "Hospital and Discussion are required.");
 
         setIsSubmitting(true);
         const locationData = await getCurrentLocation();
+        const safeUserId = currentUser?.id || 'guest';
         const nextDateISO = nextDate.toISOString().split('T')[0];
 
-        // 1. CREATE DSR (Visit Record)
+        // Prepare final product list
+        let finalProductsToSave = selectedProducts.filter(p => p !== 'Other');
+        if (selectedProducts.includes('Other') && otherProductText.trim()) {
+            finalProductsToSave.push(otherProductText.trim());
+        }
+
+        // 1. CREATE DSR (Visit Record) via SaaS Engine
         const newVisit = {
+            id: Date.now().toString(),
             visitType: 'Cold Call', 
             hospital, orgName: hospital, orgId,
-            person, mobile, city, address, product, discussion, outcome,
+            person, mobile, city, address, 
+            product: finalProductsToSave, // Saved as array
+            discussion, outcome,
             nextFollowUp: nextDateISO,
             date: new Date().toISOString().split('T')[0],
             dateIso: new Date().toISOString().split('T')[0],
-            location: locationData || null,
+            senderId: safeUserId, senderName: currentUser?.name || 'Unknown', role: currentUser?.role || 'Employee',
+            timestamp: Date.now(), location: locationData || null,
         };
 
         try {
@@ -191,9 +230,12 @@ export default function AddSalesScreen() {
                     const newLeadData = {
                         org: hospital, orgName: hospital, orgId: orgId,
                         contactPerson: person, mobile: mobile, email: email, address: address || city, city: city,
-                        product: product, requirements: product && product !== 'Other' ? [product] : [],
+                        product: finalProductsToSave.join(', '), // Comma separated for Lead view compatibility
+                        requirements: finalProductsToSave, // Array for backend processing
                         status: outcome, stage: leadStage, type: 'Warm', isHot: false,
                         source: 'Cold Call', nextDate: nextDateISO, date: new Date().toISOString().split('T')[0],
+                        userId: safeUserId, assignedTo: safeUserId, senderId: safeUserId, senderName: currentUser?.name || 'Unknown',
+                        timestamp: Date.now(), createdAt: new Date().toISOString(),
                         discussion: `Cold Call Converted to Lead.\nStatus: ${outcome}\nNote: ${discussion}`
                     };
 
@@ -261,14 +303,21 @@ export default function AddSalesScreen() {
                         </View>
                     ) : null}
 
-                    <Text style={styles.label}>Product Discussed</Text>
+                    <Text style={styles.label}>Products Discussed</Text>
                     <TouchableOpacity style={styles.dropdown} onPress={() => openModal('Product', getProductOptions())}>
-                        <Text style={{color: product ? '#333' : 'gray', flex:1}}>{product || "Select Product..."}</Text>
+                        <Text style={{color: selectedProducts.length > 0 ? '#333' : 'gray', flex:1}} numberOfLines={1}>
+                            {getSelectedProductsText() || "Select Product(s)..."}
+                        </Text>
                         <Ionicons name="cube-outline" size={20} color="gray" />
                     </TouchableOpacity>
                     
-                    {product === 'Other' && (
-                        <TextInput style={[styles.inputGray, {marginBottom:15, borderColor:'#3b5998'}]} placeholder="Type Product Name..." onChangeText={setProduct} />
+                    {selectedProducts.includes('Other') && (
+                        <TextInput 
+                            style={[styles.inputGray, {marginTop: 10, marginBottom:15, borderColor:'#3b5998'}]} 
+                            placeholder="Type Other Product Name(s)..." 
+                            value={otherProductText}
+                            onChangeText={setOtherProductText} 
+                        />
                     )}
 
                     <View style={styles.row}>
@@ -322,20 +371,27 @@ export default function AddSalesScreen() {
                 </ScrollView>
             </KeyboardAvoidingView>
 
-            {/* SEARCH MODAL */}
+            {/* SEARCH & SELECT MODAL */}
             <Modal visible={modalVisible} transparent={true} animationType="fade">
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
                         <Text style={styles.modalTitle}>Select {currentModalType}</Text>
                         <View style={styles.modalSearchBox}>
                             <Ionicons name="search" size={20} color="gray" />
-                            <TextInput style={{flex:1, marginLeft:10}} placeholder="Search..." value={searchText} onChangeText={handleSearch} autoFocus={true}/>
+                            <TextInput style={{flex:1, marginLeft:10}} placeholder="Search..." value={searchText} onChangeText={handleSearch} autoFocus={currentModalType !== 'Product'} />
                         </View>
+                        
                         <FlatList 
                             data={filteredData}
                             keyExtractor={(item, index) => index.toString()}
-                            renderItem={({item}) => (
-                                <TouchableOpacity style={styles.modalItem} onPress={() => handleSelect(item)}>
+                            renderItem={({item}) => {
+                                const isSelected = currentModalType === 'Product' && selectedProducts.includes(item);
+                                
+                                return (
+                                <TouchableOpacity 
+                                    style={[styles.modalItem, isSelected && {backgroundColor: '#e3f2fd'}]} 
+                                    onPress={() => handleSelect(item)}
+                                >
                                     {currentModalType === 'Hospital' && typeof item !== 'string' ? (
                                         <View style={{flexDirection:'row', alignItems:'center'}}>
                                             <View style={styles.iconBox}><Ionicons name='business' size={20} color="#3b5998" /></View>
@@ -345,15 +401,39 @@ export default function AddSalesScreen() {
                                             </View>
                                         </View>
                                     ) : (
-                                        <Text style={styles.modalText}>{typeof item === 'string' ? item : (item.name)}</Text>
+                                        <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%'}}>
+                                            <Text style={[styles.modalText, isSelected && {color: '#1976d2', fontWeight: 'bold'}]}>
+                                                {typeof item === 'string' ? item : (item.name)}
+                                            </Text>
+                                            {currentModalType === 'Product' && (
+                                                <Ionicons 
+                                                    name={isSelected ? "checkbox" : "square-outline"} 
+                                                    size={24} 
+                                                    color={isSelected ? "#1976d2" : "gray"} 
+                                                />
+                                            )}
+                                        </View>
                                     )}
                                 </TouchableOpacity>
-                            )}
+                            )}}
                             ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>No Data Found</Text>}
                         />
-                        <TouchableOpacity style={styles.closeBtn} onPress={() => setModalVisible(false)}>
-                            <Text style={{color:'red', fontWeight:'bold'}}>Close</Text>
-                        </TouchableOpacity>
+                        
+                        <View style={{flexDirection: 'row', justifyContent: 'space-between', marginTop: 15}}>
+                            <TouchableOpacity style={[styles.closeBtn, {flex: 1, marginRight: 5}]} onPress={() => setModalVisible(false)}>
+                                <Text style={{color:'red', fontWeight:'bold'}}>{currentModalType === 'Product' ? 'Close' : 'Cancel'}</Text>
+                            </TouchableOpacity>
+                            
+                            {/* Show "Done" button only for Multi-Select Product Modal */}
+                            {currentModalType === 'Product' && (
+                                <TouchableOpacity 
+                                    style={[styles.closeBtn, {flex: 1, marginLeft: 5, backgroundColor: '#3b5998', borderRadius: 8}]} 
+                                    onPress={() => setModalVisible(false)}
+                                >
+                                    <Text style={{color:'white', fontWeight:'bold'}}>Done</Text>
+                                </TouchableOpacity>
+                            )}
+                        </View>
                     </View>
                 </View>
             </Modal>
@@ -372,7 +452,7 @@ const styles = StyleSheet.create({
     autoFillBox: { backgroundColor: '#f0f8ff', padding: 10, borderRadius: 10, marginBottom: 10, borderWidth: 1, borderColor: '#d0eaff' },
     autoFillHeader: { fontSize:11, color:'#3b5998', fontWeight:'bold', marginBottom:8, letterSpacing: 1 },
 
-    dropdown: { backgroundColor: '#fff', borderWidth:1, borderColor:'#ddd', borderRadius: 8, padding: 12, flexDirection:'row', justifyContent:'space-between', alignItems:'center', height:50 },
+    dropdown: { backgroundColor: '#fff', borderWidth:1, borderColor:'#ddd', borderRadius: 8, padding: 12, flexDirection:'row', justifyContent:'space-between', alignItems:'center', minHeight:50 },
     inputGray: { backgroundColor: '#fff', borderWidth:1, borderColor:'#ddd', borderRadius: 8, padding: 12, fontSize:15 },
     
     voiceInputContainer: { flexDirection: 'row', alignItems: 'flex-start', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, backgroundColor: '#fff', paddingRight: 10 },
@@ -386,10 +466,10 @@ const styles = StyleSheet.create({
     saveBtnText: { color: 'white', fontWeight: 'bold', fontSize: 18 },
     
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
-    modalContent: { width:'100%', backgroundColor: 'white', borderRadius: 10, padding: 20, maxHeight: '75%' },
+    modalContent: { width:'100%', height: '85%', backgroundColor: 'white', borderRadius: 10, padding: 20, maxHeight: '95%' },
     modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginBottom:10 },
     modalSearchBox: { flexDirection:'row', alignItems:'center', backgroundColor:'#f0f0f0', borderRadius:8, padding:10, marginBottom:10 },
-    modalItem: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#eee' },
+    modalItem: { paddingVertical: 15, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: '#eee', borderRadius: 5 },
     modalText: { fontSize: 16, color: '#333' },
     closeBtn: { marginTop: 15, alignItems:'center', padding: 12 },
 

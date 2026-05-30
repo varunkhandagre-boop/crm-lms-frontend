@@ -18,7 +18,6 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct Firestore DB imports removed)
 import { storage } from '../firebaseConfig';
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
@@ -28,15 +27,23 @@ const USE_STORAGE_BUCKET = false;
 export default function CompanyProfileScreen() {
     const router = useRouter();
     
-    // 🔥 1. Context se Company Profile aur Current User nikalenge
     const { companyProfile, setCompanyProfile, currentUser } = useData();
-    
-    // 🔥 2. Naya SaaS Engine
-    const { updateSaaSData } = useSaaSDB();
+    const { updateSaaSData, fetchSaaSData, addSaaSData } = useSaaSDB();
 
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true); 
     const [saving, setSaving] = useState(false);
     const [uploading, setUploading] = useState(false);
+    
+    const [profileDocId, setProfileDocId] = useState<string | null>(null);
+
+    // 🔥 Naya State Subscription Card ke liye
+    const [subscriptionInfo, setSubscriptionInfo] = useState({
+        planName: 'Loading...',
+        expiryDate: 'Loading...',
+        maxEmployees: 10,
+        currentEmployees: 0,
+        isActive: false
+    });
 
     const [profile, setProfile] = useState({
         companyName: '', shortName: '', tagline: '',
@@ -47,21 +54,54 @@ export default function CompanyProfileScreen() {
         bank2_name: '', bank2_acc: '', bank2_ifsc: '', bank2_branch: ''
     });
 
-    // 🔥 3. LOAD DATA INSTANTLY FROM CONTEXT
     useEffect(() => {
-        if (companyProfile) {
-            const addr = companyProfile.fullAddress || {};
-            setProfile(prev => ({
-                ...prev,
-                companyName: companyProfile.companyName || '', shortName: companyProfile.shortName || '', tagline: companyProfile.tagline || '',
-                addressLine: addr.line || companyProfile.address || '', city: addr.city || '', state: addr.state || '', pincode: addr.pincode || '',
-                email: companyProfile.contactEmail || companyProfile.email || '', phone: companyProfile.contactPhone || companyProfile.phone || '', landline: companyProfile.landline || '', website: companyProfile.website || '', gstNumber: companyProfile.gstNumber || '',
-                logoUrl: companyProfile.logoUrl || '', signatureUrl: companyProfile.signatureUrl || '', qrCodeUrl: companyProfile.qrCodeUrl || '', upiId: companyProfile.upiId || '',
-                bank1_name: companyProfile.bankDetails1?.bankName || '', bank1_acc: companyProfile.bankDetails1?.accountNo || '', bank1_ifsc: companyProfile.bankDetails1?.ifsc || '', bank1_branch: companyProfile.bankDetails1?.branch || '',
-                bank2_name: companyProfile.bankDetails2?.bankName || '', bank2_acc: companyProfile.bankDetails2?.accountNo || '', bank2_ifsc: companyProfile.bankDetails2?.ifsc || '', bank2_branch: companyProfile.bankDetails2?.branch || '',
-            }));
-        }
-    }, [companyProfile]);
+        const loadProfileAndSubscription = async () => {
+            setLoading(true);
+            
+            // 1. Fetch Profile Data
+            const profiles = await fetchSaaSData("company_profile");
+            if (profiles && profiles.length > 0) {
+                const cp: any = profiles[0]; 
+                setProfileDocId(cp.id); 
+                
+                const addr = cp.fullAddress || {};
+                setProfile(prev => ({
+                    ...prev,
+                    companyName: cp.companyName || '', shortName: cp.shortName || '', tagline: cp.tagline || '',
+                    addressLine: addr.line || cp.address || '', city: cp.city || addr.city || '', state: cp.state || addr.state || '', pincode: addr.pincode || '',
+                    email: cp.contactEmail || cp.email || '', phone: cp.contactPhone || cp.phone || '', landline: cp.landline || '', website: cp.website || '', gstNumber: cp.gstNumber || '',
+                    logoUrl: cp.logoUrl || '', signatureUrl: cp.signatureUrl || '', qrCodeUrl: cp.qrCodeUrl || '', upiId: cp.upiId || '',
+                    bank1_name: cp.bankDetails1?.bankName || '', bank1_acc: cp.bankDetails1?.accountNo || '', bank1_ifsc: cp.bankDetails1?.ifsc || '', bank1_branch: cp.bankDetails1?.branch || '',
+                    bank2_name: cp.bankDetails2?.bankName || '', bank2_acc: cp.bankDetails2?.accountNo || '', bank2_ifsc: cp.bankDetails2?.ifsc || '', bank2_branch: cp.bankDetails2?.branch || '',
+                }));
+            }
+
+            // 🔥 2. Fetch Subscription Data (Plan & Employees)
+            const myCompany = await fetchSaaSData("companies");
+            const myUsers = await fetchSaaSData("users");
+
+            if (myCompany && myCompany.length > 0) {
+                const comp: any = myCompany[0];
+                let formattedExpiry = 'Unknown';
+                if (comp.expiryDate) {
+                    const dateObj = new Date(comp.expiryDate);
+                    formattedExpiry = dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+                }
+
+                setSubscriptionInfo({
+                    planName: comp.plan || 'Free Trial',
+                    expiryDate: formattedExpiry,
+                    maxEmployees: comp.maxEmployees || 10,
+                    currentEmployees: myUsers.length || 0,
+                    isActive: comp.isActive
+                });
+            }
+
+            setLoading(false);
+        };
+        
+        loadProfileAndSubscription();
+    }, []);
 
     const handleImagePick = async (field: 'logoUrl' | 'signatureUrl' | 'qrCodeUrl') => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -108,7 +148,6 @@ export default function CompanyProfileScreen() {
         } catch (error) { return uri; }
     };
 
-    // 🔥 4. SAAS ISOLATED SAVE LOGIC
     const handleSave = async () => {
         if (!profile.companyName || !profile.shortName) return Alert.alert("Error", "Company Name and Short Name are mandatory!");
         if (!currentUser?.companyId) return Alert.alert("Error", "No Company ID found. Contact support.");
@@ -121,7 +160,6 @@ export default function CompanyProfileScreen() {
 
             if (USE_STORAGE_BUCKET) {
                 setUploading(true);
-                // 🔥 SaaS Isolation for Storage
                 const basePath = `companies/${currentUser.companyId}`;
                 if (profile.logoUrl?.startsWith('file://')) {
                     finalLogo = await uploadToFirebaseStorage(profile.logoUrl, `${basePath}/logo_${Date.now()}.jpg`);
@@ -145,12 +183,16 @@ export default function CompanyProfileScreen() {
                 bankDetails2: { bankName: profile.bank2_name, accountNo: profile.bank2_acc, ifsc: profile.bank2_ifsc, branch: profile.bank2_branch }
             };
 
-            // 🔥 SaaS Engine update for specific companyId
-            const res = await updateSaaSData("company_profile", currentUser.companyId, dataToSave);
+            let res;
+            if (profileDocId) {
+                res = await updateSaaSData("company_profile", profileDocId, dataToSave);
+            } else {
+                res = await addSaaSData("company_profile", dataToSave);
+            }
             
             if (res.success) {
-                // Update Context instantly to reflect across the app
                 if(setCompanyProfile) setCompanyProfile({ ...companyProfile, ...dataToSave });
+                if(!profileDocId && (res as any).id) setProfileDocId((res as any).id);
                 Alert.alert("Success ✅", "Company Profile Updated Successfully!");
             } else {
                 Alert.alert("Error", "Could not save company profile.");
@@ -168,6 +210,11 @@ export default function CompanyProfileScreen() {
     };
 
     if (loading) return <View style={styles.center}><ActivityIndicator size="large" color="#3b5998" /></View>;
+
+    // Calculate usage percentage for progress bar
+    const usagePercent = subscriptionInfo.maxEmployees > 0 
+        ? (subscriptionInfo.currentEmployees / subscriptionInfo.maxEmployees) * 100 
+        : 0;
 
     return (
         <View style={styles.container}>
@@ -192,6 +239,35 @@ export default function CompanyProfileScreen() {
                     keyboardShouldPersistTaps="handled" 
                 >
                     
+                    {/* 🔥 0. SUBSCRIPTION INFO CARD */}
+                    <View style={[styles.section, { backgroundColor: '#f0f4ff', borderColor: '#d0d9ff', borderWidth: 1 }]}>
+                        <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10}}>
+                            <View>
+                                <Text style={{fontSize: 12, color: '#555', fontWeight: 'bold'}}>CURRENT PLAN</Text>
+                                <Text style={{fontSize: 18, color: '#3b5998', fontWeight: 'bold'}}>{subscriptionInfo.planName}</Text>
+                            </View>
+                            <View style={{alignItems: 'flex-end'}}>
+                                <Text style={{fontSize: 12, color: '#555', fontWeight: 'bold'}}>VALID TILL</Text>
+                                <Text style={{fontSize: 16, color: subscriptionInfo.isActive ? '#2e7d32' : '#d32f2f', fontWeight: 'bold'}}>
+                                    {subscriptionInfo.expiryDate}
+                                </Text>
+                            </View>
+                        </View>
+                        
+                        <View style={{marginTop: 10}}>
+                            <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5}}>
+                                <Text style={{fontSize: 12, color: '#555', fontWeight: 'bold'}}>EMPLOYEES USED</Text>
+                                <Text style={{fontSize: 12, color: '#333', fontWeight: 'bold'}}>{subscriptionInfo.currentEmployees} / {subscriptionInfo.maxEmployees}</Text>
+                            </View>
+                            <View style={{height: 8, backgroundColor: '#ddd', borderRadius: 4, overflow: 'hidden'}}>
+                                <View style={{height: '100%', width: `${Math.min(usagePercent, 100)}%`, backgroundColor: usagePercent >= 100 ? '#d32f2f' : '#4caf50'}} />
+                            </View>
+                            {usagePercent >= 100 && (
+                                <Text style={{fontSize: 10, color: '#d32f2f', marginTop: 5, textAlign: 'right'}}>Limit reached. Contact Admin to upgrade.</Text>
+                            )}
+                        </View>
+                    </View>
+
                     {/* 1. BRANDING */}
                     <View style={styles.section}>
                         <Text style={styles.sectionHeader}>🏢 Branding & Identity</Text>

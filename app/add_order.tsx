@@ -21,7 +21,7 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+// 🔥 SAAS IMPORTS (Firebase direct DB imports removed)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
@@ -31,9 +31,9 @@ import * as Sharing from 'expo-sharing';
 
 export default function AddOrderScreen() {
   const router = useRouter();
-  
-  // 🔥 1. Context se Sirf User & Notification
-  const { currentUser, companyProfile, addNotification } = useData();
+
+  // 🔥 1. Context se sirf Core User, Notification & Profile
+  const { currentUser, addNotification, companyProfile } = useData();
 
   // 🔥 2. Naya SaaS Engine
   const { fetchSaaSData, addSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
@@ -44,7 +44,7 @@ export default function AddOrderScreen() {
   const [orgList, setOrgList] = useState<any[]>([]);
   const [productList, setProductList] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
-  const [orderList, setOrderList] = useState<any[]>([]); // For ID counting
+  const [orderList, setOrderList] = useState<any[]>([]); 
 
   const [hospitalName, setHospitalName] = useState('');
   const [orgId, setOrgId] = useState(''); 
@@ -54,9 +54,23 @@ export default function AddOrderScreen() {
   const [mobile, setMobile] = useState('');
   const [email, setEmail] = useState('');
 
+  // ORDER TYPE
+  const [saleType, setSaleType] = useState('Credit'); 
+
   const [poNumber, setPoNumber] = useState('');
   const [amount, setAmount] = useState('');
-  const [productDetails, setProductDetails] = useState(''); 
+  
+  const [advanceAmount, setAdvanceAmount] = useState(''); 
+  const [advanceMode, setAdvanceMode] = useState('Cash'); 
+  const [advanceRef, setAdvanceRef] = useState(''); 
+  const [advanceBankName, setAdvanceBankName] = useState('');
+  const [advancePdcDate, setAdvancePdcDate] = useState(new Date());
+  const [showAdvancePdcPicker, setShowAdvancePdcPicker] = useState(false);
+
+  // MULTIPLE PRODUCTS
+  const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
+  const [otherProductText, setOtherProductText] = useState('');
+  
   const [paymentTerms, setPaymentTerms] = useState('');
   const [deliveryTerms, setDeliveryTerms] = useState('');
   const [notes, setNotes] = useState('');
@@ -90,8 +104,6 @@ export default function AddOrderScreen() {
               ]);
               setOrgList(orgs);
               setProductList(prods);
-              
-              // Only load users if user is Admin/Manager to save bandwidth
               if (canSelectSalesPerson) setUsers(usrs);
               setOrderList(orders);
           }
@@ -108,7 +120,11 @@ export default function AddOrderScreen() {
           setEmail(leadEmail as string || '');
           setCity(leadCity as string || '');
           setAddress(leadAddress as string || '');
-          setProductDetails(leadProduct as string || '');
+          
+          if (leadProduct) {
+              const prodArray = (leadProduct as string).split(',').map(p => p.trim()).filter(Boolean);
+              setSelectedProducts(prodArray.length > 0 ? prodArray : [(leadProduct as string)]);
+          }
       }
   }, [mode]);
 
@@ -135,73 +151,117 @@ export default function AddOrderScreen() {
             ? `<img src="${companyProfile.signatureUrl}" style="height: 50px; margin-top: 10px;" />` 
             : `<div style="font-weight: bold; margin-top: 30px;">Authorized Signatory</div>`;
 
+        const companyBankHTML = companyProfile?.bankDetails1?.accountNo 
+            ? `<div style="margin-top: 20px; font-size: 10px; border: 1px dashed #ccc; padding: 10px; background:#f5f5f5;">
+                <b>Our Bank Details:</b> ${companyProfile.bankDetails1.bankName} | 
+                A/C: ${companyProfile.bankDetails1.accountNo} | 
+                IFSC: ${companyProfile.bankDetails1.ifsc}
+               </div>` 
+            : '';
+
+        const formattedProducts = orderData.productDetails ? orderData.productDetails.replace(/,|\n/g, '<br>• ') : '';
+
         const htmlContent = `
         <html>
-          <head>
+        <head>
             <style>
-              body { font-family: 'Helvetica', sans-serif; padding: 30px; border: 2px solid #333; }
-              .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px; }
-              .title { font-size: 22px; font-weight: bold; color: #1a237e; text-transform: uppercase; }
-              .sub-title { font-size: 12px; margin-top: 2px; color: #333; line-height: 1.4; }
-              .row { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 14px; }
-              .label { font-weight: bold; color: #444; }
-              .box { border: 1px solid #000; padding: 15px; margin-top: 10px; background-color: #fcfcfc; }
-              .amount-box { display: inline-block; border: 2px solid #000; padding: 8px 25px; font-weight: bold; font-size: 18px; margin-top: 10px; }
-              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; }
-              .sign-box { text-align: center; }
+                body { font-family: 'Helvetica', 'Arial', sans-serif; padding: 20px; color: #333; }
+                .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #3b5998; padding-bottom: 10px; }
+                .company-name { font-size: 24px; font-weight: bold; color: #3b5998; text-transform: uppercase; }
+                .details-container { display: flex; justify-content: space-between; margin-bottom: 20px; }
+                .box { width: 48%; padding: 10px; border: 1px solid #eee; border-radius: 5px; background: #f9f9f9; }
+                .box-title { font-size: 12px; color: #888; margin-bottom: 5px; text-transform: uppercase; }
+                table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+                th { background-color: #e3f2fd; color: #1565c0; font-weight: bold; padding: 10px; text-align: left; font-size: 12px; border: 1px solid #bbdefb; }
+                td { padding: 10px; border: 1px solid #ddd; font-size: 13px; vertical-align: top; }
+                .summary { border: 1px solid #ddd; border-radius: 5px; width: 40%; float: right; margin-bottom: 20px;}
+                .summary-row { display: flex; justify-content: space-between; padding: 8px 10px; border-bottom: 1px solid #eee; font-size: 13px; }
+                .summary-row.total { background-color: #e3f2fd; font-weight: bold; font-size: 16px; border-bottom: none; color: #1565c0; }
             </style>
-          </head>
-          <body>
+        </head>
+        <body>
             <div class="header">
-              ${logoHTML}
-              ${companyProfile?.logoUrl ? `<div class="title">${companyProfile.companyName}</div>` : ''}
-              <div class="sub-title">${companyProfile?.address || ''}</div>
-              <div class="sub-title">Phone: ${companyProfile?.contactPhone || companyProfile?.phone || '-'} | Email: ${companyProfile?.contactEmail || companyProfile?.email || '-'}</div>
-              <div class="sub-title">${companyProfile?.gstNumber ? `GSTIN: ${companyProfile.gstNumber}` : ''}</div>
+                <div style="flex: 1;">
+                    <div class="company-name" style="margin-top: 0;">${companyProfile?.companyName || 'Our Company'}</div>
+                    <div style="font-size: 12px; margin-top: 5px; max-width: 280px; line-height: 1.5;">${companyProfile?.address || companyProfile?.addressLine || ''}</div>
+                    <div style="font-size: 12px; margin-top: 4px;">Phone: ${companyProfile?.contactPhone || companyProfile?.phone || '-'} | Email: ${companyProfile?.contactEmail || companyProfile?.email || '-'}</div>
+                    <div style="font-size: 12px; font-weight: bold; margin-top: 5px;">GSTIN: ${companyProfile?.gstNumber || '-'}</div>
+                </div>
+                <div style="width: 250px; text-align: right; margin-top: 0; padding-top: 0;">
+                    ${companyProfile?.logoUrl ? `<img src="${companyProfile.logoUrl}" style="max-height: 120px; max-width: 240px; object-fit: contain; object-position: top; display: block; margin-left: auto;" />` : ''}
+                </div>
             </div>
 
-            <h3 style="text-align: center; text-decoration: underline;">ORDER ACKNOWLEDGEMENT</h3>
-
-            <div class="row">
-              <div><span class="label">Order ID:</span> <b>${orderData.orderId}</b></div>
-              <div><span class="label">Date:</span> ${new Date(orderData.date).toLocaleDateString('en-GB')}</div>
+            <div style="text-align: center; margin: 15px 0;">
+                <h2 style="margin:0; font-size: 22px; color: #1565c0; text-decoration: underline;">SALES ORDER</h2>
             </div>
 
-            <div class="box">
-              <div class="label" style="text-decoration: underline; margin-bottom: 5px;">Client Details:</div>
-              <div style="font-size: 16px; font-weight: bold;">${orderData.hospitalName}</div>
-              <div>${orderData.address}, ${orderData.city}</div>
-              <div style="margin-top: 5px;">Contact: ${orderData.contactPerson} (${orderData.mobile})</div>
+            <div class="details-container">
+                <div class="box">
+                    <div class="box-title">Client Details</div>
+                    <div style="font-weight: bold; font-size: 16px; color: #1565c0;">${orderData.hospitalName}</div>
+                    <div style="font-size: 12px; margin-top: 5px;">${orderData.address || ''}, ${orderData.city || ''}</div>
+                    <div style="font-size: 12px;">Contact: ${orderData.contactPerson || ''} (${orderData.mobile || ''})</div>
+                </div>
+                <div style="text-align: right; font-size: 13px; line-height: 1.8;">
+                    <div><strong>Order ID:</strong> ${orderData.orderId}</div>
+                    <div><strong>Date:</strong> ${new Date(orderData.date).toLocaleDateString('en-GB')}</div>
+                    <div><strong>PO Number:</strong> ${orderData.poNumber}</div>
+                    <div style="margin-top: 5px; display: inline-block; padding: 4px 8px; background-color: #fff3e0; border-radius: 4px; color: #e65100; font-weight: bold;">Status: ${orderData.status}</div>
+                </div>
             </div>
 
-            <div class="box">
-              <div class="label" style="text-decoration: underline; margin-bottom: 5px;">Order Details:</div>
-              <div><span class="label">PO Number:</span> ${orderData.poNumber}</div>
-              <div style="margin-top: 5px;"><span class="label">Product Config:</span><br>${orderData.productDetails.replace(/\n/g, '<br>')}</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th width="70%">Product Configuration</th>
+                        <th width="30%" style="text-align:right;">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>
+                            <strong>As per PO Details:</strong><br>
+                            <span style="font-size: 11px; color: #555; white-space: pre-wrap; line-height: 1.6;">• ${formattedProducts}</span>
+                        </td>
+                        <td style="text-align:right; font-weight:bold; vertical-align: middle; font-size: 16px;">
+                            ₹${Number(orderData.amount).toLocaleString('en-IN')}
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="summary">
+                <div class="summary-row"><span>Total Order Value</span> <span>₹${Number(orderData.amount).toLocaleString('en-IN')}</span></div>
+                ${orderData.advanceAmount && Number(orderData.advanceAmount) > 0 ? `<div class="summary-row" style="color: green;"><span>Advance Received</span> <span>- ₹${Number(orderData.advanceAmount).toLocaleString('en-IN')}</span></div>` : ''}
+                <div class="summary-row total"><span>Balance Due</span> <span>₹${(Number(orderData.amount) - (Number(orderData.advanceAmount) || 0)).toLocaleString('en-IN')}</span></div>
             </div>
 
-            <div class="box">
-              <div><span class="label">Payment Terms:</span> ${orderData.paymentTerms || 'Standard'}</div>
-              <div><span class="label">Delivery Terms:</span> ${orderData.deliveryTerms || 'Standard'}</div>
-              ${orderData.notes ? `<div style="margin-top:5px;"><span class="label">Notes:</span> ${orderData.notes}</div>` : ''}
+            <div style="clear: both;"></div>
+
+            <div style="margin-top: 10px;">
+                <div class="tc-title" style="color:#1565c0; font-size: 12px; font-weight: bold;">Order Terms:</div>
+                <div style="margin-top: 5px; font-size: 11px;"><strong>Payment Terms:</strong> ${orderData.paymentTerms || 'As agreed'}</div>
+                <div style="font-size: 11px;"><strong>Delivery Terms:</strong> ${orderData.deliveryTerms || 'As agreed'}</div>
+                ${orderData.notes ? `<div style="font-size: 11px; margin-top: 5px;"><strong>Notes:</strong> ${orderData.notes}</div>` : ''}
             </div>
 
-            <div style="text-align: right; margin-top: 20px;">
-              <div style="font-weight: bold;">Total Order Value</div>
-              <div class="amount-box">₹ ${Number(orderData.amount).toLocaleString('en-IN')}/-</div>
-            </div>
+            ${companyBankHTML}
 
-            <div class="footer">
-              <div>
-                * This is a computer generated document.<br>
-                * Subject to Jurisdiction.
-              </div>
-              <div class="sign-box">
-                <div style="margin-bottom: 5px;">Booked By: <b>${orderData.senderName}</b></div>
-                ${signatureHTML}
-              </div>
+            <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-top: 40px;">
+                <div style="font-size:10px; max-width:250px; color:#333;">
+                    *This is a computer generated document.<br>
+                    *Subject to Jurisdiction.
+                </div>
+                <div class="signature-box" style="text-align: center;">
+                    <div style="font-weight:bold; margin-bottom: 5px; font-size: 12px;">For: ${companyProfile?.companyName || 'Our Company'}</div>
+                    <div style="height: 60px; display:flex; align-items:center; justify-content:center;">
+                        ${signatureHTML}
+                    </div>
+                    <div style="border-top: 1px solid #333; margin-top: 5px; padding-top: 5px; font-size: 11px; width: 150px;">Authorized Signatory<br><span style="font-size: 9px; color: gray;">(Booked By: ${orderData.senderName})</span></div>
+                </div>
             </div>
-          </body>
+        </body>
         </html>`;
 
         const { uri } = await Print.printToFileAsync({ html: htmlContent });
@@ -273,6 +333,29 @@ export default function AddOrderScreen() {
       }
   };
 
+  // 🔥 UPGRADED: Toggle Multiple Products
+  const toggleProductSelection = (item: string) => {
+      setSelectedProducts(prev => {
+          if (prev.includes(item)) {
+              if (item === 'Other') setOtherProductText('');
+              return prev.filter(p => p !== item);
+          } else {
+              return [...prev, item];
+          }
+      });
+  };
+
+  const getSelectedProductsText = () => {
+      if (selectedProducts.length === 0) return '';
+      let displayText = selectedProducts.filter(p => p !== 'Other').join(', ');
+      if (selectedProducts.includes('Other') && otherProductText) {
+           displayText += displayText ? `, ${otherProductText}` : otherProductText;
+      } else if (selectedProducts.includes('Other')) {
+           displayText += displayText ? `, Other` : 'Other';
+      }
+      return displayText;
+  };
+
   const handleSelect = (item: any) => {
       if (currentModalType === 'Hospital') {
           if (typeof item !== 'string') {
@@ -287,11 +370,12 @@ export default function AddOrderScreen() {
               setHospitalName(item);
               setOrgId('');
           }
+          setModalVisible(false);
       }
       else if (currentModalType === 'Product') {
-          if (item !== 'Other') setProductDetails(prev => prev ? `${prev}, ${item}` : item);
+          toggleProductSelection(item);
+          // Keep modal open for multiple selection
       }
-      setModalVisible(false);
   };
 
   const handleUploadOptions = () => {
@@ -336,7 +420,9 @@ export default function AddOrderScreen() {
 
   // 🔥 6. SAAS SAVE LOGIC
   const handleSave = async () => {
-      if (!hospitalName || !poNumber || !amount || !productDetails) {
+      const finalProductString = getSelectedProductsText();
+      
+      if (!hospitalName || !poNumber || !amount || !finalProductString) {
           Alert.alert("Missing Fields", "Please fill Hospital, PO No, Amount, Products.");
           return;
       }
@@ -345,7 +431,10 @@ export default function AddOrderScreen() {
 
       const locationData = await getCurrentLocation();
       const newOrderId = generateOrderId();
+      
       const cleanAmount = parseFloat(amount.toString().replace(/[^0-9.]/g, '')) || 0;
+      const cleanAdvance = parseFloat(advanceAmount.toString().replace(/[^0-9.]/g, '')) || 0; 
+      const initialBalance = cleanAmount - cleanAdvance; // Balance Calc
 
       let finalSenderId = currentUser?.id || 'guest';
       let finalSenderName = currentUser?.name || 'Unknown';
@@ -365,7 +454,13 @@ export default function AddOrderScreen() {
           date: poDate.toISOString().split('T')[0], 
           dateIso: poDate.toISOString().split('T')[0], 
           hospitalName, address, city, contactPerson, mobile, email,
-          poNumber, amount: cleanAmount, productDetails, 
+          poNumber, 
+          amount: cleanAmount, 
+          advanceAmount: cleanAdvance,
+          balance: initialBalance,
+          paymentStatus: initialBalance <= 0 ? 'Paid' : 'Pending',
+          saleType: saleType, 
+          productDetails: finalProductString, 
           paymentTerms, deliveryTerms, notes,
           status: 'Pending', 
           poFileName: selectedFile?.name || '',
@@ -379,14 +474,38 @@ export default function AddOrderScreen() {
           const res = await addSaaSData("orders", { ...newOrder, senderId: finalSenderId, senderName: finalSenderName, role: finalRole });
 
           if (res.success) {
-              // 🔥 MAGIC: AUTO-CLOSE LEAD IF ORDER IS BOOKED FROM LEAD PAGE
+              
+              // Record Advance Payment in SaaS DB
+              if (cleanAdvance > 0) {
+                  await addSaaSData("payments", {
+                      orgId: orgId,
+                      orgName: hospitalName,
+                      amount: cleanAdvance,
+                      paymentType: 'Advance',
+                      mode: advanceMode,            
+                      refNumber: advanceMode !== 'Cash' ? advanceRef : '',        
+                      bankName: advanceMode !== 'Cash' ? advanceBankName : '',
+                      pdcDate: advanceMode !== 'Cash' ? formatDate(advancePdcDate) : '',
+                      date: new Date().toISOString().split('T')[0],
+                      dateIso: new Date().toISOString().split('T')[0],
+                      orderId: newOrderId,
+                      orderRef: res.id,
+                      addedBy: currentUser?.name || 'Unknown',
+                      userName: finalSenderName,
+                      senderId: finalSenderId,
+                      timestamp: Date.now(),
+                      note: 'Advance received at the time of Order Booking'
+                  });
+              }
+
+              // 🔥 AUTO-CLOSE LEAD IF BOOKED FROM LEAD PAGE
               if (leadId) {
                   await updateSaaSData("leads", leadId as string, {
                       status: 'Converted', 
                       stage: 'Order Closed',
                       isHot: false,
                       type: 'Won',
-                      discussion: `🎉 Order Booked! (Order ID: ${newOrderId})\nValue: ₹${cleanAmount.toLocaleString('en-IN')}\n\n` 
+                      discussion: `🎉 Order Booked! (Order ID: ${newOrderId})\nValue: ₹${cleanAmount.toLocaleString('en-IN')}\nAdvance: ₹${cleanAdvance.toLocaleString('en-IN')}\n\n` 
                   });
               }
 
@@ -416,7 +535,6 @@ export default function AddOrderScreen() {
                       { 
                           text: "Yes, Share PDF", 
                           onPress: async () => { 
-                              // Use the correct ID for the PDF logic
                               await generateOrderPDF({ ...newOrder, id: res.id, senderName: finalSenderName }); 
                               askNextSteps(); 
                           }
@@ -428,7 +546,7 @@ export default function AddOrderScreen() {
               const askNextSteps = () => {
                   Alert.alert(
                       "What's Next? 🚀",
-                      "Do you want to take advance payment or assign installation?",
+                      "Do you want to assign installation?",
                       [
                           { 
                               text: "Just Close", 
@@ -450,22 +568,7 @@ export default function AddOrderScreen() {
                                           contactPerson: contactPerson,
                                           mobile: mobile,
                                           address: address,
-                                          product: productDetails.split(',')[0]
-                                      }
-                                  } as any);
-                              }
-                          },
-                          { 
-                              text: "Add Advance 💸", 
-                              onPress: () => { 
-                                  router.replace({
-                                      pathname: '/add_payment',
-                                      params: { 
-                                          orgName: hospitalName, 
-                                          amount: cleanAmount, 
-                                          linkedId: res.id, 
-                                          billNo: newOrderId, 
-                                          source: 'orders' 
+                                          product: finalProductString.split(',')[0]
                                       }
                                   } as any);
                               }
@@ -495,7 +598,7 @@ export default function AddOrderScreen() {
       </View>
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{flex: 1}}>
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
             
             {mode === 'from_lead' && (
                 <View style={{backgroundColor: '#e8f5e9', padding: 10, borderRadius: 8, marginBottom: 15, borderWidth: 1, borderColor: '#a5d6a7'}}>
@@ -530,9 +633,21 @@ export default function AddOrderScreen() {
                 {isDbLoading ? <ActivityIndicator size="small" color="#3b5998"/> : <Ionicons name="search" size={20} color="gray" />}
             </TouchableOpacity>
 
-            <View style={styles.row}>
-                  <View style={styles.col}><Text style={styles.label}>City</Text><TextInput style={styles.inputDisabled} value={city} editable={false} placeholder="Auto" /></View>
-                  <View style={styles.col}><Text style={styles.label}>Contact Person</Text><TextInput style={styles.inputDisabled} value={contactPerson} editable={false} placeholder="Auto" /></View>
+            {/* ORDER TYPE TOGGLE */}
+            <Text style={styles.label}>Order Type (Cash / Billed) *</Text>
+            <View style={{flexDirection: 'row', gap: 10, marginBottom: 15}}>
+                <TouchableOpacity 
+                    style={[styles.modeBtn, saleType === 'Cash' && styles.activeMode]} 
+                    onPress={() => setSaleType('Cash')}
+                >
+                    <Text style={{fontSize: 13, fontWeight: 'bold', color: saleType === 'Cash' ? 'white' : '#555'}}>💵 Cash Sale</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                    style={[styles.modeBtn, saleType === 'Credit' && styles.activeMode]} 
+                    onPress={() => setSaleType('Credit')}
+                >
+                    <Text style={{fontSize: 13, fontWeight: 'bold', color: saleType === 'Credit' ? 'white' : '#555'}}>📄 Billed (Credit)</Text>
+                </TouchableOpacity>
             </View>
 
             <View style={styles.divider} />
@@ -540,20 +655,90 @@ export default function AddOrderScreen() {
             <Text style={styles.label}>Client's PO Number *</Text>
             <TextInput style={styles.input} placeholder="e.g. PO-2025-XXX" value={poNumber} onChangeText={setPoNumber} />
 
-            <Text style={styles.label}>Total Order Value (₹) *</Text>
-            <TextInput style={styles.input} placeholder="e.g. 500000" value={amount} onChangeText={setAmount} keyboardType="numeric" />
+            <View style={styles.row}>
+                 <View style={styles.col}>
+                     <Text style={styles.label}>Total Value (₹) *</Text>
+                     <TextInput style={styles.input} placeholder="e.g. 500000" value={amount} onChangeText={setAmount} keyboardType="numeric" />
+                 </View>
+                 <View style={styles.col}>
+                     <Text style={[styles.label, {color: '#2e7d32'}]}>Advance Rcvd. (₹)</Text>
+                     <TextInput style={[styles.input, {borderColor: '#a5d6a7', backgroundColor: '#e8f5e9'}]} placeholder="e.g. 50000" value={advanceAmount} onChangeText={setAdvanceAmount} keyboardType="numeric" />
+                 </View>
+            </View>
 
+            {parseFloat(advanceAmount || '0') > 0 && (
+                <View style={{backgroundColor: '#e8f5e9', padding: 15, borderRadius: 10, marginBottom: 15, borderWidth: 1, borderColor: '#a5d6a7'}}>
+                    <Text style={{fontWeight:'bold', color:'#2e7d32', marginBottom: 10}}>Advance Payment Details</Text>
+                    
+                    <Text style={{fontSize: 12, color: 'gray', marginBottom: 5}}>Payment Mode</Text>
+                    <View style={{flexDirection: 'row', gap: 10, marginBottom: 10}}>
+                        {['Cash', 'UPI', 'NEFT', 'Cheque'].map((m) => (
+                            <TouchableOpacity key={m} style={[styles.modeBtn, advanceMode === m && styles.activeMode]} onPress={() => setAdvanceMode(m)}>
+                                <Text style={{fontSize: 12, fontWeight: 'bold', color: advanceMode === m ? 'white' : '#555'}}>{m}</Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+
+                    {advanceMode !== 'Cash' && (
+                        <View style={{marginTop: 10}}>
+                            <Text style={{fontSize: 12, color: 'gray', marginBottom: 5}}>Bank Name</Text>
+                            <TextInput 
+                                style={[styles.input, {backgroundColor: 'white', marginBottom: 10, paddingVertical: 8, fontSize: 13}]} 
+                                placeholder="Enter Bank Name" 
+                                value={advanceBankName} 
+                                onChangeText={setAdvanceBankName} 
+                            />
+
+                            <Text style={{fontSize: 12, color: 'gray', marginBottom: 5}}>Reference / Cheque No.</Text>
+                            <TextInput 
+                                style={[styles.input, {backgroundColor: 'white', marginBottom: 10, paddingVertical: 8, fontSize: 13}]} 
+                                placeholder="Txn ID / Cheque No" 
+                                value={advanceRef} 
+                                onChangeText={setAdvanceRef} 
+                            />
+
+                            <Text style={{fontSize: 12, color: 'gray', marginBottom: 5}}>Instrument / PDC Date</Text>
+                            <TouchableOpacity 
+                                style={[styles.input, {backgroundColor: 'white', marginBottom: 5, paddingVertical: 10, justifyContent: 'center'}]}
+                                onPress={() => setShowAdvancePdcPicker(true)}
+                            >
+                                <Text style={{color: '#333', fontSize: 13}}>{formatDate(advancePdcDate)}</Text>
+                            </TouchableOpacity>
+                            {showAdvancePdcPicker && (
+                                <DateTimePicker value={advancePdcDate} mode="date" onChange={(e, d) => { setShowAdvancePdcPicker(false); if(d) setAdvancePdcDate(d); }} />
+                            )}
+                        </View>
+                    )}
+                </View>
+            )}
+
+            {/* MULTI PRODUCT SELECTOR */}
             <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center'}}>
                 <Text style={styles.label}>Product Configuration *</Text>
                 <TouchableOpacity onPress={() => openModal('Product', getProductOptions())}>
                     <Text style={{color:'#3b5998', fontWeight:'bold', fontSize:12}}>+ Add Product</Text>
                 </TouchableOpacity>
             </View>
-            <TextInput 
-                style={[styles.input, {height: 80, textAlignVertical:'top'}]} 
-                multiline placeholder="e.g. 2x Ventilator with UPS..." 
-                value={productDetails} onChangeText={setProductDetails} 
-            />
+            
+            <TouchableOpacity 
+                style={[styles.dropdownBtn, { minHeight: 50, height: 'auto', alignItems: 'flex-start' }]} 
+                onPress={() => openModal('Product', getProductOptions())}
+            >
+                <Text style={{color: selectedProducts.length > 0 ? '#333' : 'gray', flex:1, lineHeight: 22}}>
+                    {getSelectedProductsText() || "Select Product(s)..."}
+                </Text>
+                <Ionicons name="cube-outline" size={20} color="gray" style={{marginTop: 2}} />
+            </TouchableOpacity>
+            
+            {selectedProducts.includes('Other') && (
+                <TextInput 
+                    style={[styles.input, {marginBottom:15, borderColor:'#3b5998', height: 80, textAlignVertical: 'top'}]} 
+                    multiline={true}
+                    placeholder="Type Other Product Name(s) here..." 
+                    value={otherProductText}
+                    onChangeText={setOtherProductText} 
+                />
+            )}
 
             <View style={styles.row}>
                   <View style={styles.col}><Text style={styles.label}>Payment Terms</Text><TextInput style={styles.input} placeholder="e.g. 100% Advance" value={paymentTerms} onChangeText={setPaymentTerms} /></View>
@@ -587,7 +772,7 @@ export default function AddOrderScreen() {
             <TextInput style={[styles.input, {height: 60, textAlignVertical:'top'}]} multiline placeholder="Any special instructions..." value={notes} onChangeText={setNotes} />
 
             <TouchableOpacity style={[styles.saveBtn, isSaving && {backgroundColor:'#ccc'}]} onPress={handleSave} disabled={isSaving}>
-                <Text style={styles.saveText}>{isSaving ? 'Processing...' : 'Submit Order & Close Lead'}</Text>
+                {isSaving ? <ActivityIndicator color="white" /> : <Text style={styles.saveText}>Submit Order</Text>}
             </TouchableOpacity>
             
             <Text style={{textAlign:'center', color:'gray', fontSize:10, marginTop:10}}>
@@ -600,7 +785,7 @@ export default function AddOrderScreen() {
       </KeyboardAvoidingView>
 
       {/* SEARCH MODAL */}
-      <Modal visible={modalVisible} transparent={true} animationType="slide">
+      <Modal visible={modalVisible} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
                 <Text style={styles.modalTitle}>Select {currentModalType}</Text>
@@ -613,8 +798,13 @@ export default function AddOrderScreen() {
                     data={filteredData}
                     keyExtractor={(item, index) => index.toString()}
                     style={{maxHeight: 300}}
-                    renderItem={({item}) => (
-                        <TouchableOpacity style={styles.modalItem} onPress={() => handleSelect(item)}>
+                    renderItem={({item}) => {
+                        const isSelected = currentModalType === 'Product' && selectedProducts.includes(item);
+                        return(
+                        <TouchableOpacity 
+                            style={[styles.modalItem, isSelected && {backgroundColor: '#e3f2fd'}]} 
+                            onPress={() => handleSelect(item)}
+                        >
                             {currentModalType === 'Hospital' && typeof item !== 'string' ? (
                                 <View style={{flexDirection:'row', alignItems:'center'}}>
                                     <View style={styles.iconBox}><Ionicons name="business" size={20} color="#3b5998" /></View>
@@ -624,20 +814,30 @@ export default function AddOrderScreen() {
                                     </View>
                                 </View>
                             ) : (
-                                <View style={{flexDirection:'row', alignItems:'center'}}>
-                                    <View style={[styles.iconBox, {backgroundColor:'#f3e5f5'}]}><Ionicons name={currentModalType === 'Product' ? "cube" : "radio-button-on"} size={20} color="#8e44ad" /></View>
-                                    <View style={{flex:1, marginLeft: 10}}><Text style={styles.modalText}>{typeof item === 'string' ? item : item.name}</Text></View>
-                                    <Ionicons name="add-circle-outline" size={24} color="#3b5998" />
+                                <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%'}}>
+                                    <Text style={[styles.modalText, isSelected && {color: '#1976d2', fontWeight: 'bold'}]}>
+                                        {typeof item === 'string' ? item : (item.name)}
+                                    </Text>
+                                    {currentModalType === 'Product' && (
+                                        <Ionicons name={isSelected ? "checkbox" : "square-outline"} size={24} color={isSelected ? "#1976d2" : "gray"} />
+                                    )}
                                 </View>
                             )}
                         </TouchableOpacity>
-                    )}
+                    )}}
                     ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>No matches found</Text>}
                 />
                 
-                <TouchableOpacity style={styles.closeBtn} onPress={() => setModalVisible(false)}>
-                    <Text style={{color:'gray'}}>Close</Text>
-                </TouchableOpacity>
+                <View style={{flexDirection: 'row', justifyContent: 'space-between', marginTop: 15}}>
+                    <TouchableOpacity style={[styles.closeBtn, {flex: 1, marginRight: 5}]} onPress={() => setModalVisible(false)}>
+                        <Text style={{color:'red', fontWeight:'bold'}}>{currentModalType === 'Product' ? 'Close' : 'Cancel'}</Text>
+                    </TouchableOpacity>
+                    {currentModalType === 'Product' && (
+                        <TouchableOpacity style={[styles.closeBtn, {flex: 1, marginLeft: 5, backgroundColor: '#3b5998', borderRadius: 8}]} onPress={() => setModalVisible(false)}>
+                            <Text style={{color:'white', fontWeight:'bold'}}>Done</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
             </View>
         </View>
       </Modal>
@@ -691,7 +891,8 @@ const styles = StyleSheet.create({
   pdfIconBox: { width: 50, height: 50, justifyContent:'center', alignItems:'center', backgroundColor:'#ffebee', borderRadius:5 },
   saveBtn: { backgroundColor: '#4caf50', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 10, elevation: 2 },
   saveText: { color: 'white', fontWeight: 'bold', fontSize: 18 },
-  
+  modeBtn: { flex:1, paddingVertical: 10, borderRadius: 8, backgroundColor: '#f0f0f0', alignItems:'center' },
+  activeMode: { backgroundColor: '#3b5998' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding:20 },
   modalContent: { width: '100%', backgroundColor: 'white', borderRadius: 15, padding: 20, maxHeight: '80%' },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign:'center', color:'#3b5998' },

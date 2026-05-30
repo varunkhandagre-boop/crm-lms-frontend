@@ -41,6 +41,10 @@ export default function AddDemoScreen() {
   const [orgList, setOrgList] = useState<any[]>([]);
   const [productList, setProductList] = useState<any[]>([]);
   const [demoList, setDemoList] = useState<any[]>([]);
+  
+  // "Other" Text states
+  const [customProduct, setCustomProduct] = useState(''); 
+  const [customModel, setCustomModel] = useState('');
 
   // --- STATES ---
   const [hospital, setHospital] = useState('');
@@ -142,7 +146,7 @@ export default function AddDemoScreen() {
       return `${prefix}-DEMO-${fyString}-${String(count).padStart(3, '0')}`;
   };
 
-  // 🔥 PDF GENERATOR (Untouched - Works Perfectly)
+  // 🔥 PDF GENERATOR
   const generateDemoPDF = async (demoData: any) => {
     try {
         const logoHTML = companyProfile?.logoUrl 
@@ -330,7 +334,7 @@ export default function AddDemoScreen() {
       setModalVisible(false);
   };
 
-  // 🔥 6. SAAS SAVE LOGIC
+  // 🔥 6. BULLETPROOF SAAS SAVE LOGIC
   const handleSubmit = async () => {
     if (!hospital || !product || !contactPerson) {
       Alert.alert("Missing Fields", "Hospital, Product Name and Contact Person are required.");
@@ -346,21 +350,34 @@ export default function AddDemoScreen() {
           return; 
       }
 
-      // Generate New Local ID
       const newDemoId = generateDemoId();
 
-      // Payload (Cleaned up, Engine injects the rest)
+      // 🔥 Naya Logic: Other ka input resolve karein
+      const finalProduct = product === 'Other' ? customProduct : product;
+      const finalModel = model === 'Other' ? customModel : model;
+
       const newDemo = {
         demoId: newDemoId, 
-        dateIso: demoDate.toISOString().split('T')[0], // Added Date ISO for robust sorting/querying
+        
+        // 🔥 SAAS MAGIC FIELDS (List me theek se sort/filter hone ke liye zaroori)
+        companyId: currentUser?.companyId || '', 
+        senderId: currentUser?.id || currentUser?.uid || '', 
+        senderName: currentUser?.name || 'Unknown', 
+        createdAt: new Date().toISOString(), 
+        timestamp: new Date().getTime(),
+        date: formatDate(demoDate),
+        dateIso: demoDate.toISOString().split('T')[0], 
         displayDate: formatDate(demoDate),
+
         hospital: hospital,
+        orgName: hospital, // List compatibility
         orgId: orgId, 
         address: address, 
         city: city,       
         department: department,
-        product: product,
-        model: model,
+        product: finalProduct,
+        productName: finalProduct, // List compatibility
+        model: finalModel,
         serialNo: serialNo,
         contactPerson: contactPerson,
         designation: designation, 
@@ -370,17 +387,17 @@ export default function AddDemoScreen() {
         result: result,
         notes: notes,
         status: 'Completed',
+        engineer: currentUser?.name || 'Unknown',
         location: locationData
       };
 
       const resultRes = await addSaaSData("demos", newDemo);
       
       if (resultRes.success) {
-          // Push Notification
           if (addNotification) {
               await addNotification({
                   title: "New Demo Report 📋",
-                  message: `${currentUser?.name} submitted a demo report (${newDemoId}) for ${product} at ${hospital}.`,
+                  message: `${currentUser?.name} submitted a demo report (${newDemoId}) for ${finalProduct} at ${hospital}.`,
                   to: "Admin",
                   route: "/demo",
                   type: "info"
@@ -391,14 +408,12 @@ export default function AddDemoScreen() {
               await updateActivityStatus(params.activityId as string, 'Completed');
           }
 
-          // PDF Prompt
           Alert.alert(
               "Success ✅", 
               `Demo Report ${newDemoId} Saved!\nDo you want to share PDF?`, 
               [
                 { text: "No", onPress: () => router.back(), style: 'cancel' },
                 { text: "Yes, Share PDF", onPress: async () => { 
-                    // Add senderName manually since generateDemoPDF expects it before a DB fetch happens
                     await generateDemoPDF({...newDemo, senderName: currentUser?.name});
                     router.back();
                 }}
@@ -428,7 +443,6 @@ export default function AddDemoScreen() {
 
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
             
-            {/* SECTION 1: CUSTOMER INFO */}
             <Text style={styles.sectionHeader}>🏥 Customer Details</Text>
             <View style={styles.card}>
                 <Text style={styles.label}>Organization / Hospital *</Text>
@@ -459,7 +473,6 @@ export default function AddDemoScreen() {
                 {showDatePicker && <DateTimePicker value={demoDate} mode="date" onChange={(e, d) => { setShowDatePicker(false); if(d) setDemoDate(d); }} />}
             </View>
 
-            {/* SECTION 2: CONTACT PERSON */}
             <Text style={styles.sectionHeader}>👤 Contact Person</Text>
             <View style={styles.card}>
                 <Text style={styles.label}>Demo Given To (Name) *</Text>
@@ -480,7 +493,6 @@ export default function AddDemoScreen() {
                 </View>
             </View>
 
-            {/* SECTION 3: PRODUCT INFO */}
             <Text style={styles.sectionHeader}>📦 Product Details</Text>
             <View style={styles.card}>
                 <Text style={styles.label}>Product Name *</Text>
@@ -489,13 +501,7 @@ export default function AddDemoScreen() {
                     {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="cube-outline" size={20} color="gray" />}
                 </TouchableOpacity>
 
-                {product === 'Other' && (
-                    <TextInput 
-                        style={[styles.input, {marginTop:10, borderColor:'#3b5998'}]} 
-                        placeholder="Type Product Name..." 
-                        onChangeText={setProduct} 
-                    />
-                )}
+                {product === 'Other' && <TextInput key="stable-demo-product" style={[styles.input, {marginTop:5, borderColor:'#3b5998'}]} placeholder="Type Product Name..." value={customProduct} onChangeText={setCustomProduct} />}
 
                 <View style={styles.row}>
                     <View style={{flex:1, marginRight:10}}>
@@ -508,9 +514,7 @@ export default function AddDemoScreen() {
                             <Ionicons name="caret-down" size={16} color="gray" />
                         </TouchableOpacity>
                         
-                        {model === 'Other' && (
-                            <TextInput style={[styles.input, {marginTop:5}]} placeholder="Type Model" onChangeText={setModel} />
-                        )}
+                        {model === 'Other' && <TextInput key="stable-demo-model" style={[styles.input, {marginTop:5}]} placeholder="Type Model Name..." value={customModel} onChangeText={setCustomModel} />}
                     </View>
                     <View style={{flex:1}}>
                         <Text style={styles.label}>Serial No</Text>
@@ -522,7 +526,6 @@ export default function AddDemoScreen() {
                 <TextInput style={styles.input} placeholder="e.g. 5" keyboardType="numeric" value={duration} onChangeText={setDuration} />
             </View>
 
-            {/* SECTION 4: FEEDBACK */}
             <Text style={styles.sectionHeader}>📝 Feedback & Notes</Text>
             <View style={styles.card}>
                 <Text style={styles.label}>Outcome / Feedback</Text>

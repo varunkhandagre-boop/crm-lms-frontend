@@ -15,6 +15,7 @@ import {
     onSnapshot,
     orderBy,
     query,
+    setDoc,
     updateDoc,
     where,
     writeBatch
@@ -129,7 +130,6 @@ export const DataProvider = ({ children }: any) => {
                 setCompanyProfile(JSON.parse(localProfile));
             }
 
-            // 🔥 FIX: Ab profile uski specific companyId se aayegi
             const docRef = doc(db, "company_profile", companyId);
             const docSnap = await getDoc(docRef);
             
@@ -205,17 +205,32 @@ export const DataProvider = ({ children }: any) => {
         // 🔥 SAAS VARIABLES INITIALIZED
         let companyId = "";
         let isCompanyActive = true; 
+        
+        // 🔥 FIX 1: Default id hamesha user.uid honi chahiye
+        let userDocId = user.uid;
 
         try {
             const usersRef = collection(db, "users");
+            let userData: any = null;
+
+            // 🔥 1. THE FIX: Hamesha pehle EMAIL se dhoondho (Kyunki asli data wahin hai)
             const q = query(usersRef, where("email", "==", emailKey));
             const querySnap = await getDocs(q);
 
             if (!querySnap.empty) {
-                const userDoc = querySnap.docs[0];
-                const userData = userDoc.data();
-                const userDocId = userDoc.id;
+                // Email se asli document mil gaya
+                userData = querySnap.docs[0].data();
+                userDocId = querySnap.docs[0].id; 
+            } else {
+                // 🔥 2. Agar email se nahi mila, tabhi UID wale document ko check karo
+                let userDocSnap = await getDoc(doc(db, "users", user.uid));
+                if (userDocSnap.exists()) {
+                    userData = userDocSnap.data();
+                    userDocId = user.uid; 
+                }
+            }
 
+            if (userData) {
                 console.log("🔥 Full User Data from DB:", userData);
 
                 // 🔥 Extract Company ID
@@ -224,15 +239,35 @@ export const DataProvider = ({ children }: any) => {
                 dbTarget = (userData.monthlyTarget && !isNaN(userData.monthlyTarget)) ? Number(userData.monthlyTarget) : 1000000;
                 setSalesTargets({ monthly: dbTarget, yearly: dbTarget * 12 });
 
-                let dbRole = userData.role || 'Service Engineer';
+                // 🔥 Role Normalization
+                let dbRoleRaw = userData.role || '';
+                let dbRole = dbRoleRaw.toLowerCase().trim();
+                
                 name = userData.name || name;
                 if (userData.mobile) mobile = userData.mobile;
 
-                if (dbRole === 'Engineer' || dbRole === 'Service') finalRole = 'Service Engineer';
-                else if (dbRole === 'Sales' || dbRole === 'Sales Man') finalRole = 'Sales Executive';
-                else if (dbRole === 'Account') finalRole = 'Accountant';
-                else if (dbRole === 'Back Office' || dbRole === 'Store') finalRole = 'Store Keeper';
-                else finalRole = dbRole; 
+                // Agar role admin/superadmin hai, toh strictly 'Admin' set karo
+                if (dbRole === 'admin' || dbRole === 'superadmin') {
+                    finalRole = 'Admin';
+                } 
+                else if (dbRole === 'engineer' || dbRole === 'service' || dbRole === '') {
+                    finalRole = 'Service Engineer';
+                } 
+                else if (dbRole === 'sales' || dbRole === 'sales man') {
+                    finalRole = 'Sales Executive';
+                } 
+                else if (dbRole === 'account' || dbRole === 'accountant') {
+                    finalRole = 'Accountant';
+                } 
+                else if (dbRole === 'back office' || dbRole === 'store') {
+                    finalRole = 'Store Keeper';
+                } 
+                else if (dbRole === 'hr') {
+                    finalRole = 'Hr';
+                } 
+                else {
+                    finalRole = userData.role; // Default
+                }
 
                 // 🔥 SUPER ADMIN CHECK
                 const superAdmins = ["varunkhandagre@gmail.com", "admin@lms.com", "admin@mycrm.com"];
@@ -256,27 +291,27 @@ export const DataProvider = ({ children }: any) => {
                         isCompanyActive = active;
                     }
                 }
-
-                // Push Token Sync
-                try {
-                    const token = await registerForPushNotificationsAsync();
-                    if (token) {
-                        const userRefToUpdate = doc(db, "users", userDocId);
-                        await updateDoc(userRefToUpdate, { 
-                            expoPushToken: token,
-                            lastActive: new Date().toISOString() 
-                        });
-                        console.log("✅ Push Token Saved for:", name);
-                    }
-                } catch (tokenErr) {
-                    console.log("⚠️ Could not fetch/save push token:", tokenErr);
-                }
-
             } else {
                 if(emailKey === "varunkhandagre@gmail.com" || emailKey === "admin@mycrm.com") {
                     finalRole = "SuperAdmin";
                 }
             }
+            
+            // 🔥 Push Token Sync
+            try {
+                const token = await registerForPushNotificationsAsync();
+                if (token) {
+                    const userRefToUpdate = doc(db, "users", userDocId);
+                    await setDoc(userRefToUpdate, { 
+                        expoPushToken: token,
+                        lastActive: new Date().toISOString() 
+                    }, { merge: true });
+                    console.log("✅ Push Token Saved for:", name);
+                }
+            } catch (tokenErr) {
+                console.log("⚠️ Could not fetch/save push token:", tokenErr);
+            }
+            
         } catch (e) { console.log("⚠️ Auth Error:", e); }
         
         console.log(`✅ Logged in as: ${name} (Role: ${finalRole}, Company: ${companyId})`);
@@ -289,8 +324,8 @@ export const DataProvider = ({ children }: any) => {
             empId: "EMP-" + user.uid.slice(0,4).toUpperCase(),
             profileImage: null,
             mobile: mobile,
-            companyId: companyId,             // 🔥 ADDED
-            isCompanyActive: isCompanyActive  // 🔥 ADDED
+            companyId: companyId,             
+            isCompanyActive: isCompanyActive  
         });
 
         // 🔥 Fetch Company profile automatically
@@ -305,24 +340,57 @@ export const DataProvider = ({ children }: any) => {
   }, []);
 
   // =========================================================
-  // 2. PERMISSIONS & USER LIST
-  // ==========================================
+  // 2. PERMISSIONS & USER LIST (🔥 SAAS FIX 2 ADDED)
+  // =========================================================
   useEffect(() => {
       if (!currentUser) {
           setIsFirebaseSynced(false); 
           return; 
       }
 
-      const unsub = onSnapshot(doc(db, "settings", "permissions"), (d) => { if (d.exists()) setAppPermissions(d.data()); });
-      const unsubAuto = onSnapshot(doc(db, "settings", "automation"), (d) => { 
-          if (d.exists()) setIsAutomationEnabled(d.data().enabled !== false); 
-      });
+      // 🔥 FIX 2: SAAS PERMISSIONS FETCH
+      let unsubPerm = () => {};
+      if (currentUser.companyId) {
+          const qPerm = query(collection(db, "settings_permissions"), where("companyId", "==", currentUser.companyId));
+          unsubPerm = onSnapshot(qPerm, (snapshot) => {
+              if (!snapshot.empty) {
+                  const permDoc = snapshot.docs[0].data();
+                  setAppPermissions(permDoc.data || permDoc || {});
+              } else {
+                  setAppPermissions({});
+              }
+          });
+      } else {
+          // Fallback for SuperAdmin or missing companyId
+          unsubPerm = onSnapshot(doc(db, "settings", "permissions"), (d) => { if (d.exists()) setAppPermissions(d.data()); });
+      }
+
+      // SAAS AUTOMATION SETTINGS
+      let unsubAuto = () => {};
+      if (currentUser.companyId) {
+          const qAuto = query(collection(db, "settings_automation"), where("companyId", "==", currentUser.companyId));
+          unsubAuto = onSnapshot(qAuto, (snapshot) => { 
+              if (!snapshot.empty) {
+                  const autoDoc = snapshot.docs[0].data();
+                  setIsAutomationEnabled(autoDoc.enabled !== false); 
+              }
+          });
+      } else {
+          unsubAuto = onSnapshot(doc(db, "settings", "automation"), (d) => { 
+              if (d.exists()) setIsAutomationEnabled(d.data().enabled !== false); 
+          });
+      }
+
       const unsubUsers = onSnapshot(collection(db, "users"), (snapshot) => {
-          const list = snapshot.docs.map(doc => ({ id: doc.id, uid: doc.id, ...doc.data() }));
+          let list = snapshot.docs.map(doc => ({ id: doc.id, uid: doc.id, ...doc.data() as any }));
+          // Filter by companyId if applicable
+          if (currentUser.role !== 'SuperAdmin' && currentUser.companyId) {
+              list = list.filter(u => u.companyId === currentUser.companyId);
+          }
           setUserList(list);
           setIsFirebaseSynced(true); 
       });
-      return () => { unsub(); unsubUsers(); unsubAuto(); };
+      return () => { unsubPerm(); unsubUsers(); unsubAuto(); };
   }, [currentUser]);
 
   // =========================================================
@@ -332,19 +400,24 @@ export const DataProvider = ({ children }: any) => {
     if (!currentUser) return;
 
     const role = currentUser.role ? currentUser.role.toLowerCase() : '';
-    const isMaster = ['admin', 'manager', 'account', 'accountant', 'hr'].includes(role);
+    const isMaster = ['admin', 'manager', 'account', 'accountant', 'hr', 'superadmin'].includes(role);
     const isAccount = role.includes('account');
     const isStore = role.includes('store');
 
     const createListener = (colName: string, setter: Function) => {
         return onSnapshot(collection(db, colName), (snapshot) => {
-            let data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            let data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
             
+            // 🔥 Basic SaaS Isolation for Real-time Listeners
+            if (currentUser.role !== 'SuperAdmin' && currentUser.companyId) {
+                data = data.filter(item => item.companyId === currentUser.companyId);
+            }
+
             if (isMaster) {
-                // Admin sees EVERYTHING
+                // Admin sees EVERYTHING of their company
             }
             else if (colName === 'organizations' || colName === 'installations' || colName === 'products' || colName === 'payment_dues' || colName === 'couriers') {
-                // Public Data
+                // Public Data (Within Company)
             } 
             else if (isAccount) {
                 const accountAccess = [
@@ -402,16 +475,23 @@ export const DataProvider = ({ children }: any) => {
     const unsubDue = createListener("payment_dues", setDueList);
     
     const unsubHolidays = onSnapshot(collection(db, "holidays"), (snapshot) => {
-        const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        let list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+        if (currentUser.role !== 'SuperAdmin' && currentUser.companyId) {
+            list = list.filter(item => item.companyId === currentUser.companyId);
+        }
         list.sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
         setHolidayList(list);
     });
     
     const unsubNotif = onSnapshot(collection(db, "notifications"), (snapshot) => {
-        const notifList = snapshot.docs.map(doc => ({
-            ...doc.data(), 
+        let notifList = snapshot.docs.map(doc => ({
+            ...doc.data() as any, 
             id: doc.id    
         }));
+
+        if (currentUser.role !== 'SuperAdmin' && currentUser.companyId) {
+            notifList = notifList.filter(item => item.companyId === currentUser.companyId);
+        }
         
         notifList.sort((a:any, b:any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         setNotificationList(notifList);
@@ -456,13 +536,14 @@ export const DataProvider = ({ children }: any) => {
   }, [currentUser]);
 
   // =========================================================
-  // 4. CRUD FUNCTIONS
+  // 4. CRUD FUNCTIONS (🔥 SAAS FIX 3 ADDED)
   // =========================================================
   
   const addWithMeta = async (col: string, data: any) => {
     try {
         const docRef = await addDoc(collection(db, col), { 
-            ...data, 
+            ...data,
+            companyId: currentUser?.companyId || '', // 🔥 FIX 3: SAAS COMPANY ID ADDED HERE
             status: data.status || "Pending", 
             userName: currentUser?.name || 'Unknown',
             senderId: currentUser?.id || 'guest', 
@@ -501,7 +582,7 @@ export const DataProvider = ({ children }: any) => {
             }
         } catch (queueErr) { console.error("Queue Logic Error:", queueErr); }
 
-        if (addNotification && col !== 'notifications') {
+        if (col !== 'notifications') {
             let notifTitle = "New Entry Added";
             let notifRoute = "/";
 
@@ -549,6 +630,7 @@ export const DataProvider = ({ children }: any) => {
             const dueAmount = parseFloat(orderData.amount || 0);
             if (dueAmount > 0) {
                 const dueData = {
+                    companyId: currentUser?.companyId || '', // 🔥 FIX 3
                     orgName: orderData.hospitalName || orderData.partyName || "Unknown",
                     orgId: orderData.orgId || "", 
                     city: orderData.city || "",
@@ -565,15 +647,13 @@ export const DataProvider = ({ children }: any) => {
 
                 await addDoc(collection(db, "payment_dues"), dueData);
                 
-                if(addNotification) {
-                    addNotification({
-                        title: "New Due Generated 💰",
-                        message: `Order Approved. ₹${dueAmount} added to dues for ${dueData.orgName}.`,
-                        to: "Accountant", 
-                        type: "info",
-                        route: "/payment_duelist" 
-                    });
-                }
+                addNotification({
+                    title: "New Due Generated 💰",
+                    message: `Order Approved. ₹${dueAmount} added to dues for ${dueData.orgName}.`,
+                    to: "Accountant", 
+                    type: "info",
+                    route: "/payment_duelist" 
+                });
                 console.log("✅ Auto Due Created");
             }
         }
@@ -675,7 +755,10 @@ export const DataProvider = ({ children }: any) => {
   
   const addOrder = async (orderData: any) => {
       try {
-          const docRef = await addDoc(collection(db, "orders"), orderData);
+          const docRef = await addDoc(collection(db, "orders"), {
+              ...orderData,
+              companyId: currentUser?.companyId || '' // 🔥 FIX 3
+          });
           await updateDoc(docRef, { id: docRef.id });
           console.log("✅ Order Saved & ID Synced:", docRef.id);
 
@@ -687,15 +770,14 @@ export const DataProvider = ({ children }: any) => {
               });
           }
 
-          if (addNotification) {
-              await addNotification({
-                  title: "New Order Received 📦",
-                  message: `Order added by ${currentUser?.name} for ${orderData.hospitalName || 'a hospital'}.`,
-                  to: "Admin", 
-                  type: "info",
-                  route: "/orders"
-              });
-          }
+          await addNotification({
+              title: "New Order Received 📦",
+              message: `Order added by ${currentUser?.name} for ${orderData.hospitalName || 'a hospital'}.`,
+              to: "Admin", 
+              type: "info",
+              route: "/orders"
+          });
+          
       } catch (error) {
           console.error("❌ Error adding order:", error);
           throw error;
@@ -707,6 +789,7 @@ export const DataProvider = ({ children }: any) => {
           await addWithMeta("organizations", orgData);
           
           const notifData = {
+            companyId: currentUser?.companyId || '', // 🔥 FIX 3
             title: "New Organization",
             message: `New Hospital Added: ${orgData.name || orgData.orgName}`,
             type: "info",        
@@ -738,6 +821,7 @@ export const DataProvider = ({ children }: any) => {
 
           const docRef = await addDoc(collection(db, "payment_collections"), { 
               ...paymentData, 
+              companyId: currentUser?.companyId || '', // 🔥 FIX 3
               status: 'Approved', 
               createdAt: new Date().toISOString() 
           });
@@ -755,15 +839,13 @@ export const DataProvider = ({ children }: any) => {
               }
           } catch(e) {}
 
-          if (addNotification) {
-              await addNotification({
-                  title: "Payment Received 💰",
-                  message: `₹${paymentData.amount} received from ${paymentData.orgName || 'a client'} by ${currentUser?.name}.`,
-                  to: "Admin", 
-                  type: "success",
-                  route: "/payment_collections"
-              });
-          }
+          await addNotification({
+              title: "Payment Received 💰",
+              message: `₹${paymentData.amount} received from ${paymentData.orgName || 'a client'} by ${currentUser?.name}.`,
+              to: "Admin", 
+              type: "success",
+              route: "/payment_collections"
+          });
 
           const payAmount = parseFloat(String(paymentData.amount || 0));
           let orgName = paymentData.orgName || paymentData.partyName || paymentData.hospitalName || "";
@@ -833,6 +915,7 @@ export const DataProvider = ({ children }: any) => {
       try {
           const docRef = await addDoc(collection(db, "notifications"), {
               ...notifData,
+              companyId: currentUser?.companyId || '', // 🔥 FIX 3
               createdAt: new Date().toISOString(),
               read: false,
               senderId: currentUser?.id || 'app',
@@ -854,7 +937,7 @@ export const DataProvider = ({ children }: any) => {
                   }
               }
           } else if (notifData.to) {
-              const roleQuery = query(collection(db, "users"), where("role", "==", notifData.to));
+              const roleQuery = query(collection(db, "users"), where("role", "==", notifData.to), where("companyId", "==", currentUser?.companyId || ''));
               const roleSnap = await getDocs(roleQuery);
               
               roleSnap.forEach((userDoc) => {
@@ -878,19 +961,27 @@ export const DataProvider = ({ children }: any) => {
 
   const addDue = async (dueData: any) => {
     try {
-        const docRef = await addDoc(collection(db, "payment_dues"), { ...dueData, createdAt: new Date().toISOString() });
+        const docRef = await addDoc(collection(db, "payment_dues"), { 
+            ...dueData, 
+            companyId: currentUser?.companyId || '', // 🔥 FIX 3
+            createdAt: new Date().toISOString() 
+        });
         const newDue = { id: docRef.id, ...dueData };
         setDueList([newDue, ...dueList]);
-        if(addNotification) {
-            await addNotification({ title: "New Due Added", message: `Pending due of ₹${dueData.amount} added for ${dueData.orgName}`, type: "warning" });
-        }
+        
+        await addNotification({ title: "New Due Added", message: `Pending due of ₹${dueData.amount} added for ${dueData.orgName}`, type: "warning" });
+        
         return true;
     } catch (error) { throw error; }
   };
 
   const addProduct = async (productData: any) => {
     try {
-        const docRef = await addDoc(collection(db, "products"), { ...productData, createdAt: new Date().toISOString() });
+        const docRef = await addDoc(collection(db, "products"), { 
+            ...productData, 
+            companyId: currentUser?.companyId || '', // 🔥 FIX 3
+            createdAt: new Date().toISOString() 
+        });
         await updateDoc(docRef, { id: docRef.id });
         return true;
     } catch (error) { throw error; }
@@ -912,37 +1003,85 @@ export const DataProvider = ({ children }: any) => {
   const deleteTask = (id: string) => deleteDocument("tasks", id);
   const deleteLead = (id: string) => deleteDocument("leads", id);
 
-  const login = async (e: string, p: string) => { 
-    try { 
-        const userCredential = await signInWithEmailAndPassword(auth, e, p); 
-        const firebaseUser = userCredential.user;
+  const login = async (email: string, pass: string) => {
+      try {
+          const userCredential = await signInWithEmailAndPassword(auth, email, pass);
+          const fbUser = userCredential.user;
 
-        const usersRef = collection(db, "users");
-        const q = query(usersRef, where("email", "==", firebaseUser.email));
-        const querySnap = await getDocs(q);
+          // 🔥 1. PURANA CACHE DELETE KAREIN
+          await AsyncStorage.removeItem('companyProfileLocal');
+          await AsyncStorage.removeItem('user');
 
-        if (!querySnap.empty) {
-            const userData = querySnap.docs[0].data();
-            
-            const fullUser = { 
-                uid: firebaseUser.uid, 
-                ...userData            
-            } as any;
-            
-            setCurrentUser(fullUser); 
-            await AsyncStorage.setItem('user', JSON.stringify(fullUser));
+          // 2. Fetch User Data
+          const userQuery = query(collection(db, 'users'), where('email', '==', fbUser.email!.toLowerCase()));
+          const userDocSnap = await getDocs(userQuery);
+          
+          if (userDocSnap.empty) {
+              await auth.signOut();
+              Alert.alert("Error", "User data not found in database.");
+              return false;
+          }
 
-            return true; 
-        } else {
-            Alert.alert("Error", "User data not found in database.");
-            await auth.signOut();
-            return false;
-        }
+          const userData = { ...userDocSnap.docs[0].data(), id: userDocSnap.docs[0].id } as any;
 
-    } catch (error: any) { 
-        Alert.alert("Login Failed", error.message); 
-        return false; 
-    } 
+          // 🔥 3. SAAS SECURITY: STRICT APPROVAL CHECK (WITH LEGACY SUPPORT)
+          if (userData.role !== 'SuperAdmin') {
+              let companyData = null;
+
+              // Tarika 1: Naye SaaS format me check karein (By companyId field)
+              const compQuery1 = query(collection(db, 'companies'), where('companyId', '==', userData.companyId));
+              const snap1 = await getDocs(compQuery1);
+              if (!snap1.empty) companyData = snap1.docs[0].data();
+
+              // Tarika 2: Thode purane format me check karein (By id field)
+              if (!companyData) {
+                  const compQuery2 = query(collection(db, 'companies'), where('id', '==', userData.companyId));
+                  const snap2 = await getDocs(compQuery2);
+                  if (!snap2.empty) companyData = snap2.docs[0].data();
+              }
+
+              // Tarika 3: Sabse purane format me check karein (Life Line Medical ke liye direct Doc ID se)
+              if (!companyData && userData.companyId) {
+                  const compDocRef = doc(db, 'companies', userData.companyId);
+                  const compDocSnap = await getDoc(compDocRef);
+                  if (compDocSnap.exists()) companyData = compDocSnap.data();
+              }
+
+              // Final Decision Logic
+              if (companyData) {
+                  // 1. Check if Company is Active
+                  if (companyData.isActive === false) {
+                      await auth.signOut(); // Force logout
+                      Alert.alert("Approval Pending 🚫", "Your company is not approved yet. Please wait for Super Admin approval.");
+                      return false; 
+                  }
+
+                  // 🔥 2. NAYA LOGIC: Check Trial / Plan Expiry
+                  if (companyData.expiryDate) {
+                      const today = new Date();
+                      const expiry = new Date(companyData.expiryDate);
+                      
+                      if (today > expiry) {
+                          await auth.signOut(); // Force logout
+                          Alert.alert(
+                              "Plan Expired ⏳", 
+                              "Your trial or subscription has expired. Please contact Super Admin to renew your plan."
+                          );
+                          return false; // Login block kar diya
+                      }
+                  }
+              } else {
+                  console.log("Legacy Admin login allowed.");
+              }
+          }
+
+          setCurrentUser(userData);
+          await AsyncStorage.setItem('user', JSON.stringify(userData));
+          return true;
+      } catch (error: any) {
+          Alert.alert("Login Failed", "Invalid Email or Password");
+          return false;
+      }
   };
   const logout = async () => { await signOut(auth); setCurrentUser(null); };
   

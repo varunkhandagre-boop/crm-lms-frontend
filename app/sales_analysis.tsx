@@ -1,8 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Print from 'expo-print';
 import { useRouter } from 'expo-router';
+import * as Sharing from 'expo-sharing';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
+    Alert,
     FlatList,
     Modal,
     ScrollView,
@@ -13,24 +17,25 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS
+// 🔥 SAAS IMPORTS (No direct Firebase DB imports)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function SalesAnalysisScreen() {
   const router = useRouter();
   
-  // 🔥 1. Context se sirf user nikalenge
+  // 🔥 Context se SaaS User
   const { currentUser } = useData();
 
-  // 🔥 2. Naya SaaS Engine
+  // 🔥 SaaS Engine
   const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-  // 🔥 3. Lazy Loaded States
+  // STATES FOR DATA
   const [orderList, setOrderList] = useState<any[]>([]);
   const [paymentList, setPaymentList] = useState<any[]>([]);
   const [orgList, setOrgList] = useState<any[]>([]);
   const [userList, setUserList] = useState<any[]>([]);
+  const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
 
   // STATES
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
@@ -38,10 +43,19 @@ export default function SalesAnalysisScreen() {
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
   const [searchText, setSearchText] = useState('');
   
+  // 🔥 State for Cash/Credit/Collection filtering
+  const [saleTypeFilter, setSaleTypeFilter] = useState<'All' | 'Cash' | 'Credit' | 'Collection'>('All');
+  
   // MODALS
   const [showEmpPicker, setShowEmpPicker] = useState(false);
+  
+  // Order Modal States
   const [poModalVisible, setPoModalVisible] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
+
+  // 🔥 Payment/Collection Modal States
+  const [paymentModalVisible, setPaymentModalVisible] = useState(false);
+  const [selectedPayment, setSelectedPayment] = useState<any>(null);
   
   // GRAPH
   const [graphModalVisible, setGraphModalVisible] = useState(false);
@@ -49,8 +63,9 @@ export default function SalesAnalysisScreen() {
   const [trendData, setTrendData] = useState<any[]>([]); 
   const [productData, setProductData] = useState<any[]>([]); 
 
-  // PAGINATION STATE 
+  // PAGINATION & EXPORT STATE 
   const [visibleCount, setVisibleCount] = useState(20);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   const userRole = currentUser?.role ? currentUser.role.toLowerCase() : 'unknown';
   const isAdmin = ['admin', 'manager', 'accountant', 'hr', 'superadmin'].includes(userRole);
@@ -61,9 +76,10 @@ export default function SalesAnalysisScreen() {
       } else {
           setVisibleCount(20); 
       }
+      setSaleTypeFilter('All');
   }, [viewMode, currentDate, selectedEmployee, searchText]);
 
-  // 🔥 4. LOAD SAAS DATA ON MOUNT
+  // 🔥 LOAD SAAS DATA ON MOUNT
   const loadData = async () => {
       if (currentUser?.companyId) {
           const [orders, payments, orgs, users] = await Promise.all([
@@ -76,6 +92,14 @@ export default function SalesAnalysisScreen() {
           setPaymentList(payments);
           setOrgList(orgs);
           setUserList(users);
+
+          if (isAdmin) {
+              const mappedUsers = users.map((u: any) => ({
+                  id: u.id,
+                  name: u.name || 'Unknown User'
+              }));
+              setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
+          }
       }
   };
 
@@ -83,14 +107,13 @@ export default function SalesAnalysisScreen() {
       loadData();
   }, [currentUser]);
 
-  // HELPER: Standardize any date string to YYYY-MM-DD
   const getValidDateStr = (obj: any) => {
       if (obj.dateIso) return obj.dateIso;
       if (obj.createdAt) return obj.createdAt.split('T')[0];
       if (obj.date && obj.date.includes('-')) {
            const parts = obj.date.split('-');
-           if (parts[0].length === 4) return obj.date.split('T')[0]; // YYYY-MM-DD
-           if (parts[2].length === 4) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`; // DD-MM-YYYY
+           if (parts[0].length === 4) return obj.date.split('T')[0]; 
+           if (parts[2].length === 4) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`; 
       }
       if (obj.date && obj.date.includes('/')) {
           const parts = obj.date.split('/');
@@ -105,7 +128,6 @@ export default function SalesAnalysisScreen() {
       return parseFloat(str) || 0;
   };
 
-  // Navigation for FY
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
       if (viewMode === 'Day') d.setDate(d.getDate() + dir);
@@ -114,7 +136,6 @@ export default function SalesAnalysisScreen() {
       setCurrentDate(d);
   };
 
-  // FY Header Date format
   const getHeaderDate = () => {
       if (viewMode === 'Day') return currentDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
       if (viewMode === 'Month') return currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -128,12 +149,21 @@ export default function SalesAnalysisScreen() {
       return "All Time";
   };
 
-  // --- 1. FILTER LOGIC FOR ORDERS ---
+  const getCity = (item: any) => {
+      if (item.city) return item.city;
+      const orgData = orgList.find((o: any) => 
+          (item.orgId && o.id === item.orgId) || 
+          o.orgName === item.hospitalName ||
+          o.name === item.hospitalName
+      );
+      return orgData?.city || '';
+  };
+
   const getFilteredData = () => {
       let data = [...orderList];
 
       data = data.filter(order => 
-          ['Approved', 'Completed', 'Dispatched'].includes(order.status)
+          ['Approved', 'Completed', 'Dispatched', 'Billed'].includes(order.status)
       );
 
       if (isAdmin) {
@@ -192,7 +222,6 @@ export default function SalesAnalysisScreen() {
       return data.sort((a: any, b: any) => getValidDateStr(b).localeCompare(getValidDateStr(a)));
   };
 
-  // 🔥 FILTER PAYMENTS INDEPENDENTLY
   const getFilteredPayments = () => {
       let pData = [...paymentList];
 
@@ -239,16 +268,27 @@ export default function SalesAnalysisScreen() {
               return true;
           });
       }
-      return pData;
+      return pData.sort((a: any, b: any) => getValidDateStr(b).localeCompare(getValidDateStr(a)));
   };
 
   const displayList = getFilteredData(); 
-  const renderedList = displayList.slice(0, visibleCount);
   const displayPayments = getFilteredPayments(); 
 
-  // --- 2. CALCULATIONS ---
   const totalSales = displayList.reduce((sum, item) => sum + parseAmount(item.amount), 0);
+  const cashSales = displayList.filter(item => item.saleType === 'Cash').reduce((sum, item) => sum + parseAmount(item.amount), 0);
+  const creditSales = totalSales - cashSales; 
   const totalCollection = displayPayments.reduce((sum, item) => sum + parseAmount(item.amount), 0);
+
+  const listData = saleTypeFilter === 'Collection' 
+      ? displayPayments 
+      : displayList.filter(item => {
+          if (saleTypeFilter === 'All') return true;
+          if (saleTypeFilter === 'Cash') return item.saleType === 'Cash';
+          if (saleTypeFilter === 'Credit') return item.saleType !== 'Cash';
+          return true;
+      });
+
+  const renderedList = listData.slice(0, visibleCount);
 
   let baseMonthlyTarget = 0;
   if (selectedEmployee) {
@@ -288,52 +328,14 @@ export default function SalesAnalysisScreen() {
   const t1Percent = target1 > 0 ? (totalSales / target1) * 100 : 0;
   const t2Percent = target2 > 0 ? (totalSales / target2) * 100 : 0;
 
- // --- 3. GRAPH LOGIC (100% Bulletproof Date Matching) ---
   const handleGraph = () => {
-      let graphSourceList = [...orderList];
+      let graphSourceList = [...displayList]; // Already filtered by SaaS and ViewMode
+      let tData: any[] = [];
       
-      graphSourceList = graphSourceList.filter(order => ['Approved', 'Completed', 'Dispatched'].includes(order.status));
-      
-      if (isAdmin && selectedEmployee) {
-          const selectedUserObj = userList.find((u: any) => (u.uid === selectedEmployee || u.id === selectedEmployee));
-          const targetName = selectedUserObj?.name?.trim().toLowerCase();
-          
-          graphSourceList = graphSourceList.filter((item: any) => {
-              const idMatch = (String(item.senderId) === String(selectedEmployee)) || 
-                              (String(item.userId) === String(selectedEmployee)) ||
-                              (String(item.uid) === String(selectedEmployee));
-              const itemName = (item.senderName || item.userName || '').trim().toLowerCase();
-              const nameMatch = targetName && itemName === targetName;
-              return idMatch || nameMatch;
-          });
-      } else if (!isAdmin) {
-          graphSourceList = graphSourceList.filter((o: any) => 
-              o.senderId === currentUser?.uid || o.senderId === currentUser?.id || o.userName === currentUser?.name
-          );
-      }
-
       const targetMonth = currentDate.getMonth(); 
       const targetYear = currentDate.getFullYear();
-      const targetDay = currentDate.getDate();
-      
       const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-      const fyStartDateStr = `${fyStartYear}-04-01`; 
-      const fyEndDateStr = `${fyStartYear + 1}-03-31`;
-      
-      const targetYM = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}`;
-      const targetYMD = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}`;
 
-      graphSourceList = graphSourceList.filter((item: any) => {
-          const dateStr = getValidDateStr(item);
-          if (dateStr === "1970-01-01") return false;
-
-          if (viewMode === 'FY') return dateStr >= fyStartDateStr && dateStr <= fyEndDateStr;
-          if (viewMode === 'Month') return dateStr.startsWith(targetYM);
-          if (viewMode === 'Day') return dateStr === targetYMD;
-          return true; 
-      });
-
-      let tData: any[] = [];
       if (viewMode === 'Day') {
           tData = graphSourceList.slice(0, 7).map((o:any, i) => ({ label: `Ord ${i+1}`, value: parseAmount(o.amount) }));
       } else if (viewMode === 'Month') {
@@ -384,7 +386,219 @@ export default function SalesAnalysisScreen() {
   const getOrderPayments = (order: any) => {
       return paymentList.filter((p:any) => 
           (p.orderId && p.orderId === order.id) || 
+          (p.orderId && p.orderId === order.orderId) ||
           (p.orderRef && p.orderRef === order.orderId)
+      );
+  };
+
+  // 🔥 DOWNLOAD EXCEL (CSV) LOGIC
+  const downloadReportCSV = async () => {
+      if(listData.length === 0) {
+          Alert.alert("No Data", "There is no data to download for this filter.");
+          return;
+      }
+      setIsDownloading(true);
+      try {
+          let csvString = "";
+          
+          if (saleTypeFilter === 'Collection') {
+              csvString = "S.No,Date,Receipt No,Client / Hospital,Payment Mode,Collected By,Amount (Rs)\n";
+              listData.forEach((item, index) => {
+                  const date = item.date || '-';
+                  const receipt = item.receiptNo || '-';
+                  const hospital = `"${(item.orgName || '').replace(/"/g, '""')}"`;
+                  const mode = item.mode || '-';
+                  const user = item.userName || '-';
+                  const amount = parseAmount(item.amount);
+                  csvString += `${index + 1},${date},${receipt},${hospital},${mode},${user},${amount}\n`;
+              });
+              csvString += `\n,,,,,,Total Collection,Rs. ${totalCollection}\n`;
+          } else {
+              csvString = "S.No,Date,Order ID,Client / Hospital,City,Products,Type,Amount (Rs)\n";
+              listData.forEach((item, index) => {
+                  const type = item.saleType === 'Cash' ? 'Cash' : 'Credit';
+                  const date = item.date || '-';
+                  const orderId = item.orderId || '-';
+                  const hospital = `"${(item.hospitalName || '').replace(/"/g, '""')}"`;
+                  const city = `"${getCity(item).replace(/"/g, '""')}"`;
+                  const products = `"${(item.productDetails || '-').replace(/"/g, '""').replace(/\n/g, ' ')}"`;
+                  const amount = parseAmount(item.amount);
+                  csvString += `${index + 1},${date},${orderId},${hospital},${city},${products},${type},${amount}\n`;
+              });
+              csvString += `\n,,,,,Total Cash Sales,Rs. ${cashSales}\n`;
+              csvString += `,,,,,Total Credit Sales,Rs. ${creditSales}\n`;
+              csvString += `,,,,,Grand Total Sales,Rs. ${totalSales}\n`;
+          }
+
+          const fileName = `${saleTypeFilter === 'Collection' ? 'Collection' : 'Sales'}_Report_${Date.now()}.csv`;
+          const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
+          
+          await FileSystem.writeAsStringAsync(fileUri, csvString, { encoding: FileSystem.EncodingType.UTF8 });
+          await Sharing.shareAsync(fileUri, { mimeType: 'text/csv', dialogTitle: 'Download Excel (CSV) Report' });
+      } catch (error) {
+          Alert.alert("Error", "Could not generate Excel/CSV file");
+      } finally {
+          setIsDownloading(false);
+      }
+  };
+
+  // 🔥 DOWNLOAD PDF LOGIC
+  const downloadReportPDF = async () => {
+      if(listData.length === 0) {
+          Alert.alert("No Data", "There is no data to download for this filter.");
+          return;
+      }
+      setIsDownloading(true);
+      try {
+          
+          let tableHTML = "";
+          if (saleTypeFilter === 'Collection') {
+              tableHTML = `
+              <table>
+                  <thead>
+                      <tr>
+                          <th width="5%" class="center">#</th>
+                          <th width="12%">Date</th>
+                          <th width="15%">Receipt No</th>
+                          <th width="28%">Client / Hospital</th>
+                          <th width="15%">Mode</th>
+                          <th width="15%">Collected By</th>
+                          <th width="10%" class="right">Amount (Rs)</th>
+                      </tr>
+                  </thead>
+                  <tbody>
+                      ${listData.map((item, index) => `
+                      <tr>
+                          <td class="center">${index + 1}</td>
+                          <td>${item.date || '-'}</td>
+                          <td>${item.receiptNo || '-'}</td>
+                          <td><strong>${item.orgName || '-'}</strong></td>
+                          <td>${item.mode || '-'} ${item.bankName ? `<br><small>${item.bankName}</small>` : ''}</td>
+                          <td>${item.userName || '-'}</td>
+                          <td class="right"><strong>${parseAmount(item.amount).toLocaleString()}</strong></td>
+                      </tr>
+                      `).join('')}
+                      <tr style="background-color: #f0f4f8;">
+                          <td colspan="6" class="right" style="font-weight: bold; color: #333;">Total Collection</td>
+                          <td class="right" style="font-weight: bold; font-size: 14px; color: #e65100;">Rs. ${totalCollection.toLocaleString()}</td>
+                      </tr>
+                  </tbody>
+              </table>`;
+          } else {
+              tableHTML = `
+              <table>
+                  <thead>
+                      <tr>
+                          <th width="5%" class="center">#</th>
+                          <th width="10%">Date</th>
+                          <th width="12%">Order ID</th>
+                          <th width="20%">Client / Hospital</th>
+                          <th width="10%">City</th>
+                          <th width="20%">Products</th>
+                          <th width="8%" class="center">Type</th>
+                          <th width="15%" class="right">Amount (Rs)</th>
+                      </tr>
+                  </thead>
+                  <tbody>
+                      ${listData.map((item, index) => {
+                          const isCash = item.saleType === 'Cash';
+                          return `
+                          <tr>
+                              <td class="center">${index + 1}</td>
+                              <td>${item.date}</td>
+                              <td>${item.orderId || 'N/A'}</td>
+                              <td><strong>${item.hospitalName}</strong></td>
+                              <td>${getCity(item)}</td>
+                              <td>${item.productDetails || '-'}</td>
+                              <td class="center ${isCash ? 'cash' : 'credit'}">${isCash ? 'Cash' : 'Credit'}</td>
+                              <td class="right"><strong>${parseAmount(item.amount).toLocaleString()}</strong></td>
+                          </tr>
+                          `;
+                      }).join('')}
+                      <tr style="background-color: #f0f4f8;">
+                          <td colspan="7" class="right" style="font-weight: bold; color: #333;">Grand Total</td>
+                          <td class="right" style="font-weight: bold; font-size: 16px; color: #3b5998;">Rs. ${totalSales.toLocaleString()}</td>
+                      </tr>
+                  </tbody>
+              </table>`;
+          }
+
+          const htmlContent = `
+          <html>
+          <head>
+              <style>
+                  body { font-family: 'Helvetica', 'Arial', sans-serif; padding: 20px; color: #333; }
+                  .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #3b5998; padding-bottom: 10px; }
+                  .title { font-size: 24px; font-weight: bold; color: #3b5998; margin: 0; }
+                  .sub-title { font-size: 14px; color: #555; margin-top: 5px; }
+                  table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                  th, td { border: 1px solid #ddd; padding: 10px; text-align: left; font-size: 12px; }
+                  th { background-color: #f0f4f8; color: #3b5998; font-weight: bold; }
+                  .right { text-align: right; }
+                  .center { text-align: center; }
+                  .cash { color: #2e7d32; font-weight: bold; }
+                  .credit { color: #1565c0; font-weight: bold; }
+                  .summary-box { display: flex; justify-content: space-between; background-color: #f9f9f9; border: 1px solid #ddd; padding: 15px; margin-top: 20px; border-radius: 8px; }
+                  .summary-item { text-align: center; }
+                  .summary-value { font-size: 18px; font-weight: bold; margin-top: 5px; }
+              </style>
+          </head>
+          <body>
+              <div class="header">
+                  <p class="title">${saleTypeFilter === 'Collection' ? 'COLLECTION REPORT' : `SALES REPORT ${saleTypeFilter !== 'All' ? `(${saleTypeFilter} Only)` : ''}`}</p>
+                  <p class="sub-title">Period: <strong>${getHeaderDate()}</strong> | Employee: <strong>${getSelectedEmployeeName()}</strong></p>
+              </div>
+
+              ${saleTypeFilter !== 'Collection' ? `
+              <div class="summary-box">
+                  <div class="summary-item">
+                      <div style="color: gray; font-size: 12px;">Total Cash Sales</div>
+                      <div class="summary-value cash">Rs. ${cashSales.toLocaleString()}</div>
+                  </div>
+                  <div class="summary-item">
+                      <div style="color: gray; font-size: 12px;">Total Credit Sales</div>
+                      <div class="summary-value credit">Rs. ${creditSales.toLocaleString()}</div>
+                  </div>
+                  <div class="summary-item">
+                      <div style="color: gray; font-size: 12px;">Total Sales</div>
+                      <div class="summary-value" style="color: #333;">Rs. ${totalSales.toLocaleString()}</div>
+                  </div>
+              </div>` : ''}
+
+              ${tableHTML}
+
+              <div style="margin-top: 30px; text-align: center; font-size: 10px; color: gray;">
+                  *This report was auto-generated by the system on ${new Date().toLocaleString()}.
+              </div>
+          </body>
+          </html>
+          `;
+
+          const { uri } = await Print.printToFileAsync({ html: htmlContent });
+          await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: 'Download Report' });
+      } catch (error) {
+          Alert.alert("Error", "Could not generate PDF report");
+      } finally {
+          setIsDownloading(false);
+      }
+  };
+
+  const handleDownloadOptions = () => {
+      if(listData.length === 0) {
+          Alert.alert("No Data", "There is no data to download for this filter.");
+          return;
+      }
+      
+      const reportName = saleTypeFilter === 'Collection' ? 'Payments' : (saleTypeFilter === 'All' ? 'All Orders' : `${saleTypeFilter} Orders`);
+      
+      Alert.alert(
+          "Download Report",
+          `Download list for ${reportName}:`,
+          [
+              { text: "Cancel", style: "cancel" },
+              { text: "📄 PDF", onPress: downloadReportPDF },
+              { text: "📊 Excel (CSV)", onPress: downloadReportCSV }
+          ]
       );
   };
 
@@ -397,6 +611,11 @@ export default function SalesAnalysisScreen() {
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Sales & Collection Trends</Text>
         </View>
+        
+        {/* 🔥 DOWNLOAD BUTTON */}
+        <TouchableOpacity onPress={handleDownloadOptions} style={styles.downloadBtn} disabled={isDownloading}>
+            {isDownloading ? <ActivityIndicator color="#3b5998" size="small" /> : <Ionicons name="download-outline" size={24} color="#3b5998" />}
+        </TouchableOpacity>
       </View>
 
       <View style={styles.filterBox}>
@@ -436,24 +655,27 @@ export default function SalesAnalysisScreen() {
           </View>
 
           <View style={{flexDirection:'row', justifyContent:'space-between', paddingHorizontal:5, marginTop:5}}>
-              <Text style={{fontSize:11, color:'gray'}}>Orders: {displayList.length}</Text>
+              <Text style={{fontSize:11, color:'gray'}}>Records: {listData.length}</Text>
               {selectedEmployee && <Text style={{fontSize:11, color:'#3b5998', fontWeight:'bold'}}>Filter: {getSelectedEmployeeName()}</Text>}
           </View>
       </View>
 
       <ScrollView contentContainerStyle={{paddingBottom: 20}}>
         
+        {/* SUMMARY CARD WITH CASH/CREDIT FILTERS */}
         <View style={styles.cardsContainer}>
-            <TouchableOpacity style={styles.targetCard} onPress={handleGraph}>
+            <View style={styles.targetCard}>
                 <View style={styles.cardHeader}>
-                    <Text style={styles.cardTitle}>Sales Achievement ({viewMode})</Text>
-                    <Ionicons name="bar-chart" size={18} color="#3b5998" />
+                    <Text style={styles.cardTitle}>Performance Snapshot ({viewMode})</Text>
+                    <TouchableOpacity onPress={handleGraph}><Ionicons name="bar-chart" size={18} color="#3b5998" /></TouchableOpacity>
                 </View>
+                
                 <View style={{flexDirection:'row', justifyContent:'space-between', marginTop:5}}>
-                    <View>
+                    <TouchableOpacity onPress={() => setSaleTypeFilter('All')}>
                         <Text style={{fontSize:12, color:'gray'}}>Confirmed Sales</Text>
                         <Text style={styles.achievedText}>₹ {totalSales.toLocaleString()}</Text>
-                    </View>
+                        <Text style={{fontSize:9, color:'#1976D2', marginTop:2}}>Click to view all</Text>
+                    </TouchableOpacity>
                     <View style={{alignItems:'flex-end'}}>
                         <Text style={{fontSize:12, color:'gray'}}>Target 1</Text>
                         <Text style={[styles.achievedText, {color:'#555'}]}>₹ {target1.toLocaleString()}</Text>
@@ -489,32 +711,99 @@ export default function SalesAnalysisScreen() {
                     )}
                 </View>
 
-                <View style={{marginTop:15, paddingTop:10, borderTopWidth:1, borderColor:'#eee', flexDirection:'row', justifyContent:'space-between'}}>
-                      <Text style={{fontSize:12, color:'gray'}}>Total Collection:</Text>
-                      <Text style={{fontSize:14, fontWeight:'bold', color: '#2e7d32'}}>₹{totalCollection.toLocaleString()}</Text>
+                {/* 🔥 CASH, CREDIT & COLLECTION FILTER BUTTONS */}
+                <View style={{flexDirection: 'row', justifyContent: 'space-between', marginTop: 15, paddingTop: 15, borderTopWidth: 1, borderColor: '#eee'}}>
+                    <TouchableOpacity 
+                        style={{alignItems: 'center', flex: 1, paddingVertical: 5, backgroundColor: saleTypeFilter === 'Cash' ? '#e8f5e9' : 'transparent', borderRadius: 8}}
+                        onPress={() => setSaleTypeFilter('Cash')}
+                    >
+                        <Text style={{fontSize: 10, color: 'gray', marginBottom: 2}}>💵 Cash Sales</Text>
+                        <Text style={{fontSize: 13, fontWeight: 'bold', color: '#2e7d32'}}>₹{cashSales.toLocaleString()}</Text>
+                    </TouchableOpacity>
+                    
+                    <View style={{width: 1, backgroundColor: '#eee', height: '100%'}} />
+                    
+                    <TouchableOpacity 
+                        style={{alignItems: 'center', flex: 1, paddingVertical: 5, backgroundColor: saleTypeFilter === 'Credit' ? '#e3f2fd' : 'transparent', borderRadius: 8}}
+                        onPress={() => setSaleTypeFilter('Credit')}
+                    >
+                        <Text style={{fontSize: 10, color: 'gray', marginBottom: 2}}>📄 Billed (Credit)</Text>
+                        <Text style={{fontSize: 13, fontWeight: 'bold', color: '#1565c0'}}>₹{creditSales.toLocaleString()}</Text>
+                    </TouchableOpacity>
+                    
+                    <View style={{width: 1, backgroundColor: '#eee', height: '100%'}} />
+                    
+                    <TouchableOpacity 
+                        style={{alignItems: 'center', flex: 1, paddingVertical: 5, backgroundColor: saleTypeFilter === 'Collection' ? '#fff3e0' : 'transparent', borderRadius: 8}}
+                        onPress={() => setSaleTypeFilter('Collection')}
+                    >
+                        <Text style={{fontSize: 10, color: 'gray', marginBottom: 2}}>💰 Collection</Text>
+                        <Text style={{fontSize: 13, fontWeight: 'bold', color: '#e65100'}}>₹{totalCollection.toLocaleString()}</Text>
+                    </TouchableOpacity>
                 </View>
+                
                 {totalSales > 0 && (
-                    <Text style={{fontSize:11, color:'gray', alignSelf:'flex-end', marginTop:2}}>
-                        Recovery: {((totalCollection/totalSales)*100).toFixed(0)}%
+                    <Text style={{fontSize: 10, color: 'gray', alignSelf: 'flex-end', marginTop: 8}}>
+                        Overall Recovery: {((totalCollection / totalSales) * 100).toFixed(0)}%
                     </Text>
                 )}
-            </TouchableOpacity>
+            </View>
         </View>
 
+        {/* LIST */}
         <View style={styles.listSection}>
-            <Text style={styles.sectionHeader}>Confirmed Orders</Text>
+            <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom: 10}}>
+                <Text style={styles.sectionHeader}>
+                    {saleTypeFilter === 'Collection' ? 'Payment Collections' : 'Confirmed Orders'} 
+                    {saleTypeFilter !== 'All' ? <Text style={{color:'#d32f2f', fontSize:12}}> ({saleTypeFilter} Only)</Text> : ''}
+                </Text>
+                {saleTypeFilter !== 'All' && (
+                    <TouchableOpacity onPress={() => setSaleTypeFilter('All')}>
+                        <Text style={{fontSize:11, color:'#3b5998', fontWeight:'bold'}}>Clear Filter</Text>
+                    </TouchableOpacity>
+                )}
+            </View>
+
             <FlatList 
                 data={renderedList}
                 keyExtractor={item => item.id}
                 scrollEnabled={false}
-                ListEmptyComponent={
-                    <View style={{alignItems:'center'}}>
-                        {isDbLoading ? <ActivityIndicator size="small" color="#1565c0" /> : <Text style={{color:'gray'}}>No confirmed orders found.</Text>}
-                    </View>
-                }
                 renderItem={({item}) => {
-                    const totalAmt = parseAmount(item.amount);
                     
+                    // 🔥 RENDER PAYMENT CARD
+                    if (saleTypeFilter === 'Collection') {
+                        return (
+                            <TouchableOpacity 
+                                style={styles.card} 
+                                onPress={() => { setSelectedPayment(item); setPaymentModalVisible(true); }}
+                            >
+                                <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:5}}>
+                                    <View style={[styles.idBadge, {backgroundColor:'#fff3e0'}]}>
+                                        <Text style={[styles.idText, {color:'#e65100'}]}>{item.receiptNo || 'Receipt'}</Text>
+                                    </View>
+                                    <Text style={styles.dateText}>{item.date}</Text>
+                                </View>
+                                
+                                <Text style={styles.hospitalName} numberOfLines={1}>{item.orgName}</Text>
+                                
+                                <View style={{flexDirection:'row', justifyContent:'space-between', marginTop:8}}>
+                                    <View>
+                                        <Text style={styles.label}>Mode</Text>
+                                        <Text style={styles.amount}>{item.mode} {item.bankName ? `(${item.bankName})` : ''}</Text>
+                                    </View>
+                                    <View style={{alignItems:'flex-end'}}>
+                                        <Text style={styles.label}>Amount</Text>
+                                        <Text style={[styles.amount, {color: '#2e7d32'}]}>₹{parseAmount(item.amount).toLocaleString()}</Text>
+                                    </View>
+                                </View>
+                                {item.orderRef && <Text style={{fontSize:10, color:'gray', marginTop:4}}>Linked Ref: {item.orderRef}</Text>}
+                                {item.userName && <Text style={{fontSize:10, color:'#3b5998', marginTop:2}}>Collected by: {item.userName}</Text>}
+                            </TouchableOpacity>
+                        );
+                    }
+
+                    // 🔥 RENDER ORDER CARD (CASH/CREDIT/ALL)
+                    const totalAmt = parseAmount(item.amount);
                     let pending = 0;
                     let paidAmt = 0;
 
@@ -527,6 +816,7 @@ export default function SalesAnalysisScreen() {
                     }
 
                     const isPaid = pending <= 0;
+                    const isCash = item.saleType === 'Cash';
 
                     return (
                         <TouchableOpacity style={styles.card} onPress={() => { setSelectedOrder(item); setPoModalVisible(true); }}>
@@ -541,7 +831,7 @@ export default function SalesAnalysisScreen() {
                             
                             <View style={{flexDirection:'row', justifyContent:'space-between', marginTop:8}}>
                                 <View>
-                                    <Text style={styles.label}>Value</Text>
+                                    <Text style={styles.label}>Value ({isCash ? '💵 Cash' : '📄 Credit'})</Text>
                                     <Text style={styles.amount}>₹{totalAmt.toLocaleString()}</Text>
                                 </View>
                                 <View style={{alignItems:'flex-end'}}>
@@ -559,29 +849,23 @@ export default function SalesAnalysisScreen() {
                         </TouchableOpacity>
                     );
                 }}
+                ListEmptyComponent={<Text style={{textAlign:'center', color:'gray', marginTop:20}}>No records found for this filter.</Text>}
                 
                 ListFooterComponent={
                     <View style={{ paddingBottom: 80 }}>
-                        {visibleCount < displayList.length ? (
+                        {visibleCount < listData.length ? (
                             <TouchableOpacity 
                                 onPress={() => setVisibleCount(prev => prev + 20)} 
                                 style={{
-                                    padding: 12, 
-                                    backgroundColor: '#fff', 
-                                    alignItems: 'center', 
-                                    marginVertical: 15, 
-                                    borderRadius: 8,
-                                    borderWidth: 1,
-                                    borderColor: '#ddd',
-                                    elevation: 1
+                                    padding: 12, backgroundColor: '#fff', alignItems: 'center', marginVertical: 15, borderRadius: 8, borderWidth: 1, borderColor: '#ddd', elevation: 1
                                 }}
                             >
                                 <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                                    👇 Load More Records ({displayList.length - visibleCount} remaining)
+                                    👇 Load More Records ({listData.length - visibleCount} remaining)
                                 </Text>
                             </TouchableOpacity>
                         ) : (
-                            displayList.length > 0 ? (
+                            listData.length > 0 ? (
                                 <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
                                     --- End of List ---
                                 </Text>
@@ -593,6 +877,7 @@ export default function SalesAnalysisScreen() {
         </View>
       </ScrollView>
 
+      {/* --- EMPLOYEE PICKER MODAL --- */}
       <Modal visible={showEmpPicker} transparent animationType="slide">
           <View style={styles.modalOverlay}>
               <View style={styles.pickerContainer}>
@@ -616,6 +901,7 @@ export default function SalesAnalysisScreen() {
           </View>
       </Modal>
 
+      {/* ORDER DETAILS MODAL */}
       <Modal visible={poModalVisible} transparent={true} animationType="slide">
         <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
@@ -653,12 +939,81 @@ export default function SalesAnalysisScreen() {
                         <View style={styles.productBox}>
                             <Text style={{color:'#333', lineHeight:20}}>{selectedOrder.productDetails}</Text>
                         </View>
+                        
+                        {selectedOrder.poFileUri && (
+                            <Text style={{color:'#1565c0', marginTop:10, textDecorationLine:'underline'}}>View Attached PO Document</Text>
+                        )}
                     </ScrollView>
                 )}
             </View>
         </View>
       </Modal>
 
+      {/* 🔥 NEW: PAYMENT DETAILS MODAL */}
+      <Modal visible={paymentModalVisible} transparent={true} animationType="slide">
+          <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                  <View style={styles.modalHeaderRow}>
+                      <Text style={styles.modalTitle}>{selectedPayment?.receiptNo || 'Payment Details'}</Text>
+                      <TouchableOpacity onPress={() => setPaymentModalVisible(false)}>
+                          <Ionicons name="close-circle" size={28} color="#d32f2f" />
+                      </TouchableOpacity>
+                  </View>
+
+                  {selectedPayment && (
+                      <ScrollView showsVerticalScrollIndicator={false}>
+                          <Text style={styles.modalHospitalName}>{selectedPayment.orgName}</Text>
+                          <Text style={{color:'gray', marginBottom:15}}>Date: {selectedPayment.date}</Text>
+
+                          <View style={{backgroundColor:'#e8f5e9', padding:15, borderRadius:10, marginBottom:15, alignItems:'center'}}>
+                              <Text style={{fontSize:12, color:'gray', fontWeight:'bold'}}>AMOUNT RECEIVED</Text>
+                              <Text style={{fontSize:26, fontWeight:'bold', color:'#2e7d32'}}>
+                                  ₹ {parseAmount(selectedPayment.amount).toLocaleString()}
+                              </Text>
+                          </View>
+
+                          <View style={styles.detailRow}>
+                              <Text style={styles.detailLabel}>Payment Mode</Text>
+                              <Text style={styles.detailValue}>{selectedPayment.mode} {selectedPayment.bankName ? `(${selectedPayment.bankName})` : ''}</Text>
+                          </View>
+
+                          {selectedPayment.refNumber ? (
+                              <View style={styles.detailRow}>
+                                  <Text style={styles.detailLabel}>Ref / Cheque No</Text>
+                                  <Text style={styles.detailValue}>{selectedPayment.refNumber}</Text>
+                              </View>
+                          ) : null}
+
+                          {selectedPayment.pdcDate ? (
+                              <View style={styles.detailRow}>
+                                  <Text style={styles.detailLabel}>Instrument Date</Text>
+                                  <Text style={styles.detailValue}>{selectedPayment.pdcDate}</Text>
+                              </View>
+                          ) : null}
+
+                          <View style={styles.detailRow}>
+                              <Text style={styles.detailLabel}>Collected By</Text>
+                              <Text style={styles.detailValue}>{selectedPayment.userName || '-'}</Text>
+                          </View>
+
+                          <View style={styles.detailRow}>
+                              <Text style={styles.detailLabel}>Linked Against</Text>
+                              <Text style={styles.detailValue}>{selectedPayment.orderRef || selectedPayment.billRef || 'On Account'}</Text>
+                          </View>
+
+                          {selectedPayment.notes ? (
+                              <View style={{marginTop:15, backgroundColor:'#f9f9f9', padding:10, borderRadius:8, borderWidth: 1, borderColor: '#eee'}}>
+                                  <Text style={{fontSize:11, color:'gray', fontWeight:'bold'}}>NOTES</Text>
+                                  <Text style={{color:'#555', fontStyle:'italic', marginTop:4}}>{selectedPayment.notes}</Text>
+                              </View>
+                          ) : null}
+                      </ScrollView>
+                  )}
+              </View>
+          </View>
+      </Modal>
+
+      {/* GRAPH MODAL */}
       <Modal visible={graphModalVisible} transparent={true} animationType="slide">
           <View style={styles.modalOverlay}>
               <View style={styles.graphModalContent}>
@@ -719,6 +1074,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
+  downloadBtn: { padding: 5, backgroundColor: '#f0f4f8', borderRadius: 8, marginRight: 5 },
   filterBox: { backgroundColor: 'white', padding: 10, paddingBottom:5, marginBottom: 10, elevation: 1 },
   tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', borderRadius: 8, padding: 3, marginBottom: 10 },
   tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
@@ -739,8 +1095,8 @@ const styles = StyleSheet.create({
   progressBg: { height: 10, backgroundColor: '#f0f0f0', borderRadius: 5, overflow: 'hidden', marginBottom: 5, marginTop:10, position:'relative' },
   progressFill: { height: '100%', borderRadius: 5 },
   percentText: { fontSize: 12, fontWeight: 'bold', alignSelf: 'flex-end', color: '#555' },
-  listSection: { padding: 15 },
-  sectionHeader: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 10 },
+  listSection: { padding: 15, paddingTop: 5 },
+  sectionHeader: { fontSize: 16, fontWeight: 'bold', color: '#333' },
   
   card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 10, elevation: 1 },
   hospitalName: { fontWeight: 'bold', fontSize: 15, color:'#333', marginTop:5 },
@@ -763,4 +1119,8 @@ const styles = StyleSheet.create({
   productBox: { backgroundColor: '#f9f9f9', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#eee' },
   graphModalContent: { width: '95%', backgroundColor: 'white', borderRadius: 15, padding: 20, elevation: 5, maxHeight: '85%' },
   chartContainer: { height: 400, flexDirection: 'row', alignItems: 'flex-end', paddingTop: 20 },
+
+  detailRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderColor: '#eee' },
+  detailLabel: { color: 'gray', fontSize: 13 },
+  detailValue: { fontWeight: 'bold', color: '#333', fontSize: 13 },
 });
