@@ -1,21 +1,21 @@
 {
   "project_info": {
-    "project_number": "825295836304",
-    "project_id": "lms-crm-e79ec",
-    "storage_bucket": "lms-crm-e79ec.firebasestorage.app"
+    "project_number": "93091272283",
+    "project_id": "crm-lms-1",
+    "storage_bucket": "crm-lms-1.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:825295836304:android:8dbb54554a6ccde75c7415",
+        "mobilesdk_app_id": "1:93091272283:android:3418431bd741402393117e",
         "android_client_info": {
-          "package_name": "com.lms.crm"
+          "package_name": "com.crm.lms"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyAWfyVKIuGUMsRW5gfR1i41RM22cZezPas"
+          "current_key": "AIzaSyDOAqnQ11GpC3Ltt3it19FiYMy6FpIb1Rg"
         }
       ],
       "services": {

@@ -2,7 +2,7 @@
   "expo": {
     "name": "LMS",
     "slug": "lms-crm",
-    "version": "1.0.8",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "mycrm",
@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.lms.crm"
+      "bundleIdentifier": "com.crm.lms"
     },
     "android": {
       "adaptiveIcon": {
@@ -75,7 +75,8 @@
           "icon": "./assets/images/icon.png",
           "color": "#ffffff"
         }
-      ]
+      ],
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true,
