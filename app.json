@@ -19,6 +19,7 @@
       },
       "googleServicesFile": "./google-services.json",
       "package": "com.crm.lms",
+      "versionCode": 2,
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
