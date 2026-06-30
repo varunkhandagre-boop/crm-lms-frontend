@@ -24,15 +24,16 @@ import { useData } from './context/DataContext';
 export default function VisitingCardScreen() {
   const router = useRouter();
   
-  // 🔥 1. Context se sirf current user
+  // 🔥 1. Context se sirf Current User lenge
   const { currentUser } = useData(); 
 
-  // 🔥 2. Naya SaaS Engine
+  // 🔥 2. Naya SaaS Engine for fetching and updating
   const { fetchSaaSData, updateSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
 
-  // 🔥 3. Lazy Loaded States
+  // 🔥 3. Local States for independent loading
   const [cardRequestList, setCardRequestList] = useState<any[]>([]);
   const [userList, setUserList] = useState<any[]>([]);
+  const [isFetching, setIsFetching] = useState(true);
 
   // --- STATES ---
   const [searchText, setSearchText] = useState('');
@@ -64,6 +65,50 @@ export default function VisitingCardScreen() {
   const canViewAll = ['admin', 'manager', 'store', 'account', 'accountant', 'hr', 'superadmin'].some(r => myRole.includes(r));
   const canDispatch = canViewAll; 
 
+  // 🔥 4. CRASH-PROOF DATA LOADER
+  const loadData = async () => {
+      if (!currentUser?.companyId) return;
+      setIsFetching(true);
+      try {
+          // Direct Firebase fetch skipping DataContext restrictions
+          const [cards, users] = await Promise.all([
+              fetchSaaSData("visiting_cards"),
+              fetchSaaSData("users")
+          ]);
+
+          // Safe Array fallbacks to prevent crash
+          const validCards = Array.isArray(cards) ? cards : [];
+          const validUsers = Array.isArray(users) ? users : [];
+
+          setCardRequestList(validCards);
+          setUserList(validUsers);
+
+          if (canViewAll) {
+              const uniqueUsers = Array.from(new Set(validUsers.map((a:any) => a?.name).filter(Boolean)))
+                  .map(name => validUsers.find((a:any) => a?.name === name));
+                  
+              setEmployees([{ id: 'All', name: 'All' }, ...uniqueUsers as any]);
+          }
+      } catch (error) {
+          console.log("Error loading visiting cards:", error);
+      } finally {
+          setIsFetching(false);
+      }
+  };
+
+  // Initial Load
+  useEffect(() => {
+      loadData();
+  }, [currentUser]);
+
+  // Pull to Refresh
+  const onRefresh = async () => {
+      setRefreshing(true);
+      await loadData();
+      setRefreshing(false);
+  };
+
+  // PAGE LOAD LIMIT LOGIC
   useEffect(() => {
       if (viewMode === 'Day' && activeStatus === 'All' && !searchText) {
           setVisibleCount(500); 
@@ -71,34 +116,6 @@ export default function VisitingCardScreen() {
           setVisibleCount(20); 
       }
   }, [viewMode, currentDate, activeStatus, searchText, selectedEmployeeName]);
-
-  // 🔥 4. LOAD SAAS DATA ON MOUNT
-  const loadData = async () => {
-      if (currentUser?.companyId) {
-          const [cards, users] = await Promise.all([
-              fetchSaaSData("card_requests"),
-              fetchSaaSData("users")
-          ]);
-          setCardRequestList(cards);
-          setUserList(users);
-
-          if (canViewAll) {
-              const uniqueUsers = Array.from(new Set(users.map((a:any) => a.name)))
-                  .map(name => users.find((a:any) => a.name === name));
-              setEmployees([{ id: 'All', name: 'All' }, ...uniqueUsers as any]);
-          }
-      }
-  };
-
-  useEffect(() => {
-      loadData();
-  }, [currentUser]);
-
-  const onRefresh = async () => {
-      setRefreshing(true);
-      await loadData();
-      setRefreshing(false);
-  };
 
   const parseDate = (dateStr: any) => {
       if (!dateStr) return new Date();
@@ -136,7 +153,7 @@ export default function VisitingCardScreen() {
 
   // --- FILTER LOGIC ---
   const getFilteredData = () => {
-      let data = [...cardRequestList];
+      let data = Array.isArray(cardRequestList) ? [...cardRequestList] : [];
 
       if (canViewAll) {
           if (selectedEmployeeName !== 'All') {
@@ -180,7 +197,12 @@ export default function VisitingCardScreen() {
           });
       }
 
-      data.sort((a: any, b: any) => new Date(b.dateIso || b.createdAt || b.date).getTime() - new Date(a.dateIso || a.createdAt || a.date).getTime());
+      // Safe Sorting to prevent crash on invalid dates
+      data.sort((a: any, b: any) => {
+          const d1 = new Date(b.dateIso || b.createdAt || b.date).getTime();
+          const d2 = new Date(a.dateIso || a.createdAt || a.date).getTime();
+          return (isNaN(d1) ? 0 : d1) - (isNaN(d2) ? 0 : d2);
+      });
 
       return data;
   };
@@ -202,7 +224,7 @@ export default function VisitingCardScreen() {
       }
       setIsDispatching(true); 
       try {
-          const res = await updateSaaSData("card_requests", selectedRequest.id, {
+          const res = await updateSaaSData("visiting_cards", selectedRequest.id, {
                status: 'Sent',
                trackingNo: dispatchTracking,
                outDate: new Date().toISOString().split('T')[0]
@@ -220,7 +242,7 @@ export default function VisitingCardScreen() {
                   });
               }
               setModalVisible(false);
-              await loadData();
+              await loadData(); // Data reload manually
               Alert.alert("Success", "Request Dispatched Successfully! 🚀");
           } else {
               Alert.alert("Error", "Could not dispatch request.");
@@ -239,10 +261,10 @@ export default function VisitingCardScreen() {
           { text: "Yes", onPress: async () => {
               setIsReceiving(true); 
               try {
-                  const res = await updateSaaSData("card_requests", selectedRequest.id, { status: 'Received' });
+                  const res = await updateSaaSData("visiting_cards", selectedRequest.id, { status: 'Received' });
                   if (res.success) {
                       setModalVisible(false);
-                      await loadData();
+                      await loadData(); // Data reload manually
                       Alert.alert("Success", "Marked as Received! ✅");
                   } else {
                       Alert.alert("Error", "Could not update receipt status.");
@@ -311,7 +333,7 @@ export default function VisitingCardScreen() {
           )}
 
           <View style={styles.searchBar}>
-              {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="#777" />}
+              <Ionicons name="search" size={20} color="#777" />
               <TextInput style={styles.input} placeholder="Search ID, Name..." value={searchText} onChangeText={setSearchText} />
               {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={18} color="#777" /></TouchableOpacity>}
           </View>
@@ -330,12 +352,14 @@ export default function VisitingCardScreen() {
 
       <FlatList 
         data={renderedList}
-        keyExtractor={item => item.id}
+        keyExtractor={(item, index) => item.id || index.toString()}
         contentContainerStyle={styles.contentContainer}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListEmptyComponent={
             <View style={styles.emptyBox}>
-                {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                {isFetching || isDbLoading ? (
+                    <ActivityIndicator size="large" color="#3B5998" />
+                ) : (
                     <>
                         <Ionicons name="documents-outline" size={60} color="#ccc" />
                         <Text style={styles.emptyText}>No requests found.</Text>

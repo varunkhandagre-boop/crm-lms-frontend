@@ -93,8 +93,10 @@ export default function AddCourierScreen() {
 
   // AUTO FILL LOGIC
   useEffect(() => {
-      const myCompName = companyProfile?.companyName || 'My Company';
-      const myCity = companyProfile?.city || 'Head Office';
+      const myCompName = companyProfile?.companyName;
+      const myCity = (companyProfile as any)?.fullAddress?.city || (companyProfile as any)?.address || '';
+      // Loading hoti hai tab useEffect mat chalao
+      if (!myCompName || myCompName === 'Loading...') return;
 
       if (type === 'Outward') {
           setFromName(myCompName);

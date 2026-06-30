@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -16,21 +16,18 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+// 🔥 SAAS IMPORTS
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 export default function AddVisitingCardScreen() {
   const router = useRouter();
   
-  // 🔥 1. Context se sirf User & Notification
-  const { currentUser, addNotification } = useData();
+  // 🔥 1. Context se User, Notification aur List Teeno le liye (No extra fetching!)
+  const { currentUser, addNotification, cardRequestList = [] } = useData();
 
-  // 🔥 2. Naya SaaS Engine connect kiya
-  const { fetchSaaSData, addSaaSData } = useSaaSDB();
-
-  // 🔥 3. Lazy Loaded State
-  const [cardRequestList, setCardRequestList] = useState<any[]>([]);
+  // 🔥 2. Naya SaaS Engine sirf data Save karne ke liye connect kiya
+  const { addSaaSData } = useSaaSDB();
 
   // --- FORM DATA ---
   const [shippingAddress, setShippingAddress] = useState('');
@@ -49,17 +46,6 @@ export default function AddVisitingCardScreen() {
     "Visiting Card", "Service Report", "Delivery Challan", "Receipt Book", "Letterhead",
     "Catalog", "Catalog (Manual Entry)", "Others"
   ];
-
-  // 🔥 4. LOAD REQUESTS ON MOUNT (For ID Generation)
-  useEffect(() => {
-      const loadData = async () => {
-          if (currentUser?.companyId) {
-              const reqs = await fetchSaaSData("visiting_cards");
-              setCardRequestList(reqs);
-          }
-      };
-      loadData();
-  }, [currentUser]);
 
   const handleAddRow = () => {
     const newId = rows.length > 0 ? rows[rows.length - 1].id + 1 : 1;
@@ -92,7 +78,7 @@ export default function AddVisitingCardScreen() {
     setRows(rows.map(row => row.id === id ? { ...row, customType: text } : row));
   };
 
-  // 🔥 5. SAAS SAVE LOGIC
+  // 🔥 3. SAAS SAVE LOGIC
   const handleSave = async () => {
       if (!shippingAddress) {
           Alert.alert("Required", "Please enter shipping address.");
@@ -125,11 +111,13 @@ export default function AddVisitingCardScreen() {
           const fyStartDateStr = `${fyStartYear}-04-01`;
           const fyEndDateStr = `${fyStartYear + 1}-03-31`;
 
-          const count = cardRequestList ? cardRequestList.filter((c: any) => {
+          // Global Context list se count nikal liya (Fast & Free)
+          const validList = Array.isArray(cardRequestList) ? cardRequestList : [];
+          const count = validList.filter((c: any) => {
               const reqDate = c.date || (c.createdAt ? c.createdAt.split('T')[0] : '');
               if (!reqDate) return false;
               return reqDate >= fyStartDateStr && reqDate <= fyEndDateStr;
-          }).length + 1 : 1;
+          }).length + 1;
 
           const nextNum = String(count).padStart(2, '0'); 
 

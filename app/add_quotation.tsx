@@ -15,7 +15,7 @@ export default function AddQuotationScreen() {
     const insets = useSafeAreaInsets(); 
     
     const { id, mode, leadOrg, leadPerson, leadMobile, leadCity, leadAddress, leadProduct } = useLocalSearchParams(); 
-    const { companyProfile, currentUser } = useData();
+    const { companyProfile, currentUser, sendDynamicEmail, sendSystemWhatsApp } = useData();
     const { fetchSaaSData, addSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
 
     const [orgList, setOrgList] = useState<any[]>([]);
@@ -36,6 +36,7 @@ export default function AddQuotationScreen() {
     const defaultTC = `1. Rate: Packing & assembly – Free of cost\n2. Transportation: Extra\n3. Taxes: extra as applicable\n4. Payment Terms: 100% advance along with Purchase Order\n5. Delivery: Within 10 days from the date of receipt of Purchase Order along with advance payment\n6. Validity: 30 days from the date of quotation\n7. Warranty: 1 years from the date of delivery\n8. TCS Provision: TCS will be collected if applicable as per Circular No. 17/2020. Prices quoted are exclusive of TCS.\n9. Order Cancellation: In case the Purchase Order is cancelled before dispatch, cancellation charges @5% will be applicable.\n10. Unloading & Shifting Charges: Included\n11. Order To Be Released In The Name Of: ${companyProfile?.companyName || 'Life Line Medical Systems'}.`;
     
     const [terms, setTerms] = useState(defaultTC); 
+    const [docTitle, setDocTitle] = useState<'ESTIMATE' | 'PROFORMA INVOICE' | 'QUOTATION'>('ESTIMATE');
     const [isSaving, setIsSaving] = useState(false); 
     const [existingEstimateNo, setExistingEstimateNo] = useState(''); 
 
@@ -87,6 +88,7 @@ export default function AddQuotationScreen() {
                 setItems(data.items || []);
                 setTerms(data.termsAndConditions || defaultTC);
                 if (data.taxType) setTaxType(data.taxType);
+                if (data.docTitle) setDocTitle(data.docTitle);
                 
                 const foundOrg = orgList.find((o:any) => o.id === data.orgId);
                 if(foundOrg) setSelectedOrg(foundOrg);
@@ -120,6 +122,22 @@ export default function AddQuotationScreen() {
         const month = date.getMonth(); 
         return month >= 3 ? `${year}-${(year + 1).toString().slice(-2)}` : `${year - 1}-${year.toString().slice(-2)}`;
     };
+    useEffect(() => {
+    if (selectedOrg && companyProfile) {
+        let compState = ((companyProfile as any).state || '').toLowerCase().trim();
+        if (!compState) compState = 'maharashtra';
+
+        let clientState = (selectedOrg.state || '').toLowerCase().trim();
+        if (!clientState && selectedOrg.address?.toLowerCase().includes('maharashtra')) {
+            clientState = 'maharashtra';
+        }
+
+        if (clientState) {
+            if (compState === clientState) setTaxType('CGST/SGST');
+            else setTaxType('IGST');
+        }
+    }
+}, [selectedOrg, companyProfile]);
 
     const filteredOrgs = orgList.filter((o: any) => (o.name || o.orgName || '').toLowerCase().includes(orgSearch.toLowerCase()));
     
@@ -186,6 +204,252 @@ export default function AddQuotationScreen() {
     });
     const grandTotal = subTotal + totalGST;
 
+    // 🔥 1. NAYA HTML GENERATOR FUNCTION (Professional Design)
+    const getQuotationHTML = (estimateNo: string) => {
+        let gstHtmlRows = '';
+        Object.keys(gstBreakdown).forEach((rateStr) => {
+            const rate = Number(rateStr);
+            const amount = gstBreakdown[rate];
+            if (taxType === 'IGST') {
+                gstHtmlRows += `<div class="summary-row"><span>IGST @ ${rate}%</span> <span>₹ ${amount.toLocaleString(undefined, {minimumFractionDigits: 2})}</span></div>`;
+            } else {
+                const halfRate = rate / 2;
+                const halfAmount = amount / 2;
+                gstHtmlRows += `
+                    <div class="summary-row"><span>CGST @ ${halfRate}%</span> <span>₹ ${halfAmount.toLocaleString(undefined, {minimumFractionDigits: 2})}</span></div>
+                    <div class="summary-row"><span>SGST @ ${halfRate}%</span> <span>₹ ${halfAmount.toLocaleString(undefined, {minimumFractionDigits: 2})}</span></div>
+                `;
+            }
+        });
+
+        // 🔥 Dynamic Header HTML based on Theme Selection
+        const headerHTML = pdfTheme === 'theme1' 
+        ? `
+            <div style="flex: 1; text-align: left;">
+                <div class="company-name">${companyProfile?.companyName || 'Company Name'}</div>
+                <div style="font-size: 12px; margin-top: 5px; max-width: 300px; line-height: 1.5;">${(companyProfile as any)?.fullAddress?.line ? `${(companyProfile as any).fullAddress.line}, ${(companyProfile as any).fullAddress.city || ''}, ${(companyProfile as any).fullAddress.state || ''} - ${(companyProfile as any).fullAddress.pincode || ''}` : (companyProfile?.address || 'Address Not Set')}</div>
+                <div style="font-size: 12px; margin-top: 4px;">Phone: ${companyProfile?.phone || ''}</div>
+                <div style="font-size: 12px; margin-top: 2px;">Email: ${companyProfile?.email || ''}</div>
+                <div style="font-size: 12px; font-weight: bold; margin-top: 5px;">GSTIN: ${companyProfile?.gstNumber || 'N/A'}</div>
+            </div>
+            <div style="width: 200px; text-align: right;">
+                ${(companyProfile as any)?.logoUrl ? `<img src="${(companyProfile as any).logoUrl}" style="max-height: 110px; max-width: 180px; object-fit: contain;" />` : ''}
+            </div>
+        ` 
+        : `
+            <div style="width: 200px; text-align: left;">
+                ${(companyProfile as any)?.logoUrl ? `<img src="${(companyProfile as any).logoUrl}" style="max-height: 110px; max-width: 180px; object-fit: contain;" />` : ''}
+            </div>
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: flex-end; text-align: right;">
+                <div class="company-name">${companyProfile?.companyName || 'Company Name'}</div>
+                <div style="font-size: 12px; margin-top: 5px; max-width: 300px; line-height: 1.5;">${(companyProfile as any)?.fullAddress?.line ? `${(companyProfile as any).fullAddress.line}, ${(companyProfile as any).fullAddress.city || ''}, ${(companyProfile as any).fullAddress.state || ''} - ${(companyProfile as any).fullAddress.pincode || ''}` : (companyProfile?.address || 'Address Not Set')}</div>
+                <div style="font-size: 12px; margin-top: 4px;">Phone: ${companyProfile?.phone || ''}</div>
+                <div style="font-size: 12px; margin-top: 2px;">Email: ${companyProfile?.email || ''}</div>
+                <div style="font-size: 12px; font-weight: bold; margin-top: 5px;">GSTIN: ${companyProfile?.gstNumber || 'N/A'}</div>
+            </div>
+        `;
+
+        return `
+        <html>
+        <head>
+            <style>
+                @page { size: A4; margin: 0; }
+                body { 
+                    font-family: 'Helvetica', 'Arial', sans-serif; 
+                    margin: 0; 
+                    padding: 20px; 
+                    color: #333; 
+                    display: flex; 
+                    flex-direction: column; 
+                    min-height: 100vh;
+                    box-sizing: border-box;
+                }
+                .document-wrapper {
+                    border: 1px solid #777;
+                    flex: 1;
+                    display: flex;
+                    flex-direction: column;
+                }
+                .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid #777; padding: 15px; }
+                .company-name { font-size: 22px; font-weight: bold; color: #1565c0; text-transform: uppercase; }
+                
+                .doc-title-row { text-align: center; border-bottom: 1px solid #777; background-color: #f8f9fa; padding: 6px; }
+                .doc-title { margin:0; font-size: 16px; font-weight: bold; color: #333; letter-spacing: 2px; text-transform: uppercase; }
+                
+                .details-container { display: flex; justify-content: space-between; border-bottom: 1px solid #777; }
+                .box-left { flex: 1; padding: 15px; border-right: 1px solid #777; }
+                .box-right { width: 250px; padding: 15px; font-size: 12px; line-height: 1.8; }
+                .box-title { font-size: 11px; color: #666; margin-bottom: 5px; text-transform: uppercase; }
+                
+                .main-content { flex: 1; display: flex; flex-direction: column; }
+                table { width: 100%; border-collapse: collapse; flex: 1; display: table; table-layout: fixed; height: 100%; }
+                th { 
+                    background-color: #f0f4f8; 
+                    color: #333; 
+                    font-weight: bold; 
+                    padding: 8px 10px; 
+                    text-align: left; 
+                    font-size: 12px; 
+                    border-right: 1px solid #777; 
+                    border-bottom: 1px solid #777;
+                }
+                th:last-child { border-right: none; }
+                
+                td { 
+                    padding: 8px 10px; 
+                    border-right: 1px solid #777; 
+                    font-size: 13px; 
+                    vertical-align: top; 
+                    word-wrap: break-word;
+                }
+                td:last-child { border-right: none; }
+                
+                .spacer-row { height: 100%; }
+                .spacer-row td { border-bottom: none; }
+
+                .totals-row td {
+                    border-top: 1px solid #777;
+                    border-bottom: 1px solid #777;
+                    font-weight: bold;
+                    padding: 10px;
+                    background-color: #f0f4f8; 
+                    color: #1565c0;
+                }
+
+                .specs { font-size: 11px; color: #555; margin-top: 4px; white-space: pre-wrap; }
+                
+                .footer-content { display: flex; justify-content: space-between; border-top: 1px solid #777; margin-top: auto; page-break-inside: avoid; }
+                .footer-left { flex: 1; padding: 15px; border-right: 1px solid #777; }
+                .footer-right { width: 250px; padding: 0; display: flex; flex-direction: column; justify-content: space-between; }
+                
+                .summary-row { display: flex; justify-content: space-between; padding: 8px 15px; font-size: 12px; border-bottom: 1px solid #777; }
+                .summary-row.total { font-weight: bold; font-size: 15px; background-color: #f0f4f8; color: #1565c0; margin-top: 0; border-bottom: 1px solid #777; }
+            </style>
+        </head>
+        <body>
+            <div class="document-wrapper">
+                <div class="header">
+                    ${headerHTML}
+                </div>
+
+                <div class="doc-title-row">
+                    <h2 class="doc-title">${docTitle}</h2>
+                </div>
+
+                <div class="details-container">
+                    <div class="box-left">
+                        <div class="box-title">Billed To (Consignee)</div>
+                        <div style="font-weight: bold; font-size: 14px; color: #333;">${selectedOrg?.name || selectedOrg?.orgName || ''}</div>
+                        <div style="font-size: 12px; margin-top: 5px;">${selectedOrg?.address || selectedOrg?.city || 'Address Not Provided'}</div>
+                        <div style="font-size: 12px; margin-top: 2px;">Phone: ${selectedOrg?.mobile || selectedOrg?.phone || 'N/A'}</div>
+                    </div>
+                    <div class="box-right">
+                        <div><strong>Doc No:</strong> ${estimateNo}</div>
+                        <div style="margin-top: 4px;"><strong>Date:</strong> ${new Date().toLocaleDateString('en-GB')}</div>
+                        <div style="margin-top: 4px;"><strong>Valid Till:</strong> ${new Date(Date.now() + 15*24*60*60*1000).toLocaleDateString('en-GB')}</div>
+                    </div>
+                </div>
+
+                <div class="main-content">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th width="5%">#</th>
+                                <th width="45%">Description of Goods</th>
+                                <th width="8%" style="text-align:center;">Qty</th>
+                                <th width="14%" style="text-align:right;">Rate</th>
+                                <th width="12%" style="text-align:right;">GST</th>
+                                <th width="16%" style="text-align:right;">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${items.map((item, index) => {
+                                const baseAmount = item.qty * item.price;
+                                const gstAmount = (baseAmount * item.gstRate) / 100;
+                                const rowTotal = baseAmount + gstAmount;
+                                return `
+                                <tr>
+                                    <td>${index + 1}</td>
+                                    <td>
+                                        <strong>${item.name} ${item.model ? `(${item.model})` : ''}</strong>
+                                        ${item.specifications ? `<div class="specs">${item.specifications}</div>` : ''}
+                                    </td>
+                                    <td style="text-align:center;">${item.qty}</td>
+                                    <td style="text-align:right;">${item.price.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                                    <td style="text-align:right;">${gstAmount.toLocaleString(undefined, {minimumFractionDigits: 2})}<br><span style="font-size:9px; color:gray;">(${item.gstRate}%)</span></td>
+                                    <td style="text-align:right; font-weight:bold;">${rowTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                                </tr>
+                                `;
+                            }).join('')}
+                            
+                            <tr class="spacer-row">
+                                <td></td>
+                                <td></td>
+                                <td></td>
+                                <td></td>
+                                <td></td>
+                                <td></td>
+                            </tr>
+
+                            <tr class="totals-row">
+                                <td colspan="2" style="text-align:right;">Total</td>
+                                <td style="text-align:center;">${totalQty}</td>
+                                <td style="text-align:right;">${subTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                                <td style="text-align:right;">${totalGST.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                                <td style="text-align:right;">₹ ${grandTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="footer-content">
+                    <div class="footer-left">
+                        <div style="margin-bottom: 15px;">
+                            <span style="color:gray; font-size: 11px;">Amount Chargeable (in words):</span><br>
+                            <strong style="font-size: 12px;">INR ${numberToWords(grandTotal)} Rupees Only</strong>
+                        </div>
+
+                        <div style="margin-bottom: 15px;">
+                            <div style="font-size: 11px; font-weight: bold; text-decoration: underline; margin-bottom: 4px;">Terms & Conditions:</div>
+                            <div style="font-size: 10px; white-space: pre-wrap; line-height: 1.4;">${terms}</div>
+                        </div>
+
+                        <div style="display:flex; align-items: flex-start; gap: 15px;">
+                            <div>
+                                <div style="font-size: 11px; font-weight: bold; text-decoration: underline; margin-bottom: 4px;">Company's Bank Details:</div>
+                                <div style="font-size: 10px;">Bank Name: <strong>${(companyProfile as any)?.bankDetails1?.bankName || (companyProfile as any)?.bank1_name || 'N/A'}</strong></div>
+                                <div style="font-size: 10px;">A/c No: <strong>${(companyProfile as any)?.bankDetails1?.accountNo || (companyProfile as any)?.bank1_acc || 'N/A'}</strong></div>
+                                <div style="font-size: 10px;">IFSC: <strong>${(companyProfile as any)?.bankDetails1?.ifsc || (companyProfile as any)?.bank1_ifsc || 'N/A'}</strong></div>
+                                <div style="font-size: 10px;">A/c Name: <strong>${companyProfile?.companyName || 'N/A'}</strong></div>
+                            </div>
+                            ${(companyProfile as any)?.qrCodeUrl ? `<img src="${(companyProfile as any).qrCodeUrl}" style="width: 60px; height: 60px; border: 1px solid #ddd; padding: 2px;" />` : ''}
+                        </div>
+                    </div>
+
+                    <div class="footer-right">
+                        <div style="width: 100%;">
+                            <div class="summary-row"><span>Sub Total</span> <span>₹ ${subTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</span></div>
+                            ${gstHtmlRows}
+                            <div class="summary-row total"><span>Grand Total</span> <span>₹ ${grandTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</span></div>
+                        </div>
+
+                        <div style="text-align: center; margin-top: 30px; padding: 15px;">
+                            <div style="font-weight:bold; font-size: 11px; margin-bottom: 5px;">For: ${companyProfile?.companyName || 'Company Name'}</div>
+                            <div style="height: 50px; display:flex; align-items:center; justify-content:center;">
+                                ${(companyProfile as any)?.signatureUrl ? `<img src="${(companyProfile as any).signatureUrl}" style="max-height: 50px; max-width: 120px;" />` : ''}
+                            </div>
+                            <div style="font-size: 10px; margin-top: 5px;">Authorized Signatory</div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </body>
+        </html>
+        `;
+    };
+
+    // 🔥 2. NAYA generatePDF FUNCTION (Jo upar wale ko call karega)
     const generatePDF = async () => {
         if (!selectedOrg) return Alert.alert("Required", "Please select a client organization.");
         if (items.length === 0) return Alert.alert("Required", "Please add at least one item.");
@@ -194,160 +458,8 @@ export default function AddQuotationScreen() {
         const shortName = companyProfile?.shortName || 'EST';
         const estimateNo = (mode === 'edit' && existingEstimateNo) ? existingEstimateNo : `${shortName}/${fy}/${Math.floor(100 + Math.random() * 900)}`;
 
-        let gstHtmlRows = '';
-        Object.keys(gstBreakdown).forEach((rateStr) => {
-            const rate = Number(rateStr);
-            const amount = gstBreakdown[rate];
-            if (taxType === 'IGST') {
-                gstHtmlRows += `<div class="summary-row"><span>IGST @ ${rate}%</span> <span>₹${amount.toLocaleString()}</span></div>`;
-            } else {
-                const halfRate = rate / 2;
-                const halfAmount = amount / 2;
-                gstHtmlRows += `
-                    <div class="summary-row"><span>CGST @ ${halfRate}%</span> <span>₹${halfAmount.toLocaleString()}</span></div>
-                    <div class="summary-row"><span>SGST @ ${halfRate}%</span> <span>₹${halfAmount.toLocaleString()}</span></div>
-                `;
-            }
-        });
-
         try {
-            const htmlContent = `
-            <html>
-            <head>
-                <style>
-                    body { font-family: 'Helvetica', 'Arial', sans-serif; padding: 20px; color: #333; }
-                    .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #3b5998; padding-bottom: 10px; }
-                    .company-name { font-size: 24px; font-weight: bold; color: #3b5998; text-transform: uppercase; }
-                    .details-container { display: flex; justify-content: space-between; margin-bottom: 20px; }
-                    .box { width: 48%; padding: 10px; border: 1px solid #eee; border-radius: 5px; background: #f9f9f9; }
-                    .box-title { font-size: 12px; color: #888; margin-bottom: 5px; text-transform: uppercase; }
-                    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-                    th { background-color: #e3f2fd; color: #1565c0; font-weight: bold; padding: 10px; text-align: left; font-size: 12px; border: 1px solid #bbdefb; }
-                    td { padding: 10px; border: 1px solid #ddd; font-size: 13px; vertical-align: top; }
-                    .specs { font-size: 11px; color: #555; margin-top: 4px; white-space: pre-wrap; }
-                    .summary { border: 1px solid #ddd; border-radius: 5px; }
-                    .summary-row { display: flex; justify-content: space-between; padding: 8px 10px; border-bottom: 1px solid #eee; font-size: 13px; }
-                    .summary-row span:first-child { text-align: left; }
-                    .summary-row span:last-child { text-align: right; }
-                    .summary-row.total { background-color: #e3f2fd; font-weight: bold; font-size: 16px; border-bottom: none; color: #1565c0; }
-                </style>
-            </head>
-            <body>
-                <div class="header" style="flex-direction: ${pdfTheme === 'theme1' ? 'row' : 'row-reverse'}; text-align: ${pdfTheme === 'theme1' ? 'left' : 'right'}; align-items: flex-start;">
-                    <div style="flex: 1;">
-                        <div class="company-name" style="margin-top: 0;">${companyProfile?.companyName || 'Life Line Medical Systems'}</div>
-                        <div style="font-size: 12px; margin-top: 5px; max-width: 280px; line-height: 1.5;">${companyProfile?.address || companyProfile?.addressLine || 'Nagpur, M.H. 440022'}</div>
-                        <div style="font-size: 12px; margin-top: 4px;">Phone: ${companyProfile?.phone || '8770530146'}</div>
-                        <div style="font-size: 12px; margin-top: 2px;">Email: ${companyProfile?.email || 'lifelinengp@gmail.com'}</div>
-                        <div style="font-size: 12px; font-weight: bold; margin-top: 5px;">GSTIN: ${companyProfile?.gstNumber || '27BMSPK3720Q1ZB'}</div>
-                    </div>
-                    <div style="width: 250px; text-align: ${pdfTheme === 'theme1' ? 'right' : 'left'}; margin-top: 0; padding-top: 0;">
-                        ${companyProfile?.logoUrl ? `<img src="${companyProfile.logoUrl}" style="max-height: 120px; max-width: 240px; object-fit: contain; object-position: top; display: block; ${pdfTheme === 'theme1' ? 'margin-left: auto;' : 'margin-right: auto;'}" />` : ''}
-                    </div>
-                </div>
-
-                <div style="text-align: center; margin: 15px 0;">
-                    <h2 style="margin:0; font-size: 22px; color: #1565c0; text-decoration: underline;">ESTIMATE</h2>
-                </div>
-
-                <div class="details-container">
-                    <div class="box">
-                        <div class="box-title">Estimate For</div>
-                        <div style="font-weight: bold; font-size: 16px; color: #1565c0;">${selectedOrg.name || selectedOrg.orgName}</div>
-                        <div style="font-size: 12px; margin-top: 5px;">${selectedOrg.address || selectedOrg.city || 'Address Not Provided'}</div>
-                        <div style="font-size: 12px;">Phone: ${selectedOrg.mobile || selectedOrg.phone || 'N/A'}</div>
-                    </div>
-                    <div style="text-align: right; font-size: 13px; line-height: 1.8;">
-                        <div><strong>Est No:</strong> ${estimateNo}</div>
-                        <div><strong>Date:</strong> ${new Date().toLocaleDateString('en-GB')}</div>
-                        <div><strong>Valid Till:</strong> ${new Date(Date.now() + 15*24*60*60*1000).toLocaleDateString('en-GB')}</div>
-                    </div>
-                </div>
-
-                <table>
-                    <thead>
-                        <tr>
-                            <th width="5%">#</th>
-                            <th width="45%">Item Name & Description</th>
-                            <th width="10%">Qty</th>
-                            <th width="15%" style="text-align:right;">Price/Unit</th>
-                            <th width="10%" style="text-align:right;">GST</th>
-                            <th width="15%" style="text-align:right;">Amount</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${items.map((item, index) => {
-                            const baseAmount = item.qty * item.price;
-                            const gstAmount = (baseAmount * item.gstRate) / 100;
-                            const rowTotal = baseAmount + gstAmount;
-                            return `
-                            <tr>
-                                <td>${index + 1}</td>
-                                <td>
-                                    <strong>${item.name} ${item.model ? `(${item.model})` : ''}</strong>
-                                    ${item.specifications ? `<div class="specs">${item.specifications}</div>` : ''}
-                                </td>
-                                <td>${item.qty}</td>
-                                <td style="text-align:right;">₹${item.price.toLocaleString()}</td>
-                                <td style="text-align:right;">₹${gstAmount.toLocaleString()}<br><span style="font-size:10px; color:gray;">(${item.gstRate}%)</span></td>
-                                <td style="text-align:right; font-weight:bold;">₹${rowTotal.toLocaleString()}</td>
-                            </tr>
-                            `;
-                        }).join('')}
-                        
-                        <tr style="background-color: #f0f8ff; border-top: 2px solid #3b5998;">
-                            <td colspan="2" style="text-align:right; font-weight:bold; padding:10px; font-size:14px;">Total</td>
-                            <td style="font-weight:bold; padding:10px; font-size:14px;">${totalQty}</td>
-                            <td></td>
-                            <td style="text-align:right; font-weight:bold; padding:10px; font-size:14px;">₹${totalGST.toLocaleString()}</td>
-                            <td style="text-align:right; font-weight:bold; padding:10px; font-size:14px;">₹${grandTotal.toLocaleString()}</td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <div style="display: flex; justify-content: space-between; margin-top: 20px;">
-                    <div style="width: 55%;">
-                        <div style="margin-bottom: 15px;">
-                            <span style="color:gray; font-size: 11px;">Amount In Words:</span><br>
-                            <strong style="font-size: 12px;">${numberToWords(grandTotal)} Rupees Only</strong>
-                        </div>
-
-                        <div style="margin-bottom: 15px;">
-                            <div class="tc-title" style="color:#1565c0; font-size: 12px; font-weight: bold;">Terms & Conditions:</div>
-                            <div style="margin-top: 5px; font-size: 10px; white-space: pre-wrap; line-height: 1.4;">${terms}</div>
-                        </div>
-
-                        <div style="display:flex; align-items: flex-start; gap: 15px;">
-                            <div>
-                                <div class="tc-title" style="color:#1565c0; font-size: 12px; font-weight: bold;">Pay To / Bank Details:</div>
-                                <div style="font-size: 11px;">Bank Name: <strong>${companyProfile?.bankDetails1?.bankName || companyProfile?.bank1_name || 'N/A'}</strong></div>
-                                <div style="font-size: 11px;">A/c No: <strong>${companyProfile?.bankDetails1?.accountNo || companyProfile?.bank1_acc || 'N/A'}</strong></div>
-                                <div style="font-size: 11px;">IFSC: <strong>${companyProfile?.bankDetails1?.ifsc || companyProfile?.bank1_ifsc || 'N/A'}</strong></div>
-                                <div style="font-size: 11px;">A/c Name: <strong>${companyProfile?.companyName || 'N/A'}</strong></div>
-                            </div>
-                            ${companyProfile?.qrCodeUrl ? `<img src="${companyProfile.qrCodeUrl}" style="width: 70px; height: 70px; border: 1px solid #ddd; padding: 2px;" />` : ''}
-                        </div>
-                    </div>
-
-                    <div style="width: 40%; display: flex; flex-direction: column; justify-content: space-between;">
-                        <div class="summary" style="border: 1px solid #ddd; border-radius: 5px;">
-                            <div class="summary-row"><span>Sub Total</span> <span>₹${subTotal.toLocaleString()}</span></div>
-                            ${gstHtmlRows}
-                            <div class="summary-row total"><span>Grand Total</span> <span>₹${grandTotal.toLocaleString()}</span></div>
-                        </div>
-
-                        <div class="signature-box" style="text-align: center; margin-top: 40px;">
-                            <div style="font-weight:bold; margin-bottom: 5px; font-size: 12px;">For: ${companyProfile?.companyName}</div>
-                            <div style="height: 60px; display:flex; align-items:center; justify-content:center;">
-                                ${companyProfile?.signatureUrl ? `<img src="${companyProfile.signatureUrl}" style="max-height: 60px; max-width: 150px;" />` : ''}
-                            </div>
-                            <div style="border-top: 1px solid #333; margin-top: 5px; padding-top: 5px; font-size: 11px; width: 100%;">Authorized Signatory</div>
-                        </div>
-                    </div>
-                </div>
-            </body>
-            </html>
-            `;
+            const htmlContent = getQuotationHTML(estimateNo);
             const { uri } = await Print.printToFileAsync({ html: htmlContent });
             await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
         } catch (error) {
@@ -376,6 +488,7 @@ export default function AddQuotationScreen() {
             const quotationData = {
                 estimateNo: finalEstimateNo,
                 orgId: selectedOrg.id || '',
+                docTitle: docTitle,
                 orgName: selectedOrg.name || selectedOrg.orgName || 'Unknown',
                 orgAddress: selectedOrg.address || selectedOrg.city || '',
                 orgPhone: selectedOrg.phone || selectedOrg.mobile || '',
@@ -403,6 +516,19 @@ export default function AddQuotationScreen() {
                 if(res.success) Alert.alert("Success", `Estimate ${finalEstimateNo} Created Successfully!`);
                 else Alert.alert("Error", "Could not save.");
             }
+            try {
+    const custMobile = selectedOrg.mobile || selectedOrg.phone || "";
+    if (custMobile) {
+        sendSystemWhatsApp(custMobile, 'quotation_sent', {
+            customer_name: selectedOrg.name || selectedOrg.orgName || "Customer",
+            quote_no: finalEstimateNo,
+            amount: grandTotal.toLocaleString(),
+            company_name: companyProfile?.companyName || "Our Company"
+        });
+    }
+} catch (autoErr) {
+    console.log("Auto-Message Error:", autoErr);
+}
             
             router.back(); 
         } catch (e: any) {
@@ -505,6 +631,26 @@ export default function AddQuotationScreen() {
 
                     {items.length > 0 && (
                         <>
+                        <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 5}}>
+    <Text style={styles.sectionTitle}>Document Title</Text>
+    <View style={{flexDirection: 'row', backgroundColor: '#e3f2fd', borderRadius: 8, padding: 3}}>
+        <TouchableOpacity 
+            onPress={() => setDocTitle('ESTIMATE')} 
+            style={[styles.taxBtn, docTitle === 'ESTIMATE' && styles.taxBtnActive]}>
+            <Text style={[styles.taxBtnText, docTitle === 'ESTIMATE' && styles.taxBtnTextActive]}>Estimate</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+            onPress={() => setDocTitle('PROFORMA INVOICE')} 
+            style={[styles.taxBtn, docTitle === 'PROFORMA INVOICE' && styles.taxBtnActive]}>
+            <Text style={[styles.taxBtnText, docTitle === 'PROFORMA INVOICE' && styles.taxBtnTextActive]}>Proforma</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+            onPress={() => setDocTitle('QUOTATION')} 
+            style={[styles.taxBtn, docTitle === 'QUOTATION' && styles.taxBtnActive]}>
+            <Text style={[styles.taxBtnText, docTitle === 'QUOTATION' && styles.taxBtnTextActive]}>Quotation</Text>
+        </TouchableOpacity>
+    </View>
+</View>
                             <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 5}}>
                                 <Text style={styles.sectionTitle}>Tax Type</Text>
                                 <View style={{flexDirection: 'row', backgroundColor: '#e3f2fd', borderRadius: 8, padding: 3}}>

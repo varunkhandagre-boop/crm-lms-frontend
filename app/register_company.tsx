@@ -21,7 +21,7 @@ import { auth } from '../firebaseConfig';
 // 🔥 SAAS IMPORTS
 import { useSaaSDB } from '../hooks/useSaaSDB';
 
-// 🔥 INDIAN STATES & DISTRICTS DATA (Aap isme aur add kar sakte hain)
+// 🔥 INDIAN STATES & DISTRICTS DATA
 const indianStatesAndDistricts: any = {
     "Maharashtra": ["Mumbai", "Pune", "Nagpur", "Thane", "Nashik", "Aurangabad", "Solapur", "Amravati", "Kolhapur", "Navi Mumbai"],
     "Gujarat": ["Ahmedabad", "Surat", "Vadodara", "Rajkot", "Bhavnagar", "Jamnagar", "Gandhinagar", "Junagadh"],
@@ -53,7 +53,7 @@ export default function RegisterCompanyScreen() {
     
     const [address, setAddress] = useState('');
     const [state, setState] = useState('');
-    const [city, setCity] = useState(''); // Working as District
+    const [city, setCity] = useState(''); 
     const [gstNumber, setGstNumber] = useState('');
     const [employeesCount, setEmployeesCount] = useState('10'); 
 
@@ -75,13 +75,15 @@ export default function RegisterCompanyScreen() {
             const cleanEmail = email.trim().toLowerCase();
             const cleanEmpCount = employeesCount ? Number(employeesCount) : 10;
 
-            // 1. Create Auth User (Yeh auto-login kar deta hai)
+            // 1. Create Auth User
             await createUserWithEmailAndPassword(auth, cleanEmail, password);
 
             const companyId = `COMP-${Date.now()}`;
+            
+            // 🔥 SMART 7-DAY FREE TRIAL LOGIC
             const startDate = new Date();
             const expiryDate = new Date();
-            expiryDate.setDate(startDate.getDate() + 7); 
+            expiryDate.setDate(startDate.getDate() + 7); // Aaj se exactly 7 din baad ka time
 
             // 2. Create COMPANY Document 
             const companyData = {
@@ -96,10 +98,14 @@ export default function RegisterCompanyScreen() {
                 state: state,
                 gstNumber: gstNumber || "",
                 maxEmployees: cleanEmpCount,
-                isActive: false, 
-                plan: 'Pending Approval', 
+                
+                // 🔥 Auto-Approve & Set Trial
+                isActive: true, // Turant chaloo ho jayega
+                plan: 'Free Trial', // Plan ka naam
+                
                 startDate: startDate.toISOString(),
-                expiryDate: expiryDate.toISOString(),
+                expiryDate: expiryDate.toISOString(), // 7 din baad app band ho jayegi
+                
                 createdAt: new Date().toISOString(),
                 senderId: cleanEmail, 
                 senderName: ownerName 
@@ -126,11 +132,11 @@ export default function RegisterCompanyScreen() {
             const userRes = await addSaaSData("users", userData, true);
             if (!userRes.success) throw new Error(userRes.error);
 
-            // 🔥 4. FIX 2: CREATE DEFAULT COMPANY PROFILE 
+            // 4. CREATE DEFAULT COMPANY PROFILE 
             const profileData = {
                 companyId: companyId,
                 companyName: companyName,
-                shortName: companyName, // Branding ke liye
+                shortName: companyName, 
                 ownerName: ownerName,
                 email: cleanEmail,
                 mobile: mobile,
@@ -144,22 +150,27 @@ export default function RegisterCompanyScreen() {
             };
             await addSaaSData("company_profile", profileData, true);
 
-            // 🔥 5. FIX 1: FORCE LOGOUT (Auto-login bypass block karne ke liye)
-            await auth.signOut();
-
+            // 5. Success aur direct login option
+            // 🔥 LINKED TO SUBSCRIPTION: User register hote hi direct Subscription page par jayega data lekar
             Alert.alert(
                 "Registration Successful ✅", 
-                "Your account is created but requires Super Admin approval. Please contact support.", 
+                "Your organization is registered. Please select your subscription plan to proceed.", 
                 [
                     { 
-                        text: "Go to Login", 
+                        text: "Choose Plan", 
                         onPress: () => {
-                            router.replace('/login' as any);
+                            // Isse companyId automatic naye screen par send ho jayegi
+                            router.replace({
+                                pathname: '/SubscriptionScreen' as any,
+                                params: { companyId: companyId }
+                            });
                         } 
                     }
                 ],
                 { cancelable: false } 
             );
+            // Automatically sign out to force fresh context login
+            await auth.signOut();
 
         } catch (error: any) {
             let msg = error.message;
@@ -201,10 +212,8 @@ export default function RegisterCompanyScreen() {
                     <Text style={styles.sectionHeader}>Address & Legal</Text>
                     <TextInput style={styles.input} placeholder="Full Address" value={address} onChangeText={setAddress} />
                     
-                    {/* 🔥 NEW PROFESSIONAL DROPDOWNS FOR STATE & DISTRICT */}
                     <View style={{flexDirection:'row', gap:10, marginBottom: 10}}>
                         
-                        {/* STATE SELECTOR */}
                         <TouchableOpacity style={[styles.input, styles.dropdownBtn, {flex:1}]} onPress={() => setStateModalVisible(true)}>
                             <Text style={{color: state ? '#333' : '#999', fontSize: 16}}>
                                 {state || "Select State *"}
@@ -212,7 +221,6 @@ export default function RegisterCompanyScreen() {
                             <Ionicons name="chevron-down" size={20} color="#666" />
                         </TouchableOpacity>
 
-                        {/* DISTRICT/CITY SELECTOR */}
                         <TouchableOpacity 
                             style={[styles.input, styles.dropdownBtn, {flex:1}, !state && {backgroundColor: '#f0f0f0'}]} 
                             onPress={() => {
@@ -236,13 +244,13 @@ export default function RegisterCompanyScreen() {
                     <TextInput style={styles.input} placeholder="Max Employees (Default: 10)" keyboardType="numeric" value={employeesCount} onChangeText={setEmployeesCount} />
 
                     <TouchableOpacity style={styles.btn} onPress={handleRegister} disabled={loading}>
-                        {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Register Company</Text>}
+                        {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Start 7-Day Free Trial</Text>}
                     </TouchableOpacity>
                 </View>
                 <View style={{height: 50}} />
             </ScrollView>
 
-            {/* 🔥 STATE SELECTION MODAL WITH SEARCH */}
+            {/* STATE SELECTION MODAL */}
             <Modal visible={stateModalVisible} animationType="slide" transparent={true}>
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
@@ -253,7 +261,6 @@ export default function RegisterCompanyScreen() {
                             </TouchableOpacity>
                         </View>
                         
-                        {/* 🔍 Search Bar */}
                         <View style={{backgroundColor:'#f0f0f0', borderRadius:8, paddingHorizontal:10, marginBottom:10, flexDirection:'row', alignItems:'center'}}>
                             <Ionicons name="search" size={20} color="gray" />
                             <TextInput 
@@ -271,7 +278,7 @@ export default function RegisterCompanyScreen() {
                                 <TouchableOpacity style={styles.modalListItem} onPress={() => {
                                     setState(item);
                                     setCity(''); 
-                                    setStateSearchQuery(''); // Clear search
+                                    setStateSearchQuery(''); 
                                     setStateModalVisible(false);
                                 }}>
                                     <Text style={styles.modalListText}>{item}</Text>
@@ -283,7 +290,7 @@ export default function RegisterCompanyScreen() {
                 </View>
             </Modal>
 
-            {/* 🔥 DISTRICT SELECTION MODAL WITH SEARCH */}
+            {/* DISTRICT SELECTION MODAL */}
             <Modal visible={districtModalVisible} animationType="slide" transparent={true}>
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
@@ -294,7 +301,6 @@ export default function RegisterCompanyScreen() {
                             </TouchableOpacity>
                         </View>
                         
-                        {/* 🔍 Search Bar */}
                         <View style={{backgroundColor:'#f0f0f0', borderRadius:8, paddingHorizontal:10, marginBottom:10, flexDirection:'row', alignItems:'center'}}>
                             <Ionicons name="search" size={20} color="gray" />
                             <TextInput 
@@ -311,7 +317,7 @@ export default function RegisterCompanyScreen() {
                             renderItem={({item}) => (
                                 <TouchableOpacity style={styles.modalListItem} onPress={() => {
                                     setCity(item);
-                                    setDistrictSearchQuery(''); // Clear search
+                                    setDistrictSearchQuery(''); 
                                     setDistrictModalVisible(false);
                                 }}>
                                     <Text style={styles.modalListText}>{item}</Text>
@@ -336,18 +342,13 @@ const styles = StyleSheet.create({
     sectionHeader: { fontSize: 16, fontWeight: 'bold', color: '#3b5998', marginTop: 15, marginBottom: 10 },
     form: { width: '100%' },
     input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 10, padding: 15, fontSize: 16, backgroundColor: '#fff', marginBottom: 10 },
-    
-    // Dropdown Styles
     dropdownBtn: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 0 },
-    
-    // Modal Styles
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
     modalContent: { backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '70%' },
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, borderBottomWidth: 1, borderBottomColor: '#eee', paddingBottom: 10 },
     modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
     modalListItem: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#f5f5f5' },
     modalListText: { fontSize: 16, color: '#333' },
-
     btn: { backgroundColor: '#3b5998', padding: 18, borderRadius: 10, alignItems: 'center', marginTop: 20, elevation: 2 },
     btnText: { color: 'white', fontSize: 18, fontWeight: 'bold' }
 });

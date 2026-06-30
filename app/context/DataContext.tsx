@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert } from 'react-native';
 
 // 🔥 FIREBASE IMPORTS
@@ -12,6 +12,7 @@ import {
     doc,
     getDoc,
     getDocs,
+    limit,
     onSnapshot,
     orderBy,
     query,
@@ -46,6 +47,10 @@ export const DataProvider = ({ children }: any) => {
   const [isAutomationEnabled, setIsAutomationEnabled] = useState(true); 
   const [isFirebaseSynced, setIsFirebaseSynced] = useState(false); 
 
+  // --- REFS FOR READ OPTIMIZATION ---
+  const staticDataLoaded = useRef(false);
+  const currentUserRef = useRef<User | null>(null);
+
   // --- LISTS STATES ---
   const [userList, setUserList] = useState<any[]>([]); 
   const [productList, setProductList] = useState<any[]>([]); 
@@ -74,7 +79,7 @@ export const DataProvider = ({ children }: any) => {
   const [salesTargets, setSalesTargets] = useState({ monthly: 1000000, yearly: 12000000 });
   const [paymentList, setPaymentList] = useState<any[]>([]);
   const [dueList, setDueList] = useState<any[]>([]);
-  const [appPermissions, setAppPermissions] = useState({});
+  const [appPermissions, setAppPermissions] = useState<Record<string, any>>({});
   const [holidayList, setHolidayList] = useState<any[]>([]);
   const [companyProfile, setCompanyProfile] = useState({
       companyName: 'Loading...',
@@ -90,7 +95,54 @@ export const DataProvider = ({ children }: any) => {
   });
 
   // =========================================================
-  // 🔥 MASTER MESSAGING ENGINE (WhatsApp & Email Queue)
+  // 🔥 STATIC DATA FETCHERS (Saves 10,000+ reads)
+  // =========================================================
+  const fetchStaticData = async (compId: string) => {
+      if (staticDataLoaded.current) return;
+      staticDataLoaded.current = true;
+      try {
+          const prodSnap = await getDocs(query(
+              collection(db, "products"), 
+              where("companyId", "==", compId),
+              orderBy("createdAt", "desc"), 
+              limit(300)
+          ));
+          setProductList(prodSnap.docs.map(d => ({ id: d.id, ...d.data() as any })));
+
+          const orgSnap = await getDocs(query(
+              collection(db, "organizations"), 
+              where("companyId", "==", compId),
+              orderBy("createdAt", "desc"), 
+              limit(500)
+          ));
+          setOrgList(orgSnap.docs.map(d => ({ id: d.id, ...d.data() as any })));
+
+          const holSnap = await getDocs(query(
+              collection(db, "holidays"),
+              where("companyId", "==", compId)
+          ));
+          const holidays = holSnap.docs.map(d => ({ id: d.id, ...d.data() as any }));
+          holidays.sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
+          setHolidayList(holidays);
+
+          console.log("✅ Static data loaded once.");
+      } catch (e) { console.log("Static data error:", e); }
+  };
+
+  const refreshOrganizations = async (compId: string) => {
+      try {
+          const snap = await getDocs(query(
+              collection(db, "organizations"),
+              where("companyId", "==", compId),
+              orderBy("createdAt", "desc"),
+              limit(500)
+          ));
+          setOrgList(snap.docs.map(d => ({ id: d.id, ...d.data() as any })));
+      } catch (e) { console.log("Org refresh error:", e); }
+  };
+
+  // =========================================================
+  // 🔥 MASTER MESSAGING ENGINE
   // =========================================================
   const queueAutomatedMessage = async (type: 'whatsapp' | 'email', to: string, templateName: string, variables: any, scheduledDate: string | null = null) => {
       if (!isAutomationEnabled) {
@@ -118,25 +170,38 @@ export const DataProvider = ({ children }: any) => {
       } catch (error) { console.error("❌ [Queue Error]:", error); }
   };
   
-  // =========================================================
-  // 🔥 COMPANY SETTINGS FETCH (UPDATED FOR SAAS)
-  // =========================================================
   const fetchCompanySettings = async (companyId: string) => {
         if (!companyId) return;
 
         try {
             const localProfile = await AsyncStorage.getItem('companyProfileLocal');
             if (localProfile) {
-                setCompanyProfile(JSON.parse(localProfile));
+                const parsed = JSON.parse(localProfile);
+                if (parsed.companyId === companyId) {
+                    setCompanyProfile(parsed);
+                } else {
+                    await AsyncStorage.removeItem('companyProfileLocal');
+                }
             }
 
-            const docRef = doc(db, "company_profile", companyId);
-            const docSnap = await getDoc(docRef);
+            // 🔥 FIX: "companies" collection mein companyId field se query karo
+            const compQuery = query(collection(db, "companies"), where("companyId", "==", companyId));
+            const compSnap = await getDocs(compQuery);
+
+            let data: any = null;
+            if (!compSnap.empty) {
+                data = compSnap.docs[0].data();
+            } else {
+                const docRef = doc(db, "company_profile", companyId);
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) {
+                    data = docSnap.data();
+                }
+            }
             
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                
+            if (data) {
                 const profileData = {
+                    companyId: companyId,
                     companyName: data.companyName || 'LMS',
                     shortName: data.shortName || 'LMS',
                     tagline: data.tagline || '',
@@ -167,8 +232,8 @@ export const DataProvider = ({ children }: any) => {
       try {
           const q = query(collection(db, "projects"), orderBy("createdAt", "desc"));
           const snapshot = await getDocs(q);
-          const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          setProjectList(list as any);
+          const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+          setProjectList(list);
       } catch (e) { 
           console.log("Error fetching projects:", e); 
       }
@@ -191,7 +256,7 @@ export const DataProvider = ({ children }: any) => {
   }, [currentUser]);  
   
   // =========================================================
-  // 1. AUTH LISTENER & PUSH TOKEN SYNC (🔥 SAAS ENGINE UPGRADED)
+  // 1. AUTH LISTENER & PUSH TOKEN SYNC
   // =========================================================
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
@@ -202,27 +267,21 @@ export const DataProvider = ({ children }: any) => {
         const emailKey = user.email?.trim().toLowerCase() || ""; 
         let dbTarget = 1000000; 
 
-        // 🔥 SAAS VARIABLES INITIALIZED
         let companyId = "";
         let isCompanyActive = true; 
-        
-        // 🔥 FIX 1: Default id hamesha user.uid honi chahiye
         let userDocId = user.uid;
 
         try {
             const usersRef = collection(db, "users");
             let userData: any = null;
 
-            // 🔥 1. THE FIX: Hamesha pehle EMAIL se dhoondho (Kyunki asli data wahin hai)
             const q = query(usersRef, where("email", "==", emailKey));
             const querySnap = await getDocs(q);
 
             if (!querySnap.empty) {
-                // Email se asli document mil gaya
                 userData = querySnap.docs[0].data();
                 userDocId = querySnap.docs[0].id; 
             } else {
-                // 🔥 2. Agar email se nahi mila, tabhi UID wale document ko check karo
                 let userDocSnap = await getDoc(doc(db, "users", user.uid));
                 if (userDocSnap.exists()) {
                     userData = userDocSnap.data();
@@ -231,51 +290,29 @@ export const DataProvider = ({ children }: any) => {
             }
 
             if (userData) {
-                console.log("🔥 Full User Data from DB:", userData);
-
-                // 🔥 Extract Company ID
                 companyId = userData.companyId || "";
-
                 dbTarget = (userData.monthlyTarget && !isNaN(userData.monthlyTarget)) ? Number(userData.monthlyTarget) : 1000000;
                 setSalesTargets({ monthly: dbTarget, yearly: dbTarget * 12 });
 
-                // 🔥 Role Normalization
                 let dbRoleRaw = userData.role || '';
                 let dbRole = dbRoleRaw.toLowerCase().trim();
                 
                 name = userData.name || name;
                 if (userData.mobile) mobile = userData.mobile;
 
-                // Agar role admin/superadmin hai, toh strictly 'Admin' set karo
-                if (dbRole === 'admin' || dbRole === 'superadmin') {
-                    finalRole = 'Admin';
-                } 
-                else if (dbRole === 'engineer' || dbRole === 'service' || dbRole === '') {
-                    finalRole = 'Service Engineer';
-                } 
-                else if (dbRole === 'sales' || dbRole === 'sales man') {
-                    finalRole = 'Sales Executive';
-                } 
-                else if (dbRole === 'account' || dbRole === 'accountant') {
-                    finalRole = 'Accountant';
-                } 
-                else if (dbRole === 'back office' || dbRole === 'store') {
-                    finalRole = 'Store Keeper';
-                } 
-                else if (dbRole === 'hr') {
-                    finalRole = 'Hr';
-                } 
-                else {
-                    finalRole = userData.role; // Default
-                }
+                if (dbRole === 'admin' || dbRole === 'superadmin') finalRole = 'Admin';
+                else if (dbRole === 'engineer' || dbRole === 'service' || dbRole === '') finalRole = 'Service Engineer';
+                else if (dbRole === 'sales' || dbRole === 'sales man') finalRole = 'Sales Executive';
+                else if (dbRole === 'account' || dbRole === 'accountant') finalRole = 'Accountant';
+                else if (dbRole === 'back office' || dbRole === 'store') finalRole = 'Store Keeper';
+                else if (dbRole === 'hr') finalRole = 'Hr';
+                else finalRole = userData.role; 
 
-                // 🔥 SUPER ADMIN CHECK
                 const superAdmins = ["varunkhandagre@gmail.com", "admin@lms.com", "admin@mycrm.com"];
                 if(superAdmins.includes(emailKey)) {
                     finalRole = "SuperAdmin";
                 }
 
-                // 🔥 KILL SWITCH LOGIC (Check if Plan/Trial Expired)
                 if (companyId && finalRole !== "SuperAdmin") {
                     const companyDocRef = doc(db, "company_profile", companyId);
                     const companySnap = await getDoc(companyDocRef);
@@ -297,7 +334,6 @@ export const DataProvider = ({ children }: any) => {
                 }
             }
             
-            // 🔥 Push Token Sync
             try {
                 const token = await registerForPushNotificationsAsync();
                 if (token) {
@@ -306,17 +342,14 @@ export const DataProvider = ({ children }: any) => {
                         expoPushToken: token,
                         lastActive: new Date().toISOString() 
                     }, { merge: true });
-                    console.log("✅ Push Token Saved for:", name);
                 }
             } catch (tokenErr) {
                 console.log("⚠️ Could not fetch/save push token:", tokenErr);
             }
-            
         } catch (e) { console.log("⚠️ Auth Error:", e); }
         
-        console.log(`✅ Logged in as: ${name} (Role: ${finalRole}, Company: ${companyId})`);
-        
-        setCurrentUser({
+        // 🔥 setCurrentUser Optimized Ref Logic
+        const newUser = {
             id: user.uid,
             name: name,
             email: user.email || "",
@@ -326,13 +359,24 @@ export const DataProvider = ({ children }: any) => {
             mobile: mobile,
             companyId: companyId,             
             isCompanyActive: isCompanyActive  
-        });
+        };
+        
+        currentUserRef.current = newUser;
+        setCurrentUser(newUser);
+        console.log("🆔 companyId from userData:", companyId);
 
-        // 🔥 Fetch Company profile automatically
-        if (companyId) fetchCompanySettings(companyId);
+        if (companyId) {
+            console.log("✅ Calling fetchCompanySettings with:", companyId);
+            fetchCompanySettings(companyId);
+            fetchStaticData(companyId); // Static data ek baar fetch
+
+        }
 
       } else {
+        console.log("❌ companyId is EMPTY — fetchCompanySettings NOT called!");
         setCurrentUser(null);
+        currentUserRef.current = null;
+        staticDataLoaded.current = false;
       }
       setLoading(false);
     });
@@ -340,7 +384,7 @@ export const DataProvider = ({ children }: any) => {
   }, []);
 
   // =========================================================
-  // 2. PERMISSIONS & USER LIST (🔥 SAAS FIX 2 ADDED)
+  // 2. PERMISSIONS & USER LIST
   // =========================================================
   useEffect(() => {
       if (!currentUser) {
@@ -348,11 +392,10 @@ export const DataProvider = ({ children }: any) => {
           return; 
       }
 
-      // 🔥 FIX 2: SAAS PERMISSIONS FETCH
       let unsubPerm = () => {};
       if (currentUser.companyId) {
           const qPerm = query(collection(db, "settings_permissions"), where("companyId", "==", currentUser.companyId));
-          unsubPerm = onSnapshot(qPerm, (snapshot) => {
+          unsubPerm = onSnapshot(qPerm, (snapshot: any) => {
               if (!snapshot.empty) {
                   const permDoc = snapshot.docs[0].data();
                   setAppPermissions(permDoc.data || permDoc || {});
@@ -361,93 +404,107 @@ export const DataProvider = ({ children }: any) => {
               }
           });
       } else {
-          // Fallback for SuperAdmin or missing companyId
-          unsubPerm = onSnapshot(doc(db, "settings", "permissions"), (d) => { if (d.exists()) setAppPermissions(d.data()); });
+          unsubPerm = onSnapshot(doc(db, "settings", "permissions"), (d: any) => { if (d.exists()) setAppPermissions(d.data()); });
       }
 
-      // SAAS AUTOMATION SETTINGS
       let unsubAuto = () => {};
       if (currentUser.companyId) {
           const qAuto = query(collection(db, "settings_automation"), where("companyId", "==", currentUser.companyId));
-          unsubAuto = onSnapshot(qAuto, (snapshot) => { 
+          unsubAuto = onSnapshot(qAuto, (snapshot: any) => { 
               if (!snapshot.empty) {
                   const autoDoc = snapshot.docs[0].data();
                   setIsAutomationEnabled(autoDoc.enabled !== false); 
               }
           });
       } else {
-          unsubAuto = onSnapshot(doc(db, "settings", "automation"), (d) => { 
+          unsubAuto = onSnapshot(doc(db, "settings", "automation"), (d: any) => { 
               if (d.exists()) setIsAutomationEnabled(d.data().enabled !== false); 
           });
       }
 
-      const unsubUsers = onSnapshot(collection(db, "users"), (snapshot) => {
-          let list = snapshot.docs.map(doc => ({ id: doc.id, uid: doc.id, ...doc.data() as any }));
-          // Filter by companyId if applicable
-          if (currentUser.role !== 'SuperAdmin' && currentUser.companyId) {
-              list = list.filter(u => u.companyId === currentUser.companyId);
-          }
-          setUserList(list);
-          setIsFirebaseSynced(true); 
-      });
+      // ✅ Aise karo — sirf apni company ke users
+const unsubUsers = onSnapshot(
+    currentUser.role === 'SuperAdmin'
+        ? query(collection(db, "users"), limit(200))
+        : query(collection(db, "users"), where("companyId", "==", currentUser.companyId || ''), limit(100)),
+    (snapshot: any) => {
+        const list = snapshot.docs.map((doc: any) => ({ id: doc.id, uid: doc.id, ...doc.data() }));
+        setUserList(list);
+        setIsFirebaseSynced(true);
+    }
+);
       return () => { unsubPerm(); unsubUsers(); unsubAuto(); };
   }, [currentUser]);
 
   // =========================================================
-  // 3. DATA LISTENERS (To be migrated to useSaaSDB later)
+  // 3. DATA LISTENERS (ENTERPRISE SAAS OPTIMIZED)
   // =========================================================
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || !currentUser.companyId) return;
 
     const role = currentUser.role ? currentUser.role.toLowerCase() : '';
     const isMaster = ['admin', 'manager', 'account', 'accountant', 'hr', 'superadmin'].includes(role);
     const isAccount = role.includes('account');
     const isStore = role.includes('store');
+    const compId = currentUser.companyId;
 
     const createListener = (colName: string, setter: Function) => {
-        return onSnapshot(collection(db, colName), (snapshot) => {
-            let data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
-            
-            // 🔥 Basic SaaS Isolation for Real-time Listeners
-            if (currentUser.role !== 'SuperAdmin' && currentUser.companyId) {
-                data = data.filter(item => item.companyId === currentUser.companyId);
-            }
+        let dbQuery;
+        const publicCollections = ['organizations', 'products', 'holidays', 'settings'];
+        const personalHeavyCollections = ['leads', 'sales_reports', 'service_calls', 'demos', 'travel_notes', 'advances', 'expenses', 'attendance', 'leaves'];
 
-            if (isMaster) {
-                // Admin sees EVERYTHING of their company
-            }
-            else if (colName === 'organizations' || colName === 'installations' || colName === 'products' || colName === 'payment_dues' || colName === 'couriers') {
-                // Public Data (Within Company)
-            } 
-            else if (isAccount) {
-                const accountAccess = [
-                    'orders', 'payment_collections', 'payment_dues', 
-                    'advances', 'expenses', 'leaves', 'attendance', 
-                    'travel_notes', 'card_requests', 'tasks', 'couriers', 'installations'
-                ];
-                if (!accountAccess.includes(colName) && 
-                    colName !== 'organizations' && colName !== 'products' && colName !== 'couriers') {
-                        data = data.filter((item: any) => item.senderId === currentUser.id || item.userId === currentUser.id);
+        const isPublicData = publicCollections.includes(colName);
+        const FETCH_LIMIT = isPublicData ? 2000 : 300;
+
+        const baseQuery = [where("companyId", "==", compId), orderBy("createdAt", "desc"), limit(FETCH_LIMIT)];
+
+        if (currentUser.role === 'SuperAdmin') {
+            dbQuery = query(collection(db, colName), orderBy("createdAt", "desc"), limit(FETCH_LIMIT));
+        }
+        else if (isMaster || isPublicData) {
+            dbQuery = query(collection(db, colName), ...baseQuery);
+        } 
+        else if (isAccount && ['orders', 'payment_collections', 'payment_dues', 'advances', 'expenses', 'leaves', 'attendance', 'travel_notes', 'visiting_cards', 'tasks', 'couriers', 'installations'].includes(colName)) {
+            dbQuery = query(collection(db, colName), ...baseQuery);
+        } 
+        else if (isStore && ['spare_parts', 'couriers', 'visiting_cards', 'orders', 'tasks', 'installations', 'payment_dues'].includes(colName)) {
+            dbQuery = query(collection(db, colName), ...baseQuery);
+        } 
+        else if (personalHeavyCollections.includes(colName)) {
+            dbQuery = query(
+                collection(db, colName), 
+                where("companyId", "==", compId),
+                where("senderId", "==", currentUser.id), 
+                orderBy("createdAt", "desc"), 
+                limit(FETCH_LIMIT)
+            );
+        } 
+        else {
+            dbQuery = query(collection(db, colName), ...baseQuery);
+        }
+
+        return onSnapshot(dbQuery, (snapshot: any) => {
+            let data = snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() as any }));
+
+            if (!isMaster && !isPublicData && currentUser.role !== 'SuperAdmin') {
+                if (isAccount && ['orders', 'payment_collections', 'payment_dues', 'advances', 'expenses', 'leaves', 'attendance', 'travel_notes', 'visiting_cards', 'tasks', 'couriers', 'installations'].includes(colName)) {
+                    // All good
+                }
+                else if (isStore && ['spare_parts', 'couriers', 'visiting_cards', 'orders', 'tasks', 'installations', 'payment_dues'].includes(colName)) {
+                    // All good
+                }
+                else if (!personalHeavyCollections.includes(colName)) {
+                    data = data.filter((item: any) => 
+                        item.senderId === currentUser.id || 
+                        item.userId === currentUser.id ||
+                        item.assignedTo === currentUser.id || 
+                        item.userName === currentUser.name ||
+                        (colName === 'tasks' && item.to === currentUser.name) ||
+                        (colName === 'couriers' && (item.receiverName === currentUser.name || item.senderName === currentUser.name))
+                    );
                 }
             }
-            else if (isStore) {
-                const storeAccess = ['spare_parts', 'couriers', 'products', 'card_requests', 'orders', 'tasks', 'installations'];
-                if (!storeAccess.includes(colName) && colName !== 'organizations') {
-                    data = data.filter((item: any) => item.senderId === currentUser.id || item.userId === currentUser.id);
-                }
-            }
-            else {
-                data = data.filter((item: any) => 
-                    item.senderId === currentUser.id || 
-                    item.userId === currentUser.id ||
-                    item.assignedTo === currentUser.id || 
-                    item.userName === currentUser.name ||
-                    (colName === 'tasks' && item.to === currentUser.name) ||
-                    (colName === 'couriers' && (item.receiverName === currentUser.name || item.senderName === currentUser.name))
-                );
-            }
 
-            // Sort Newest First
             data.sort((a: any, b: any) => {
                 const dateA = new Date(a.createdAt || a.date || 0).getTime();
                 const dateB = new Date(b.createdAt || b.date || 0).getTime();
@@ -455,10 +512,12 @@ export const DataProvider = ({ children }: any) => {
             });
 
             setter(data);
+        }, (error) => {
+            console.error(`Firebase Listener Error [${colName}]:`, error);
         });
     };
 
-    const unsubProduct = createListener("products", setProductList);
+    // 🔥 Removed Products, Orgs, Holidays from Realtime Listeners
     const unsubLead = createListener("leads", setLeadsList);
     const unsubTravel = createListener("travel_notes", setTravelList);
     const unsubPMS = createListener("pms_reports", setPmsList);
@@ -470,36 +529,39 @@ export const DataProvider = ({ children }: any) => {
     const unsubSpare = createListener("spare_parts", setSparePartsList);
     const unsubPlan = createListener("activity_plans", setActivityPlanList);
     const unsubCourier = createListener("couriers", setCourierList);
-    const unsubCard = createListener("card_requests", setCardRequestList);
+    const unsubCard = createListener("visiting_cards", setCardRequestList);
     const unsubPay = createListener("payment_collections", setPaymentList);
     const unsubDue = createListener("payment_dues", setDueList);
+    const unsubTask = createListener("tasks", setTaskList);
     
-    const unsubHolidays = onSnapshot(collection(db, "holidays"), (snapshot) => {
-        let list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
-        if (currentUser.role !== 'SuperAdmin' && currentUser.companyId) {
-            list = list.filter(item => item.companyId === currentUser.companyId);
-        }
-        list.sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
-        setHolidayList(list);
-    });
-    
-    const unsubNotif = onSnapshot(collection(db, "notifications"), (snapshot) => {
-        let notifList = snapshot.docs.map(doc => ({
-            ...doc.data() as any, 
-            id: doc.id    
-        }));
+    const unsub1 = createListener("attendance", setAttendanceList);
+    const unsub2 = createListener("leaves", setLeaveList);
+    const unsub3 = createListener("expenses", setExpenseList);
+    const unsub4 = createListener("advances", setAdvanceList);
 
-        if (currentUser.role !== 'SuperAdmin' && currentUser.companyId) {
-            notifList = notifList.filter(item => item.companyId === currentUser.companyId);
-        }
-        
+    // 🔥 Optimized Notification Query
+    // ✅ Aise karo
+const sevenDaysAgo = new Date();
+sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+const notifQuery = currentUser.role === 'SuperAdmin'
+    ? query(collection(db, "notifications"), orderBy("createdAt", "desc"), limit(100))
+    : query(collection(db, "notifications"), 
+        where("companyId", "==", compId), 
+        where("createdAt", ">=", sevenDaysAgo.toISOString()),
+        orderBy("createdAt", "desc"), 
+        limit(100));
+
+    const unsubNotif = onSnapshot(notifQuery, (snapshot: any) => {
+        let notifList = snapshot.docs.map((doc: any) => ({ ...doc.data() as any, id: doc.id }));
         notifList.sort((a:any, b:any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         setNotificationList(notifList);
 
-        if (currentUser) {
-            const myName = (currentUser.name || '').toLowerCase().trim();
-            const myId = (currentUser.id || '').toString().trim(); 
-            const myRole = (currentUser.role || '').toLowerCase().trim();
+        const user = currentUserRef.current; 
+        if (user) {
+            const myName = (user.name || '').toLowerCase().trim();
+            const myId = (user.id || '').toString().trim(); 
+            const myRole = (user.role || '').toLowerCase().trim();
 
             const unreadItems = notifList.filter((n: any) => {
                 const targetTo = (n.to || '').toString().toLowerCase().trim();
@@ -517,33 +579,25 @@ export const DataProvider = ({ children }: any) => {
             });
             setNotificationCount(unreadItems.length);
         }
-      });
-    const unsubOrg = createListener("organizations", setOrgList);
-    const unsubTask = createListener("tasks", setTaskList);
-    
-    const unsub1 = createListener("attendance", setAttendanceList);
-    const unsub2 = createListener("leaves", setLeaveList);
-    const unsub3 = createListener("expenses", setExpenseList);
-    const unsub4 = createListener("advances", setAdvanceList);
+    });
 
     return () => { 
-        unsubTask(); unsubNotif();
-        unsub1(); unsub2(); unsub3(); unsub4(); unsubTravel(); unsubLead();
-        unsubSales(); unsubPMS(); unsubDemo(); unsubOrder();
-        unsubService(); unsubOrg(); unsubInstall(); unsubSpare(); unsubPlan();
-        unsubCourier(); unsubCard(); unsubPay(); unsubDue(); unsubHolidays();
+        unsubLead(); unsubTravel(); unsubPMS(); unsubSales(); unsubDemo(); 
+        unsubOrder(); unsubService(); unsubInstall(); unsubSpare(); unsubPlan(); unsubCourier(); 
+        unsubCard(); unsubPay(); unsubDue(); unsubTask();
+        unsub1(); unsub2(); unsub3(); unsub4(); unsubNotif();
     };
   }, [currentUser]);
 
   // =========================================================
-  // 4. CRUD FUNCTIONS (🔥 SAAS FIX 3 ADDED)
+  // 4. CRUD FUNCTIONS 
   // =========================================================
   
   const addWithMeta = async (col: string, data: any) => {
     try {
         const docRef = await addDoc(collection(db, col), { 
             ...data,
-            companyId: currentUser?.companyId || '', // 🔥 FIX 3: SAAS COMPANY ID ADDED HERE
+            companyId: currentUser?.companyId || '', 
             status: data.status || "Pending", 
             userName: currentUser?.name || 'Unknown',
             senderId: currentUser?.id || 'guest', 
@@ -630,7 +684,7 @@ export const DataProvider = ({ children }: any) => {
             const dueAmount = parseFloat(orderData.amount || 0);
             if (dueAmount > 0) {
                 const dueData = {
-                    companyId: currentUser?.companyId || '', // 🔥 FIX 3
+                    companyId: currentUser?.companyId || '', 
                     orgName: orderData.hospitalName || orderData.partyName || "Unknown",
                     orgId: orderData.orgId || "", 
                     city: orderData.city || "",
@@ -675,6 +729,7 @@ export const DataProvider = ({ children }: any) => {
       try {
           const ref = doc(db, "organizations", id);
           await updateDoc(ref, data);
+          setOrgList(prev => prev.map(o => o.id === id ? { ...o, ...data } : o));
           console.log(`✅ Organization updated:`, data);
 
           if (data.name) {
@@ -685,7 +740,7 @@ export const DataProvider = ({ children }: any) => {
               const updateOldRecords = async (colName: string, fieldsToUpdate: any) => {
                   const q = query(collection(db, colName), where("orgId", "==", id));
                   const snap = await getDocs(q);
-                  snap.forEach((docItem) => {
+                  snap.forEach((docItem: any) => {
                       batch.update(docItem.ref, fieldsToUpdate);
                       updateCount++;
                   });
@@ -757,7 +812,7 @@ export const DataProvider = ({ children }: any) => {
       try {
           const docRef = await addDoc(collection(db, "orders"), {
               ...orderData,
-              companyId: currentUser?.companyId || '' // 🔥 FIX 3
+              companyId: currentUser?.companyId || '' 
           });
           await updateDoc(docRef, { id: docRef.id });
           console.log("✅ Order Saved & ID Synced:", docRef.id);
@@ -784,12 +839,14 @@ export const DataProvider = ({ children }: any) => {
       }
   };
 
+  // 🔥 Local Update added for Organizations
   const addOrganization = async (orgData: any) => {
       try {
           await addWithMeta("organizations", orgData);
+          setOrgList(prev => [{ ...orgData, createdAt: new Date().toISOString() }, ...prev]);
           
           const notifData = {
-            companyId: currentUser?.companyId || '', // 🔥 FIX 3
+            companyId: currentUser?.companyId || '', 
             title: "New Organization",
             message: `New Hospital Added: ${orgData.name || orgData.orgName}`,
             type: "info",        
@@ -812,7 +869,7 @@ export const DataProvider = ({ children }: any) => {
   const addInstallation = (i:any) => addWithMeta("installations", i);
   const addSparePart = (i:any) => addWithMeta("spare_parts", i);
   const addActivityPlan = (i:any) => addWithMeta("activity_plans", i);
-  const addCardRequest = (i:any) => addWithMeta("card_requests", i);
+  const addCardRequest = (i:any) => addWithMeta("visiting_cards", i);
   const addCourier = (i:any) => addWithMeta("couriers", i);
   
   const addPayment = async (paymentData: any) => {
@@ -821,7 +878,7 @@ export const DataProvider = ({ children }: any) => {
 
           const docRef = await addDoc(collection(db, "payment_collections"), { 
               ...paymentData, 
-              companyId: currentUser?.companyId || '', // 🔥 FIX 3
+              companyId: currentUser?.companyId || '', 
               status: 'Approved', 
               createdAt: new Date().toISOString() 
           });
@@ -915,7 +972,7 @@ export const DataProvider = ({ children }: any) => {
       try {
           const docRef = await addDoc(collection(db, "notifications"), {
               ...notifData,
-              companyId: currentUser?.companyId || '', // 🔥 FIX 3
+              companyId: currentUser?.companyId || '', 
               createdAt: new Date().toISOString(),
               read: false,
               senderId: currentUser?.id || 'app',
@@ -940,7 +997,7 @@ export const DataProvider = ({ children }: any) => {
               const roleQuery = query(collection(db, "users"), where("role", "==", notifData.to), where("companyId", "==", currentUser?.companyId || ''));
               const roleSnap = await getDocs(roleQuery);
               
-              roleSnap.forEach((userDoc) => {
+              roleSnap.forEach((userDoc: any) => {
                   const targetUser = userDoc.data();
                   if (targetUser.expoPushToken) {
                       sendExpoPushNotification(
@@ -963,7 +1020,7 @@ export const DataProvider = ({ children }: any) => {
     try {
         const docRef = await addDoc(collection(db, "payment_dues"), { 
             ...dueData, 
-            companyId: currentUser?.companyId || '', // 🔥 FIX 3
+            companyId: currentUser?.companyId || '', 
             createdAt: new Date().toISOString() 
         });
         const newDue = { id: docRef.id, ...dueData };
@@ -975,14 +1032,16 @@ export const DataProvider = ({ children }: any) => {
     } catch (error) { throw error; }
   };
 
+  // 🔥 Local Update added for Products
   const addProduct = async (productData: any) => {
     try {
         const docRef = await addDoc(collection(db, "products"), { 
             ...productData, 
-            companyId: currentUser?.companyId || '', // 🔥 FIX 3
+            companyId: currentUser?.companyId || '', 
             createdAt: new Date().toISOString() 
         });
         await updateDoc(docRef, { id: docRef.id });
+        setProductList(prev => [{ id: docRef.id, ...productData, createdAt: new Date().toISOString() }, ...prev]);
         return true;
     } catch (error) { throw error; }
   };
@@ -1008,11 +1067,9 @@ export const DataProvider = ({ children }: any) => {
           const userCredential = await signInWithEmailAndPassword(auth, email, pass);
           const fbUser = userCredential.user;
 
-          // 🔥 1. PURANA CACHE DELETE KAREIN
           await AsyncStorage.removeItem('companyProfileLocal');
           await AsyncStorage.removeItem('user');
 
-          // 2. Fetch User Data
           const userQuery = query(collection(db, 'users'), where('email', '==', fbUser.email!.toLowerCase()));
           const userDocSnap = await getDocs(userQuery);
           
@@ -1024,50 +1081,43 @@ export const DataProvider = ({ children }: any) => {
 
           const userData = { ...userDocSnap.docs[0].data(), id: userDocSnap.docs[0].id } as any;
 
-          // 🔥 3. SAAS SECURITY: STRICT APPROVAL CHECK (WITH LEGACY SUPPORT)
           if (userData.role !== 'SuperAdmin') {
               let companyData = null;
 
-              // Tarika 1: Naye SaaS format me check karein (By companyId field)
               const compQuery1 = query(collection(db, 'companies'), where('companyId', '==', userData.companyId));
               const snap1 = await getDocs(compQuery1);
               if (!snap1.empty) companyData = snap1.docs[0].data();
 
-              // Tarika 2: Thode purane format me check karein (By id field)
               if (!companyData) {
                   const compQuery2 = query(collection(db, 'companies'), where('id', '==', userData.companyId));
                   const snap2 = await getDocs(compQuery2);
                   if (!snap2.empty) companyData = snap2.docs[0].data();
               }
 
-              // Tarika 3: Sabse purane format me check karein (Life Line Medical ke liye direct Doc ID se)
               if (!companyData && userData.companyId) {
                   const compDocRef = doc(db, 'companies', userData.companyId);
                   const compDocSnap = await getDoc(compDocRef);
                   if (compDocSnap.exists()) companyData = compDocSnap.data();
               }
 
-              // Final Decision Logic
               if (companyData) {
-                  // 1. Check if Company is Active
                   if (companyData.isActive === false) {
-                      await auth.signOut(); // Force logout
+                      await auth.signOut(); 
                       Alert.alert("Approval Pending 🚫", "Your company is not approved yet. Please wait for Super Admin approval.");
                       return false; 
                   }
 
-                  // 🔥 2. NAYA LOGIC: Check Trial / Plan Expiry
                   if (companyData.expiryDate) {
                       const today = new Date();
                       const expiry = new Date(companyData.expiryDate);
                       
                       if (today > expiry) {
-                          await auth.signOut(); // Force logout
+                          await auth.signOut(); 
                           Alert.alert(
                               "Plan Expired ⏳", 
                               "Your trial or subscription has expired. Please contact Super Admin to renew your plan."
                           );
-                          return false; // Login block kar diya
+                          return false; 
                       }
                   }
               } else {
@@ -1083,53 +1133,75 @@ export const DataProvider = ({ children }: any) => {
           return false;
       }
   };
-  const logout = async () => { await signOut(auth); setCurrentUser(null); };
+
+  // 🔥 Logout Ref Reset
+  const logout = async () => { 
+      await signOut(auth); 
+      setCurrentUser(null); 
+      currentUserRef.current = null;
+      staticDataLoaded.current = false;
+  };
   
   const markNotificationRead = async (id: string) => {
       setNotificationList(prev => prev.map((n: any) => n.id === id ? { ...n, read: true } : n));
       try { await updateDoc(doc(db, "notifications", id), { read: true }); } catch (e) {}
   };
 
+  // 🔥 Optimized Batch Notifications Update
   const markAllNotificationsRead = async () => {
       setNotificationList(prev => prev.map((n: any) => ({ ...n, read: true })));
       try {
           const unread = notificationList.filter((n:any) => !n.read);
-          unread.forEach(async (item:any) => { await updateDoc(doc(db, "notifications", item.id), { read: true }); });
+          if (unread.length === 0) return;
+          const batch = writeBatch(db);
+          unread.forEach((item:any) => {
+              batch.update(doc(db, "notifications", item.id), { read: true });
+          });
+          await batch.commit();
       } catch (e) {}
   };  
 
   const getMyUnreadCount = () => notificationCount;
 
+  const contextValue = useMemo(() => ({
+      currentUser, loading, login, logout, activeSection, setActiveSection, shouldOpenSidebar, setShouldOpenSidebar, user: currentUser,
+      isFirebaseSynced, isAutomationEnabled,
+      taskList, leadsList, pmsList, notificationList, notificationCount, attendanceList, leaveList, expenseList, advanceList, travelList, 
+      salesVisitList, orderList, serviceCallList, orgList, installList, sparePartsList, activityPlanList, courierList, 
+      cardRequestList, paymentList, dueList, demoList, serviceList, productList, companyProfile,
+      userList, holidayList,
+      
+      salesTargets, appPermissions, projectList,
+      
+      addAttendance, addTask, addLead, addTravelNote, addAdvance, addExpense, addLeave, addSalesVisit, addServiceCall, 
+      addOrder, addPayment, addDue, addOrganization, addInstallation, addSparePart, addActivityPlan, addCardRequest, addCourier, 
+      addDemo, addPMS, completeTask, addProduct, addNotification, addProject, addQuotation,
+      
+      updateAdvanceStatus, 
+      updateExpenseStatus, 
+      updateLeaveStatus,
+      updateActivityStatus,
+      updateOrderStatus,
+      updateLead,
+      updateOrganization, 
+      addLeadActivity,
+
+      deleteOrder, deleteTask, deleteLead,
+
+      markNotificationRead, markAllNotificationsRead, 
+      refreshOrganizations: () => refreshOrganizations(currentUser?.companyId || ''),
+      
+      unreadCount: notificationCount 
+  }), [
+      currentUser, loading, activeSection, shouldOpenSidebar, isFirebaseSynced, isAutomationEnabled,
+      taskList, leadsList, pmsList, notificationList, notificationCount, attendanceList, leaveList, expenseList, advanceList, travelList, 
+      salesVisitList, orderList, serviceCallList, orgList, installList, sparePartsList, activityPlanList, courierList, 
+      cardRequestList, paymentList, dueList, demoList, serviceList, productList, companyProfile,
+      userList, holidayList, salesTargets, appPermissions, projectList
+  ]);
+
   return (
-    <DataContext.Provider value={{ 
-        currentUser, loading, login, logout, activeSection, setActiveSection, shouldOpenSidebar, setShouldOpenSidebar, user: currentUser,
-        isFirebaseSynced, isAutomationEnabled,
-        taskList, leadsList, pmsList, notificationList, notificationCount, attendanceList, leaveList, expenseList, advanceList, travelList, 
-        salesVisitList, orderList, serviceCallList, orgList, installList, sparePartsList, activityPlanList, courierList, 
-        cardRequestList, paymentList, dueList, demoList, serviceList, productList, companyProfile,
-        userList, holidayList,
-        
-        salesTargets, appPermissions, projectList,
-        
-        addAttendance, addTask, addLead, addTravelNote, addAdvance, addExpense, addLeave, addSalesVisit, addServiceCall, 
-        addOrder, addPayment, addDue, addOrganization, addInstallation, addSparePart, addActivityPlan, addCardRequest, addCourier, 
-        addDemo, addPMS, completeTask, addProduct, addNotification, addProject, addQuotation,
-        
-        updateAdvanceStatus, 
-        updateExpenseStatus, 
-        updateLeaveStatus,
-        updateActivityStatus,
-        updateOrderStatus,
-        updateLead,
-        updateOrganization, 
-        addLeadActivity,
-
-        deleteOrder, deleteTask, deleteLead,
-
-        markNotificationRead, markAllNotificationsRead,
-        
-        unreadCount: notificationCount 
-    }}>
+    <DataContext.Provider value={contextValue}>
       {children}
     </DataContext.Provider>
   );

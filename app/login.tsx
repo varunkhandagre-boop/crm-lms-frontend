@@ -16,6 +16,10 @@ import {
     View
 } from 'react-native';
 
+// 🔥 FIREBASE AUTH IMPORT FOR FORGOT PASSWORD
+import { sendPasswordResetEmail } from 'firebase/auth';
+import { auth } from '../firebaseConfig'; // Path check kar lein agar galat ho toh
+
 // 🔥 SAAS IMPORTS
 import { useData } from './context/DataContext';
 
@@ -54,6 +58,27 @@ export default function LoginScreen() {
       loadBranding();
   }, []);
 
+  // 🔥 FORGOT PASSWORD FUNCTION
+  const handleForgotPassword = async () => {
+      if (!email) {
+          Alert.alert("Email Required", "Please enter your registered email ID in the box above to reset your password.");
+          return;
+      }
+      
+      try {
+          await sendPasswordResetEmail(auth, email.trim().toLowerCase());
+          Alert.alert(
+              "Email Sent ✅", 
+              "A password reset link has been sent to your email address. Please check your inbox (and spam folder) to create a new password."
+          );
+      } catch (error: any) {
+          let msg = error.message;
+          if (msg.includes('user-not-found')) msg = "This email is not registered with us.";
+          if (msg.includes('invalid-email')) msg = "Please enter a valid email address.";
+          Alert.alert("Error", msg);
+      }
+  };
+
   // 🔥 SAAS LOGIN LOGIC
   const handleLogin = async () => {
       if(!email || !password) {
@@ -64,8 +89,6 @@ export default function LoginScreen() {
       setIsLoading(true); 
       
       try {
-          // The underlying login function in context will now fetch the user document,
-          // which includes the companyId, effectively routing them to their tenant's isolated data.
           const success = await login(email.trim().toLowerCase(), password);
           
           if (success) {
@@ -133,6 +156,11 @@ export default function LoginScreen() {
                   />
               </View>
 
+              {/* 🔥 NEW: FORGOT PASSWORD BUTTON 🔥 */}
+              <TouchableOpacity onPress={handleForgotPassword} style={{ alignSelf: 'flex-end', marginBottom: 20 }}>
+                  <Text style={{ color: '#3b5998', fontWeight: 'bold' }}>Forgot Password?</Text>
+              </TouchableOpacity>
+
               {/* LOGIN BUTTON WITH SPINNER */}
               <TouchableOpacity 
                   style={[styles.loginBtn, isLoading && { opacity: 0.6 }]} 
@@ -147,7 +175,7 @@ export default function LoginScreen() {
                   )}
               </TouchableOpacity>
 
-              {/* 🔥 NEW: REGISTER COMPANY LINK 🔥 */}
+              {/* REGISTER COMPANY LINK */}
               <TouchableOpacity onPress={() => router.push('/register_company' as any)} style={{ marginTop: 25 }}>
                   <Text style={{ textAlign: 'center', color: '#3b5998', fontWeight: 'bold', fontSize: 15 }}>
                       Don't have an account? Register Company
@@ -193,7 +221,7 @@ const styles = StyleSheet.create({
 
   loginBtn: { 
       backgroundColor: '#3b5998', height: 55, borderRadius: 12, 
-      justifyContent: 'center', alignItems: 'center', marginTop: 15, 
+      justifyContent: 'center', alignItems: 'center', marginTop: 5, 
       shadowColor: '#3b5998', shadowOffset: {width:0, height:4}, 
       shadowOpacity:0.3, shadowRadius:5, elevation:5 
   },

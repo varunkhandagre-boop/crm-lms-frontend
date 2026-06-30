@@ -266,6 +266,21 @@ export default function CompanyProfileScreen() {
                                 <Text style={{fontSize: 10, color: '#d32f2f', marginTop: 5, textAlign: 'right'}}>Limit reached. Contact Admin to upgrade.</Text>
                             )}
                         </View>
+                        {/* 🔥 NAYA BUTTON: UPGRADE / RENEW PLAN (Sirf Admin ke liye) */}
+                        {currentUser?.role === 'Admin' && (
+                            <TouchableOpacity 
+                                style={{ backgroundColor: '#2e7d32', padding: 12, borderRadius: 8, marginTop: 15, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', elevation: 2 }}
+                                onPress={() => {
+                                    router.push({
+                                        pathname: '/SubscriptionScreen' as any,
+                                        params: { companyId: currentUser?.companyId }
+                                    });
+                                }}
+                            >
+                                <Ionicons name="rocket-outline" size={18} color="white" style={{ marginRight: 8 }} />
+                                <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 14 }}>Upgrade / Renew Plan</Text>
+                            </TouchableOpacity>
+                        )}
                     </View>
 
                     {/* 1. BRANDING */}
