@@ -412,10 +412,14 @@ export default function AddOrderScreen() {
   };
 
   const openGallery = async () => {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') return Alert.alert("Permission Denied");
-      let result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.5 });
-      if (!result.canceled) setSelectedFile({ type: 'image', uri: result.assets[0].uri, name: "gallery_img.jpg" });
+      try {
+          if (Platform.OS === 'ios') {
+              const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+              if (status !== 'granted') return Alert.alert("Permission Denied", "Please allow gallery access in Settings.");
+          }
+          let result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.5 });
+          if (!result.canceled) setSelectedFile({ type: 'image', uri: result.assets[0].uri, name: "gallery_img.jpg" });
+      } catch (error) { Alert.alert("Error", "Could not open gallery."); }
   };
 
   // 🔥 6. SAAS SAVE LOGIC

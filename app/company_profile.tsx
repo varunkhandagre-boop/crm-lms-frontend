@@ -104,26 +104,30 @@ export default function CompanyProfileScreen() {
     }, []);
 
     const handleImagePick = async (field: 'logoUrl' | 'signatureUrl' | 'qrCodeUrl') => {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') return Alert.alert("Permission", "Gallery permission required.");
-
-        let result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            allowsEditing: true,
-            aspect: field === 'signatureUrl' ? [3, 1] : [1, 1],
-            quality: 0.2,
-            base64: true,
-        });
-
-        if (!result.canceled && result.assets[0]) {
-            const asset = result.assets[0];
-            if (USE_STORAGE_BUCKET) {
-                updateField(field, asset.uri);
-            } else {
-                const b64String = `data:image/jpeg;base64,${asset.base64}`;
-                updateField(field, b64String);
+        try {
+            if (Platform.OS === 'ios') {
+                const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                if (status !== 'granted') return Alert.alert("Permission", "Gallery permission required in Settings.");
             }
-        }
+
+            let result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsEditing: true,
+                aspect: field === 'signatureUrl' ? [3, 1] : [1, 1],
+                quality: 0.2,
+                base64: true,
+            });
+
+            if (!result.canceled && result.assets[0]) {
+                const asset = result.assets[0];
+                if (USE_STORAGE_BUCKET) {
+                    updateField(field, asset.uri);
+                } else {
+                    const b64String = `data:image/jpeg;base64,${asset.base64}`;
+                    updateField(field, b64String);
+                }
+            }
+        } catch (error) { Alert.alert("Error", "Could not open gallery."); }
     };
 
     const handleRemoveImage = (field: string) => {

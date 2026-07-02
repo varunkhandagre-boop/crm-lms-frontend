@@ -7,6 +7,7 @@ import {
     ActivityIndicator,
     Alert,
     Image,
+    Platform,
     ScrollView,
     StatusBar,
     StyleSheet,
@@ -99,9 +100,11 @@ export default function ProfileScreen() {
   };
 
   const pickImage = async () => {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') return Alert.alert("Permission Needed", "Please allow gallery access.");
       try {
+        if (Platform.OS === 'ios') {
+            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (status !== 'granted') return Alert.alert("Permission Needed", "Please allow gallery access in Settings.");
+        }
         let result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.2, base64: true, 
         });
@@ -119,7 +122,7 @@ export default function ProfileScreen() {
           const imageString = `data:image/jpeg;base64,${base64}`;
           const userEmail = currentUser.email.toLowerCase();
           
-          const res = await updateSaaSData("users", userEmail, { profileImage: imageString, updatedAt: new Date().toISOString() });
+          const res = await updateSaaSData("users", currentUser.id, { profileImage: imageString, updatedAt: new Date().toISOString() });
           
           if (res.success) {
               setCurrentImage(imageString);
