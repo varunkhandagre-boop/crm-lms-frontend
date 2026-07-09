@@ -73,39 +73,49 @@ export default function HomeScreen() {
   const [paymentList, setPaymentList] = useState<any[]>([]);
   
   const [sidebarVisible, setSidebarVisible] = useState(false); 
+  const [planDaysLeft, setPlanDaysLeft] = useState<number | null>(null);
   const [expoPushToken, setExpoPushToken] = useState('');
 
   useFocusEffect(
-      useCallback(() => {
-          const loadCountsData = async () => {
-              if (currentUser?.companyId) {
-                  const [
-                      tasks, leads, pms, dues, couriers, services, sales,
-                      attendance, leaves, expenses, advances, orders,
-                      cards, installs, demos, payments
-                  ] = await Promise.all([
-                      fetchSaaSData("tasks"), fetchSaaSData("leads"), fetchSaaSData("pms_reports"),
-                      fetchSaaSData("dues"), fetchSaaSData("couriers"), fetchSaaSData("service_calls"),
-                      fetchSaaSData("sales_reports"), fetchSaaSData("attendance"), fetchSaaSData("leaves"),
-                      fetchSaaSData("expenses"), fetchSaaSData("advances"), fetchSaaSData("orders"),
-                      fetchSaaSData("visiting_cards"), fetchSaaSData("installations"), fetchSaaSData("demos"),
-                      fetchSaaSData("payments")
-                  ]);
+    useCallback(() => {
+        const loadCountsData = async () => {
+            if (currentUser?.companyId) {
+                const [
+                    tasks, leads, pms, dues, couriers, services, sales,
+                    attendance, leaves, expenses, advances, orders,
+                    cards, installs, demos, payments
+                ] = await Promise.all([
+                    fetchSaaSData("tasks"), fetchSaaSData("leads"), fetchSaaSData("pms_reports"),
+                    fetchSaaSData("dues"), fetchSaaSData("couriers"), fetchSaaSData("service_calls"),
+                    fetchSaaSData("sales_reports"), fetchSaaSData("attendance"), fetchSaaSData("leaves"),
+                    fetchSaaSData("expenses"), fetchSaaSData("advances"), fetchSaaSData("orders"),
+                    fetchSaaSData("visiting_cards"), fetchSaaSData("installations"), fetchSaaSData("demos"),
+                    fetchSaaSData("payments")
+                ]);
 
-                  setTaskList(tasks); setLeadList(leads); setPmsList(pms); setDueList(dues);
-                  setCourierList(couriers); setServiceCallList(services); setSalesVisitList(sales);
-                  setAttendanceList(attendance); setLeaveList(leaves); setExpenseList(expenses);
-                  setAdvanceList(advances); setOrderList(orders); setCardRequestList(cards);
-                  setInstallList(installs); setDemoList(demos); setPaymentList(payments);
-              }
-          };
-          loadCountsData();
-          
-          if (shouldOpenSidebar) { setSidebarVisible(true); setShouldOpenSidebar(false); }
-      }, [currentUser, shouldOpenSidebar])
-  );
+                setTaskList(tasks); setLeadList(leads); setPmsList(pms); setDueList(dues);
+                setCourierList(couriers); setServiceCallList(services); setSalesVisitList(sales);
+                setAttendanceList(attendance); setLeaveList(leaves); setExpenseList(expenses);
+                setAdvanceList(advances); setOrderList(orders); setCardRequestList(cards);
+                setInstallList(installs); setDemoList(demos); setPaymentList(payments);
+            }
 
-  const [branding, setBranding] = useState({
+            try {
+                const companies = await fetchSaaSData("companies");
+                if (companies?.length > 0) {
+                    const expiry = new Date((companies[0] as any).expiryDate);
+                    const diff = Math.ceil((expiry.getTime() - Date.now()) / 86400000);
+                    setPlanDaysLeft(diff);
+                }
+            } catch (e) {}
+
+            if (shouldOpenSidebar) { setSidebarVisible(true); setShouldOpenSidebar(false); }
+        };
+        loadCountsData();
+    }, [currentUser, shouldOpenSidebar])
+);
+
+const [branding, setBranding] = useState({
       name: 'LMS',
       logo: null as string | null
   });
@@ -572,6 +582,30 @@ const saveTokenToDatabase = async (token: string) => {
                           <Text style={styles.empId}>{currentUser.empId}</Text>
                           <Text style={styles.empName}>{currentUser.name}</Text>
                           <Text style={styles.empRole}>{currentUser.role}</Text>
+                          {planDaysLeft !== null && planDaysLeft <= 30 && (
+    <TouchableOpacity 
+        onPress={() => { setSidebarVisible(false); router.push('/SubscriptionScreen' as any); }}
+        style={{
+            marginTop: 8,
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: planDaysLeft <= 7 ? '#fdecea' : '#fff3cd',
+            borderColor: planDaysLeft <= 7 ? '#d32f2f' : '#f57c00',
+            borderWidth: 1,
+            borderRadius: 12,
+            paddingHorizontal: 12,
+            paddingVertical: 5,
+        }}
+    >
+        <Ionicons name="warning" size={12} color={planDaysLeft <= 7 ? '#d32f2f' : '#f57c00'} />
+        <Text style={{
+            fontSize: 11, fontWeight: 'bold', marginLeft: 5,
+            color: planDaysLeft <= 7 ? '#d32f2f' : '#856404'
+        }}>
+            {planDaysLeft <= 0 ? '⚠️ Plan Expired!' : `⏳ Plan: ${planDaysLeft} days left`}
+        </Text>
+    </TouchableOpacity>
+)}
                       </View>
                       <FlatList 
                           data={visibleSidebar} 

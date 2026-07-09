@@ -22,18 +22,7 @@ import { auth } from '../firebaseConfig';
 import { useSaaSDB } from '../hooks/useSaaSDB';
 
 // 🔥 INDIAN STATES & DISTRICTS DATA
-const indianStatesAndDistricts: any = {
-    "Maharashtra": ["Mumbai", "Pune", "Nagpur", "Thane", "Nashik", "Aurangabad", "Solapur", "Amravati", "Kolhapur", "Navi Mumbai"],
-    "Gujarat": ["Ahmedabad", "Surat", "Vadodara", "Rajkot", "Bhavnagar", "Jamnagar", "Gandhinagar", "Junagadh"],
-    "Karnataka": ["Bengaluru", "Mysuru", "Mangaluru", "Hubli", "Belagavi", "Gulbarga", "Davanagere"],
-    "Delhi": ["Central Delhi", "New Delhi", "North Delhi", "South Delhi", "West Delhi", "East Delhi"],
-    "Tamil Nadu": ["Chennai", "Coimbatore", "Madurai", "Salem", "Tiruchirappalli", "Tiruppur", "Vellore"],
-    "Uttar Pradesh": ["Lucknow", "Kanpur", "Ghaziabad", "Agra", "Varanasi", "Meerut", "Prayagraj", "Noida"],
-    "Telangana": ["Hyderabad", "Warangal", "Nizamabad", "Karimnagar", "Ramagundam"],
-    "West Bengal": ["Kolkata", "Howrah", "Darjeeling", "Siliguri", "Asansol", "Durgapur"],
-    "Rajasthan": ["Jaipur", "Jodhpur", "Udaipur", "Kota", "Bikaner", "Ajmer"],
-    "Madhya Pradesh": ["Bhopal", "Indore", "Gwalior", "Jabalpur", "Ujjain", "Sagar"]
-};
+import { districtPincodes, indianStatesAndDistricts } from '../constants/indianStatesData';
 
 export default function RegisterCompanyScreen() {
     const router = useRouter();
@@ -54,6 +43,7 @@ export default function RegisterCompanyScreen() {
     const [address, setAddress] = useState('');
     const [state, setState] = useState('');
     const [city, setCity] = useState(''); 
+    const [pinCode, setPinCode] = useState('');
     const [gstNumber, setGstNumber] = useState('');
     const [employeesCount, setEmployeesCount] = useState('10'); 
 
@@ -61,7 +51,7 @@ export default function RegisterCompanyScreen() {
     const [stateModalVisible, setStateModalVisible] = useState(false);
     const [districtModalVisible, setDistrictModalVisible] = useState(false);
 
-    const statesList = Object.keys(indianStatesAndDistricts);
+    const statesList = Object.keys(indianStatesAndDistricts).sort(); 
     const districtsList = state ? indianStatesAndDistricts[state] : [];
 
     const handleRegister = async () => {
@@ -94,7 +84,8 @@ export default function RegisterCompanyScreen() {
                 ownerEmail: cleanEmail,
                 ownerMobile: mobile,
                 address: address || "",
-                city: city, 
+                city: city,
+                pinCode: pinCode, 
                 state: state,
                 gstNumber: gstNumber || "",
                 maxEmployees: cleanEmpCount,
@@ -142,6 +133,7 @@ export default function RegisterCompanyScreen() {
                 mobile: mobile,
                 address: address || "",
                 city: city,
+                pinCode: pinCode,
                 state: state,
                 gstNumber: gstNumber || "",
                 createdAt: new Date().toISOString(),
@@ -238,6 +230,15 @@ export default function RegisterCompanyScreen() {
                     </View>
 
                     <TextInput style={styles.input} placeholder="GST Number (Optional)" value={gstNumber} onChangeText={setGstNumber} autoCapitalize="characters" />
+                    {/* GST Number ke BAAD ye add karo */}
+<TextInput 
+    style={styles.input} 
+    placeholder="Pin Code" 
+    value={pinCode} 
+    onChangeText={setPinCode}  // manually change kar sakta hai
+    keyboardType="numeric" 
+    maxLength={6}
+/>
 
                     <Text style={styles.sectionHeader}>Setup</Text>
                     <Text style={{color:'#666', marginBottom:5}}>Initial Employee Limit</Text>
@@ -317,6 +318,7 @@ export default function RegisterCompanyScreen() {
                             renderItem={({item}) => (
                                 <TouchableOpacity style={styles.modalListItem} onPress={() => {
                                     setCity(item);
+                                    setPinCode(districtPincodes[item] || '');
                                     setDistrictSearchQuery(''); 
                                     setDistrictModalVisible(false);
                                 }}>

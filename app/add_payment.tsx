@@ -75,7 +75,7 @@ export default function AddPaymentScreen() {
                     fetchSaaSData("organizations"),
                     fetchSaaSData("orders"),
                     fetchSaaSData("payment_dues"),
-                    fetchSaaSData("payments") // To check existing payments/receipt no
+                    fetchSaaSData("payment_collections") // To check existing payments/receipt no
                 ]);
                 setOrgList(orgs);
                 setOrderList(orders);
@@ -435,7 +435,7 @@ export default function AddPaymentScreen() {
 
         try {
             // 1. ADD PAYMENT RECORD VIA SAAS
-            const paymentResult = await addSaaSData('payments', paymentData);
+            const paymentResult = await addSaaSData('payment_collections', paymentData);
             
             if (paymentResult.success) {
                 const payAmount = parseFloat(amount);

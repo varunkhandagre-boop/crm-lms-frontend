@@ -78,7 +78,7 @@ export default function PaymentCollection() {
     const loadData = async () => {
         if (currentUser?.companyId) {
             const [payments, orgs, users] = await Promise.all([
-                fetchSaaSData("payments"),
+                fetchSaaSData("payment_collections"),
                 fetchSaaSData("organizations"),
                 fetchSaaSData("users")
             ]);
@@ -295,7 +295,7 @@ export default function PaymentCollection() {
         if (!selectedHistoryItem) return;
         setLoading(true);
         try {
-            const res = await updateSaaSData("payments", selectedHistoryItem.id, {
+            const res = await updateSaaSData("payment_collections", selectedHistoryItem.id, {
                 amount: parseFloat(editAmount) || 0,
                 notes: editNotes,
                 mode: editModeVal,
@@ -387,7 +387,7 @@ export default function PaymentCollection() {
                             }
 
                             // 2. DELETE THE PAYMENT ENTRY
-                            const res = await deleteSaaSData("payments", selectedHistoryItem.id);
+                            const res = await deleteSaaSData("payment_collections", selectedHistoryItem.id);
                             
                             if(res.success) {
                                 setPaymentList(prev => prev.filter(item => item.id !== selectedHistoryItem.id));

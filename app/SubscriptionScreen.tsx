@@ -4,7 +4,6 @@ import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
-    Image,
     KeyboardAvoidingView,
     Platform,
     ScrollView,
@@ -14,32 +13,45 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import QRCode from 'react-native-qrcode-svg';
 
 // 🔥 FIREBASE IMPORTS
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { useSaaSDB } from '../hooks/useSaaSDB';
+import { useData } from './context/DataContext';
+
+type PlanConfig = {
+    id: string;
+    label: string;
+    durationMonths: number;
+    pricePerEmployee: number;
+    discountPercent: number;
+    active: boolean;
+};
 
 export default function SubscriptionScreen() {
     const router = useRouter();
-    const { companyId } = useLocalSearchParams(); // Registration page se companyId aayegi
+    const { companyId } = useLocalSearchParams();
     const { addSaaSData } = useSaaSDB();
+    const { currentUser } = useData(); 
+    const effectiveCompanyId = companyId || currentUser?.companyId || null;
 
     const [loading, setLoading] = useState(false);
+    const [alreadySubmitted, setAlreadySubmitted] = useState(false);
     const [fetchingRates, setFetchingRates] = useState(true);
 
-    // --- PRICING CONFIG FROM FIREBASE (Fallback rates agar internet na ho) ---
-    const [rates, setRates] = useState({
-        basePricePerEmployeePerYear: 1000,
-        discountTwoYear: 15 // 15% Discount
-    });
+    // --- DYNAMIC CONFIG FROM FIREBASE ---
+    const [plans, setPlans] = useState<PlanConfig[]>([]);
+    const [upiId, setUpiId] = useState('');
+    const [upiPayeeName, setUpiPayeeName] = useState('Company');
 
     // --- FORM STATE ---
-    const [selectedPlan, setSelectedPlan] = useState<'1_year' | '2_year'>('1_year');
+    const [selectedPlanId, setSelectedPlanId] = useState<string>('');
     const [employeeCount, setEmployeeCount] = useState('10');
-    const [totalPrice, setTotalPrice] = useState(10000);
+    const [totalPrice, setTotalPrice] = useState(0);
 
-    // 🔥 1. LOAD PRICING FROM FIREBASE ON MOUNT
+    // 🔥 1. LOAD PRICING CONFIG FROM FIREBASE
     useEffect(() => {
         const loadPricing = async () => {
             try {
@@ -47,13 +59,24 @@ export default function SubscriptionScreen() {
                 const docSnap = await getDoc(docRef);
                 if (docSnap.exists()) {
                     const data = docSnap.data();
-                    setRates({
-                        basePricePerEmployeePerYear: Number(data.basePricePerEmployeePerYear) || 1000,
-                        discountTwoYear: Number(data.discountTwoYear) || 15
-                    });
+                    const activePlans: PlanConfig[] = (data.plans || [])
+    .filter((p: any) => p.active !== false && p.active !== "false")
+    .map((p: any) => ({
+        id: String(p.id),
+        label: String(p.label),
+        durationMonths: Number(p.durationMonths),
+        pricePerEmployee: Number(p.pricePerEmployee),
+        discountPercent: Number(p.discountPercent),
+        active: true,
+    }));
+                    setPlans(activePlans);
+                    if (activePlans.length > 0) setSelectedPlanId(activePlans[0].id);
+                    setUpiId(data.upiId || '');
+                    setUpiPayeeName(data.upiPayeeName || 'Company');
                 }
             } catch (e) {
                 console.log("Error loading pricing from Firebase:", e);
+                Alert.alert("Error", "Could not load plans. Please check your internet connection.");
             } finally {
                 setFetchingRates(false);
             }
@@ -61,41 +84,45 @@ export default function SubscriptionScreen() {
         loadPricing();
     }, []);
 
-    // 🔥 2. AUTOMATIC PRICE CALCULATION LOGIC
+    // 🔥 2. AUTOMATIC PRICE CALCULATION
     useEffect(() => {
+        const plan = plans.find(p => p.id === selectedPlanId);
+        if (!plan) { setTotalPrice(0); return; }
+
         const empCount = Number(employeeCount) || 0;
-        let baseCost = empCount * rates.basePricePerEmployeePerYear;
+        const yearsInPlan = plan.durationMonths / 12;
+        let baseCost = empCount * plan.pricePerEmployee * yearsInPlan;
 
-        if (selectedPlan === '1_year') {
-            setTotalPrice(baseCost);
-        } else {
-            // 2 Years Plan with Discount Logic
-            let twoYearCost = baseCost * 2;
-            let discountAmount = (twoYearCost * rates.discountTwoYear) / 100;
-            setTotalPrice(twoYearCost - discountAmount);
-        }
-    }, [selectedPlan, employeeCount, rates]);
+        const discountAmount = (baseCost * (plan.discountPercent || 0)) / 100;
+        setTotalPrice(Math.round(baseCost - discountAmount));
+    }, [selectedPlanId, employeeCount, plans]);
 
-    // 🔥 3. HANDLE PAYMENT SUBMISSION (MANUAL UPI / QR FLOW)
+    const selectedPlan = plans.find(p => p.id === selectedPlanId);
+
+    // 🔥 3. HANDLE PAYMENT SUBMISSION
     const handlePaymentSubmit = async () => {
         if (!employeeCount || Number(employeeCount) <= 0) {
             Alert.alert("Invalid Input", "Please enter a valid number of employees.");
             return;
         }
+        if (!selectedPlan) {
+            Alert.alert("Error", "Please select a plan.");
+            return;
+        }
+        if (!effectiveCompanyId) {
+    Alert.alert("Error", "Company ID not found. Please login again and retry.");
+    return;
+}
 
         setLoading(true);
         try {
             const expiryDate = new Date();
-            if (selectedPlan === '1_year') {
-                expiryDate.setFullYear(expiryDate.getFullYear() + 1);
-            } else {
-                expiryDate.setFullYear(expiryDate.getFullYear() + 2);
-            }
+            expiryDate.setMonth(expiryDate.getMonth() + selectedPlan.durationMonths);
 
-            // Create a pending subscription request for Admin to verify
             const subscriptionRequest = {
-                companyId: companyId || 'MANUAL',
-                planChosen: selectedPlan === '1_year' ? '1 Year Paid Plan' : '2 Year Paid Plan',
+                companyId: effectiveCompanyId,
+                planChosen: selectedPlan.label,
+                planId: selectedPlan.id,
                 employeesRequested: Number(employeeCount),
                 amountPaid: totalPrice,
                 status: 'Pending Verification',
@@ -105,11 +132,20 @@ export default function SubscriptionScreen() {
 
             const res = await addSaaSData("subscription_requests", subscriptionRequest, true);
             if (res.success) {
+                setAlreadySubmitted(true);
                 Alert.alert(
-                    "Payment Submitted ⏳",
-                    "We are verifying your payment. Once confirmed by the Admin, your plan will be activated within 1 hour.",
-                    [{ text: "OK", onPress: () => router.replace('/login' as any) }]
-                );
+    "Payment Submitted ⏳",
+    "We are verifying your payment. Once confirmed by the Admin, your plan will be activated within 1 hour.",
+    [{
+        text: "OK", onPress: () => {
+            if (currentUser) {
+                router.replace('/' as any); // existing company → apne dashboard/home pe bhejo
+            } else {
+                router.replace('/login' as any); // naya registration → login pe bhejo
+            }
+        }
+    }]
+);
             } else {
                 Alert.alert("Error", "Could not process request.");
             }
@@ -129,43 +165,59 @@ export default function SubscriptionScreen() {
         );
     }
 
+    if (plans.length === 0) {
+        return (
+            <View style={[styles.container, { justifyContent: 'center', padding: 20 }]}>
+                <Text style={{ textAlign: 'center', color: '#666' }}>
+                    No active plans available right now. Please contact support.
+                </Text>
+            </View>
+        );
+    }
+
+    // UPI Deep Link with dynamic amount — QR is generated at runtime, no Storage needed
+    const upiString = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(upiPayeeName)}&am=${totalPrice}&cu=INR`;
+
     return (
         <View style={styles.container}>
             <View style={styles.header}>
-                <Text style={styles.headerTitle}>Choose Subscription Plan</Text>
+                <TouchableOpacity onPress={() => router.back()} style={{ position: 'absolute', left: 20, bottom: 15 }}>
+                    <Ionicons name="arrow-back" size={24} color="#3b5998" />
+                </TouchableOpacity>
+                <Text style={styles.headerTitle}>Subscription & Renewal</Text>
             </View>
 
             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
                 <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-                    
-                    {/* PLAN CARDS */}
-                    <Text style={styles.sectionTitle}>Select Duration</Text>
-                    <View style={styles.planContainer}>
-                        {/* 1 YEAR PLAN */}
-                        <TouchableOpacity 
-                            style={[styles.planCard, selectedPlan === '1_year' && styles.selectedCard]} 
-                            onPress={() => setSelectedPlan('1_year')}
-                        >
-                            <Ionicons name={selectedPlan === '1_year' ? "radio-button-on" : "radio-button-off"} size={22} color="#3b5998" />
-                            <Text style={styles.planTitle}>1 Year Plan</Text>
-                            <Text style={styles.planPrice}>₹{rates.basePricePerEmployeePerYear} / Emp / Year</Text>
-                        </TouchableOpacity>
 
-                        {/* 2 YEAR PLAN */}
-                        <TouchableOpacity 
-                            style={[styles.planCard, selectedPlan === '2_year' && styles.selectedCard]} 
-                            onPress={() => setSelectedPlan('2_year')}
-                        >
-                            <View style={styles.badge}><Text style={styles.badgeText}>Save {rates.discountTwoYear}%</Text></View>
-                            <Ionicons name={selectedPlan === '2_year' ? "radio-button-on" : "radio-button-off"} size={22} color="#3b5998" />
-                            <Text style={styles.planTitle}>2 Year Plan</Text>
-                            <Text style={styles.planPrice}>Best value for long-term</Text>
-                        </TouchableOpacity>
+                    {/* PLAN CARDS - DYNAMIC FROM FIRESTORE */}
+                    <Text style={styles.sectionTitle}>Select Plan</Text>
+                    <View style={styles.planContainer}>
+                        {plans.map((plan) => (
+                            <TouchableOpacity
+                                key={plan.id}
+                                style={[styles.planCard, selectedPlanId === plan.id && styles.selectedCard]}
+                                onPress={() => setSelectedPlanId(plan.id)}
+                            >
+                                {plan.discountPercent > 0 && (
+                                    <View style={styles.badge}>
+                                        <Text style={styles.badgeText}>Save {plan.discountPercent}%</Text>
+                                    </View>
+                                )}
+                                <Ionicons
+                                    name={selectedPlanId === plan.id ? "radio-button-on" : "radio-button-off"}
+                                    size={22}
+                                    color="#3b5998"
+                                />
+                                <Text style={styles.planTitle}>{plan.label}</Text>
+                                <Text style={styles.planPrice}>₹{plan.pricePerEmployee} / Emp / Year</Text>
+                            </TouchableOpacity>
+                        ))}
                     </View>
 
                     {/* EMPLOYEE INPUT */}
                     <Text style={styles.sectionTitle}>Number of Employees</Text>
-                    <TextInput 
+                    <TextInput
                         style={styles.input}
                         keyboardType="numeric"
                         value={employeeCount}
@@ -177,8 +229,8 @@ export default function SubscriptionScreen() {
                     <View style={styles.summaryCard}>
                         <Text style={styles.summaryTitle}>Order Summary</Text>
                         <View style={styles.summaryRow}>
-                            <Text style={styles.summaryLabel}>Plan Duration:</Text>
-                            <Text style={styles.summaryValue}>{selectedPlan === '1_year' ? '1 Year' : '2 Years'}</Text>
+                            <Text style={styles.summaryLabel}>Plan:</Text>
+                            <Text style={styles.summaryValue}>{selectedPlan?.label}</Text>
                         </View>
                         <View style={styles.summaryRow}>
                             <Text style={styles.summaryLabel}>Total Employees:</Text>
@@ -190,25 +242,39 @@ export default function SubscriptionScreen() {
                         </View>
                     </View>
 
-                    {/* MANUAL UPI PAYMENT SCANNER METHOD */}
+                    {/* MANUAL UPI PAYMENT - QR GENERATED AT RUNTIME, NO STORAGE NEEDED */}
                     <View style={styles.qrCard}>
                         <Text style={styles.qrTitle}>👉 Scan & Pay via UPI QR</Text>
-                        
-                        {/* 🔥 Yahan Aapka Asli QR Code Aayega */}
-                        <Image 
-                            source={require('../assets/images/payment-qr.jpeg')} 
-                            style={{ width: 180, height: 180, alignSelf: 'center', marginVertical: 15, borderRadius: 10 }}
-                            resizeMode="contain"
-                        />
-                        
-                        {/* 🔥 Apna Asli UPI ID Yahan Likhein */}
-                        <Text style={styles.upiId}>UPI ID: aapka-number@ybl</Text>
-                        
-                        <Text style={styles.qrNote}>Please complete the payment on this UPI ID using any app (PhonePe, GPay, Paytm) and click the submit button below.</Text>
+
+                        {upiId ? (
+                            <View style={{ alignSelf: 'center', marginVertical: 15, backgroundColor: 'white', padding: 12, borderRadius: 10 }}>
+                                <QRCode value={upiString} size={180} />
+                            </View>
+                        ) : (
+                            <Text style={{ textAlign: 'center', color: '#d32f2f', marginVertical: 15 }}>
+                                UPI ID not configured. Please contact support.
+                            </Text>
+                        )}
+
+                        <Text style={styles.upiId}>UPI ID: {upiId || 'Not Set'}</Text>
+
+                        <Text style={styles.qrNote}>
+                            Please complete the payment on this UPI ID using any app (PhonePe, GPay, Paytm) and click the submit button below.
+                        </Text>
                     </View>
 
-                    <TouchableOpacity style={styles.btn} onPress={handlePaymentSubmit} disabled={loading}>
-                        {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>I Have Paid — Submit Request</Text>}
+                    <TouchableOpacity
+                        style={[styles.btn, alreadySubmitted && { backgroundColor: '#ccc' }]}
+                        onPress={handlePaymentSubmit}
+                        disabled={loading || alreadySubmitted}
+                    >
+                        {loading ? (
+                            <ActivityIndicator color="white" />
+                        ) : alreadySubmitted ? (
+                            <Text style={styles.btnText}>Request Sent — Awaiting Approval ⏳</Text>
+                        ) : (
+                            <Text style={styles.btnText}>I Have Paid — Submit Request</Text>
+                        )}
                     </TouchableOpacity>
 
                 </ScrollView>
@@ -223,8 +289,8 @@ const styles = StyleSheet.create({
     headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
     scroll: { padding: 20 },
     sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#333', marginTop: 15, marginBottom: 10 },
-    planContainer: { flexDirection: 'row', gap: 10, marginBottom: 15 },
-    planCard: { flex: 1, backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd', borderRadius: 10, padding: 15, position: 'relative' },
+    planContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 15 },
+    planCard: { flexBasis: '47%', backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd', borderRadius: 10, padding: 15, position: 'relative' },
     selectedCard: { borderColor: '#3b5998', backgroundColor: '#f0f4f8', borderWidth: 2 },
     planTitle: { fontSize: 16, fontWeight: 'bold', color: '#333', marginTop: 10 },
     planPrice: { fontSize: 12, color: '#666', marginTop: 5 },
@@ -240,7 +306,7 @@ const styles = StyleSheet.create({
     totalValue: { fontSize: 18, fontWeight: 'bold', color: '#d32f2f' },
     qrCard: { backgroundColor: '#fff3cd', borderColor: '#ffeeba', borderWidth: 1, padding: 15, borderRadius: 10, marginBottom: 20 },
     qrTitle: { fontWeight: 'bold', color: '#856404', fontSize: 15 },
-    upiId: { fontWeight: 'bold', color: '#3b5998', fontSize: 16, marginTop: 5 },
+    upiId: { fontWeight: 'bold', color: '#3b5998', fontSize: 16, marginTop: 5, textAlign: 'center' },
     qrNote: { fontSize: 12, color: '#856404', marginTop: 5 },
     btn: { backgroundColor: '#3b5998', padding: 18, borderRadius: 10, alignItems: 'center', marginTop: 10 },
     btnText: { color: 'white', fontSize: 18, fontWeight: 'bold' }

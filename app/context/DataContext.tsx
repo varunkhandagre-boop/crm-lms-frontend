@@ -44,6 +44,7 @@ export const DataProvider = ({ children }: any) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [shouldOpenSidebar, setShouldOpenSidebar] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [isSubscriptionExpired, setIsSubscriptionExpired] = useState(false);
   const [isAutomationEnabled, setIsAutomationEnabled] = useState(true); 
   const [isFirebaseSynced, setIsFirebaseSynced] = useState(false); 
 
@@ -221,6 +222,13 @@ export const DataProvider = ({ children }: any) => {
                 };
                 setCompanyProfile(profileData as any);
                 await AsyncStorage.setItem('companyProfileLocal', JSON.stringify(profileData));
+                if (data.expiryDate) {
+    const today = new Date();
+    const expiry = new Date(data.expiryDate);
+    if (today > expiry) {
+        setIsSubscriptionExpired(true);
+    }
+}
             }
         } catch (error) {
             console.log("Error fetching company settings:", error);
@@ -326,6 +334,8 @@ export const DataProvider = ({ children }: any) => {
                             if (today > expiry) active = false; 
                         }
                         isCompanyActive = active;
+                        if (!active) setIsSubscriptionExpired(true);
+                        else setIsSubscriptionExpired(false);
                     }
                 }
             } else {
@@ -587,6 +597,19 @@ const notifQuery = currentUser.role === 'SuperAdmin'
         unsubCard(); unsubPay(); unsubDue(); unsubTask();
         unsub1(); unsub2(); unsub3(); unsub4(); unsubNotif();
     };
+  }, [currentUser]);
+
+  // ✅ Har 1 ghante mein plan expiry check
+  useEffect(() => {
+      if (!currentUser || currentUser.role === 'SuperAdmin') return;
+      
+      const interval = setInterval(() => {
+          if (currentUser?.companyId) {
+              fetchCompanySettings(currentUser.companyId);
+          }
+      }, 60 * 60 * 1000); // 1 ghanta = 3600000ms
+      
+      return () => clearInterval(interval);
   }, [currentUser]);
 
   // =========================================================
@@ -1165,7 +1188,7 @@ const notifQuery = currentUser.role === 'SuperAdmin'
 
   const contextValue = useMemo(() => ({
       currentUser, loading, login, logout, activeSection, setActiveSection, shouldOpenSidebar, setShouldOpenSidebar, user: currentUser,
-      isFirebaseSynced, isAutomationEnabled,
+      isFirebaseSynced, isAutomationEnabled, isSubscriptionExpired,
       taskList, leadsList, pmsList, notificationList, notificationCount, attendanceList, leaveList, expenseList, advanceList, travelList, 
       salesVisitList, orderList, serviceCallList, orgList, installList, sparePartsList, activityPlanList, courierList, 
       cardRequestList, paymentList, dueList, demoList, serviceList, productList, companyProfile,

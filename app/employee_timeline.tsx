@@ -56,7 +56,8 @@ export default function CombinedActivityScreen() {
               fetchSaaSData("orders"),
               fetchSaaSData("demos"),
               fetchSaaSData("installations"),
-              fetchSaaSData("payments"),
+              fetchSaaSData("payment_collections"),
+              fetchSaaSData("payment_dues"),
               fetchSaaSData("tasks"),
               fetchSaaSData("pms_reports"),
               fetchSaaSData("sales_reports"),
@@ -528,7 +529,8 @@ export default function CombinedActivityScreen() {
           let hasData = false;
           
           if(await fetchAndAddSheet(wb, "orders", "Orders", "dateIso", "senderId")) hasData = true;
-          if(await fetchAndAddSheet(wb, "payments", "Collections", "dateIso", "senderId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "payment_collections", "Collections", "dateIso", "senderId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "payment_dues", "Dues", "dateIso", "addedBy")) hasData = true;
           if(await fetchAndAddSheet(wb, "expenses", "Expenses", "dateIso", "userId")) hasData = true;
           if(await fetchAndAddSheet(wb, "leads", "Leads", "dateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "attendance", "Attendance", "dateIso", "senderId")) hasData = true;

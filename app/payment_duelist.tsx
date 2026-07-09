@@ -53,7 +53,7 @@ export default function PaymentDueList() {
             const [dues, orders, payments, orgs] = await Promise.all([
                 fetchSaaSData("payment_dues"), 
                 fetchSaaSData("orders"),
-                fetchSaaSData("payments"),
+                fetchSaaSData("payment_collections"),
                 fetchSaaSData("organizations")
             ]);
             setDueList(dues);
@@ -196,10 +196,7 @@ export default function PaymentDueList() {
             const oStatus = (d.status || '').trim().toLowerCase();
             const payStatus = (d.paymentStatus || '').trim().toLowerCase();
             if (oStatus === 'collected' || oStatus === 'paid' || payStatus === 'paid') return false;
-            
-            // System Orders ko ignore karega taaki duplicate na ho
-            if (d.orderId && typeof d.orderId === 'string' && d.orderId.startsWith('ORD')) return false; 
-            
+                       
             return true;
         }).map((d: any) => ({ ...d, collectionName: 'payment_dues' })) : [];
 
@@ -216,8 +213,9 @@ export default function PaymentDueList() {
             if (oStatus === 'collected' || payStatus === 'paid') return false;
             
             // 🔥 'Billed' orders hi yahan aayenge
-            if (oStatus !== 'billed') return false; 
-            if (payMode === 'cash') return false; 
+            const isCreditStatus = ['billed', 'approved', 'dispatched', 'completed'].includes(oStatus);
+            if (!isCreditStatus) return false;
+            if (payMode === 'cash') return false;
             
             return true;
         }).map((o: any) => ({ ...o, collectionName: 'orders' })) : [];
@@ -282,40 +280,38 @@ export default function PaymentDueList() {
 
    // 🔥 FIX: BULLETPROOF SMART MATCHING (Ignores spaces and cases)
     const getPartyHistory = (partyItem: any) => {
-        if (!partyItem || !paymentList) return [];
+    if (!partyItem || !paymentList) return [];
 
-        return paymentList
-            .filter((p: any) => {
-                // 1. Sabhi IDs ko string banakar spaces hata do aur lowercase kar do taaki perfect match ho
-                const pLinkedId = String(p.linkedId || '').trim().toLowerCase();
-                const pOrderRef = String(p.orderRef || '').trim().toLowerCase();
-                const pOrderId = String(p.orderId || '').trim().toLowerCase();
-                const pBillRef = String(p.billRef || '').trim().toLowerCase();
+    return paymentList
+        .filter((p: any) => {
+            const pOrderRef = String(p.orderRef || '').trim().toLowerCase();
+            const pOrderId = String(p.orderId || '').trim().toLowerCase();
+            const pLinkedId = String(p.linkedId || '').trim().toLowerCase();
+            const pBillRef = String(p.billRef || '').trim().toLowerCase();
 
-                const partyId = String(partyItem.id || '').trim().toLowerCase();
-                const partyOrderId = String(partyItem.orderId || '').trim().toLowerCase();
-                const partyBillNo = String(partyItem.billNo || partyItem.poNumber || '').trim().toLowerCase();
+            const partyId = String(partyItem.id || '').trim().toLowerCase();
+            const partyOrderId = String(partyItem.orderId || '').trim().toLowerCase();
+            const partyBillNo = String(partyItem.billNo || partyItem.poNumber || '').trim().toLowerCase();
 
-                // 2. Direct DB ID Match (Jab 'Collect' button dabakar payment liya ho)
-                if (partyId && (pLinkedId === partyId || pOrderId === partyId)) return true;
+            // 1. Direct DB ID match
+            if (partyId && (pLinkedId === partyId || pOrderId === partyId)) return true;
 
-                // 3. Order ID Match (ORD-XXXX)
-                if (partyOrderId && (pOrderRef === partyOrderId || pOrderId === partyOrderId)) return true;
+            // 2. Order ID match (ORD-XXXX)
+            if (partyOrderId && (pOrderRef === partyOrderId || pOrderId === partyOrderId)) return true;
 
-                // 4. Bill No / PO Match (Manual Entry ke liye)
-                if (partyBillNo && (pBillRef === partyBillNo || pOrderRef === partyBillNo)) return true;
+            // 3. Bill No match (manual dues ke liye)
+            if (partyBillNo && (pBillRef === partyBillNo || pOrderRef === partyBillNo)) return true;
 
-                // Agar koi bhi ID match nahi hui toh is specific due ke liye yeh payment nahi hai
-                return false;
-            })
-            .sort((a: any, b: any) => {
-                // 🔥 Date sorting using dateIso for safety
-                const dateA = parseDate(a.dateIso || a.date || a.createdAt).getTime();
-                const dateB = parseDate(b.dateIso || b.date || b.createdAt).getTime();
-                return dateB - dateA;
-            })
-            .slice(0, 5); // Sirf latest 5 payments dikhayega
-    };
+            // ❌ OrgName/OrgId fallback NAHI — ye remove kar diya
+            return false;
+        })
+        .sort((a: any, b: any) => {
+            const dateA = new Date(a.dateIso || a.date || a.createdAt || 0).getTime();
+            const dateB = new Date(b.dateIso || b.date || b.createdAt || 0).getTime();
+            return dateB - dateA;
+        })
+        .slice(0, 5);
+};
 
     const handleCollect = (item: any) => {
         const currentDue = item.balance !== undefined ? item.balance : item.amount;

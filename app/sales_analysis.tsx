@@ -84,7 +84,7 @@ export default function SalesAnalysisScreen() {
       if (currentUser?.companyId) {
           const [orders, payments, orgs, users] = await Promise.all([
               fetchSaaSData("orders"),
-              fetchSaaSData("payments"),
+              fetchSaaSData("payment_collections"),
               fetchSaaSData("organizations"),
               fetchSaaSData("users")
           ]);

@@ -28,14 +28,36 @@ export default function UpdatedDashboard() {
   const [attendanceList, setAttendanceList] = useState<any[]>([]);
 
   const [refreshing, setRefreshing] = useState(false);
+  // Subscription warning
+const [subDaysLeft, setSubDaysLeft] = useState<number | null>(null);
+
+useEffect(() => {
+    const checkSubscription = async () => {
+        if (!currentUser?.companyId) return;
+        try {
+            const companies = await fetchSaaSData("companies");
+            if (companies && companies.length > 0) {
+                const company = companies[0] as any;
+                const expiryStr = company.expiryDate;
+                if (expiryStr) {
+                    const expiry = new Date(expiryStr);
+                    const today = new Date();
+                    const diff = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                    setSubDaysLeft(diff);
+                }
+            }
+        } catch (e) {}
+    };
+    checkSubscription();
+}, [currentUser]);
 
   // 🔥 4. MASSIVE DATA LOAD FOR DASHBOARD
   const loadDashboardData = async () => {
       if (currentUser?.companyId) {
           const [leads, dues, payments, orders, tasks, couriers, services, visits, attendance] = await Promise.all([
               fetchSaaSData("leads"),
-              fetchSaaSData("advances"), // Mapping dueList to advances, adjust if collection name differs
-              fetchSaaSData("payments"),
+              fetchSaaSData("payment_dues"), // Mapping dueList to advances, adjust if collection name differs
+              fetchSaaSData("payment_collections"),
               fetchSaaSData("orders"),
               fetchSaaSData("tasks"),
               fetchSaaSData("couriers"),
@@ -64,6 +86,7 @@ export default function UpdatedDashboard() {
     await loadDashboardData();
     setRefreshing(false);
   }, [currentUser]);
+  
 
   // --- 🔥 ROLE CHECKS ---
   const userRole = (currentUser?.role || '').toLowerCase();
@@ -142,7 +165,7 @@ export default function UpdatedDashboard() {
       return orderList
         .filter((order: any) => {
             const isMine = isAdmin ? true : (order.senderId === currentUser?.id || order.senderId === currentUser?.uid);
-            const isConfirmed = ['Approved', 'Completed', 'Dispatched'].includes(order.status);
+            const isConfirmed = ['Approved', 'Completed', 'Dispatched', 'Billed'].includes(order.status);
             const orderDate = new Date(order.date || order.createdAt);
             const isWithinFY = orderDate >= fyStartDate && orderDate <= fyEndDate;
             return isMine && isConfirmed && isWithinFY; 
@@ -169,16 +192,22 @@ export default function UpdatedDashboard() {
 
   // C. OUTSTANDING
   const totalMarketOutstanding = orderList
-    .filter((order: any) => {
-        const isApproved = ['Approved', 'Completed', 'Dispatched'].includes(order.status);
-        const isMine = isAdmin ? true : (order.senderId === currentUser?.id || order.senderId === currentUser?.uid);
-        const isNotPaid = order.paymentStatus !== 'Paid';
-        return isApproved && isMine && isNotPaid;
-    })
-    .reduce((sum: number, order: any) => {
-        const due = order.balance !== undefined ? Number(order.balance) : Number(order.amount);
-        return sum + due;
-    }, 0);
+  .filter((order: any) => {
+      const isApproved = ['Approved', 'Completed', 'Dispatched', 'Billed'].includes(order.status);
+      const isMine = isAdmin 
+          ? true 
+          : (order.senderId === currentUser?.id || order.senderId === currentUser?.uid);
+      const currentBal = order.balance !== undefined 
+          ? parseFloat(String(order.balance)) 
+          : parseFloat(String(order.amount || 0));
+      return isApproved && isMine && currentBal > 0; // paymentStatus check hata — balance > 0 hi sahi check hai
+  })
+  .reduce((sum: number, order: any) => {
+      const due = order.balance !== undefined 
+          ? parseFloat(String(order.balance)) 
+          : parseFloat(String(order.amount || 0));
+      return sum + (isNaN(due) ? 0 : due);
+  }, 0);
 
   // D. RECOVERY
   const totalRecoveryThisMonth = paymentList
@@ -280,6 +309,36 @@ export default function UpdatedDashboard() {
             <View style={styles.badge} />
         </TouchableOpacity>
       </View>
+      {subDaysLeft !== null && subDaysLeft <= 30 && (
+    <TouchableOpacity
+        onPress={() => router.push('/SubscriptionScreen' as any)}
+        style={{
+            backgroundColor: subDaysLeft <= 7 ? '#fdecea' : '#fff3cd',
+            borderColor: subDaysLeft <= 7 ? '#d32f2f' : '#f57c00',
+            borderWidth: 1, borderRadius: 10,
+            marginHorizontal: 18, marginTop: 10,
+            padding: 12, flexDirection: 'row',
+            alignItems: 'center', gap: 8
+        }}
+    >
+        <Ionicons name="warning" size={18}
+            color={subDaysLeft <= 7 ? '#d32f2f' : '#f57c00'}
+        />
+        <View style={{ flex: 1 }}>
+            <Text style={{
+                fontWeight: 'bold', fontSize: 13,
+                color: subDaysLeft <= 7 ? '#d32f2f' : '#856404'
+            }}>
+                {subDaysLeft <= 0
+                    ? '⚠️ Plan Expired! Renew Now'
+                    : `⏳ Plan expires in ${subDaysLeft} day${subDaysLeft === 1 ? '' : 's'}`}
+            </Text>
+            <Text style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
+                Tap here to renew →
+            </Text>
+        </View>
+    </TouchableOpacity>
+)}
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         

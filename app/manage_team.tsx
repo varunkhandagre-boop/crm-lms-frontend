@@ -86,6 +86,7 @@ export default function ManageTeamScreen() {
 // 1️⃣ USERS TAB (100% SAAS ARCHITECTURE)
 // ====================================================================
 const UsersTab = () => {
+    const router = useRouter();
     const { currentUser } = useData();
     const { fetchSaaSData, updateSaaSData, addSaaSData } = useSaaSDB();
     
@@ -157,6 +158,7 @@ const UsersTab = () => {
             } else {
                 // 🔥 NAYA EMPLOYEE ADD KARNA: 100% SAAS LIMIT CHECK
                 const currentEmployees = await fetchSaaSData("users");
+                const activeEmployees = currentEmployees.filter((u: any) => u.status !== 'Disabled');
                 const myCompanyData = await fetchSaaSData("companies"); 
                 
                 let maxLimit = 10; // Default limit
@@ -164,14 +166,18 @@ const UsersTab = () => {
                     maxLimit = (myCompanyData[0] as any).maxEmployees || 10;
                 }
 
-                if (currentEmployees.length >= maxLimit) {
-                    Alert.alert(
-                        "Limit Reached 🛑", 
-                        `Your plan only allows up to ${maxLimit} employees. Please upgrade your plan to add more.`
-                    );
-                    setIsProcessing(false);
-                    return; // Stop execution!
-                }
+                if (activeEmployees.length >= maxLimit) {
+    Alert.alert(
+        "Plan Limit Reached 🛑",
+        `Your current plan allows only ${maxLimit} active employees.\n\nActive: ${activeEmployees.length}/${maxLimit}\n\nPlease upgrade your plan to add more team members.`,
+        [
+            { text: "Upgrade Plan", onPress: () => router.push('/subscription' as any) },
+            { text: "OK", style: "cancel" }
+        ]
+    );
+    setIsProcessing(false);
+    return;
+}
 
                 // 🔥 SAFE USER CREATION: Secondary App Trick (For Firebase Auth Only)
                 const secondaryApp = initializeApp(firebaseConfig, "Secondary");
@@ -296,6 +302,18 @@ const UsersTab = () => {
                     )
                 }
             />
+            <View style={{
+    position: 'absolute', bottom: 85, left: 15,
+    backgroundColor: 'white', paddingHorizontal: 12,
+    paddingVertical: 6, borderRadius: 20,
+    elevation: 3, flexDirection: 'row', alignItems: 'center',
+    borderWidth: 1, borderColor: '#ddd'
+}}>
+    <Ionicons name="people" size={14} color="#2c3e50" />
+    <Text style={{ fontSize: 12, color: '#2c3e50', fontWeight: 'bold', marginLeft: 5 }}>
+        {users.filter((u:any) => u.status !== 'Disabled').length} / 10 Seats Used
+    </Text>
+</View>
             
             <TouchableOpacity style={styles.fab} onPress={openAdd}>
                 <Ionicons name="add" size={30} color="white" />
@@ -393,6 +411,7 @@ const UsersTab = () => {
 // 2️⃣ PERMISSIONS TAB
 // ====================================================================
 const PermissionsTab = () => {
+    const router = useRouter();
     const { currentUser } = useData();
     const { fetchSaaSData, updateSaaSData, addSaaSData } = useSaaSDB();
     

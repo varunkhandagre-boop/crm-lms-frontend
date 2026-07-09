@@ -6,8 +6,10 @@ import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
+    FlatList,
     Image,
     KeyboardAvoidingView,
+    Modal,
     Platform,
     ScrollView,
     StatusBar,
@@ -18,6 +20,7 @@ import {
     View
 } from 'react-native';
 
+import { statesList as allStatesList, districtPincodes, indianStatesAndDistricts } from '../constants/indianStatesData';
 import { storage } from '../firebaseConfig';
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
@@ -36,7 +39,12 @@ export default function CompanyProfileScreen() {
     
     const [profileDocId, setProfileDocId] = useState<string | null>(null);
 
-    // 🔥 Naya State Subscription Card ke liye
+    // Modal States
+    const [stateModalVisible, setStateModalVisible] = useState(false);
+    const [cityModalVisible, setCityModalVisible] = useState(false);
+    const [stateSearchQuery, setStateSearchQuery] = useState('');
+    const [citySearchQuery, setCitySearchQuery] = useState('');
+
     const [subscriptionInfo, setSubscriptionInfo] = useState({
         planName: 'Loading...',
         expiryDate: 'Loading...',
@@ -58,12 +66,10 @@ export default function CompanyProfileScreen() {
         const loadProfileAndSubscription = async () => {
             setLoading(true);
             
-            // 1. Fetch Profile Data
             const profiles = await fetchSaaSData("company_profile");
             if (profiles && profiles.length > 0) {
                 const cp: any = profiles[0]; 
                 setProfileDocId(cp.id); 
-                
                 const addr = cp.fullAddress || {};
                 setProfile(prev => ({
                     ...prev,
@@ -76,7 +82,6 @@ export default function CompanyProfileScreen() {
                 }));
             }
 
-            // 🔥 2. Fetch Subscription Data (Plan & Employees)
             const myCompany = await fetchSaaSData("companies");
             const myUsers = await fetchSaaSData("users");
 
@@ -87,7 +92,6 @@ export default function CompanyProfileScreen() {
                     const dateObj = new Date(comp.expiryDate);
                     formattedExpiry = dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
                 }
-
                 setSubscriptionInfo({
                     planName: comp.plan || 'Free Trial',
                     expiryDate: formattedExpiry,
@@ -109,7 +113,6 @@ export default function CompanyProfileScreen() {
                 const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
                 if (status !== 'granted') return Alert.alert("Permission", "Gallery permission required in Settings.");
             }
-
             let result = await ImagePicker.launchImageLibraryAsync({
                 mediaTypes: ImagePicker.MediaTypeOptions.Images,
                 allowsEditing: true,
@@ -117,7 +120,6 @@ export default function CompanyProfileScreen() {
                 quality: 0.2,
                 base64: true,
             });
-
             if (!result.canceled && result.assets[0]) {
                 const asset = result.assets[0];
                 if (USE_STORAGE_BUCKET) {
@@ -133,11 +135,7 @@ export default function CompanyProfileScreen() {
     const handleRemoveImage = (field: string) => {
         Alert.alert("Remove Image", "Are you sure you want to remove this image?", [
             { text: "Cancel", style: "cancel" },
-            { 
-                text: "Remove", 
-                style: "destructive", 
-                onPress: () => updateField(field, '') 
-            }
+            { text: "Remove", style: "destructive", onPress: () => updateField(field, '') }
         ]);
     };
 
@@ -165,15 +163,9 @@ export default function CompanyProfileScreen() {
             if (USE_STORAGE_BUCKET) {
                 setUploading(true);
                 const basePath = `companies/${currentUser.companyId}`;
-                if (profile.logoUrl?.startsWith('file://')) {
-                    finalLogo = await uploadToFirebaseStorage(profile.logoUrl, `${basePath}/logo_${Date.now()}.jpg`);
-                }
-                if (profile.signatureUrl?.startsWith('file://')) {
-                    finalSign = await uploadToFirebaseStorage(profile.signatureUrl, `${basePath}/sign_${Date.now()}.jpg`);
-                }
-                if (profile.qrCodeUrl?.startsWith('file://')) {
-                    finalQr = await uploadToFirebaseStorage(profile.qrCodeUrl, `${basePath}/qr_${Date.now()}.jpg`);
-                }
+                if (profile.logoUrl?.startsWith('file://')) finalLogo = await uploadToFirebaseStorage(profile.logoUrl, `${basePath}/logo_${Date.now()}.jpg`);
+                if (profile.signatureUrl?.startsWith('file://')) finalSign = await uploadToFirebaseStorage(profile.signatureUrl, `${basePath}/sign_${Date.now()}.jpg`);
+                if (profile.qrCodeUrl?.startsWith('file://')) finalQr = await uploadToFirebaseStorage(profile.qrCodeUrl, `${basePath}/qr_${Date.now()}.jpg`);
                 setUploading(false);
             }
 
@@ -215,11 +207,11 @@ export default function CompanyProfileScreen() {
 
     if (loading) return <View style={styles.center}><ActivityIndicator size="large" color="#3b5998" /></View>;
 
-    // Calculate usage percentage for progress bar
     const usagePercent = subscriptionInfo.maxEmployees > 0 
         ? (subscriptionInfo.currentEmployees / subscriptionInfo.maxEmployees) * 100 
         : 0;
 
+    // ✅ MODALS + MAIN UI sab return() ke ANDAR hain
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" backgroundColor="#3b5998" />
@@ -242,8 +234,7 @@ export default function CompanyProfileScreen() {
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled" 
                 >
-                    
-                    {/* 🔥 0. SUBSCRIPTION INFO CARD */}
+                    {/* 0. SUBSCRIPTION INFO CARD */}
                     <View style={[styles.section, { backgroundColor: '#f0f4ff', borderColor: '#d0d9ff', borderWidth: 1 }]}>
                         <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10}}>
                             <View>
@@ -257,7 +248,6 @@ export default function CompanyProfileScreen() {
                                 </Text>
                             </View>
                         </View>
-                        
                         <View style={{marginTop: 10}}>
                             <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5}}>
                                 <Text style={{fontSize: 12, color: '#555', fontWeight: 'bold'}}>EMPLOYEES USED</Text>
@@ -270,16 +260,10 @@ export default function CompanyProfileScreen() {
                                 <Text style={{fontSize: 10, color: '#d32f2f', marginTop: 5, textAlign: 'right'}}>Limit reached. Contact Admin to upgrade.</Text>
                             )}
                         </View>
-                        {/* 🔥 NAYA BUTTON: UPGRADE / RENEW PLAN (Sirf Admin ke liye) */}
                         {currentUser?.role === 'Admin' && (
                             <TouchableOpacity 
                                 style={{ backgroundColor: '#2e7d32', padding: 12, borderRadius: 8, marginTop: 15, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', elevation: 2 }}
-                                onPress={() => {
-                                    router.push({
-                                        pathname: '/SubscriptionScreen' as any,
-                                        params: { companyId: currentUser?.companyId }
-                                    });
-                                }}
+                                onPress={() => router.push({ pathname: '/SubscriptionScreen' as any, params: { companyId: currentUser?.companyId } })}
                             >
                                 <Ionicons name="rocket-outline" size={18} color="white" style={{ marginRight: 8 }} />
                                 <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 14 }}>Upgrade / Renew Plan</Text>
@@ -311,18 +295,41 @@ export default function CompanyProfileScreen() {
                         <Text style={styles.sectionHeader}>📍 Address Details</Text>
                         <InputLabel label="Address Line 1" />
                         <TextInput style={[styles.input, {height: 50}]} value={profile.addressLine} onChangeText={t => updateField('addressLine', t)} placeholder="Plot No, Street, Area" />
+
+                        {/* ✅ STATE DROPDOWN */}
+                        <InputLabel label="State" />
+                        <TouchableOpacity 
+                            style={[styles.input, {flexDirection:'row', justifyContent:'space-between', alignItems:'center'}]}
+                            onPress={() => setStateModalVisible(true)}
+                        >
+                            <Text style={{color: profile.state ? '#333' : '#999', fontSize:14}}>
+                                {profile.state || "Select State"}
+                            </Text>
+                            <Ionicons name="chevron-down" size={18} color="#666" />
+                        </TouchableOpacity>
+
                         <View style={styles.row}>
                             <View style={{flex:1, marginRight:10}}>
-                                <InputLabel label="City" />
-                                <TextInput style={styles.input} value={profile.city} onChangeText={t => updateField('city', t)} />
+                                {/* ✅ CITY DROPDOWN */}
+                                <InputLabel label="City / District" />
+                                <TouchableOpacity 
+                                    style={[styles.input, {flexDirection:'row', justifyContent:'space-between', alignItems:'center'}]}
+                                    onPress={() => {
+                                        if(!profile.state) Alert.alert("Select State", "Please select state first.");
+                                        else setCityModalVisible(true);
+                                    }}
+                                >
+                                    <Text style={{color: profile.city ? '#333' : '#999', fontSize:14}}>
+                                        {profile.city || "Select City"}
+                                    </Text>
+                                    <Ionicons name="chevron-down" size={18} color="#666" />
+                                </TouchableOpacity>
                             </View>
                             <View style={{flex:1}}>
                                 <InputLabel label="Pincode" />
                                 <TextInput style={styles.input} value={profile.pincode} onChangeText={t => updateField('pincode', t)} keyboardType="numeric" />
                             </View>
                         </View>
-                        <InputLabel label="State" />
-                        <TextInput style={styles.input} value={profile.state} onChangeText={t => updateField('state', t)} />
                     </View>
 
                     {/* 3. CONTACT */}
@@ -386,7 +393,6 @@ export default function CompanyProfileScreen() {
                     <View style={styles.section}>
                         <Text style={styles.sectionHeader}>🖼️ Digital Assets</Text>
                         
-                        {/* LOGO */}
                         <Text style={styles.imgLabel}>Company Logo</Text>
                         <View style={{alignItems: 'flex-start'}}>
                             <TouchableOpacity onPress={() => handleImagePick('logoUrl')} style={styles.imgBox}>
@@ -404,7 +410,6 @@ export default function CompanyProfileScreen() {
                             ) : null}
                         </View>
 
-                        {/* SIGNATURE */}
                         <Text style={styles.imgLabel}>Digital Signature</Text>
                         <View style={{alignItems: 'flex-start'}}>
                             <TouchableOpacity onPress={() => handleImagePick('signatureUrl')} style={[styles.imgBox, {width: 200, height: 80}]}>
@@ -422,14 +427,8 @@ export default function CompanyProfileScreen() {
                             ) : null}
                         </View>
 
-                        {/* UPI & QR */}
                         <InputLabel label="UPI ID (For Payment Link)" />
-                        <TextInput 
-                            style={styles.input} 
-                            value={profile.upiId} 
-                            onChangeText={t => updateField('upiId', t)} 
-                            placeholder="e.g. business@okicici" 
-                        />
+                        <TextInput style={styles.input} value={profile.upiId} onChangeText={t => updateField('upiId', t)} placeholder="e.g. business@okicici" />
 
                         <Text style={styles.imgLabel}>Payment QR Code Image</Text>
                         <View style={{alignItems: 'flex-start'}}>
@@ -456,7 +455,89 @@ export default function CompanyProfileScreen() {
                     <View style={{height: 100}} /> 
                 </ScrollView>
             </KeyboardAvoidingView>
+
+            {/* ✅ MODALS - KeyboardAvoidingView ke BAHAR, lekin return() ke ANDAR */}
+
+            {/* STATE MODAL */}
+            <Modal visible={stateModalVisible} animationType="slide" transparent={true}>
+                <View style={modalStyles.overlay}>
+                    <View style={modalStyles.content}>
+                        <View style={modalStyles.header}>
+                            <Text style={modalStyles.title}>Select State</Text>
+                            <TouchableOpacity onPress={() => { setStateModalVisible(false); setStateSearchQuery(''); }}>
+                                <Ionicons name="close-circle" size={28} color="#d32f2f" />
+                            </TouchableOpacity>
+                        </View>
+                        <View style={{backgroundColor:'#f0f0f0', borderRadius:8, paddingHorizontal:10, marginBottom:10, flexDirection:'row', alignItems:'center'}}>
+                            <Ionicons name="search" size={20} color="gray" />
+                            <TextInput 
+                                style={{flex:1, padding:10, fontSize:16}} 
+                                placeholder="Search State..." 
+                                value={stateSearchQuery} 
+                                onChangeText={setStateSearchQuery} 
+                            />
+                        </View>
+                        <FlatList
+                            data={allStatesList.filter(s => s.toLowerCase().includes(stateSearchQuery.toLowerCase()))}
+                            keyExtractor={item => item}
+                            renderItem={({item}) => (
+                                <TouchableOpacity style={modalStyles.item} onPress={() => {
+                                    updateField('state', item);
+                                    updateField('city', '');
+                                    setStateSearchQuery('');
+                                    setStateModalVisible(false);
+                                }}>
+                                    <Text style={modalStyles.itemText}>{item}</Text>
+                                </TouchableOpacity>
+                            )}
+                            keyboardShouldPersistTaps="handled"
+                        />
+                    </View>
+                </View>
+            </Modal>
+
+            {/* CITY MODAL */}
+            <Modal visible={cityModalVisible} animationType="slide" transparent={true}>
+                <View style={modalStyles.overlay}>
+                    <View style={modalStyles.content}>
+                        <View style={modalStyles.header}>
+                            <Text style={modalStyles.title}>Select City / District</Text>
+                            <TouchableOpacity onPress={() => { setCityModalVisible(false); setCitySearchQuery(''); }}>
+                                <Ionicons name="close-circle" size={28} color="#d32f2f" />
+                            </TouchableOpacity>
+                        </View>
+                        <View style={{backgroundColor:'#f0f0f0', borderRadius:8, paddingHorizontal:10, marginBottom:10, flexDirection:'row', alignItems:'center'}}>
+                            <Ionicons name="search" size={20} color="gray" />
+                            <TextInput 
+                                style={{flex:1, padding:10, fontSize:16}} 
+                                placeholder="Search City..." 
+                                value={citySearchQuery} 
+                                onChangeText={setCitySearchQuery} 
+                            />
+                        </View>
+                        <FlatList
+                            data={(indianStatesAndDistricts[profile.state] || []).filter((c: string) => c.toLowerCase().includes(citySearchQuery.toLowerCase()))}
+                            keyExtractor={item => item}
+                            renderItem={({item}) => (
+                                <TouchableOpacity style={modalStyles.item} onPress={() => {
+                                    updateField('city', item);
+                                    if (!profile.pincode) {
+                                    updateField('pincode', districtPincodes[item] || '');
+                                    }
+                                    setCitySearchQuery('');
+                                    setCityModalVisible(false);
+                                }}>
+                                    <Text style={modalStyles.itemText}>{item}</Text>
+                                </TouchableOpacity>
+                            )}
+                            keyboardShouldPersistTaps="handled"
+                        />
+                    </View>
+                </View>
+            </Modal>
+
         </View>
+        // ✅ return() yahan khatam hota hai
     );
 }
 
@@ -475,25 +556,20 @@ const styles = StyleSheet.create({
     row: { flexDirection: 'row' },
     saveBtn: { backgroundColor: '#2E7D32', padding: 15, borderRadius: 10, alignItems: 'center', elevation: 3 },
     saveText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
-    
     imgLabel: { fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 5, marginTop: 10 },
     imgBox: { width: 100, height: 100, backgroundColor: '#f9f9f9', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginBottom: 15, borderStyle: 'dashed' },
     previewImg: { width: '100%', height: '100%', borderRadius: 8 },
     placeholder: { alignItems: 'center' },
     phText: { fontSize: 10, color: '#999', marginTop: 4 },
     editBadge: { position: 'absolute', bottom: -5, right: -5, backgroundColor: '#e65100', width: 24, height: 24, borderRadius: 12, justifyContent: 'center', alignItems: 'center', elevation: 2 },
-    
-    deleteBadge: { 
-        position: 'absolute', 
-        top: 25, 
-        left: 85, 
-        backgroundColor: '#d32f2f', 
-        width: 26, 
-        height: 26, 
-        borderRadius: 13, 
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        elevation: 4, 
-        zIndex: 10 
-    }
+    deleteBadge: { position: 'absolute', top: 25, left: 85, backgroundColor: '#d32f2f', width: 26, height: 26, borderRadius: 13, justifyContent: 'center', alignItems: 'center', elevation: 4, zIndex: 10 }
+});
+
+const modalStyles = StyleSheet.create({
+    overlay: { flex:1, backgroundColor:'rgba(0,0,0,0.5)', justifyContent:'flex-end' },
+    content: { backgroundColor:'white', borderTopLeftRadius:20, borderTopRightRadius:20, padding:20, maxHeight:'70%' },
+    header: { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:15, borderBottomWidth:1, borderBottomColor:'#eee', paddingBottom:10 },
+    title: { fontSize:18, fontWeight:'bold', color:'#333' },
+    item: { paddingVertical:15, borderBottomWidth:1, borderBottomColor:'#f5f5f5' },
+    itemText: { fontSize:16, color:'#333' }
 });

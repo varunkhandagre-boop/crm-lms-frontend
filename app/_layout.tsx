@@ -32,7 +32,52 @@ export default function Layout() {
     </DataProvider>
   );
 }
+function PlanExpiryIndicator() {
+    const [daysLeft, setDaysLeft] = useState<number | null>(null);
+    const insets = useSafeAreaInsets();
+    const router = useRouter();
+    const pathname = usePathname();
+    const { currentUser } = useData();
+    const { fetchSaaSData } = useSaaSDB();
 
+    useEffect(() => {
+        const check = async () => {
+            if (!currentUser?.companyId) return;
+            try {
+                const companies = await fetchSaaSData("companies");
+                if (companies?.length > 0) {
+                    const expiry = new Date((companies[0] as any).expiryDate);
+                    const diff = Math.ceil((expiry.getTime() - Date.now()) / 86400000);
+                    setDaysLeft(diff);
+                }
+            } catch (e) {}
+        };
+        check();
+    }, [currentUser]);
+
+    if (pathname !== '/' || daysLeft === null || daysLeft > 30) return null;
+
+    const urgent = daysLeft <= 7;
+    return (
+        <TouchableOpacity
+            onPress={() => router.push('/SubscriptionScreen' as any)}
+            style={{
+                position: 'absolute', left: 15, top: insets.top + 50,
+                zIndex: 9999, flexDirection: 'row', alignItems: 'center',
+                backgroundColor: urgent ? '#fdecea' : '#fff3cd',
+                borderColor: urgent ? '#d32f2f' : '#f57c00',
+                borderWidth: 1, borderRadius: 15,
+                paddingHorizontal: 8, paddingVertical: 5,
+                elevation: 5,
+            }}
+        >
+            <Ionicons name="warning" size={11} color={urgent ? '#d32f2f' : '#f57c00'} style={{marginRight:4}} />
+            <Text style={{fontSize:10, fontWeight:'bold', color: urgent ? '#d32f2f' : '#856404'}}>
+                {daysLeft <= 0 ? 'Plan Expired!' : `Plan: ${daysLeft}d left`}
+            </Text>
+        </TouchableOpacity>
+    );
+}
 // 🔥 BULLETPROOF NETWORK & FIREBASE INDICATOR 🔥
 function NetworkIndicator() {
     const [isConnected, setIsConnected] = useState<boolean | null>(null);
@@ -87,7 +132,8 @@ function NavigationLayout() {
   const { 
       currentUser, 
       appPermissions, 
-      loading, 
+      loading,
+      isSubscriptionExpired, 
       attendanceList, 
       taskList = [],
       leadList = [],         
@@ -251,8 +297,13 @@ function NavigationLayout() {
   }, [attendanceList, currentUser, loading]);
 
   if (loading) {
-     return <View style={{flex:1, justifyContent:'center', alignItems:'center'}}><ActivityIndicator size="large" color="#3b5998"/></View>;
-  }
+   return <View style={{flex:1, justifyContent:'center', alignItems:'center'}}><ActivityIndicator size="large" color="#3b5998"/></View>;
+}
+
+// ✅ Subscription expired check
+if (currentUser && isSubscriptionExpired) {
+    return <SubscriptionExpiredScreen />;
+}
 
   const canSeeTab = (moduleKey: string) => {
       const userRole = currentUser?.role || 'Service Engineer';
@@ -270,10 +321,12 @@ function NavigationLayout() {
       
       {/* 🔥 GLOBAL NETWORK INDICATOR */}
       <NetworkIndicator />
+      <PlanExpiryIndicator />
 
       <View style={styles.content}>
         <Slot />
       </View>
+      
 
       {/* BOTTOM NAVIGATION */}
       {showNavBar && (
@@ -331,6 +384,38 @@ function NavigationLayout() {
       )}
     </View>
   );
+}
+
+// ✅ Subscription Expired Screen Component
+function SubscriptionExpiredScreen() {
+    const router = useRouter();
+    const { logout } = useData();
+    const handleLogout = async () => {
+        await logout();
+        router.replace('/login' as any);
+    };
+    return (
+        <View style={{flex:1, justifyContent:'center', alignItems:'center', padding:20, backgroundColor:'#fff'}}>
+            <Ionicons name="lock-closed" size={80} color="#d32f2f" />
+            <Text style={{fontSize:24, fontWeight:'bold', color:'#d32f2f', marginTop:20}}>
+                Plan Expired
+            </Text>
+            <Text style={{textAlign:'center', color:'#555', marginTop:10, fontSize:15, lineHeight:24}}>
+                Your subscription has expired.{"\n"}Please contact support to renew.
+            </Text>
+            <View style={{backgroundColor:'#f5f5f5', padding:20, borderRadius:10, width:'100%', marginTop:30, alignItems:'center'}}>
+                <Text style={{fontWeight:'bold', fontSize:16, marginBottom:10, color:'#333'}}>Contact Support</Text>
+                <Text style={{fontSize:15, color:'#555', marginBottom:5}}>📞 +91 87705 30146</Text>
+                <Text style={{fontSize:15, color:'#555'}}>📧 support@yourcrm.com</Text>
+            </View>
+            <TouchableOpacity 
+                style={{marginTop:30, paddingHorizontal:30, paddingVertical:12, backgroundColor:'#333', borderRadius:25}}
+                onPress={handleLogout}
+            >
+                <Text style={{color:'white', fontWeight:'bold', fontSize:16}}>Logout</Text>
+            </TouchableOpacity>
+        </View>
+    );
 }
 
 // 🔥 NAV BUTTON

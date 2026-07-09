@@ -481,7 +481,7 @@ export default function AddOrderScreen() {
               
               // Record Advance Payment in SaaS DB
               if (cleanAdvance > 0) {
-                  await addSaaSData("payments", {
+                  await addSaaSData("payment_collections", {
                       orgId: orgId,
                       orgName: hospitalName,
                       amount: cleanAdvance,

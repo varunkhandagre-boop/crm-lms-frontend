@@ -716,16 +716,96 @@ export default function OrderListScreen() {
           </View>
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingLeft:15, paddingVertical:10}}>
-              {['All', 'Pending', 'Approved', 'Dispatched', 'Billed', 'Rejected'].map(s => (
-                  <TouchableOpacity key={s} style={[styles.filterChip, statusFilter === s && styles.activeChip]} onPress={() => setStatusFilter(s)}>
-                      <Text style={[styles.chipText, statusFilter === s && {color:'white'}]}>{s}</Text>
-                  </TouchableOpacity>
-              ))}
-          </ScrollView>
-          
-          <Text style={{textAlign:'right', fontSize:12, color:'gray', paddingRight:15}}>
-              Total: <Text style={{fontWeight:'bold', color:'#3b5998'}}>{fullList.length}</Text>
-          </Text>
+    {['All', 'Pending', 'Approved', 'Dispatched', 'Billed', 'Rejected'].map(s => {
+        
+        const chipData = (() => {
+            let base = orderList ? [...orderList] : [];
+
+            // Employee filter
+            if (isAdmin && selectedEmployee !== 'All') {
+                const targetName = selectedEmployeeName.toLowerCase().trim();
+                base = base.filter((item: any) =>
+                    item.senderId === selectedEmployee ||
+                    item.userId === selectedEmployee ||
+                    (item.senderName && item.senderName.toLowerCase().includes(targetName)) ||
+                    (item.userName && item.userName.toLowerCase().includes(targetName))
+                );
+            } else if (!isAdmin) {
+                const myId = currentUser?.id || currentUser?.uid;
+                base = base.filter((item: any) =>
+                    item.senderId === myId || item.bookedBy === currentUser?.name
+                );
+            }
+
+            // Search filter
+            if (searchText) {
+                const term = searchText.toLowerCase();
+                base = base.filter((item: any) => {
+                    const fullString = `${item.hospitalName || ''} ${item.poNumber || ''} ${item.orderId || ''} ${item.productDetails || ''} ${item.amount || ''}`.toLowerCase();
+                    return fullString.includes(term);
+                });
+            }
+
+            // Date/FY filter
+            if (viewMode !== 'All') {
+                const targetYear = currentDate.getFullYear();
+                const targetMonth = currentDate.getMonth();
+                const targetDay = currentDate.getDate();
+                const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+                const fyStartDate = new Date(fyStartYear, 3, 1).getTime();
+                const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime();
+
+                base = base.filter((item: any) => {
+                    const ts = parseDate(item.dateIso || item.date || item.createdAt);
+                    if (ts === 0) return false;
+                    const itemDate = new Date(ts);
+                    if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
+                    if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
+                    if (viewMode === 'FY') return ts >= fyStartDate && ts <= fyEndDate;
+                    return true;
+                });
+            }
+
+            // Status filter for chip count
+            const filtered = s === 'All'
+                ? base.filter((item: any) => {
+                    const status = (item.status || '').toLowerCase();
+                    return !status.includes('reject') && !status.includes('cancel');
+                })
+                : base.filter((item: any) => item.status === s);
+
+            const count = filtered.length;
+            const amount = filtered.reduce((sum: number, o: any) => sum + (parseFloat(o.amount) || 0), 0);
+            return { count, amount };
+        })();
+
+        const isActive = statusFilter === s;
+
+        return (
+            <TouchableOpacity
+                key={s}
+                style={[
+                    styles.filterChip,
+                    isActive && styles.activeChip,
+                    { minWidth: 90, paddingVertical: 8, alignItems: 'center' }
+                ]}
+                onPress={() => setStatusFilter(s)}
+            >
+                <Text style={[styles.chipText, isActive && { color: 'white' }, { fontWeight: 'bold' }]}>
+                    {s}
+                </Text>
+                <Text style={[
+                    { fontSize: 11, marginTop: 2 },
+                    isActive ? { color: 'white' } : { color: '#3b5998' }
+                ]}>
+                    {chipData.count} • ₹{chipData.amount >= 100000
+                        ? (chipData.amount / 100000).toFixed(1) + 'L'
+                        : chipData.amount.toLocaleString('en-IN')}
+                </Text>
+            </TouchableOpacity>
+        );
+    })}
+</ScrollView>
       </View>
 
       <FlatList 
@@ -1030,7 +1110,7 @@ const styles = StyleSheet.create({
   searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', marginHorizontal: 15, paddingHorizontal: 10, borderRadius: 8, height:36, alignItems:'center', marginBottom:10 },
   searchInput: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
 
-  filterChip: { paddingHorizontal:15, paddingVertical:6, backgroundColor:'#eee', borderRadius:20, marginRight:10 },
+  filterChip: { paddingHorizontal:15, paddingVertical:6, backgroundColor:'#eee', borderRadius:20, marginRight:10, minWidth: 90, alignItems: 'center' },
   activeChip: { backgroundColor:'#3b5998' },
   chipText: { fontSize:12, color:'#555' },
   
