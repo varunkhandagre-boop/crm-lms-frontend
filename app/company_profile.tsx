@@ -170,14 +170,64 @@ export default function CompanyProfileScreen() {
             }
 
             const dataToSave = {
-                companyName: profile.companyName, shortName: profile.shortName.toUpperCase(), tagline: profile.tagline,
-                fullAddress: { line: profile.addressLine, city: profile.city, state: profile.state, pincode: profile.pincode },
-                address: `${profile.addressLine}, ${profile.city}, ${profile.state} - ${profile.pincode}`,
-                gstNumber: profile.gstNumber, contactEmail: profile.email, contactPhone: profile.phone, landline: profile.landline, website: profile.website,
-                logoUrl: finalLogo, signatureUrl: finalSign, qrCodeUrl: finalQr, upiId: profile.upiId,
-                bankDetails1: { bankName: profile.bank1_name, accountNo: profile.bank1_acc, ifsc: profile.bank1_ifsc, branch: profile.bank1_branch },
-                bankDetails2: { bankName: profile.bank2_name, accountNo: profile.bank2_acc, ifsc: profile.bank2_ifsc, branch: profile.bank2_branch }
-            };
+    // ✅ Flat fields (Register wale format ke saath compatible)
+    companyName: profile.companyName,
+    shortName: profile.shortName.toUpperCase(),
+    tagline: profile.tagline,
+    
+    address: `${profile.addressLine}, ${profile.city}, ${profile.state} - ${profile.pincode}`,
+    addressLine: profile.addressLine,   // ✅ extra alias
+    city: profile.city,                 // ✅ flat city
+    state: profile.state,               // ✅ flat state
+    pincode: profile.pincode,           // ✅ flat pincode
+    
+    email: profile.email,               // ✅ flat email
+    phone: profile.phone,               // ✅ flat phone
+    mobile: profile.phone,              // ✅ alias for mobile
+    landline: profile.landline,
+    website: profile.website,
+    gstNumber: profile.gstNumber,
+    
+    // ✅ Nested fields (CompanyProfile wale format)
+    fullAddress: {
+        line: profile.addressLine,
+        city: profile.city,
+        state: profile.state,
+        pincode: profile.pincode
+    },
+    contactEmail: profile.email,
+    contactPhone: profile.phone,
+    
+    // ✅ Images
+    logoUrl: finalLogo,
+    signatureUrl: finalSign,
+    qrCodeUrl: finalQr,
+    upiId: profile.upiId,
+    
+    // ✅ Bank nested (for PDF)
+    bankDetails1: {
+        bankName: profile.bank1_name,
+        accountNo: profile.bank1_acc,
+        ifsc: profile.bank1_ifsc,
+        branch: profile.bank1_branch
+    },
+    bankDetails2: {
+        bankName: profile.bank2_name,
+        accountNo: profile.bank2_acc,
+        ifsc: profile.bank2_ifsc,
+        branch: profile.bank2_branch
+    },
+    
+    // ✅ Flat bank fields bhi (agar koi directly access kare)
+    bank1_name: profile.bank1_name,
+    bank1_acc: profile.bank1_acc,
+    bank1_ifsc: profile.bank1_ifsc,
+    bank1_branch: profile.bank1_branch,
+    bank2_name: profile.bank2_name,
+    bank2_acc: profile.bank2_acc,
+    bank2_ifsc: profile.bank2_ifsc,
+    bank2_branch: profile.bank2_branch,
+};
 
             let res;
             if (profileDocId) {

@@ -172,68 +172,118 @@ export const DataProvider = ({ children }: any) => {
   };
   
   const fetchCompanySettings = async (companyId: string) => {
-        if (!companyId) return;
+    if (!companyId) return;
 
-        try {
-            const localProfile = await AsyncStorage.getItem('companyProfileLocal');
-            if (localProfile) {
-                const parsed = JSON.parse(localProfile);
-                if (parsed.companyId === companyId) {
-                    setCompanyProfile(parsed);
-                } else {
-                    await AsyncStorage.removeItem('companyProfileLocal');
-                }
+    try {
+        // AsyncStorage cache check
+        const localProfile = await AsyncStorage.getItem('companyProfileLocal');
+        if (localProfile) {
+            const parsed = JSON.parse(localProfile);
+            if (parsed.companyId === companyId) {
+                setCompanyProfile(parsed);
+            } else {
+                await AsyncStorage.removeItem('companyProfileLocal');
             }
+        }
 
-            // 🔥 FIX: "companies" collection mein companyId field se query karo
-            const compQuery = query(collection(db, "companies"), where("companyId", "==", companyId));
+        // ✅ FIX 1: company_profile collection mein companyId field se query karo
+        let data: any = null;
+
+        const profileQuery = query(
+            collection(db, "company_profile"), 
+            where("companyId", "==", companyId)
+        );
+        const profileSnap = await getDocs(profileQuery);
+
+        if (!profileSnap.empty) {
+            data = profileSnap.docs[0].data();
+        } else {
+            // Fallback: companies collection check karo
+            const compQuery = query(
+                collection(db, "companies"), 
+                where("companyId", "==", companyId)
+            );
             const compSnap = await getDocs(compQuery);
-
-            let data: any = null;
             if (!compSnap.empty) {
                 data = compSnap.docs[0].data();
-            } else {
-                const docRef = doc(db, "company_profile", companyId);
-                const docSnap = await getDoc(docRef);
-                if (docSnap.exists()) {
-                    data = docSnap.data();
-                }
             }
-            
-            if (data) {
-                const profileData = {
-                    companyId: companyId,
-                    companyName: data.companyName || 'LMS',
-                    shortName: data.shortName || 'LMS',
-                    tagline: data.tagline || '',
-                    address: data.address || (data.fullAddress ? `${data.fullAddress.line || ''}, ${data.fullAddress.city || ''}` : ''),
-                    fullAddress: data.fullAddress || {},
-                    phone: data.contactPhone || data.phone || '', 
-                    email: data.contactEmail || data.email || '',
-                    landline: data.landline || '',
-                    website: data.website || '',
-                    gstNumber: data.gstNumber || '',
-                    logoUrl: data.logoUrl || '',
-                    signatureUrl: data.signatureUrl || '',
-                    qrCodeUrl: data.qrCodeUrl || '',
-                    upiId: data.upiId || '', 
-                    bankDetails1: data.bankDetails1 || {},
-                    bankDetails2: data.bankDetails2 || {}
-                };
-                setCompanyProfile(profileData as any);
-                await AsyncStorage.setItem('companyProfileLocal', JSON.stringify(profileData));
-                if (data.expiryDate) {
-    const today = new Date();
-    const expiry = new Date(data.expiryDate);
-    if (today > expiry) {
-        setIsSubscriptionExpired(true);
-    }
-}
-            }
-        } catch (error) {
-            console.log("Error fetching company settings:", error);
         }
-    };
+        
+        if (data) {
+            // ✅ FIX 2: Sab fields normalize karo - flat + nested dono
+            const profileData = {
+                companyId: companyId,
+                companyName: data.companyName || 'My Company',
+                shortName: data.shortName || 'CRM',
+                tagline: data.tagline || '',
+
+                // ✅ Address - flat fields
+                addressLine: data.addressLine || data.fullAddress?.line || data.address || '',
+                city:        data.city        || data.fullAddress?.city  || '',
+                state:       data.state       || data.fullAddress?.state || '',
+                pincode:     data.pincode     || data.fullAddress?.pincode || '',
+
+                // ✅ Address - combined string (PDF ke liye)
+                address: data.address || 
+                    (data.fullAddress 
+                        ? `${data.fullAddress.line || ''}, ${data.fullAddress.city || ''}, ${data.fullAddress.state || ''}`
+                        : ''),
+                fullAddress: data.fullAddress || {},
+
+                // ✅ Contact - sab aliases handle karo
+                phone:    data.phone    || data.contactPhone || data.mobile || '',
+                mobile:   data.mobile   || data.contactPhone || data.phone  || '',
+                email:    data.email    || data.contactEmail || '',
+                landline: data.landline || '',
+                website:  data.website  || '',
+
+                gstNumber: data.gstNumber || '',
+
+                // ✅ Images
+                logoUrl:      data.logoUrl      || '',
+                signatureUrl: data.signatureUrl || '',
+                qrCodeUrl:    data.qrCodeUrl    || '',
+                upiId:        data.upiId        || '',
+
+                // ✅ Bank - nested format (PDF use karta hai)
+                bankDetails1: data.bankDetails1 || {
+                    bankName:  data.bank1_name   || '',
+                    accountNo: data.bank1_acc    || '',
+                    ifsc:      data.bank1_ifsc   || '',
+                    branch:    data.bank1_branch || '',
+                },
+                bankDetails2: data.bankDetails2 || {
+                    bankName:  data.bank2_name   || '',
+                    accountNo: data.bank2_acc    || '',
+                    ifsc:      data.bank2_ifsc   || '',
+                    branch:    data.bank2_branch || '',
+                },
+
+                // ✅ Bank - flat format bhi rakho
+                bank1_name:   data.bank1_name   || data.bankDetails1?.bankName  || '',
+                bank1_acc:    data.bank1_acc    || data.bankDetails1?.accountNo || '',
+                bank1_ifsc:   data.bank1_ifsc   || data.bankDetails1?.ifsc      || '',
+                bank1_branch: data.bank1_branch || data.bankDetails1?.branch    || '',
+                bank2_name:   data.bank2_name   || data.bankDetails2?.bankName  || '',
+                bank2_acc:    data.bank2_acc    || data.bankDetails2?.accountNo || '',
+                bank2_ifsc:   data.bank2_ifsc   || data.bankDetails2?.ifsc      || '',
+                bank2_branch: data.bank2_branch || data.bankDetails2?.branch    || '',
+            };
+
+            setCompanyProfile(profileData as any);
+            await AsyncStorage.setItem('companyProfileLocal', JSON.stringify(profileData));
+
+            // Expiry check
+            if (data.expiryDate) {
+                const today = new Date();
+                const expiry = new Date(data.expiryDate);
+                if (today > expiry) setIsSubscriptionExpired(true);
+            }
+        }
+    } catch (error) {
+        console.log("Error fetching company settings:", error);
+    }
+};
 
   const [projectList, setProjectList] = useState<any[]>([]);
   const fetchProjects = async () => {
@@ -322,23 +372,28 @@ export const DataProvider = ({ children }: any) => {
                 }
 
                 if (companyId && finalRole !== "SuperAdmin") {
-                    const companyDocRef = doc(db, "company_profile", companyId);
-                    const companySnap = await getDoc(companyDocRef);
-                    if (companySnap.exists()) {
-                        const compData = companySnap.data();
-                        let active = compData.isActive !== false; 
-                        
+                    const compQuery = query(
+                        collection(db, "company_profile"),
+                        where("companyId", "==", companyId)
+                    );
+                    const compSnap = await getDocs(compQuery);
+                    if (!compSnap.empty) {
+                        const compData = compSnap.docs[0].data();
+                        let active = compData.isActive !== false;
+
                         if (active && compData.expiryDate) {
                             const today = new Date().getTime();
                             const expiry = new Date(compData.expiryDate).getTime();
-                            if (today > expiry) active = false; 
+                            if (today > expiry) active = false;
                         }
                         isCompanyActive = active;
                         if (!active) setIsSubscriptionExpired(true);
                         else setIsSubscriptionExpired(false);
                     }
                 }
+
             } else {
+                // ✅ YE BLOCK MISSING THA - userData null hone par SuperAdmin check
                 if(emailKey === "varunkhandagre@gmail.com" || emailKey === "admin@mycrm.com") {
                     finalRole = "SuperAdmin";
                 }
@@ -356,9 +411,9 @@ export const DataProvider = ({ children }: any) => {
             } catch (tokenErr) {
                 console.log("⚠️ Could not fetch/save push token:", tokenErr);
             }
+
         } catch (e) { console.log("⚠️ Auth Error:", e); }
         
-        // 🔥 setCurrentUser Optimized Ref Logic
         const newUser = {
             id: user.uid,
             name: name,
@@ -378,8 +433,7 @@ export const DataProvider = ({ children }: any) => {
         if (companyId) {
             console.log("✅ Calling fetchCompanySettings with:", companyId);
             fetchCompanySettings(companyId);
-            fetchStaticData(companyId); // Static data ek baar fetch
-
+            fetchStaticData(companyId);
         }
 
       } else {
