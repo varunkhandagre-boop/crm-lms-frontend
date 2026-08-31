@@ -20,24 +20,22 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-// 🔥 SAAS IMPORTS (No direct Firebase DB imports)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 1/2: lead update/delete and visit logging now via the new backend API
+import { deleteLead as apiDeleteLead, updateLead as apiUpdateLead } from '../services/api/leads';
+import { createSalesVisit } from '../services/api/salesVisits';
 
 export default function LeadDetailsScreen() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
     const { id } = useLocalSearchParams();
     
-    // 🔥 Context se SaaS ready properties
-    const { leadsList, addLeadActivity, currentUser, refreshData, productList = [] } = useData();
-
-    // 🔥 Naya SaaS Engine (add, update, aur delete)
-    const { addSaaSData, updateSaaSData, deleteSaaSData } = useSaaSDB();
+    // 🔥 leadsList now comes from the new API via DataContext's refreshLeads
+    const { leadsList, currentUser, refreshLeads, productList = [] } = useData();
 
     const [lead, setLead] = useState<any>(null);
     const [isUpdating, setIsUpdating] = useState(false);
-    const [isDeleting, setIsDeleting] = useState(false); // 🔥 DELETE LOADER
+    const [isDeleting, setIsDeleting] = useState(false);
 
     // Log Visit Modal States
     const [logModalVisible, setLogVisitModalVisible] = useState(false);
@@ -172,94 +170,77 @@ export default function LeadDetailsScreen() {
         return null;
     };
 
-    // 🔥 SAAS DUAL SAVE LOGIC (Log Visit + Update Lead)
+    // 🔥 DUAL SAVE LOGIC (Log Visit + Update Lead) — via new backend API
     const handleLogVisit = async () => {
         if (!editNote.trim()) return Alert.alert("Required", "Please enter discussion note.");
         if (selectedProducts.includes('Other') && !otherProductText.trim()) return Alert.alert("Required", "Please type the new product name.");
-        if (!currentUser?.companyId) return Alert.alert("Error", "Company ID not found.");
         
         setIsUpdating(true);
         try {
             const locationData = await getCurrentLocation();
-            const safeUserId = currentUser?.uid || currentUser?.id || 'guest';
             const nextDateISO = editNextDate.toISOString().split('T')[0];
             const todayString = new Date().toLocaleDateString('en-GB');
 
-            // Prepare final product list
             let finalProductsToSave = selectedProducts.filter(p => p !== 'Other');
             if (selectedProducts.includes('Other') && otherProductText.trim()) {
                 finalProductsToSave.push(otherProductText.trim());
             }
             const productDisplayString = finalProductsToSave.join(', ');
 
-            // 1. CREATE DSR (Sales Visit)
-            const newVisit = {
+            // 1. CREATE VISIT — linked to this existing lead via leadId, so
+            // the backend does NOT auto-create a second lead for it.
+            await createSalesVisit({
                 visitType: 'Follow Up',
-                hospital: lead.org || lead.orgName, 
-                orgName: lead.org || lead.orgName, 
-                orgId: lead.orgId || '', 
-                leadId: lead.id,
-                person: lead.contactPerson || '', 
-                mobile: lead.mobile || '', 
-                city: lead.city || '', 
-                product: finalProductsToSave, // Array
-                discussion: editNote, 
+                orgName: lead.org || lead.orgName,
+                orgId: lead.orgId || undefined,
+                contactPerson: lead.contactPerson || undefined,
+                mobile: lead.mobile || undefined,
+                city: lead.city || undefined,
+                products: finalProductsToSave,
+                discussion: editNote,
                 outcome: editOutcome,
                 nextFollowUp: nextDateISO,
-                date: new Date().toISOString().split('T')[0],
-                dateIso: new Date().toISOString().split('T')[0],
-                senderId: safeUserId, 
-                senderName: currentUser?.name || 'Unknown', 
-                role: currentUser?.role || 'Employee',
-                timestamp: Date.now(), 
-                location: locationData || null,
-            };
-            
-            const visitRes = await addSaaSData("sales_reports", newVisit);
-            if (!visitRes.success) throw new Error("Failed to log visit report.");
+                location: locationData ? { latitude: locationData.lat, longitude: locationData.lng } : null,
+                leadId: lead.id,
+            });
 
             // 2. UPDATE LEAD
             let finalStatus = editOutcome === 'Order Closed' ? 'Converted' : editOutcome;
-            let leadType = editOutcome === 'Order Expected' ? 'Hot' : editOutcome === 'Order Closed' ? 'Won' : 'Warm';
+            // Note: this is lead TYPE (Hot/Warm/Cold), not deal outcome —
+            // 'Won' isn't a valid type, `status: 'Converted'` already covers that.
+            const apiLeadType: 'HOT' | 'WARM' | 'COLD' =
+                editOutcome === 'Order Expected' ? 'HOT' :
+                lead.type === 'Hot' ? 'HOT' :
+                lead.type === 'Cold' ? 'COLD' : 'WARM';
 
             const logEntry = `📅 ${todayString}: Visit/Follow-up Logged.\nStatus: ${editOutcome} | Stage: ${editStage}\nProducts: ${productDisplayString}\nNote: ${editNote}`;
             const updatedDiscussion = lead.discussion ? `${logEntry}\n────────────────\n${lead.discussion}` : logEntry;
 
-            const updateRes = await updateSaaSData("leads", lead.id, {
+            await apiUpdateLead(lead.id, {
                 status: finalStatus,
                 stage: editStage,
-                type: leadType,
-                product: productDisplayString, // Save string for legacy
-                requirements: finalProductsToSave, // Save array for modern UI
-                isHot: leadType === 'Hot',
+                type: apiLeadType,
+                requirements: finalProductsToSave,
+                isHot: apiLeadType === 'HOT',
                 nextDate: nextDateISO,
-                lastUpdated: new Date().toISOString(),
-                discussion: updatedDiscussion
+                discussion: updatedDiscussion,
             });
 
-            if (!updateRes.success) throw new Error("Failed to update lead status.");
+            // 3. Timeline history is now handled automatically by the
+            // backend: apiUpdateLead() above appends a new history entry
+            // itself whenever `discussion` is included in the update.
+            // (No Firestore addLeadActivity call needed anymore — leads
+            // don't have a Firestore document to update since Phase 1.)
 
-            // 3. ADD TO TIMELINE
-            if (addLeadActivity) {
-                await addLeadActivity(lead.id, {
-                    type: 'Visit',
-                    msg: `Logged Visit: ${editNote}`, 
-                    changeNote: `Status ➔ ${editOutcome}, Stage ➔ ${editStage}, Products ➔ ${productDisplayString}`,
-                    by: currentUser?.name,
-                    date: new Date().toLocaleString()
-                });
-            }
-
-            if (refreshData) await refreshData();
+            if (refreshLeads) await refreshLeads();
             setLogVisitModalVisible(false);
             setEditNote('');
-            
-            // Sync Local Data
+
             setLead((prev: any) => ({
                 ...prev,
                 status: finalStatus,
                 stage: editStage,
-                type: leadType,
+                type: apiLeadType === 'HOT' ? 'Hot' : apiLeadType === 'COLD' ? 'Cold' : 'Warm',
                 requirements: finalProductsToSave,
                 product: productDisplayString,
                 nextDate: nextDateISO,
@@ -275,7 +256,7 @@ export default function LeadDetailsScreen() {
         }
     };
 
-    // 🔥 NEW: ADMIN DELETE FUNCTION (SAAS INTEGRATED)
+    // 🔥 ADMIN DELETE — via new backend API
     const handleDeleteLead = async () => {
         if (!lead) return;
         Alert.alert(
@@ -289,14 +270,10 @@ export default function LeadDetailsScreen() {
                     onPress: async () => {
                         setIsDeleting(true);
                         try {
-                            const res = await deleteSaaSData("leads", lead.id);
-                            if(res.success) {
-                                Alert.alert("Deleted", "Lead has been deleted successfully.");
-                                if (refreshData) await refreshData();
-                                router.back(); 
-                            } else {
-                                Alert.alert("Error", "Failed to delete lead.");
-                            }
+                            await apiDeleteLead(lead.id);
+                            Alert.alert("Deleted", "Lead has been deleted successfully.");
+                            if (refreshLeads) await refreshLeads();
+                            router.back(); 
                         } catch (error: any) {
                             Alert.alert("Error", error.message);
                         } finally {
@@ -402,7 +379,6 @@ export default function LeadDetailsScreen() {
                         
                         <View style={styles.divider}/>
                         
-                        {/* 🔥 UPGRADED LIST VIEW FOR PRODUCTS */}
                         <View style={styles.reqBox}>
                             <Text style={{fontSize: 12, fontWeight: 'bold', color: 'gray', marginBottom: 2}}>Requirements / Products</Text>
                             {renderProductList(lead.requirements || lead.product) || <Text style={{fontSize: 13, color: '#444'}}>None</Text>}
@@ -442,7 +418,6 @@ export default function LeadDetailsScreen() {
                         <Text style={{color: '#1565c0', fontWeight: 'bold', marginLeft: 8}}>📄 Generate Quotation for this Lead</Text>
                     </TouchableOpacity>
 
-                    {/* 🔥 CONDITIONAL ORDER BUTTON */}
                     {(lead.stage === 'Order Closed' || lead.status === 'Converted') && (
                         <TouchableOpacity 
                             style={{backgroundColor: '#e8f5e9', padding: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 15, borderWidth: 1, borderColor: '#a5d6a7'}}
@@ -467,7 +442,6 @@ export default function LeadDetailsScreen() {
                         </TouchableOpacity>
                     )}
 
-                    {/* 🔥 ADMIN DELETE BUTTON */}
                     {isStrictAdmin && (
                         <TouchableOpacity 
                             style={{backgroundColor: '#ffebee', padding: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 15, borderWidth: 1, borderColor: '#ef9a9a'}}
@@ -538,7 +512,6 @@ export default function LeadDetailsScreen() {
                                     </View>
                                 </View>
 
-                                {/* 🔥 MULTIPLE PRODUCT DISCUSS / UPDATE */}
                                 <Text style={styles.label}>Products Discussed:</Text>
                                 <TouchableOpacity style={styles.pickerBtn} onPress={() => { setProductSearchText(''); setShowProductPicker(true); }}>
                                     <Text style={{ color: selectedProducts.length > 0 ? '#333' : 'gray', fontWeight: 'bold', flex: 1 }} numberOfLines={1}>
@@ -624,7 +597,6 @@ export default function LeadDetailsScreen() {
                 </View>
             </Modal>
 
-            {/* 🔥 PRODUCT MULTI-SELECT PICKER WITH SEARCH BAR */}
             <Modal visible={showProductPicker} transparent animationType="fade">
                 <View style={styles.pickerOverlay}>
                     <TouchableOpacity style={StyleSheet.absoluteFill} onPress={() => setShowProductPicker(false)} />

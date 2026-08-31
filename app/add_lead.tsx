@@ -18,9 +18,11 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Firebase DB imports completely removed)
+// 🔥 SAAS IMPORTS (organizations/users/products still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 1/2: leads now go through the new backend API
+import { createLead, listLeads, updateLead as apiUpdateLead } from '../services/api/leads';
 
 export default function AddLeadScreen() {
   const router = useRouter();
@@ -28,8 +30,8 @@ export default function AddLeadScreen() {
   // 🔥 1. Context se sirf user aur notification nikala
   const { currentUser, addNotification } = useData(); 
 
-  // 🔥 2. Naya SaaS Engine connect kiya
-  const { fetchSaaSData, addSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 2. SaaS Engine ab sirf organizations/users/products ke liye
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
   // 🔥 3. Lazy Loaded States
   const [orgList, setOrgList] = useState<any[]>([]);
@@ -76,7 +78,7 @@ export default function AddLeadScreen() {
   const [filteredData, setFilteredData] = useState<any[]>([]);
   const [currentModalType, setCurrentModalType] = useState('');
 
-  // 🔥 4. LOAD DATA ON MOUNT
+  // 🔥 4. LOAD DATA ON MOUNT (leads via new API, rest via SaaS/Firestore)
   useEffect(() => {
       const loadData = async () => {
           if (currentUser?.companyId) {
@@ -84,7 +86,7 @@ export default function AddLeadScreen() {
                   fetchSaaSData("organizations"),
                   fetchSaaSData("users"),
                   fetchSaaSData("products"),
-                  fetchSaaSData("leads")
+                  listLeads() // was: fetchSaaSData("leads")
               ]);
               setOrgList(orgs);
               setUserList(users);
@@ -213,7 +215,7 @@ export default function AddLeadScreen() {
       setSelectedRequirements(selectedRequirements.filter(r => r !== item));
   };
 
-  // 🔥 5. SAAS SAVE & MERGE LOGIC
+  // 🔥 5. SAVE & MERGE LOGIC — via new backend API
   const handleSave = async () => {
       if (isSubmitting) return;
 
@@ -248,7 +250,7 @@ export default function AddLeadScreen() {
           }
 
           try {
-              // 🔥 FAST LOCAL DUPLICATE CHECK
+              // 🔥 FAST LOCAL DUPLICATE CHECK (against API-sourced leadsList)
               const existingLead = leadsList.find(d => {
                   return d.orgName === org && 
                          d.status !== 'Closed' && 
@@ -258,7 +260,7 @@ export default function AddLeadScreen() {
               });
 
               if (existingLead) {
-                  // ⚠️ DUPLICATE FOUND: MERGE DATA VIA SAAS HOOK
+                  // ⚠️ DUPLICATE FOUND: MERGE DATA VIA NEW API
                   let currentReqs = existingLead.requirements || [];
                   let newReqsToAdd = finalRequirements.filter((r: string) => !currentReqs.includes(r));
                   let updatedReqs = [...currentReqs, ...newReqsToAdd];
@@ -267,10 +269,10 @@ export default function AddLeadScreen() {
                   const newNote = `➕ New Inquiry Merged (${todayStr}):\nAdded Req: ${finalRequirements.join(', ')}\nNote: ${discussion}`;
                   const updatedDiscussion = `${newNote}\n────────────────\n${existingLead.discussion || ''}`;
 
-                  await updateSaaSData("leads", existingLead.id, {
+                  await apiUpdateLead(existingLead.id, {
                       requirements: updatedReqs,
                       discussion: updatedDiscussion,
-                      orgId: orgId || existingLead.orgId || '', 
+                      orgId: orgId || existingLead.orgId || undefined, 
                       isHot: leadType === 'Hot' ? true : existingLead.isHot 
                   });
 
@@ -288,41 +290,32 @@ export default function AddLeadScreen() {
               console.log("Error checking duplicate:", e);
           }
 
-          // ✅ CREATE NEW LEAD (Engine Auto-injects CompanyId, SenderId, etc.)
-          const newLeadData = {
-              org: org,
-              orgName: org, 
-              orgId: orgId, 
-              address: address,
-              city: city,
-              contactPerson: clientName, 
-              mobile: mobile,
-              email: email,
-              allocatedTo: allocatedTo, 
-              ownerName: leadOwner,       
-              status: status,
-              stage: leadStage, 
-              type: leadType,
-              isHot: leadType === 'Hot',
-              discussion: discussion,
-              requirements: finalRequirements,
-              nextDate: nextDate.toISOString().split('T')[0],
-              closingDate: closingDate.toISOString().split('T')[0],
-              date: new Date().toISOString().split('T')[0], 
-              userId: currentUser?.id,       
-              assignedTo: currentUser?.id, 
-              location: locationData,
-              history: [{
-                  date: new Date().toLocaleString(),
-                  msg: `Lead Created. Req: ${finalRequirements.join(', ')}. Note: ${discussion}`,
-                  type: 'New Lead',
-                  by: currentUser?.name || 'User'
-              }]
-          };
+          // ✅ CREATE NEW LEAD via the new backend API
+          // Note: assignedToId intentionally omitted — backend defaults to
+          // the logged-in user, same as this screen's original self-assign
+          // behavior ("Allocated To" here is a display label only).
+          try {
+              await createLead({
+                  orgName: org,
+                  orgId: orgId || undefined,
+                  contactPerson: clientName,
+                  mobile,
+                  email: email || undefined,
+                  address,
+                  city,
+                  ownerName: leadOwner !== 'Select' ? leadOwner : undefined,
+                  status,
+                  stage: leadStage,
+                  type: leadType.toUpperCase() as 'HOT' | 'WARM' | 'COLD',
+                  isHot: leadType === 'Hot',
+                  source: leadSource !== 'Select' ? leadSource : undefined,
+                  requirements: finalRequirements,
+                  discussion,
+                  nextDate: nextDate.toISOString().split('T')[0],
+                  closingDate: closingDate.toISOString().split('T')[0],
+                  location: { latitude: locationData.lat, longitude: locationData.lng },
+              });
 
-          const result = await addSaaSData("leads", newLeadData);
-
-          if (result.success) {
               if (addNotification) {
                   await addNotification({
                       title: "New Lead Added 👥",
@@ -334,10 +327,11 @@ export default function AddLeadScreen() {
               }
               Alert.alert("Success", "New Lead Added!");
               router.back();
-          } else {
-              Alert.alert("Error", "Could not save lead.");
+          } catch (err: any) {
+              Alert.alert("Error", err?.message || "Could not save lead.");
+          } finally {
+              setIsSubmitting(false); 
           }
-          setIsSubmitting(false); 
       }
   };
 

@@ -6,22 +6,22 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-// 🔥 SAAS IMPORTS (Direct DB imports removed)
+// 🔥 SAAS IMPORTS (users still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 2: quotations now go through the new backend API
+import { listQuotations } from '../services/api/quotations';
 
 
 export default function QuotationsListScreen() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
     
-    // 🔥 1. Context se sirf current user & profile nikala
     const { companyProfile, currentUser } = useData(); 
     
-    // 🔥 2. Naya SaaS Engine
+    // 🔥 SaaS Engine kept only for users
     const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-    // 🔥 3. Lazy Loaded Master States
     const [quotations, setQuotations] = useState<any[]>([]);
     const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
 
@@ -46,17 +46,16 @@ export default function QuotationsListScreen() {
         else setVisibleCount(20); 
     }, [viewMode, currentDate, selectedEmployeeName, searchText]);
 
-    // 🔥 4. LOAD SAAS DATA
+    // 🔥 LOAD DATA — quotations via new API; users via Firestore
     const loadData = async () => {
         if (!currentUser?.companyId) return;
         setLoading(true);
         try {
             const [quotes, users] = await Promise.all([
-                fetchSaaSData("quotations"),
+                listQuotations(), // was: fetchSaaSData("quotations")
                 fetchSaaSData("users")
             ]);
             
-            // Sort Descending locally
             quotes.sort((a: any, b: any) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
             setQuotations(quotes);
 

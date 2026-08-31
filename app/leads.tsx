@@ -15,9 +15,11 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+// 🔥 SAAS IMPORTS (users still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 1: leads now go through the new backend API
+import { listLeads } from '../services/api/leads';
 
 export default function LeadsScreen() {
     const router = useRouter();
@@ -25,7 +27,7 @@ export default function LeadsScreen() {
     // 🔥 1. Context se sirf user
     const { currentUser } = useData();
 
-    // 🔥 2. Naya SaaS Engine
+    // 🔥 2. SaaS Engine ab sirf users ke liye
     const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
     // 🔥 3. Lazy Loaded States
@@ -64,12 +66,12 @@ export default function LeadsScreen() {
     const leadStatuses = ['All', 'Interested', 'Follow Up', 'Demo Planned', 'Order Expected', 'Converted (Win)', 'Lost'];
     const leadStages = ['All', 'New', 'Introduction', 'Technical Review', 'Quotation', 'Negotiation', 'Order Closed'];
 
-    // 🔥 4. MASSIVE SAAS DATA LOAD ON MOUNT
+    // 🔥 4. LEADS LOAD ON MOUNT — via new backend API; users via Firestore
     useEffect(() => {
         const loadData = async () => {
             if (currentUser?.companyId) {
                 const [leads, users] = await Promise.all([
-                    fetchSaaSData("leads"),
+                    listLeads(), // was: fetchSaaSData("leads")
                     fetchSaaSData("users")
                 ]);
                 setLeadsList(leads);

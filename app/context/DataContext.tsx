@@ -12,6 +12,7 @@ import {
     doc,
     getDoc,
     getDocs,
+    increment,
     limit,
     onSnapshot,
     orderBy,
@@ -22,6 +23,9 @@ import {
     writeBatch
 } from 'firebase/firestore';
 import { auth, db } from '../../firebaseConfig';
+import { bridgeLogin, bridgeLogout } from '../../services/api/authBridge';
+import { listLeads } from '../../services/api/leads';
+import { listSalesVisits } from '../../services/api/salesVisits';
 import { registerForPushNotificationsAsync, sendExpoPushNotification } from '../../utils/notificationHelper';
 
 // --- DATA TYPES (🔥 SaaS Variables Added) ---
@@ -165,11 +169,55 @@ export const DataProvider = ({ children }: any) => {
               status: 'pending', 
               createdAt: new Date().toISOString(), 
               scheduledFor: scheduledDate || new Date().toISOString(), 
-              retryCount: 0
+              retryCount: 0,
+              companyId: currentUser?.companyId || ''
           });
           console.log(`✉️ [Message Queued] ${templateName} - Scheduled: ${scheduledDate ? 'Future ⏳' : 'Now ⚡'}`);
       } catch (error) { console.error("❌ [Queue Error]:", error); }
   };
+
+  // =========================================================
+// 📊 USAGE TRACKING - login aur app-open ka lightweight counter
+// =========================================================
+const trackUsage = async (userDocId: string, compId: string) => {
+    try {
+        // ── User ki last login ──────────────────────────
+        const userRef = doc(db, "users", userDocId);
+        await setDoc(userRef, {
+            lastLogin: new Date().toISOString(),
+            loginCount: increment(1),
+        }, { merge: true });
+
+        // ── ✅ FIX: companyId field se query karo ───────
+        // Bug: pehle doc(db, "companies", compId) likhte the
+        // compId ek field hai, direct document ID nahi hota
+        const compQuery = query(
+            collection(db, "companies"),
+            where("companyId", "==", compId)
+        );
+        const compSnap = await getDocs(compQuery);
+
+        if (!compSnap.empty) {
+            const compDocRef = compSnap.docs[0].ref; // ✅ actual doc reference
+
+            // Current month key — "2026-07" format
+            const now = new Date();
+            const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+            await setDoc(compDocRef, {
+                lastActiveAt: now.toISOString(),
+                appOpenCount: increment(1),
+                [`monthlyUsage.${monthKey}`]: increment(1),
+            }, { merge: true });
+
+            console.log(`📊 Usage tracked: ${compId} | ${monthKey}`);
+        } else {
+            console.log(`⚠️ trackUsage: No company found for companyId: ${compId}`);
+        }
+    } catch (e) {
+        console.log("Usage tracking error (non-critical):", e);
+    }
+};
   
   const fetchCompanySettings = async (companyId: string) => {
     if (!companyId) return;
@@ -434,6 +482,7 @@ export const DataProvider = ({ children }: any) => {
             console.log("✅ Calling fetchCompanySettings with:", companyId);
             fetchCompanySettings(companyId);
             fetchStaticData(companyId);
+            trackUsage(userDocId, companyId);
         }
 
       } else {
@@ -582,10 +631,13 @@ const unsubUsers = onSnapshot(
     };
 
     // 🔥 Removed Products, Orgs, Holidays from Realtime Listeners
+        // 🔥 Removed Products, Orgs, Holidays from Realtime Listeners
+    /* 🔥 Phase 1/2: leads/sales_reports ab neeche wale refreshLeads/refreshSalesVisits (API se) use hote hain
     const unsubLead = createListener("leads", setLeadsList);
+    const unsubSales = createListener("sales_reports", setSalesVisitList);
+    */
     const unsubTravel = createListener("travel_notes", setTravelList);
     const unsubPMS = createListener("pms_reports", setPmsList);
-    const unsubSales = createListener("sales_reports", setSalesVisitList);
     const unsubDemo = createListener("demos", setDemoList);
     const unsubOrder = createListener("orders", setOrderList);
     const unsubService = createListener("service_calls", (data: any) => { setServiceCallList(data); setServiceList(data); });
@@ -645,13 +697,39 @@ const notifQuery = currentUser.role === 'SuperAdmin'
         }
     });
 
-    return () => { 
-        unsubLead(); unsubTravel(); unsubPMS(); unsubSales(); unsubDemo(); 
+        return () => { 
+        unsubTravel(); unsubPMS(); unsubDemo(); 
         unsubOrder(); unsubService(); unsubInstall(); unsubSpare(); unsubPlan(); unsubCourier(); 
         unsubCard(); unsubPay(); unsubDue(); unsubTask();
         unsub1(); unsub2(); unsub3(); unsub4(); unsubNotif();
     };
   }, [currentUser]);
+
+  // 🔥 Phase 1/2: leads aur sales visits ab naye backend API se aate hain
+  const refreshLeads = async () => {
+      try {
+          const leads = await listLeads();
+          setLeadsList(leads);
+      } catch (e) {
+          console.log("Leads API fetch error:", e);
+      }
+  };
+  const refreshSalesVisits = async () => {
+      try {
+          const visits = await listSalesVisits();
+          setSalesVisitList(visits);
+      } catch (e) {
+          console.log("Sales visits API fetch error:", e);
+      }
+  };
+  useEffect(() => {
+      if (currentUser) {
+          refreshLeads();
+          refreshSalesVisits();
+      }
+  }, [currentUser]);
+
+  // ✅ Har 1 ghante mein plan expiry check
 
   // ✅ Har 1 ghante mein plan expiry check
   useEffect(() => {
@@ -683,35 +761,6 @@ const notifQuery = currentUser.role === 'SuperAdmin'
         });
         await updateDoc(docRef, { id: docRef.id });
         console.log(`✅ Added to ${col} with ID: ${docRef.id}`);
-
-        try {
-            if (col === 'sales_reports' && data.mobile) {
-                await queueAutomatedMessage('whatsapp', data.mobile, 'sales_visit_thanks', {
-                    customer_name: data.person || data.orgName || 'Customer',
-                    company_name: companyProfile?.companyName || 'Our Company'
-                });
-            } else if (col === 'service_calls' && data.mobile) {
-                await queueAutomatedMessage('whatsapp', data.mobile, 'service_ticket_created', {
-                    customer_name: data.contactPerson || data.hospitalName || 'Customer',
-                    ticket_id: docRef.id.slice(-6).toUpperCase()
-                });
-            } else if (col === 'demos' && data.mobile) {
-                await queueAutomatedMessage('whatsapp', data.mobile, 'demo_scheduled', {
-                    customer_name: data.contactPerson || data.hospitalName || 'Customer',
-                    date: data.date
-                });
-            } else if (col === 'installations' && data.mobile) {
-                await queueAutomatedMessage('whatsapp', data.mobile, 'installation_completed', {
-                    customer_name: data.contactPerson || data.hospitalName || 'Customer',
-                    product: data.productName || 'Machine'
-                });
-            } else if (col === 'pms_reports' && data.mobile) {
-                await queueAutomatedMessage('whatsapp', data.mobile, 'pms_scheduled', {
-                    customer_name: data.contactPerson || data.hospitalName || 'Customer',
-                    date: data.nextServiceDate || 'Upcoming'
-                });
-            }
-        } catch (queueErr) { console.error("Queue Logic Error:", queueErr); }
 
         if (col !== 'notifications') {
             let notifTitle = "New Entry Added";
@@ -1204,6 +1253,7 @@ const notifQuery = currentUser.role === 'SuperAdmin'
 
           setCurrentUser(userData);
           await AsyncStorage.setItem('user', JSON.stringify(userData));
+          await bridgeLogin(email, pass);
           return true;
       } catch (error: any) {
           Alert.alert("Login Failed", "Invalid Email or Password");
@@ -1217,6 +1267,7 @@ const notifQuery = currentUser.role === 'SuperAdmin'
       setCurrentUser(null); 
       currentUserRef.current = null;
       staticDataLoaded.current = false;
+      await bridgeLogout();
   };
   
   const markNotificationRead = async (id: string) => {
@@ -1242,7 +1293,7 @@ const notifQuery = currentUser.role === 'SuperAdmin'
 
   const contextValue = useMemo(() => ({
       currentUser, loading, login, logout, activeSection, setActiveSection, shouldOpenSidebar, setShouldOpenSidebar, user: currentUser,
-      isFirebaseSynced, isAutomationEnabled, isSubscriptionExpired,
+      isFirebaseSynced, isAutomationEnabled, isSubscriptionExpired, queueAutomatedMessage,
       taskList, leadsList, pmsList, notificationList, notificationCount, attendanceList, leaveList, expenseList, advanceList, travelList, 
       salesVisitList, orderList, serviceCallList, orgList, installList, sparePartsList, activityPlanList, courierList, 
       cardRequestList, paymentList, dueList, demoList, serviceList, productList, companyProfile,
@@ -1262,6 +1313,8 @@ const notifQuery = currentUser.role === 'SuperAdmin'
       updateLead,
       updateOrganization, 
       addLeadActivity,
+      refreshLeads,
+      refreshSalesVisits,
 
       deleteOrder, deleteTask, deleteLead,
 

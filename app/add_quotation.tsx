@@ -6,9 +6,11 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-// 🔥 SAAS IMPORTS
+// 🔥 SAAS IMPORTS (organizations/products still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 2: quotations now go through the new backend API
+import { createQuotation, listQuotations, updateQuotation } from '../services/api/quotations';
 
 export default function AddQuotationScreen() {
     const router = useRouter();
@@ -16,7 +18,7 @@ export default function AddQuotationScreen() {
     
     const { id, mode, leadOrg, leadPerson, leadMobile, leadCity, leadAddress, leadProduct } = useLocalSearchParams(); 
     const { companyProfile, currentUser, sendDynamicEmail, sendSystemWhatsApp } = useData();
-    const { fetchSaaSData, addSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+    const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
     const [orgList, setOrgList] = useState<any[]>([]);
     const [productList, setProductList] = useState<any[]>([]);
@@ -46,7 +48,7 @@ export default function AddQuotationScreen() {
                 const [orgs, prods, quotes] = await Promise.all([
                     fetchSaaSData("organizations"),
                     fetchSaaSData("products"),
-                    fetchSaaSData("quotations")
+                    listQuotations() // was: fetchSaaSData("quotations")
                 ]);
                 setOrgList(orgs);
                 setProductList(prods);
@@ -77,7 +79,7 @@ export default function AddQuotationScreen() {
                     qty: 1,
                     price: 0,
                     gstRate: 18,
-                    isCustom: true // Treat lead product as custom so user can edit details
+                    isCustom: true
                 }]);
             }
             setTerms(defaultTC);
@@ -141,7 +143,6 @@ export default function AddQuotationScreen() {
 
     const filteredOrgs = orgList.filter((o: any) => (o.name || o.orgName || '').toLowerCase().includes(orgSearch.toLowerCase()));
     
-    // 🔥 NAYA PRODUCT FILTER LOGIC: Always add "Other" option at the end
     const searchTxt = prodSearch.toLowerCase();
     const baseFilteredProds = productList.filter((p: any) => (p.name || p.model || '').toLowerCase().includes(searchTxt));
     const filteredProds = [
@@ -159,14 +160,13 @@ export default function AddQuotationScreen() {
             qty: 1, 
             price: prod.price || 0, 
             gstRate: prod.gstRate || 18,
-            isCustom: isCustom // Yeh flag UI ko batayega ki Name aur Model ke textboxes dikhane hain
+            isCustom: isCustom
         };
         setItems([...items, newItem]);
         setShowProductModal(false);
         setProdSearch('');
     };
 
-    // 🔥 FIX: Ab string values (Name, Model) ko bhi update allow karta hai
     const updateItemField = (index: number, field: string, value: string) => {
         const newItems = [...items];
         if (field === 'specifications' || field === 'name' || field === 'model') {
@@ -204,7 +204,6 @@ export default function AddQuotationScreen() {
     });
     const grandTotal = subTotal + totalGST;
 
-    // 🔥 1. NAYA HTML GENERATOR FUNCTION (Professional Design)
     const getQuotationHTML = (estimateNo: string) => {
         let gstHtmlRows = '';
         Object.keys(gstBreakdown).forEach((rateStr) => {
@@ -222,7 +221,6 @@ export default function AddQuotationScreen() {
             }
         });
 
-        // 🔥 Dynamic Header HTML based on Theme Selection
         const headerHTML = pdfTheme === 'theme1' 
         ? `
             <div style="flex: 1; text-align: left;">
@@ -449,7 +447,6 @@ export default function AddQuotationScreen() {
         `;
     };
 
-    // 🔥 2. NAYA generatePDF FUNCTION (Jo upar wale ko call karega)
     const generatePDF = async () => {
         if (!selectedOrg) return Alert.alert("Required", "Please select a client organization.");
         if (items.length === 0) return Alert.alert("Required", "Please add at least one item.");
@@ -467,73 +464,66 @@ export default function AddQuotationScreen() {
         }
     };
 
+    // 🔥 SAVE — via new backend API. On create, estimateNo is omitted so the
+    // backend auto-generates it (COMPANY/FY/### pattern); on edit, the
+    // existing number is kept as-is.
     const handleSaveQuotation = async () => {
         if (!selectedOrg) return Alert.alert("Required", "Please select a client organization.");
         if (items.length === 0) return Alert.alert("Required", "Please add at least one item.");
         if (items.some(item => !item.name)) return Alert.alert("Required", "Please provide a name for all Custom Products.");
 
         setIsSaving(true);
-        const fy = getFinancialYear();
-        const shortName = companyProfile?.shortName || 'EST';
 
         try {
-            let finalEstimateNo = existingEstimateNo;
-
-            if (mode !== 'edit' || !existingEstimateNo) {
-                const count = quotationList ? quotationList.filter((q: any) => q.estimateNo?.includes(fy)).length + 1 : 1;
-                const serialNumber = count.toString().padStart(3, '0');
-                finalEstimateNo = `${shortName}/${fy}/${serialNumber}`;
-            }
-
-            const quotationData = {
-                estimateNo: finalEstimateNo,
-                orgId: selectedOrg.id || '',
+            const payload = {
+                orgId: selectedOrg.id === 'lead_temp_org' ? undefined : (selectedOrg.id || undefined),
                 docTitle: docTitle,
                 orgName: selectedOrg.name || selectedOrg.orgName || 'Unknown',
                 orgAddress: selectedOrg.address || selectedOrg.city || '',
                 orgPhone: selectedOrg.phone || selectedOrg.mobile || '',
                 items: items.map(item => ({
-                    id: item.id || '', name: item.name || '', model: item.model || '',
+                    name: item.name || '', model: item.model || '',
                     specifications: item.specifications || '', qty: item.qty || 0,
                     price: item.price || 0, gstRate: item.gstRate || 0,
                     isCustom: item.isCustom || false
                 })),
                 termsAndConditions: terms, 
                 taxType: taxType, 
-                subTotal: subTotal || 0, totalGST: totalGST || 0, grandTotal: grandTotal || 0,
+                subTotal: subTotal || 0, totalGst: totalGST || 0, grandTotal: grandTotal || 0,
                 date: new Date().toISOString().split('T')[0],
                 validTill: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
                 status: 'Saved',
-                role: currentUser?.role || 'Employee' 
             };
 
+            let finalEstimateNo = existingEstimateNo;
+
             if (mode === 'edit' && id) {
-                const res = await updateSaaSData("quotations", id as string, quotationData);
-                if(res.success) Alert.alert("Success", `Estimate Updated Successfully!`);
-                else Alert.alert("Error", "Could not update.");
+                await updateQuotation(id as string, payload);
+                Alert.alert("Success", `Estimate Updated Successfully!`);
             } else {
-                const res = await addSaaSData("quotations", quotationData);
-                if(res.success) Alert.alert("Success", `Estimate ${finalEstimateNo} Created Successfully!`);
-                else Alert.alert("Error", "Could not save.");
+                const created = await createQuotation(payload);
+                finalEstimateNo = created.estimateNo;
+                Alert.alert("Success", `Estimate ${finalEstimateNo} Created Successfully!`);
             }
+
             try {
-    const custMobile = selectedOrg.mobile || selectedOrg.phone || "";
-    if (custMobile) {
-        sendSystemWhatsApp(custMobile, 'quotation_sent', {
-            customer_name: selectedOrg.name || selectedOrg.orgName || "Customer",
-            quote_no: finalEstimateNo,
-            amount: grandTotal.toLocaleString(),
-            company_name: companyProfile?.companyName || "Our Company"
-        });
-    }
-} catch (autoErr) {
-    console.log("Auto-Message Error:", autoErr);
-}
+                const custMobile = selectedOrg.mobile || selectedOrg.phone || "";
+                if (custMobile) {
+                    sendSystemWhatsApp(custMobile, 'quotation_sent', {
+                        customer_name: selectedOrg.name || selectedOrg.orgName || "Customer",
+                        quote_no: finalEstimateNo,
+                        amount: grandTotal.toLocaleString(),
+                        company_name: companyProfile?.companyName || "Our Company"
+                    });
+                }
+            } catch (autoErr) {
+                console.log("Auto-Message Error:", autoErr);
+            }
             
             router.back(); 
         } catch (e: any) {
             console.error("Save Error:", e); 
-            Alert.alert("Error", "Could not save quotation.");
+            Alert.alert("Error", e?.message || "Could not save quotation.");
         } finally {
             setIsSaving(false);
         }

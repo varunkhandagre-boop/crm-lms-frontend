@@ -18,18 +18,22 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (No direct Firebase DB imports)
+// 🔥 SAAS IMPORTS (organizations/products still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 2: sales visits now go through the new backend API, which
+// auto-creates/links a lead server-side for positive outcomes — no more
+// separate addSaaSData("leads", ...) call needed here.
+import { createSalesVisit } from '../services/api/salesVisits';
 
 export default function AddSalesScreen() {
     const router = useRouter();
     
     // 🔥 Context se current user aur global Notification engine
-    const { currentUser, addNotification } = useData(); 
+    const { currentUser, addNotification, refreshLeads } = useData(); 
 
-    // 🔥 SaaS Engine for Tenant Data
-    const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
+    // 🔥 SaaS Engine for organizations/products (still Firestore)
+    const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
     const [orgList, setOrgList] = useState<any[]>([]);
     const [productList, setProductList] = useState<any[]>([]);
@@ -44,7 +48,6 @@ export default function AddSalesScreen() {
     const [city, setCity] = useState('');
     const [address, setAddress] = useState('');
 
-    // 🔥 UPGRADED: Product is now an array for multiple selections
     const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
     const [otherProductText, setOtherProductText] = useState(''); 
     
@@ -67,7 +70,7 @@ export default function AddSalesScreen() {
 
     const outcomeOptions = ['Interested', 'Not Interested', 'Follow Up', 'Demo Planned'];
 
-    // 🔥 LOAD DATA ON MOUNT (SAAS)
+    // 🔥 LOAD DATA ON MOUNT (organizations/products still SaaS/Firestore)
     useEffect(() => {
         const loadData = async () => {
             if (currentUser?.companyId) {
@@ -133,7 +136,6 @@ export default function AddSalesScreen() {
         }
     };
 
-    // 🔥 UPGRADED: Handle multiple product selection
     const toggleProductSelection = (item: string) => {
         setSelectedProducts(prev => {
             if (prev.includes(item)) {
@@ -166,11 +168,9 @@ export default function AddSalesScreen() {
         }
         else if (currentModalType === 'Product') {
              toggleProductSelection(item);
-             // Note: Modal intentionally left open for multiple selections
         }
     };
 
-    // Helper to display selected products in the UI
     const getSelectedProductsText = () => {
         if (selectedProducts.length === 0) return '';
         let displayText = selectedProducts.filter(p => p !== 'Other').join(', ');
@@ -186,81 +186,54 @@ export default function AddSalesScreen() {
         console.log(`\n🚀 [AUTOMATION TRIGGERED] Sending New Lead message to: ${data.person}`);
     };
 
-    // 🔥 SAAS SAVE LOGIC
+    // 🔥 SAVE LOGIC — single API call, backend auto-creates the lead
     const handleSave = async () => {
         if (isSubmitting) return;
         if (!hospital || !discussion) return Alert.alert("Missing Fields", "Hospital and Discussion are required.");
 
         setIsSubmitting(true);
         const locationData = await getCurrentLocation();
-        const safeUserId = currentUser?.id || 'guest';
         const nextDateISO = nextDate.toISOString().split('T')[0];
 
-        // Prepare final product list
         let finalProductsToSave = selectedProducts.filter(p => p !== 'Other');
         if (selectedProducts.includes('Other') && otherProductText.trim()) {
             finalProductsToSave.push(otherProductText.trim());
         }
 
-        // 1. CREATE DSR (Visit Record) via SaaS Engine
-        const newVisit = {
-            id: Date.now().toString(),
-            visitType: 'Cold Call', 
-            hospital, orgName: hospital, orgId,
-            person, mobile, city, address, 
-            product: finalProductsToSave, // Saved as array
-            discussion, outcome,
-            nextFollowUp: nextDateISO,
-            date: new Date().toISOString().split('T')[0],
-            dateIso: new Date().toISOString().split('T')[0],
-            senderId: safeUserId, senderName: currentUser?.name || 'Unknown', role: currentUser?.role || 'Employee',
-            timestamp: Date.now(), location: locationData || null,
-        };
-
         try {
-            const res = await addSaaSData("sales_reports", newVisit);
+            const visit = await createSalesVisit({
+                visitType: 'Cold Call',
+                orgName: hospital,
+                orgId: orgId || undefined,
+                contactPerson: person,
+                mobile,
+                email: email || undefined,
+                city,
+                address,
+                products: finalProductsToSave,
+                discussion,
+                outcome,
+                nextFollowUp: nextDateISO,
+                location: locationData ? { latitude: locationData.lat, longitude: locationData.lng } : null,
+            });
 
-            if (res.success) {
-                // 2. LEAD MANAGEMENT LOGIC (AUTO CONVERT)
-                const isPositiveOutcome = ['Interested', 'Demo Planned', 'Follow Up'].includes(outcome);
+            if (visit.leadId && mobile) triggerAutomatedMessages({ hospital, person, mobile, email });
+            if (visit.leadId && refreshLeads) await refreshLeads();
 
-                if (isPositiveOutcome) {
-                    let leadStage = outcome === 'Demo Planned' ? 'Technical Review' : 'Introduction';
-                    
-                    const newLeadData = {
-                        org: hospital, orgName: hospital, orgId: orgId,
-                        contactPerson: person, mobile: mobile, email: email, address: address || city, city: city,
-                        product: finalProductsToSave.join(', '), // Comma separated for Lead view compatibility
-                        requirements: finalProductsToSave, // Array for backend processing
-                        status: outcome, stage: leadStage, type: 'Warm', isHot: false,
-                        source: 'Cold Call', nextDate: nextDateISO, date: new Date().toISOString().split('T')[0],
-                        userId: safeUserId, assignedTo: safeUserId, senderId: safeUserId, senderName: currentUser?.name || 'Unknown',
-                        timestamp: Date.now(), createdAt: new Date().toISOString(),
-                        discussion: `Cold Call Converted to Lead.\nStatus: ${outcome}\nNote: ${discussion}`
-                    };
-
-                    await addSaaSData("leads", newLeadData);
-                    if(mobile) triggerAutomatedMessages({ hospital, person, mobile, email });
-                }
-
-                // 3. PUSH NOTIFICATION
-                if (addNotification) {
-                    await addNotification({
-                        title: "New Cold Call 📍",
-                        message: `${currentUser?.name} visited ${hospital} (${outcome}).`,
-                        to: "Admin", 
-                        route: "/sales", 
-                        type: "info"
-                    });
-                }
-
-                Alert.alert("Success", "Cold Call Logged Successfully!");
-                router.back();
-            } else {
-                Alert.alert("Error", "Could not log cold call.");
+            if (addNotification) {
+                await addNotification({
+                    title: "New Cold Call 📍",
+                    message: `${currentUser?.name} visited ${hospital} (${outcome}).`,
+                    to: "Admin", 
+                    route: "/sales", 
+                    type: "info"
+                });
             }
-        } catch (error) {
-            Alert.alert("Error", "Something went wrong.");
+
+            Alert.alert("Success", "Cold Call Logged Successfully!");
+            router.back();
+        } catch (error: any) {
+            Alert.alert("Error", error?.message || "Something went wrong.");
         } finally {
             setIsSubmitting(false); 
         }
@@ -424,7 +397,6 @@ export default function AddSalesScreen() {
                                 <Text style={{color:'red', fontWeight:'bold'}}>{currentModalType === 'Product' ? 'Close' : 'Cancel'}</Text>
                             </TouchableOpacity>
                             
-                            {/* Show "Done" button only for Multi-Select Product Modal */}
                             {currentModalType === 'Product' && (
                                 <TouchableOpacity 
                                     style={[styles.closeBtn, {flex: 1, marginLeft: 5, backgroundColor: '#3b5998', borderRadius: 8}]} 

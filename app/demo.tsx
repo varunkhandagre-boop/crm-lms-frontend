@@ -14,9 +14,12 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Firebase DB imports removed)
+// 🔥 SAAS IMPORTS (organizations/users still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 2: demos & sales visits now go through the new backend API
+import { listDemos } from '../services/api/demos';
+import { listSalesVisits } from '../services/api/salesVisits';
 
 // 🔥 PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
@@ -26,19 +29,16 @@ import * as Sharing from 'expo-sharing';
 export default function DemoScreen() {
   const router = useRouter();
   
-  // 🔥 1. Context se sirf current user aur company profile
   const { currentUser, companyProfile } = useData(); 
 
-  // 🔥 2. Naya SaaS Engine
+  // 🔥 SaaS Engine kept for organizations/users
   const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-  // 🔥 3. Lazy Loaded Lists
   const [demoList, setDemoList] = useState<any[]>([]);
   const [salesVisitList, setSalesVisitList] = useState<any[]>([]);
   const [orgList, setOrgList] = useState<any[]>([]);
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
 
-  // --- STATES ---
   const [searchText, setSearchText] = useState('');
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -48,17 +48,14 @@ export default function DemoScreen() {
   const [orgDetails, setOrgDetails] = useState<any>(null); 
   const [generatingPdf, setGeneratingPdf] = useState(false); 
 
-  // --- EMPLOYEE FILTER STATES ---
   const [selectedEmployee, setSelectedEmployee] = useState('All'); 
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  // PAGINATION STATE
   const [visibleCount, setVisibleCount] = useState(20);
 
   const isAdmin = ['Admin', 'Manager', 'Accountant' , 'Account', 'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
 
-  // RESET PAGINATION LOGIC
   useEffect(() => {
       if (viewMode === 'Day') {
           setVisibleCount(500); 
@@ -67,13 +64,13 @@ export default function DemoScreen() {
       }
   }, [viewMode, currentDate, selectedEmployee, searchText]);
 
-  // 🔥 4. MASSIVE SAAS DATA LOAD ON MOUNT
+  // 🔥 LOAD DATA — demos & sales visits via new API; orgs/users via Firestore
   useEffect(() => {
       const loadData = async () => {
           if (currentUser?.companyId) {
               const [demos, sales, orgs, users] = await Promise.all([
-                  fetchSaaSData("demos"),           // Make sure this matches your DB collection name
-                  fetchSaaSData("sales_reports"),   // For salesVisitList
+                  listDemos(),         // was: fetchSaaSData("demos")
+                  listSalesVisits(),   // was: fetchSaaSData("sales_reports")
                   fetchSaaSData("organizations"),
                   fetchSaaSData("users")
               ]);
@@ -94,7 +91,6 @@ export default function DemoScreen() {
       loadData();
   }, [currentUser]);
 
-  // --- HELPER: DATE PARSER ---
   const parseDate = (dateStr: string) => {
       if (!dateStr) return new Date(0);
       if (dateStr.includes('T')) return new Date(dateStr);
@@ -126,7 +122,6 @@ export default function DemoScreen() {
       return "All Time";
   };
 
-  // 🔥 PDF GENERATOR FOR DEMO REPORT
   const generateDemoPDF = async (demoData: any) => {
     setGeneratingPdf(true);
     try {
@@ -234,7 +229,7 @@ export default function DemoScreen() {
     }
   };
 
-  // --- SMART MERGE LOGIC ---
+  // --- SMART MERGE LOGIC (unchanged, now fed by API data) ---
   const getAllDemos = () => {
       const salesDemos = salesVisitList ? salesVisitList.filter((item: any) => 
           (item.discussion && item.discussion.toLowerCase().includes('demo')) || 
@@ -260,7 +255,6 @@ export default function DemoScreen() {
         return { ...item, city: item.city || (org ? org.city : '') };
       });
 
-      // SECURITY FILTER
       if (!isAdmin) {
           const myId = currentUser?.id || currentUser?.uid;
           combined = combined.filter((item: any) => item.senderId === myId || item.userName === currentUser?.name);
@@ -271,11 +265,9 @@ export default function DemoScreen() {
 
   const allData = getAllDemos(); 
 
-  // --- FILTER LOGIC (Date + Search + Employee) ---
   const getFilteredData = () => {
     let data = allData;
 
-    // 0. Employee Filter (Only for Admin/Manager)
     if (isAdmin && selectedEmployee !== 'All') {
         data = data.filter((item: any) => 
           (item.senderId === selectedEmployee) || 
@@ -284,7 +276,6 @@ export default function DemoScreen() {
         );
     }
 
-    // 1. SUPER SEARCH
     if (searchText) {
         const lowerTerm = searchText.toLowerCase();
         data = data.filter((item: any) => {
@@ -300,7 +291,6 @@ export default function DemoScreen() {
         });
     }
 
-    // 2. DATE FILTER (FY Boundaries)
     if (viewMode !== 'All') {
         const targetYear = currentDate.getFullYear();
         const targetMonth = currentDate.getMonth();

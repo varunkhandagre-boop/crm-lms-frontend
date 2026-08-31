@@ -14,6 +14,7 @@ import {
     View
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
+import RazorpayCheckout from 'react-native-razorpay';
 
 // 🔥 FIREBASE IMPORTS
 import { doc, getDoc } from 'firebase/firestore';
@@ -30,11 +31,25 @@ type PlanConfig = {
     active: boolean;
 };
 
+type GatewayConfig = {
+    isEnabled: boolean;
+    isTestMode: boolean;
+    keyId: string;
+    keySecret: string;
+    currency: string;
+    companyName: string;
+    companyLogo: string;
+    companyColor: string;
+    description: string;
+};
+
+const DEFAULT_AUTOMATION_ADDON_PRICE = 3000;
+
 export default function SubscriptionScreen() {
     const router = useRouter();
     const { companyId } = useLocalSearchParams();
     const { addSaaSData } = useSaaSDB();
-    const { currentUser } = useData(); 
+    const { currentUser } = useData();
     const effectiveCompanyId = companyId || currentUser?.companyId || null;
 
     const [loading, setLoading] = useState(false);
@@ -45,46 +60,61 @@ export default function SubscriptionScreen() {
     const [plans, setPlans] = useState<PlanConfig[]>([]);
     const [upiId, setUpiId] = useState('');
     const [upiPayeeName, setUpiPayeeName] = useState('Company');
+    const [gatewayConfig, setGatewayConfig] = useState<GatewayConfig | null>(null);
 
     // --- FORM STATE ---
     const [selectedPlanId, setSelectedPlanId] = useState<string>('');
     const [employeeCount, setEmployeeCount] = useState('10');
     const [totalPrice, setTotalPrice] = useState(0);
+    const [wantsAutomation, setWantsAutomation] = useState(false);
+    const [automationAddonPrice, setAutomationAddonPrice] = useState(DEFAULT_AUTOMATION_ADDON_PRICE);
 
-    // 🔥 1. LOAD PRICING CONFIG FROM FIREBASE
+    // =========================================================
+    // 1. LOAD PRICING CONFIG + GATEWAY CONFIG FROM FIREBASE
+    // =========================================================
     useEffect(() => {
-        const loadPricing = async () => {
+        const loadAllConfig = async () => {
             try {
-                const docRef = doc(db, "settings", "pricing");
-                const docSnap = await getDoc(docRef);
-                if (docSnap.exists()) {
-                    const data = docSnap.data();
+                // Pricing config load karo
+                const pricingSnap = await getDoc(doc(db, "settings", "pricing"));
+                if (pricingSnap.exists()) {
+                    const data = pricingSnap.data();
                     const activePlans: PlanConfig[] = (data.plans || [])
-    .filter((p: any) => p.active !== false && p.active !== "false")
-    .map((p: any) => ({
-        id: String(p.id),
-        label: String(p.label),
-        durationMonths: Number(p.durationMonths),
-        pricePerEmployee: Number(p.pricePerEmployee),
-        discountPercent: Number(p.discountPercent),
-        active: true,
-    }));
+                        .filter((p: any) => p.active !== false && p.active !== "false")
+                        .map((p: any) => ({
+                            id: String(p.id),
+                            label: String(p.label),
+                            durationMonths: Number(p.durationMonths),
+                            pricePerEmployee: Number(p.pricePerEmployee),
+                            discountPercent: Number(p.discountPercent),
+                            active: true,
+                        }));
                     setPlans(activePlans);
                     if (activePlans.length > 0) setSelectedPlanId(activePlans[0].id);
                     setUpiId(data.upiId || '');
                     setUpiPayeeName(data.upiPayeeName || 'Company');
+                    setAutomationAddonPrice(Number(data.automationAddonPrice) || DEFAULT_AUTOMATION_ADDON_PRICE);
                 }
+
+                // 🔥 Gateway config load karo
+                const gatewaySnap = await getDoc(doc(db, "settings", "payment_gateway"));
+                if (gatewaySnap.exists()) {
+                    setGatewayConfig(gatewaySnap.data() as GatewayConfig);
+                }
+
             } catch (e) {
-                console.log("Error loading pricing from Firebase:", e);
+                console.log("Error loading config:", e);
                 Alert.alert("Error", "Could not load plans. Please check your internet connection.");
             } finally {
                 setFetchingRates(false);
             }
         };
-        loadPricing();
+        loadAllConfig();
     }, []);
 
-    // 🔥 2. AUTOMATIC PRICE CALCULATION
+    // =========================================================
+    // 2. AUTOMATIC PRICE CALCULATION
+    // =========================================================
     useEffect(() => {
         const plan = plans.find(p => p.id === selectedPlanId);
         if (!plan) { setTotalPrice(0); return; }
@@ -92,60 +122,141 @@ export default function SubscriptionScreen() {
         const empCount = Number(employeeCount) || 0;
         const yearsInPlan = plan.durationMonths / 12;
         let baseCost = empCount * plan.pricePerEmployee * yearsInPlan;
-
         const discountAmount = (baseCost * (plan.discountPercent || 0)) / 100;
-        setTotalPrice(Math.round(baseCost - discountAmount));
-    }, [selectedPlanId, employeeCount, plans]);
+        let finalPrice = Math.round(baseCost - discountAmount);
+        if (wantsAutomation) finalPrice += automationAddonPrice;
+        setTotalPrice(finalPrice);
+    }, [selectedPlanId, employeeCount, plans, wantsAutomation]);
 
     const selectedPlan = plans.find(p => p.id === selectedPlanId);
 
-    // 🔥 3. HANDLE PAYMENT SUBMISSION
-    const handlePaymentSubmit = async () => {
-        if (!employeeCount || Number(employeeCount) <= 0) {
-            Alert.alert("Invalid Input", "Please enter a valid number of employees.");
+    // =========================================================
+    // 3. COMMON — subscription_requests mein entry karo
+    // =========================================================
+    const saveSubscriptionRequest = async (razorpayPaymentId: string | null = null) => {
+        const expiryDate = new Date();
+        expiryDate.setMonth(expiryDate.getMonth() + (selectedPlan?.durationMonths || 1));
+
+        const subscriptionRequest = {
+            companyId: effectiveCompanyId,
+            planChosen: selectedPlan!.label,
+            planId: selectedPlan!.id,
+            employeesRequested: Number(employeeCount),
+            amountPaid: totalPrice,
+            automationRequested: wantsAutomation,
+            automationAmount: wantsAutomation ? automationAddonPrice : 0,
+            status: razorpayPaymentId ? 'Pending Verification' : 'Pending Verification',
+            paymentMethod: razorpayPaymentId ? 'razorpay' : 'upi_manual',
+            razorpayPaymentId: razorpayPaymentId || '',
+            requestedExpiryDate: expiryDate.toISOString(),
+            createdAt: new Date().toISOString(),
+        };
+
+        return await addSaaSData("subscription_requests", subscriptionRequest, true);
+    };
+
+    // =========================================================
+    // 4. VALIDATE FORM
+    // =========================================================
+    const validateForm = (): string | null => {
+        if (!employeeCount || Number(employeeCount) <= 0)
+            return 'Please enter a valid number of employees.';
+        if (!selectedPlan)
+            return 'Please select a plan.';
+        if (!effectiveCompanyId)
+            return 'Company ID not found. Please login again and retry.';
+        return null;
+    };
+
+    // =========================================================
+    // 5. RAZORPAY PAYMENT
+    // =========================================================
+    const handleRazorpayPayment = async () => {
+        const err = validateForm();
+        if (err) { Alert.alert("Invalid Input", err); return; }
+
+        if (!gatewayConfig || !gatewayConfig.isEnabled) {
+            Alert.alert('Not Available', 'Online payment is not available right now. Please use UPI QR below.');
             return;
         }
-        if (!selectedPlan) {
-            Alert.alert("Error", "Please select a plan.");
-            return;
-        }
-        if (!effectiveCompanyId) {
-    Alert.alert("Error", "Company ID not found. Please login again and retry.");
-    return;
-}
 
         setLoading(true);
         try {
-            const expiryDate = new Date();
-            expiryDate.setMonth(expiryDate.getMonth() + selectedPlan.durationMonths);
-
-            const subscriptionRequest = {
-                companyId: effectiveCompanyId,
-                planChosen: selectedPlan.label,
-                planId: selectedPlan.id,
-                employeesRequested: Number(employeeCount),
-                amountPaid: totalPrice,
-                status: 'Pending Verification',
-                requestedExpiryDate: expiryDate.toISOString(),
-                createdAt: new Date().toISOString()
+            const options = {
+                key: gatewayConfig.keyId,
+                amount: totalPrice * 100, // Razorpay paisa mein leta hai
+                currency: gatewayConfig.currency || 'INR',
+                name: gatewayConfig.companyName || 'CRM Subscription',
+                image: gatewayConfig.companyLogo || '',
+                description: `${selectedPlan?.label} — ${employeeCount} Users${wantsAutomation ? ' + Automation' : ''}`,
+                prefill: {
+                    name: currentUser?.name || '',
+                    email: currentUser?.email || '',
+                    contact: currentUser?.mobile || '',
+                },
+                theme: {
+                    color: gatewayConfig.companyColor || '#d32f2f',
+                },
             };
 
-            const res = await addSaaSData("subscription_requests", subscriptionRequest, true);
+            RazorpayCheckout.open(options)
+                .then(async (paymentData: any) => {
+                    // ✅ Payment successful
+                    console.log('✅ Razorpay Payment:', paymentData.razorpay_payment_id);
+                    const res = await saveSubscriptionRequest(paymentData.razorpay_payment_id);
+                    if (res.success) {
+                        setAlreadySubmitted(true);
+                        Alert.alert(
+                            "Payment Successful ✅",
+                            `Payment ID: ${paymentData.razorpay_payment_id}\n\nYour plan will be activated within 1 hour.`,
+                            [{
+                                text: "OK", onPress: () => {
+                                    router.replace(currentUser ? '/' : '/login' as any);
+                                }
+                            }]
+                        );
+                    }
+                })
+                .catch((error: any) => {
+                    // ❌ Payment failed ya cancel
+                    if (error.code === 2) {
+                        // User ne cancel kiya
+                        console.log('Payment cancelled by user');
+                    } else {
+                        Alert.alert(
+                            'Payment Failed',
+                            error.description || 'Payment could not be completed. Try again or use UPI QR.'
+                        );
+                    }
+                });
+        } catch (e) {
+            Alert.alert('Error', 'Could not initiate payment. Please try again.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // =========================================================
+    // 6. MANUAL UPI PAYMENT (existing flow)
+    // =========================================================
+    const handleManualUpiSubmit = async () => {
+        const err = validateForm();
+        if (err) { Alert.alert("Invalid Input", err); return; }
+
+        setLoading(true);
+        try {
+            const res = await saveSubscriptionRequest(null);
             if (res.success) {
                 setAlreadySubmitted(true);
                 Alert.alert(
-    "Payment Submitted ⏳",
-    "We are verifying your payment. Once confirmed by the Admin, your plan will be activated within 1 hour.",
-    [{
-        text: "OK", onPress: () => {
-            if (currentUser) {
-                router.replace('/' as any); // existing company → apne dashboard/home pe bhejo
-            } else {
-                router.replace('/login' as any); // naya registration → login pe bhejo
-            }
-        }
-    }]
-);
+                    "Payment Submitted ⏳",
+                    "We are verifying your payment. Once confirmed by the Admin, your plan will be activated within 1 hour.",
+                    [{
+                        text: "OK", onPress: () => {
+                            router.replace(currentUser ? '/' : '/login' as any);
+                        }
+                    }]
+                );
             } else {
                 Alert.alert("Error", "Could not process request.");
             }
@@ -156,11 +267,14 @@ export default function SubscriptionScreen() {
         }
     };
 
+    // =========================================================
+    // LOADING STATE
+    // =========================================================
     if (fetchingRates) {
         return (
             <View style={[styles.container, { justifyContent: 'center' }]}>
                 <ActivityIndicator size="large" color="#3b5998" />
-                <Text style={{ marginTop: 10, color: '#666' }}>Fetching latest plans...</Text>
+                <Text style={{ marginTop: 10, color: '#666', textAlign: 'center' }}>Fetching latest plans...</Text>
             </View>
         );
     }
@@ -175,8 +289,8 @@ export default function SubscriptionScreen() {
         );
     }
 
-    // UPI Deep Link with dynamic amount — QR is generated at runtime, no Storage needed
     const upiString = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(upiPayeeName)}&am=${totalPrice}&cu=INR`;
+    const razorpayEnabled = gatewayConfig?.isEnabled === true;
 
     return (
         <View style={styles.container}>
@@ -190,7 +304,7 @@ export default function SubscriptionScreen() {
             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
                 <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
-                    {/* PLAN CARDS - DYNAMIC FROM FIRESTORE */}
+                    {/* PLAN CARDS */}
                     <Text style={styles.sectionTitle}>Select Plan</Text>
                     <View style={styles.planContainer}>
                         {plans.map((plan) => (
@@ -200,7 +314,7 @@ export default function SubscriptionScreen() {
                                 onPress={() => setSelectedPlanId(plan.id)}
                             >
                                 {plan.discountPercent > 0 && (
-                                    <View style={styles.badge}>
+                                    <View style={styles.discountBadge}>
                                         <Text style={styles.badgeText}>Save {plan.discountPercent}%</Text>
                                     </View>
                                 )}
@@ -225,7 +339,30 @@ export default function SubscriptionScreen() {
                         placeholder="Enter number of team members..."
                     />
 
-                    {/* BILLING SUMMARY CARD */}
+                    {/* AUTOMATION ADD-ON */}
+                    <Text style={styles.sectionTitle}>Add-ons</Text>
+                    <TouchableOpacity
+                        style={[styles.addonCard, wantsAutomation && styles.addonCardActive]}
+                        onPress={() => setWantsAutomation(!wantsAutomation)}
+                        activeOpacity={0.8}
+                    >
+                        <View style={{ flex: 1, paddingRight: 10 }}>
+                            <Text style={styles.addonTitle}>WhatsApp / Email Automation</Text>
+                            <Text style={styles.addonSubtitle}>
+                                Order, payment, and service updates sent to customers automatically
+                            </Text>
+                        </View>
+                        <View style={{ alignItems: 'flex-end' }}>
+                            <Text style={styles.addonPrice}>+₹{automationAddonPrice}</Text>
+                            <Ionicons
+                                name={wantsAutomation ? "checkbox" : "square-outline"}
+                                size={24}
+                                color={wantsAutomation ? "#2e7d32" : "#999"}
+                            />
+                        </View>
+                    </TouchableOpacity>
+
+                    {/* BILLING SUMMARY */}
                     <View style={styles.summaryCard}>
                         <Text style={styles.summaryTitle}>Order Summary</Text>
                         <View style={styles.summaryRow}>
@@ -236,46 +373,109 @@ export default function SubscriptionScreen() {
                             <Text style={styles.summaryLabel}>Total Employees:</Text>
                             <Text style={styles.summaryValue}>{employeeCount || 0} Users</Text>
                         </View>
-                        <View style={[styles.summaryRow, { borderTopWidth: 1, borderTopColor: '#ddd', paddingTop: 10, marginTop: 10 }]}>
+                        {selectedPlan && selectedPlan.discountPercent > 0 && (
+                            <View style={styles.summaryRow}>
+                                <Text style={styles.summaryLabel}>Discount:</Text>
+                                <Text style={[styles.summaryValue, { color: '#2e7d32' }]}>
+                                    -{selectedPlan.discountPercent}% applied
+                                </Text>
+                            </View>
+                        )}
+                        {wantsAutomation && (
+                            <View style={styles.summaryRow}>
+                                <Text style={styles.summaryLabel}>Automation Add-on:</Text>
+                                <Text style={styles.summaryValue}>+₹{automationAddonPrice}</Text>
+                            </View>
+                        )}
+                        <View style={[styles.summaryRow, styles.totalRow]}>
                             <Text style={styles.totalLabel}>Total Amount:</Text>
                             <Text style={styles.totalValue}>₹{totalPrice.toLocaleString('en-IN')}</Text>
                         </View>
                     </View>
 
-                    {/* MANUAL UPI PAYMENT - QR GENERATED AT RUNTIME, NO STORAGE NEEDED */}
-                    <View style={styles.qrCard}>
-                        <Text style={styles.qrTitle}>👉 Scan & Pay via UPI QR</Text>
+                    {/* ── PAYMENT OPTIONS ── */}
+                    <Text style={styles.sectionTitle}>Payment Options</Text>
 
-                        {upiId ? (
-                            <View style={{ alignSelf: 'center', marginVertical: 15, backgroundColor: 'white', padding: 12, borderRadius: 10 }}>
+                    {/* OPTION 1: RAZORPAY — only if enabled */}
+                    {razorpayEnabled && (
+                        <TouchableOpacity
+                            style={[styles.razorpayBtn, (loading || alreadySubmitted) && { opacity: 0.6 }]}
+                            onPress={handleRazorpayPayment}
+                            disabled={loading || alreadySubmitted}
+                            activeOpacity={0.85}
+                        >
+                            {loading ? (
+                                <ActivityIndicator color="white" />
+                            ) : (
+                                <>
+                                    <Ionicons name="card" size={22} color="white" />
+                                    <View style={{ marginLeft: 10 }}>
+                                        <Text style={styles.razorpayBtnText}>
+                                            Pay ₹{totalPrice.toLocaleString('en-IN')} Online
+                                        </Text>
+                                        <Text style={styles.razorpayBtnSub}>
+                                            Card • UPI • Net Banking • Wallet
+                                        </Text>
+                                    </View>
+                                    <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" style={{ marginLeft: 'auto' }} />
+                                </>
+                            )}
+                        </TouchableOpacity>
+                    )}
+
+                    {/* DIVIDER between options */}
+                    {razorpayEnabled && upiId && (
+                        <View style={styles.orDivider}>
+                            <View style={styles.orLine} />
+                            <Text style={styles.orText}>OR</Text>
+                            <View style={styles.orLine} />
+                        </View>
+                    )}
+
+                    {/* OPTION 2: MANUAL UPI QR */}
+                    {upiId ? (
+                        <View style={styles.qrCard}>
+                            <Text style={styles.qrTitle}>👉 Scan & Pay via UPI QR</Text>
+                            <View style={styles.qrCodeWrapper}>
                                 <QRCode value={upiString} size={180} />
                             </View>
-                        ) : (
-                            <Text style={{ textAlign: 'center', color: '#d32f2f', marginVertical: 15 }}>
-                                UPI ID not configured. Please contact support.
+                            <Text style={styles.upiId}>UPI ID: {upiId}</Text>
+                            <Text style={styles.qrNote}>
+                                Complete the payment using any UPI app (PhonePe, GPay, Paytm), then tap the button below.
                             </Text>
-                        )}
 
-                        <Text style={styles.upiId}>UPI ID: {upiId || 'Not Set'}</Text>
+                            <TouchableOpacity
+                                style={[styles.manualBtn, (loading || alreadySubmitted) && { opacity: 0.6 }]}
+                                onPress={handleManualUpiSubmit}
+                                disabled={loading || alreadySubmitted}
+                            >
+                                {loading ? (
+                                    <ActivityIndicator color="white" />
+                                ) : alreadySubmitted ? (
+                                    <Text style={styles.manualBtnText}>Request Sent — Awaiting Approval ⏳</Text>
+                                ) : (
+                                    <Text style={styles.manualBtnText}>I Have Paid — Submit Request</Text>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    ) : !razorpayEnabled ? (
+                        <View style={styles.noPaymentCard}>
+                            <Ionicons name="warning-outline" size={32} color="#e67e22" />
+                            <Text style={styles.noPaymentText}>
+                                Payment options are not configured yet.{'\n'}Please contact support to renew your plan.
+                            </Text>
+                        </View>
+                    ) : null}
 
-                        <Text style={styles.qrNote}>
-                            Please complete the payment on this UPI ID using any app (PhonePe, GPay, Paytm) and click the submit button below.
-                        </Text>
-                    </View>
-
-                    <TouchableOpacity
-                        style={[styles.btn, alreadySubmitted && { backgroundColor: '#ccc' }]}
-                        onPress={handlePaymentSubmit}
-                        disabled={loading || alreadySubmitted}
-                    >
-                        {loading ? (
-                            <ActivityIndicator color="white" />
-                        ) : alreadySubmitted ? (
-                            <Text style={styles.btnText}>Request Sent — Awaiting Approval ⏳</Text>
-                        ) : (
-                            <Text style={styles.btnText}>I Have Paid — Submit Request</Text>
-                        )}
-                    </TouchableOpacity>
+                    {/* Test mode indicator */}
+                    {razorpayEnabled && gatewayConfig?.isTestMode && (
+                        <View style={styles.testModeBanner}>
+                            <Ionicons name="flask" size={14} color="#1565c0" />
+                            <Text style={styles.testModeText}>
+                                Payment gateway is in Test Mode — no real money will be charged.
+                            </Text>
+                        </View>
+                    )}
 
                 </ScrollView>
             </KeyboardAvoidingView>
@@ -285,29 +485,130 @@ export default function SubscriptionScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f9f9f9' },
-    header: { padding: 20, backgroundColor: '#fff', paddingTop: 50, elevation: 2, alignItems: 'center' },
+
+    header: {
+        padding: 20,
+        backgroundColor: '#fff',
+        paddingTop: 50,
+        elevation: 2,
+        alignItems: 'center',
+    },
     headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
-    scroll: { padding: 20 },
-    sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#333', marginTop: 15, marginBottom: 10 },
-    planContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 15 },
-    planCard: { flexBasis: '47%', backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd', borderRadius: 10, padding: 15, position: 'relative' },
+
+    scroll: { padding: 20, paddingBottom: 60 },
+
+    sectionTitle: {
+        fontSize: 15,
+        fontWeight: 'bold',
+        color: '#333',
+        marginTop: 18,
+        marginBottom: 10,
+    },
+
+    // Plans
+    planContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 10 },
+    planCard: {
+        flexBasis: '47%',
+        backgroundColor: '#fff',
+        borderWidth: 1,
+        borderColor: '#ddd',
+        borderRadius: 12,
+        padding: 15,
+        position: 'relative',
+    },
     selectedCard: { borderColor: '#3b5998', backgroundColor: '#f0f4f8', borderWidth: 2 },
-    planTitle: { fontSize: 16, fontWeight: 'bold', color: '#333', marginTop: 10 },
-    planPrice: { fontSize: 12, color: '#666', marginTop: 5 },
-    badge: { position: 'absolute', top: -10, right: 10, backgroundColor: 'orange', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
+    planTitle: { fontSize: 15, fontWeight: 'bold', color: '#333', marginTop: 10 },
+    planPrice: { fontSize: 12, color: '#666', marginTop: 4 },
+    discountBadge: {
+        position: 'absolute', top: -10, right: 10,
+        backgroundColor: 'orange', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10,
+    },
     badgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
-    input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 10, padding: 15, fontSize: 16, backgroundColor: '#fff', marginBottom: 20 },
-    summaryCard: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#eee', borderRadius: 10, padding: 20, marginBottom: 20 },
-    summaryTitle: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 15 },
+
+    // Input
+    input: {
+        borderWidth: 1, borderColor: '#ddd', borderRadius: 10,
+        padding: 15, fontSize: 16, backgroundColor: '#fff', marginBottom: 10,
+    },
+
+    // Addon
+    addonCard: {
+        flexDirection: 'row', backgroundColor: '#fff',
+        borderWidth: 1, borderColor: '#ddd', borderRadius: 12,
+        padding: 15, marginBottom: 10, alignItems: 'center',
+    },
+    addonCardActive: { borderColor: '#2e7d32', borderWidth: 2, backgroundColor: '#f0f8f0' },
+    addonTitle: { fontSize: 14, fontWeight: 'bold', color: '#333' },
+    addonSubtitle: { fontSize: 12, color: '#666', marginTop: 3 },
+    addonPrice: { fontSize: 14, fontWeight: 'bold', color: '#2e7d32', marginBottom: 4 },
+
+    // Summary
+    summaryCard: {
+        backgroundColor: '#fff', borderWidth: 1,
+        borderColor: '#eee', borderRadius: 12, padding: 18, marginBottom: 10,
+    },
+    summaryTitle: { fontSize: 15, fontWeight: 'bold', color: '#333', marginBottom: 14 },
     summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-    summaryLabel: { color: '#666' },
-    summaryValue: { fontWeight: 'bold', color: '#333' },
+    totalRow: {
+        borderTopWidth: 1, borderTopColor: '#ddd',
+        paddingTop: 12, marginTop: 8,
+    },
+    summaryLabel: { color: '#666', fontSize: 14 },
+    summaryValue: { fontWeight: 'bold', color: '#333', fontSize: 14 },
     totalLabel: { fontSize: 16, fontWeight: 'bold', color: '#333' },
-    totalValue: { fontSize: 18, fontWeight: 'bold', color: '#d32f2f' },
-    qrCard: { backgroundColor: '#fff3cd', borderColor: '#ffeeba', borderWidth: 1, padding: 15, borderRadius: 10, marginBottom: 20 },
-    qrTitle: { fontWeight: 'bold', color: '#856404', fontSize: 15 },
-    upiId: { fontWeight: 'bold', color: '#3b5998', fontSize: 16, marginTop: 5, textAlign: 'center' },
-    qrNote: { fontSize: 12, color: '#856404', marginTop: 5 },
-    btn: { backgroundColor: '#3b5998', padding: 18, borderRadius: 10, alignItems: 'center', marginTop: 10 },
-    btnText: { color: 'white', fontSize: 18, fontWeight: 'bold' }
+    totalValue: { fontSize: 20, fontWeight: 'bold', color: '#d32f2f' },
+
+    // Razorpay button
+    razorpayBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#3b5998',
+        padding: 18,
+        borderRadius: 14,
+        marginBottom: 10,
+        elevation: 3,
+    },
+    razorpayBtnText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
+    razorpayBtnSub: { color: 'rgba(255,255,255,0.75)', fontSize: 11, marginTop: 2 },
+
+    // OR divider
+    orDivider: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 12 },
+    orLine: { flex: 1, height: 1, backgroundColor: '#ddd' },
+    orText: { fontSize: 12, fontWeight: 'bold', color: '#aaa' },
+
+    // QR
+    qrCard: {
+        backgroundColor: '#fff3cd', borderColor: '#ffeeba',
+        borderWidth: 1, padding: 16, borderRadius: 12, marginBottom: 10,
+    },
+    qrTitle: { fontWeight: 'bold', color: '#856404', fontSize: 15, marginBottom: 5 },
+    qrCodeWrapper: {
+        alignSelf: 'center', marginVertical: 14,
+        backgroundColor: 'white', padding: 12, borderRadius: 10,
+        elevation: 2,
+    },
+    upiId: { fontWeight: 'bold', color: '#3b5998', fontSize: 15, textAlign: 'center', marginBottom: 8 },
+    qrNote: { fontSize: 12, color: '#856404', lineHeight: 18 },
+
+    // Manual submit button
+    manualBtn: {
+        backgroundColor: '#2e7d32', padding: 16,
+        borderRadius: 12, alignItems: 'center', marginTop: 14,
+    },
+    manualBtnText: { color: 'white', fontSize: 15, fontWeight: 'bold' },
+
+    // No payment configured
+    noPaymentCard: {
+        backgroundColor: '#fff3e0', borderRadius: 12,
+        padding: 20, alignItems: 'center', gap: 10, borderWidth: 1, borderColor: '#ffe0b2',
+    },
+    noPaymentText: { color: '#e67e22', fontSize: 13, textAlign: 'center', lineHeight: 20 },
+
+    // Test mode banner
+    testModeBanner: {
+        flexDirection: 'row', alignItems: 'center', gap: 8,
+        backgroundColor: '#e3f2fd', padding: 10, borderRadius: 10,
+        marginTop: 10, borderWidth: 1, borderColor: '#bbdefb',
+    },
+    testModeText: { flex: 1, fontSize: 12, color: '#1565c0', lineHeight: 18 },
 });

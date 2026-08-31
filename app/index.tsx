@@ -75,6 +75,7 @@ export default function HomeScreen() {
   const [sidebarVisible, setSidebarVisible] = useState(false); 
   const [planDaysLeft, setPlanDaysLeft] = useState<number | null>(null);
   const [expoPushToken, setExpoPushToken] = useState('');
+  const [checkedOnboarding, setCheckedOnboarding] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -305,9 +306,25 @@ const [branding, setBranding] = useState({
   }
 
   useEffect(() => {
+      const checkOnboarding = async () => {
+          if (currentUser) { setCheckedOnboarding(true); return; }
+          try {
+              const seen = await AsyncStorage.getItem('hasSeenOnboarding');
+              if (seen !== 'true') {
+                  router.replace('/onboarding' as any);
+                  return;
+              }
+          } catch (e) {}
+          setCheckedOnboarding(true);
+      };
+      checkOnboarding();
+  }, [currentUser]);
+
+  useEffect(() => {
+      if (!checkedOnboarding) return;
       const timer = setTimeout(() => { if (!currentUser) router.replace('/login' as any); }, 100);
       return () => clearTimeout(timer);
-  }, [currentUser]);
+  }, [currentUser, checkedOnboarding]);
 
   useEffect(() => {
       if(currentUser) {
@@ -357,7 +374,7 @@ const saveTokenToDatabase = async (token: string) => {
       setShouldOpenSidebar(true); setSidebarVisible(false); router.push(route as any);
   };
 
-  if (!currentUser) return <View style={{flex:1, justifyContent:'center', alignItems:'center'}}><ActivityIndicator size="large" color="#3b5998" /></View>;
+  if (!currentUser || !checkedOnboarding) return <View style={{flex:1, justifyContent:'center', alignItems:'center'}}><ActivityIndicator size="large" color="#3b5998" /></View>;
 
   const toggleSection = (section: string) => {
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -406,7 +423,7 @@ const saveTokenToDatabase = async (token: string) => {
   
   const sidebarItems = [
       // 🔥 NEW: Super Admin Panel Link added here
-      { id: '999', title: 'Super Admin Panel', icon: 'globe', route: '/super_admin', module: 'superadmin_only' },      
+      { id: '999', title: 'Super Admin Panel', icon: 'globe', route: '/superadmin/super_admin', module: 'superadmin_only' },      
       { id: '1', title: 'Serial Number', icon: 'pricetag', route: '/serial_number', module: 'asset_history' }, 
       { id: '7', title: 'Attendance Report', icon: 'person', route: '/attendance', module: 'attendance' },
       { id: '5', title: 'Spare Part Book', icon: 'book', route: '/spare_parts', module: 'spares' },
@@ -415,7 +432,9 @@ const saveTokenToDatabase = async (token: string) => {
       { id: '99', title: 'Sales Calculation', icon: 'calculator', route: '/sales_team_report', module: 'sales_team_report' },
       { id: '93', title: 'Activity Timeline', icon: 'time', route: '/employee_timeline', module: 'users' },
       { id: '92', title: 'Admin Control', icon: 'settings', route: '/manage_team', module: 'users' },
-      { id: '90', title: 'Company Profile', icon: 'business', route: '/company_profile', module: 'company_profile' },       
+      { id: '101', title: 'Automation Settings', icon: 'chatbubbles', route: '/automation_settings', module: 'company_profile' },
+      { id: '90', title: 'Company Profile', icon: 'business', route: '/company_profile', module: 'company_profile' },
+      { id: '102', title: 'Help & Support', icon: 'help-circle', route: '/help_support', module: 'common' },       
   ];
 
   const allHrItems = [

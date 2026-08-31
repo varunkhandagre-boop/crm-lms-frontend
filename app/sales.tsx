@@ -15,20 +15,20 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (No direct Firebase DB imports!)
+// 🔥 SAAS IMPORTS (organizations/users still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 2: sales visits now go through the new backend API
+import { deleteSalesVisit as apiDeleteSalesVisit, listSalesVisits } from '../services/api/salesVisits';
 
 export default function SalesReportScreen() {
   const router = useRouter();
   
-  // 🔥 Context se sirf user aur notification action nikala
   const { currentUser, markAllNotificationsRead } = useData();
 
-  // 🔥 Naya SaaS Engine (isDbLoading, fetchSaaSData, aur deleteSaaSData)
-  const { fetchSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 SaaS Engine kept for organizations/users only
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-  // 🔥 Lazy Loaded States
   const [salesVisitList, setSalesVisitList] = useState<any[]>([]);
   const [orgList, setOrgList] = useState<any[]>([]);
   const [userList, setUserList] = useState<any[]>([]);
@@ -40,19 +40,16 @@ export default function SalesReportScreen() {
       }
   }, []);
 
-  // STATES
   const [visitTypeFilter, setVisitTypeFilter] = useState<'Cold Call' | 'Follow Up' | 'All'>('All');
   const [searchText, setSearchText] = useState('');
   
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
 
-  // EMPLOYEE FILTER
   const [selectedEmployee, setSelectedEmployee] = useState('All'); 
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  // READ-ONLY MODAL & DELETE
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -71,11 +68,11 @@ export default function SalesReportScreen() {
       }
   }, [viewMode, currentDate, visitTypeFilter, searchText, selectedEmployee]);
 
-  // 🔥 LOAD SAAS DATA ON MOUNT
+  // 🔥 LOAD DATA ON MOUNT — visits via new API; orgs/users via Firestore
   const loadData = async () => {
       if (currentUser?.companyId) {
           const [visits, orgs, users] = await Promise.all([
-              fetchSaaSData("sales_reports"),
+              listSalesVisits(), // was: fetchSaaSData("sales_reports")
               fetchSaaSData("organizations"),
               fetchSaaSData("users")
           ]);
@@ -144,7 +141,6 @@ export default function SalesReportScreen() {
       return "All Time";
   };
 
-  // 🔥 MULTIPLE PRODUCTS RENDER HELPER
   const getProductDisplay = (productData: any) => {
       if (!productData) return '';
       if (Array.isArray(productData)) return productData.join(', ');
@@ -180,7 +176,6 @@ export default function SalesReportScreen() {
       return null;
   };
 
-  // --- FILTER LOGIC ---
   const getData = () => {
       let list = salesVisitList ? [...salesVisitList] : [];
 
@@ -271,7 +266,7 @@ export default function SalesReportScreen() {
       }
   };
 
-  // 🔥 SAAS ISOLATED DELETE FUNCTION
+  // 🔥 DELETE — via new backend API
   const handleDeleteVisit = async () => {
       if (!selectedItem) return;
       Alert.alert(
@@ -285,10 +280,10 @@ export default function SalesReportScreen() {
                   onPress: async () => {
                       setIsDeleting(true);
                       try {
-                          await deleteSaaSData("sales_reports", selectedItem.id);
+                          await apiDeleteSalesVisit(selectedItem.id);
                           setModalVisible(false);
                           Alert.alert("Deleted", "Visit record has been deleted successfully.");
-                          loadData(); // 🔥 Refresh list after deletion
+                          loadData();
                       } catch (error: any) {
                           Alert.alert("Error", error.message);
                       } finally {
@@ -314,7 +309,6 @@ export default function SalesReportScreen() {
                   <View style={{flex:1, marginRight: 5}}>
                       <Text style={styles.hospitalName} numberOfLines={1}>{item.hospital || item.hospitalName}</Text>
                       
-                      {/* 🔥 Show Multiple Products */}
                       {renderProductList(item.product)}
 
                       <Text style={styles.subText} numberOfLines={1}>
@@ -504,7 +498,6 @@ export default function SalesReportScreen() {
                               <Text style={styles.historyText}>{selectedItem.discussion || 'No discussion notes recorded.'}</Text>
                           </View>
 
-                          {/* 🔥 NEW ADMIN DELETE BUTTON */}
                           {isStrictAdmin && (
                               <TouchableOpacity 
                                   style={{marginTop: 5, marginBottom: 20, backgroundColor: '#ffebee', padding: 12, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#ef9a9a'}} 

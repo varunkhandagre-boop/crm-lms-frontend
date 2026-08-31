@@ -14,7 +14,7 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db } from '../firebaseConfig';
+import { db } from '../../firebaseConfig';
 
 type PlanConfig = {
     id: string;
@@ -45,6 +45,10 @@ export default function ManagePlansScreen() {
     const [upiId, setUpiId] = useState('');
     const [upiPayeeName, setUpiPayeeName] = useState('');
 
+    // 🔥 NAYA: Automation add-on price (same settings/pricing doc me)
+    const [automationAddonPrice, setAutomationAddonPrice] = useState('3000');
+    const [savingAutomationPrice, setSavingAutomationPrice] = useState(false);
+
     // Modal / form state
     const [modalVisible, setModalVisible] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
@@ -54,7 +58,7 @@ export default function ManagePlansScreen() {
         loadPricingDoc();
     }, []);
 
-    // 🔥 LOAD FULL PRICING DOC (plans array + upi fields)
+    // 🔥 LOAD FULL PRICING DOC (plans array + upi fields + automation price)
     const loadPricingDoc = async () => {
         setLoading(true);
         try {
@@ -73,6 +77,7 @@ export default function ManagePlansScreen() {
                 setPlans(rawPlans);
                 setUpiId(data.upiId || '');
                 setUpiPayeeName(data.upiPayeeName || '');
+                setAutomationAddonPrice(String(data.automationAddonPrice ?? '3000')); // 🔥 NAYA
             } else {
                 // Doc doesn't exist yet — will be created on first save
                 setPlans([]);
@@ -132,6 +137,27 @@ export default function ManagePlansScreen() {
             Alert.alert("Error", "Could not save UPI details.");
         } finally {
             setSaving(false);
+        }
+    };
+
+    // 🔥 NAYA: SAVE AUTOMATION ADD-ON PRICE
+    const saveAutomationPrice = async () => {
+        const priceNum = Number(automationAddonPrice);
+        if (!priceNum || priceNum <= 0) {
+            Alert.alert("Invalid", "Automation price must be a positive number.");
+            return;
+        }
+        setSavingAutomationPrice(true);
+        try {
+            const docRef = doc(db, "settings", "pricing");
+            await updateDoc(docRef, {
+                automationAddonPrice: priceNum,
+            });
+            Alert.alert("Saved ✅", "Automation add-on price updated. The new price will show next time the Subscription screen is opened.");
+        } catch (e) {
+            Alert.alert("Error", "Could not save automation price.");
+        } finally {
+            setSavingAutomationPrice(false);
         }
     };
 
@@ -278,6 +304,38 @@ export default function ManagePlansScreen() {
                     </View>
                 ))}
 
+                {/* 🔥 NAYA: AUTOMATION ADD-ON PRICE SECTION */}
+                <View style={styles.automationCard}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                        <Ionicons name="chatbubbles" size={18} color="#2e7d32" />
+                        <Text style={[styles.sectionHeader, { marginBottom: 0, marginLeft: 6 }]}>
+                            Automation Add-on Price
+                        </Text>
+                    </View>
+                    <Text style={styles.helperText}>
+                        This price is shown to every client on the Subscription screen
+                        when they select the "WhatsApp/Email Automation" add-on.
+                    </Text>
+                    <Text style={styles.label}>Price (₹)</Text>
+                    <TextInput
+                        style={styles.inputBox}
+                        value={automationAddonPrice}
+                        onChangeText={setAutomationAddonPrice}
+                        placeholder="e.g. 3000"
+                        keyboardType="numeric"
+                    />
+                    <TouchableOpacity
+                        style={[styles.saveUpiBtn, { backgroundColor: '#2e7d32' }]}
+                        onPress={saveAutomationPrice}
+                        disabled={savingAutomationPrice}
+                    >
+                        {savingAutomationPrice
+                            ? <ActivityIndicator color="white" />
+                            : <Text style={styles.btnText}>Save Automation Price</Text>
+                        }
+                    </TouchableOpacity>
+                </View>
+
                 {/* UPI SETTINGS SECTION */}
                 <View style={styles.upiCard}>
                     <Text style={styles.sectionHeader}>UPI Payment Settings</Text>
@@ -393,6 +451,10 @@ const styles = StyleSheet.create({
     editBtnText: { color: '#3b5998', fontWeight: 'bold', fontSize: 13 },
     deleteBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     deleteBtnText: { color: '#d32f2f', fontWeight: 'bold', fontSize: 13 },
+
+    // 🔥 NAYA
+    automationCard: { backgroundColor: '#fff', borderRadius: 10, padding: 15, marginTop: 10, marginBottom: 15, elevation: 2, borderWidth: 1, borderColor: '#c8e6c9' },
+    helperText: { fontSize: 12, color: '#888', marginBottom: 5, lineHeight: 17 },
 
     upiCard: { backgroundColor: '#fff', borderRadius: 10, padding: 15, marginTop: 10, marginBottom: 30, elevation: 2 },
     sectionHeader: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 10 },

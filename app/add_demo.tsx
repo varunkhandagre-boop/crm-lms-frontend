@@ -18,9 +18,11 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct Firebase writes removed)
+// 🔥 SAAS IMPORTS (organizations/products still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 2: demos now go through the new backend API
+import { createDemo, listDemos } from '../services/api/demos';
 
 // 🔥 PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
@@ -31,34 +33,28 @@ export default function AddDemoScreen() {
   const router = useRouter();
   const params = useLocalSearchParams(); 
   
-  // 🔥 1. Context se sirf zaroori functions aur user details nikale
   const { currentUser, updateActivityStatus, companyProfile, addNotification } = useData();
 
-  // 🔥 2. Naya SaaS Engine connect kiya
-  const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 SaaS Engine kept for organizations/products
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-  // 🔥 3. Lazy Loaded Lists (Taki app fast rahe)
   const [orgList, setOrgList] = useState<any[]>([]);
   const [productList, setProductList] = useState<any[]>([]);
   const [demoList, setDemoList] = useState<any[]>([]);
   
-  // "Other" Text states
   const [customProduct, setCustomProduct] = useState(''); 
   const [customModel, setCustomModel] = useState('');
 
-  // --- STATES ---
   const [hospital, setHospital] = useState('');
   const [orgId, setOrgId] = useState('');
   const [department, setDepartment] = useState('');
   
-  // AUTO-FILL STATES
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
 
   const [demoDate, setDemoDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
 
-  // PRODUCT DETAILS
   const [product, setProduct] = useState('');
   const [model, setModel] = useState('');
   const [serialNo, setSerialNo] = useState('');
@@ -74,20 +70,19 @@ export default function AddDemoScreen() {
 
   const [loading, setLoading] = useState(false);
 
-  // --- MODAL STATE ---
   const [modalVisible, setModalVisible] = useState(false);
   const [currentModalType, setCurrentModalType] = useState('');
   const [searchText, setSearchText] = useState('');
   const [filteredData, setFilteredData] = useState<any[]>([]);
 
-  // 🔥 4. LOAD DATA ON MOUNT
+  // 🔥 LOAD DATA — demos via new API; orgs/products via Firestore
   useEffect(() => {
       const loadData = async () => {
           if (currentUser?.companyId) {
               const [orgs, prods, demos] = await Promise.all([
                   fetchSaaSData("organizations"),
                   fetchSaaSData("products"),
-                  fetchSaaSData("demos") // Required for accurate ID Counting
+                  listDemos() // was: fetchSaaSData("demos")
               ]);
               setOrgList(orgs);
               setProductList(prods);
@@ -125,7 +120,7 @@ export default function AddDemoScreen() {
     return `${day}/${month}/${year}`;
   };
 
-  // 🔥 5. SMART SAAS FY DEMO ID GENERATOR
+  // 🔥 SMART FY DEMO ID GENERATOR (still client-side, cosmetic reference number)
   const generateDemoId = () => {
       const targetMonth = demoDate.getMonth(); 
       const targetYear = demoDate.getFullYear();
@@ -135,9 +130,8 @@ export default function AddDemoScreen() {
       const fyStartDateStr = `${fyStartYear}-04-01`;
       const fyEndDateStr = `${fyStartYear + 1}-03-31`;
 
-      // Sirf apni company ke is FY ke demos gino
       const count = demoList ? demoList.filter((d: any) => {
-          const dDate = d.dateIso || d.date; // Support legacy format if any
+          const dDate = d.dateIso || d.date;
           if (!dDate) return false;
           return dDate >= fyStartDateStr && dDate <= fyEndDateStr;
       }).length + 1 : 1;
@@ -146,7 +140,6 @@ export default function AddDemoScreen() {
       return `${prefix}-DEMO-${fyString}-${String(count).padStart(3, '0')}`;
   };
 
-  // 🔥 PDF GENERATOR
   const generateDemoPDF = async (demoData: any) => {
     try {
         const logoHTML = companyProfile?.logoUrl 
@@ -334,7 +327,7 @@ export default function AddDemoScreen() {
       setModalVisible(false);
   };
 
-  // 🔥 6. BULLETPROOF SAAS SAVE LOGIC
+  // 🔥 SAVE LOGIC — via new backend API
   const handleSubmit = async () => {
     if (!hospital || !product || !contactPerson) {
       Alert.alert("Missing Fields", "Hospital, Product Name and Contact Person are required.");
@@ -352,79 +345,72 @@ export default function AddDemoScreen() {
 
       const newDemoId = generateDemoId();
 
-      // 🔥 Naya Logic: Other ka input resolve karein
       const finalProduct = product === 'Other' ? customProduct : product;
       const finalModel = model === 'Other' ? customModel : model;
 
-      const newDemo = {
-        demoId: newDemoId, 
-        
-        // 🔥 SAAS MAGIC FIELDS (List me theek se sort/filter hone ke liye zaroori)
-        companyId: currentUser?.companyId || '', 
-        senderId: currentUser?.id || currentUser?.uid || '', 
-        senderName: currentUser?.name || 'Unknown', 
-        createdAt: new Date().toISOString(), 
-        timestamp: new Date().getTime(),
-        date: formatDate(demoDate),
-        dateIso: demoDate.toISOString().split('T')[0], 
-        displayDate: formatDate(demoDate),
+      const createdDemo = await createDemo({
+          demoRef: newDemoId,
+          orgName: hospital,
+          address: address,
+          city: city,
+          department: department,
+          product: finalProduct,
+          model: finalModel,
+          serialNo: serialNo,
+          contactPerson: contactPerson,
+          designation: designation,
+          contactNumber: contactNumber,
+          date: demoDate.toISOString().split('T')[0],
+          duration: Number(duration) || 1,
+          outcome: result,
+          notes: notes,
+      });
 
-        hospital: hospital,
-        orgName: hospital, // List compatibility
-        orgId: orgId, 
-        address: address, 
-        city: city,       
-        department: department,
-        product: finalProduct,
-        productName: finalProduct, // List compatibility
-        model: finalModel,
-        serialNo: serialNo,
-        contactPerson: contactPerson,
-        designation: designation, 
-        contactNumber: contactNumber,
-        email: email,
-        duration: duration,
-        result: result,
-        notes: notes,
-        status: 'Completed',
-        engineer: currentUser?.name || 'Unknown',
-        location: locationData
-      };
-
-      const resultRes = await addSaaSData("demos", newDemo);
+      if (addNotification) {
+          await addNotification({
+              title: "New Demo Report 📋",
+              message: `${currentUser?.name} submitted a demo report (${newDemoId}) for ${finalProduct} at ${hospital}.`,
+              to: "Admin",
+              route: "/demo",
+              type: "info"
+          });
+      }
       
-      if (resultRes.success) {
-          if (addNotification) {
-              await addNotification({
-                  title: "New Demo Report 📋",
-                  message: `${currentUser?.name} submitted a demo report (${newDemoId}) for ${finalProduct} at ${hospital}.`,
-                  to: "Admin",
-                  route: "/demo",
-                  type: "info"
-              });
-          }
-          
-          if (params.activityId && updateActivityStatus) {
-              await updateActivityStatus(params.activityId as string, 'Completed');
-          }
-
-          Alert.alert(
-              "Success ✅", 
-              `Demo Report ${newDemoId} Saved!\nDo you want to share PDF?`, 
-              [
-                { text: "No", onPress: () => router.back(), style: 'cancel' },
-                { text: "Yes, Share PDF", onPress: async () => { 
-                    await generateDemoPDF({...newDemo, senderName: currentUser?.name});
-                    router.back();
-                }}
-              ]
-          );
-      } else {
-          Alert.alert("Error", "Could not save demo.");
+      if (params.activityId && updateActivityStatus) {
+          await updateActivityStatus(params.activityId as string, 'Completed');
       }
 
-    } catch (error) {
-      Alert.alert("Error", "Something went wrong.");
+      Alert.alert(
+          "Success ✅", 
+          `Demo Report ${newDemoId} Saved!\nDo you want to share PDF?`, 
+          [
+            { text: "No", onPress: () => router.back(), style: 'cancel' },
+            { text: "Yes, Share PDF", onPress: async () => { 
+                await generateDemoPDF({
+                    demoId: newDemoId,
+                    hospital,
+                    address,
+                    city,
+                    department,
+                    product: finalProduct,
+                    model: finalModel,
+                    serialNo,
+                    contactPerson,
+                    designation,
+                    contactNumber,
+                    duration,
+                    result,
+                    notes,
+                    displayDate: formatDate(demoDate),
+                    senderName: currentUser?.name,
+                });
+                router.back();
+            }}
+          ]
+      );
+
+    } catch (error: any) {
+      Alert.alert("Error", error?.message || "Something went wrong.");
     } finally {
       setLoading(false);
     }

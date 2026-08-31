@@ -1,0 +1,78 @@
+[debug] [2026-07-15T07:50:48.733Z] ----------------------------------------------------------------------
+[debug] [2026-07-15T07:50:48.757Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\HP\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js deploy --only functions --debug
+[debug] [2026-07-15T07:50:48.758Z] CLI Version:   15.23.0
+[debug] [2026-07-15T07:50:48.758Z] Platform:      win32
+[debug] [2026-07-15T07:50:48.759Z] Node Version:  v24.11.1
+[debug] [2026-07-15T07:50:48.759Z] Detected Agent: unknown
+[debug] [2026-07-15T07:50:48.759Z] Time:          Wed Jul 15 2026 13:20:48 GMT+0530 (India Standard Time)
+[debug] [2026-07-15T07:50:48.760Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-07-15T07:50:58.682Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-07-15T07:50:58.691Z] > authorizing via signed-in user (varunkhandagre@gmail.com)
+[debug] [2026-07-15T07:50:58.691Z] [iam] checking project crm-lms-1 for permissions ["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]
+[debug] [2026-07-15T07:50:58.768Z] Checked if tokens are valid: true, expires at: 1784105115226
+[debug] [2026-07-15T07:50:58.770Z] Checked if tokens are valid: true, expires at: 1784105115226
+[debug] [2026-07-15T07:50:58.774Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/crm-lms-1:testIamPermissions [none]
+[debug] [2026-07-15T07:50:58.775Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/crm-lms-1:testIamPermissions  x-goog-user-project=crm-lms-1
+[debug] [2026-07-15T07:50:58.776Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/crm-lms-1:testIamPermissions {"permissions":["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]}
+[debug] [2026-07-15T07:51:01.356Z] <<< [apiv2][status] POST https://cloudresourcemanager.googleapis.com/v1/projects/crm-lms-1:testIamPermissions 200
+[debug] [2026-07-15T07:51:01.356Z] <<< [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/crm-lms-1:testIamPermissions {"permissions":["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]}
+[debug] [2026-07-15T07:51:01.358Z] Checked if tokens are valid: true, expires at: 1784105115226
+[debug] [2026-07-15T07:51:01.358Z] Checked if tokens are valid: true, expires at: 1784105115226
+[debug] [2026-07-15T07:51:01.359Z] >>> [apiv2][query] POST https://iam.googleapis.com/v1/projects/crm-lms-1/serviceAccounts/crm-lms-1@appspot.gserviceaccount.com:testIamPermissions [none]
+[debug] [2026-07-15T07:51:01.359Z] >>> [apiv2][body] POST https://iam.googleapis.com/v1/projects/crm-lms-1/serviceAccounts/crm-lms-1@appspot.gserviceaccount.com:testIamPermissions {"permissions":["iam.serviceAccounts.actAs"]}
+[debug] [2026-07-15T07:51:02.985Z] <<< [apiv2][status] POST https://iam.googleapis.com/v1/projects/crm-lms-1/serviceAccounts/crm-lms-1@appspot.gserviceaccount.com:testIamPermissions 200
+[debug] [2026-07-15T07:51:02.986Z] <<< [apiv2][body] POST https://iam.googleapis.com/v1/projects/crm-lms-1/serviceAccounts/crm-lms-1@appspot.gserviceaccount.com:testIamPermissions {"permissions":["iam.serviceAccounts.actAs"]}
+[info] 
+[info] === Deploying to 'crm-lms-1'...
+[info] 
+[info] i  deploying functions 
+[debug] [2026-07-15T07:51:03.027Z] Checked if tokens are valid: true, expires at: 1784105115226
+[debug] [2026-07-15T07:51:03.030Z] Checked if tokens are valid: true, expires at: 1784105115226
+[debug] [2026-07-15T07:51:03.042Z] >>> [apiv2][query] GET https://cloudresourcemanager.googleapis.com/v1/projects/crm-lms-1 [none]
+[debug] [2026-07-15T07:51:03.496Z] <<< [apiv2][status] GET https://cloudresourcemanager.googleapis.com/v1/projects/crm-lms-1 200
+[debug] [2026-07-15T07:51:03.506Z] <<< [apiv2][body] GET https://cloudresourcemanager.googleapis.com/v1/projects/crm-lms-1 {"projectNumber":"93091272283","projectId":"crm-lms-1","lifecycleState":"ACTIVE","name":"CRM-LMS","labels":{"firebase":"enabled","firebase-core":"disabled"},"createTime":"2026-02-10T08:34:25.867997Z"}
+[info] i  functions: preparing codebase default for deployment 
+[info] i  functions: ensuring required API cloudfunctions.googleapis.com is enabled... 
+[info] i  functions: ensuring required API cloudbuild.googleapis.com is enabled... 
+[info] i  artifactregistry: ensuring required API artifactregistry.googleapis.com is enabled... 
+[debug] [2026-07-15T07:51:03.559Z] Checked if tokens are valid: true, expires at: 1784105115226
+[debug] [2026-07-15T07:51:03.560Z] Checked if tokens are valid: true, expires at: 1784105115226
+[debug] [2026-07-15T07:51:03.561Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/crm-lms-1/adminSdkConfig [none]
+[debug] [2026-07-15T07:51:04.030Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/crm-lms-1/adminSdkConfig 200
+[debug] [2026-07-15T07:51:04.031Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/crm-lms-1/adminSdkConfig {"projectId":"crm-lms-1","storageBucket":"crm-lms-1.firebasestorage.app"}
+[debug] [2026-07-15T07:51:04.060Z] Validating nodejs source
+[warn] !  functions: Runtime Node.js 20 was deprecated on 2026-04-30 and will be decommissioned on 2026-10-30, after which you will not be able to deploy without upgrading. Consider upgrading now to avoid disruption. See https://cloud.google.com/functions/docs/runtime-support for full details on the lifecycle policy 
+[debug] [2026-07-15T07:51:09.623Z] > [functions] package.json contents: {
+  "name": "functions",
+  "description": "Cloud Functions for Firebase",
+  "scripts": {
+    "serve": "firebase emulators:start --only functions",
+    "shell": "firebase functions:shell",
+    "start": "npm run shell",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log"
+  },
+  "engines": {
+    "node": "20"
+  },
+  "main": "src/index.js",
+  "dependencies": {
+    "@sendgrid/mail": "^8.1.6",
+    "axios": "^1.18.1",
+    "firebase-admin": "^13.10.0",
+    "firebase-functions": "^7.2.5"
+  },
+  "devDependencies": {
+    "firebase-functions-test": "^3.4.1"
+  },
+  "private": true
+}
+[debug] [2026-07-15T07:51:09.624Z] Building nodejs source
+[info] i  functions: Loading and analyzing source code for codebase default to determine what to deploy 
+[debug] [2026-07-15T07:51:09.631Z] Could not find functions.yaml. Must use http discovery
+[debug] [2026-07-15T07:51:09.734Z] Found firebase-functions binary at 'D:\vs code projects\Varun\CRM LMS\functions\node_modules\.bin\firebase-functions'
+[info] Serving at port 8774
+
+[error] 
+[error] Error: User code failed to load. Cannot determine backend specification. Timeout after 10000. See https://firebase.google.com/docs/functions/tips#avoid_deployment_timeouts_during_initialization'
