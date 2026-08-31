@@ -20,25 +20,30 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (No direct Firebase DB imports)
+// 🔥 SAAS IMPORTS (payments/users still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 3: orders now go through the new backend API
+import {
+    billOrder as apiBillOrder,
+    deleteOrder as apiDeleteOrder,
+    listOrders,
+    updateOrder as apiUpdateOrder,
+    updateOrderStatus as apiUpdateOrderStatus,
+} from '../services/api/orders';
 
 export default function OrderListScreen() {
   const router = useRouter();
 
-  // 🔥 1. Context se sirf Core User, Notification & Profile
   const { currentUser, addNotification, companyProfile } = useData();
 
-  // 🔥 2. Naya SaaS Engine (fetch, update, delete)
-  const { fetchSaaSData, updateSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 SaaS Engine kept for payments/users only
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-  // 🔥 3. States for SaaS Data
   const [orderList, setOrderList] = useState<any[]>([]);
   const [paymentList, setPaymentList] = useState<any[]>([]);
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
 
-  // SEARCH & FILTER STATES
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
@@ -50,7 +55,6 @@ export default function OrderListScreen() {
 
   const [visibleCount, setVisibleCount] = useState(20);
 
-  // MODAL STATES
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   
@@ -65,7 +69,6 @@ export default function OrderListScreen() {
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
 
-  // ROLES
   const userRole = (currentUser?.role || '').toLowerCase().trim();
   const isAdmin = ['admin', 'manager', 'account', 'accountant', 'hr', 'superadmin'].includes(userRole);
   const isStrictAdmin = ['admin', 'manager', 'accountant', 'account', 'superadmin'].includes(userRole); 
@@ -75,12 +78,11 @@ export default function OrderListScreen() {
       else setVisibleCount(20); 
   }, [viewMode, currentDate, searchText, statusFilter, selectedEmployee]);
 
-  // 🔥 4. LOAD SAAS DATA ON MOUNT
+  // 🔥 LOAD DATA — orders via new API; payments/users via Firestore
   const loadData = async () => {
       if (currentUser?.companyId) {
-          // Fetch Orders, Payments (for billing calc), and Users
           const [orders, payments, users] = await Promise.all([
-              fetchSaaSData("orders"),
+              listOrders(), // was: fetchSaaSData("orders")
               fetchSaaSData("payments"),
               fetchSaaSData("users")
           ]);
@@ -149,7 +151,6 @@ export default function OrderListScreen() {
       return "All Time";
   };
 
-  // 🔥 ADVANCED PDF GENERATION WITH COMPANY PROFILE
   const generateOrderPDF = async (orderData: any) => {
     setGeneratingPdf(true);
     try {
@@ -316,7 +317,6 @@ export default function OrderListScreen() {
       } catch (e: any) { Alert.alert("Error", "Could not open file."); }
   };
 
-  // 🔥 FILTER LOGIC (Priority Sorting: Pending/Approved at Top)
   const getFilteredData = () => {
       let data = orderList ? [...orderList] : [];
 
@@ -384,16 +384,7 @@ export default function OrderListScreen() {
   const fullList = getFilteredData(); 
   const renderedList = fullList.slice(0, visibleCount);
 
-  // HELPER FOR BILLING CALCULATION
-  const getOrderPayments = (order: any) => {
-      return paymentList.filter((p:any) => 
-          (p.orderId && p.orderId === order.id) || 
-          (p.orderId && p.orderId === order.orderId) ||
-          (p.orderRef && p.orderRef === order.orderId)
-      );
-  };
-
-  // 🔥 SAAS ORDER STATUS UPDATE
+  // 🔥 STATUS UPDATE — via new backend API
   const handleUpdateStatus = async (newStatus: string) => {
       if (!selectedOrder) return;
       Alert.alert("Confirm", `Mark as ${newStatus}?`, [
@@ -403,25 +394,21 @@ export default function OrderListScreen() {
               onPress: async () => {
                   setIsUpdating(true);
                   try {
-                      const res = await updateSaaSData("orders", selectedOrder.id, { status: newStatus });
-                      
-                      if (res.success) {
-                          if (addNotification && selectedOrder.senderId) {
-                              await addNotification({
-                                  title: `Order ${newStatus}`, 
-                                  message: `Order for ${selectedOrder.hospitalName} (PO: ${selectedOrder.poNumber}) has been ${newStatus}.`,
-                                  type: newStatus === 'Approved' ? 'success' : newStatus === 'Rejected' ? 'alert' : 'info',
-                                  userId: selectedOrder.senderId,
-                                  to: selectedOrder.senderName, 
-                                  route: '/orders'
-                              });
-                          }
-                          setOrderList(prev => prev.map(item => item.id === selectedOrder.id ? { ...item, status: newStatus } : item));
-                          setModalVisible(false);
-                      } else {
-                          Alert.alert("Error", "Failed to update status.");
+                      await apiUpdateOrderStatus(selectedOrder.id, newStatus as any);
+
+                      if (addNotification && selectedOrder.senderId) {
+                          await addNotification({
+                              title: `Order ${newStatus}`, 
+                              message: `Order for ${selectedOrder.hospitalName} (PO: ${selectedOrder.poNumber}) has been ${newStatus}.`,
+                              type: newStatus === 'Approved' ? 'success' : newStatus === 'Rejected' ? 'alert' : 'info',
+                              userId: selectedOrder.senderId,
+                              to: selectedOrder.senderName, 
+                              route: '/orders'
+                          });
                       }
-                  } catch (error) { Alert.alert("Error", "Failed to update status."); } 
+                      setOrderList(prev => prev.map(item => item.id === selectedOrder.id ? { ...item, status: newStatus } : item));
+                      setModalVisible(false);
+                  } catch (error: any) { Alert.alert("Error", error?.message || "Failed to update status."); } 
                   finally { setIsUpdating(false); }
               }
           }
@@ -444,7 +431,7 @@ export default function OrderListScreen() {
       setEditModalVisible(true);
   };
 
-  // 🔥 SAAS ADMIN EDIT ORDER
+  // 🔥 ADMIN EDIT ORDER — via new backend API
   const handleSaveEdit = async () => {
       if (!editData.id) return;
       if (!editData.hospitalName || !editData.amount) {
@@ -454,7 +441,7 @@ export default function OrderListScreen() {
       setIsSavingEdit(true);
       try {
           const updates = {
-              hospitalName: editData.hospitalName,
+              orgName: editData.hospitalName,
               poNumber: editData.poNumber,
               amount: parseFloat(editData.amount),
               productDetails: editData.productDetails,
@@ -462,77 +449,46 @@ export default function OrderListScreen() {
               deliveryTerms: editData.deliveryTerms,
               notes: editData.notes,
               saleType: editData.saleType,
-              status: editData.status 
           };
-          const res = await updateSaaSData("orders", editData.id, updates);
+          await apiUpdateOrder(editData.id, updates);
+          if (editData.status) await apiUpdateOrderStatus(editData.id, editData.status);
 
-          if (res.success) {
-              setOrderList(prev => prev.map(item => item.id === editData.id ? { ...item, ...updates } : item));
-              Alert.alert("Success", "Order details updated successfully!");
-              setEditModalVisible(false);
-          } else {
-              Alert.alert("Error", "Could not update order.");
-          }
+          setOrderList(prev => prev.map(item => item.id === editData.id ? { ...item, hospitalName: editData.hospitalName, ...updates, status: editData.status } : item));
+          Alert.alert("Success", "Order details updated successfully!");
+          setEditModalVisible(false);
       } catch (error: any) {
-          Alert.alert("Error", "Could not update order. ");
+          Alert.alert("Error", error?.message || "Could not update order.");
       } finally {
           setIsSavingEdit(false);
       }
   };
 
-  // 🔥 SAAS BILLED CALCULATION & UPDATE
   const openBillingModal = () => {
       setBillingData({ finalAmount: selectedOrder.amount.toString(), paymentMode: 'Credit' });
       setBilledModalVisible(true);
   };
 
+  // 🔥 BILLING — via new backend API (server computes balance/status)
   const handleConfirmBilling = async () => {
       if (!billingData.finalAmount) return Alert.alert("Required", "Final bill amount is required.");
       setIsBilling(true);
       
       try {
           const finalAmountNum = parseFloat(String(billingData.finalAmount).replace(/[^0-9.]/g, '')) || 0;
-          
-          const orderPayments = paymentList.filter((p: any) => 
-              p.orderId === selectedOrder.id || p.orderRef === selectedOrder.orderId
-          );
-          const totalPaidSoFar = orderPayments.reduce((sum: number, p: any) => sum + (parseFloat(p.amount) || 0), 0);
-          
-          const advanceNum = parseFloat(String(selectedOrder.advanceAmount || '0').replace(/[^0-9.]/g, '')) || 0;
-          const actualPaid = Math.max(totalPaidSoFar, advanceNum);
-          
-          const newBalance = finalAmountNum - actualPaid; 
-          const finalBalance = newBalance < 0 ? 0 : newBalance; 
-          
-          const newStatus = finalBalance <= 0 ? 'Completed' : 'Billed';
-          
-          const updates = {
-              status: newStatus,
-              finalBillAmount: finalAmountNum,
-              balance: finalBalance,
-              paymentStatus: finalBalance <= 0 ? 'Paid' : 'Pending', 
-              billedDate: new Date().toISOString()
-          };
+          const updated = await apiBillOrder(selectedOrder.id, finalAmountNum);
 
-          const res = await updateSaaSData("orders", selectedOrder.id, updates);
-          
-          if(res.success){
-              setOrderList(prev => prev.map(item => item.id === selectedOrder.id ? { ...item, ...updates } : item));
-              Alert.alert("Success", `Billing Done! Auto-calculated balance: ₹${finalBalance}.`);
-              setBilledModalVisible(false);
-              setModalVisible(false); 
-          } else {
-              Alert.alert("Error", "Failed to mark order as billed.");
-          }
-          
-      } catch (error) {
-          Alert.alert("Error", "Failed to mark order as billed.");
+          setOrderList(prev => prev.map(item => item.id === selectedOrder.id ? { ...item, ...updated } : item));
+          Alert.alert("Success", `Billing Done! Auto-calculated balance: ₹${updated.balance}.`);
+          setBilledModalVisible(false);
+          setModalVisible(false); 
+      } catch (error: any) {
+          Alert.alert("Error", error?.message || "Failed to mark order as billed.");
       } finally {
           setIsBilling(false);
       }
   };
 
-  // 🔥 SAAS ADMIN DELETE ORDER
+  // 🔥 DELETE — via new backend API
   const handleDeleteOrder = async () => {
       if (!selectedOrder) return;
       Alert.alert(
@@ -546,14 +502,10 @@ export default function OrderListScreen() {
                   onPress: async () => {
                       setIsUpdating(true);
                       try {
-                          const res = await deleteSaaSData("orders", selectedOrder.id);
-                          if(res.success) {
-                              setOrderList(prev => prev.filter(item => item.id !== selectedOrder.id));
-                              setModalVisible(false);
-                              Alert.alert("Deleted", "Order has been deleted successfully.");
-                          } else {
-                              Alert.alert("Error", "Failed to delete order.");
-                          }
+                          await apiDeleteOrder(selectedOrder.id);
+                          setOrderList(prev => prev.filter(item => item.id !== selectedOrder.id));
+                          setModalVisible(false);
+                          Alert.alert("Deleted", "Order has been deleted successfully.");
                       } catch (error: any) {
                           Alert.alert("Error", error.message);
                       } finally {
@@ -721,7 +673,6 @@ export default function OrderListScreen() {
         const chipData = (() => {
             let base = orderList ? [...orderList] : [];
 
-            // Employee filter
             if (isAdmin && selectedEmployee !== 'All') {
                 const targetName = selectedEmployeeName.toLowerCase().trim();
                 base = base.filter((item: any) =>
@@ -737,7 +688,6 @@ export default function OrderListScreen() {
                 );
             }
 
-            // Search filter
             if (searchText) {
                 const term = searchText.toLowerCase();
                 base = base.filter((item: any) => {
@@ -746,7 +696,6 @@ export default function OrderListScreen() {
                 });
             }
 
-            // Date/FY filter
             if (viewMode !== 'All') {
                 const targetYear = currentDate.getFullYear();
                 const targetMonth = currentDate.getMonth();
@@ -766,7 +715,6 @@ export default function OrderListScreen() {
                 });
             }
 
-            // Status filter for chip count
             const filtered = s === 'All'
                 ? base.filter((item: any) => {
                     const status = (item.status || '').toLowerCase();

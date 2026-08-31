@@ -11,6 +11,7 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: quotations now go through the new backend API
 import { createQuotation, listQuotations, updateQuotation } from '../services/api/quotations';
+import { listProducts } from '../services/api/products';
 
 export default function AddQuotationScreen() {
     const router = useRouter();
@@ -47,7 +48,7 @@ export default function AddQuotationScreen() {
             if (currentUser?.companyId) {
                 const [orgs, prods, quotes] = await Promise.all([
                     fetchSaaSData("organizations"),
-                    fetchSaaSData("products"),
+                    listProducts(), // was: fetchSaaSData("products")
                     listQuotations() // was: fetchSaaSData("quotations")
                 ]);
                 setOrgList(orgs);

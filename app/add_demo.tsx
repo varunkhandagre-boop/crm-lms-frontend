@@ -23,6 +23,7 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: demos now go through the new backend API
 import { createDemo, listDemos } from '../services/api/demos';
+import { listProducts } from '../services/api/products';
 
 // 🔥 PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
@@ -75,13 +76,13 @@ export default function AddDemoScreen() {
   const [searchText, setSearchText] = useState('');
   const [filteredData, setFilteredData] = useState<any[]>([]);
 
-  // 🔥 LOAD DATA — demos via new API; orgs/products via Firestore
+  // 🔥 LOAD DATA — demos via new API; orgs via Firestore; products via new API
   useEffect(() => {
       const loadData = async () => {
           if (currentUser?.companyId) {
               const [orgs, prods, demos] = await Promise.all([
                   fetchSaaSData("organizations"),
-                  fetchSaaSData("products"),
+                  listProducts(), // was: fetchSaaSData("products")
                   listDemos() // was: fetchSaaSData("demos")
               ]);
               setOrgList(orgs);

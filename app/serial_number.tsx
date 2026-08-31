@@ -19,34 +19,38 @@ import {
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
-// 🔥 SAAS IMPORTS (Firebase DB imports removed)
+// 🔥 SAAS IMPORTS (installations/organizations/service_calls/pms_reports/
+// payments/dues/couriers still Firestore — out of scope until Phase 4/6/8)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Light Phase 3 patch: sales visits (Phase 2) and orders (Phase 3) now
+// come from the new backend API. NOTE: order detail fields here (name,
+// product, totalReceived, createdBy) don't map 1:1 to the new Order shape —
+// those specific detail-modal lines may show blank/undefined until this
+// screen gets a full rewrite in a later phase; the org-level financial
+// totals and timeline dates/amounts are correct.
+import { listSalesVisits } from '../services/api/salesVisits';
+import { listOrders } from '../services/api/orders';
 
 export default function SerialNumberScreen() {
   const router = useRouter();
   
-  // 🔥 1. Context se sirf user nikala
   const { currentUser } = useData();
 
-  // 🔥 2. Naya SaaS Engine connect kiya
   const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
   const userRole = (currentUser?.role || '').toLowerCase().trim();
   const isFinanceRole = ['admin', 'manager', 'account', 'accountant', 'superadmin'].includes(userRole);
 
-  // Search & Navigation States
   const [searchType, setSearchType] = useState<'MACHINE' | 'ORGANIZATION'>('MACHINE');
   const [searchInput, setSearchInput] = useState('');
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [viewMode, setViewMode] = useState<'IDLE' | 'LIST' | 'DETAILS' | 'ORG_DETAILS'>('IDLE');
   
-  // Lazy Loaded Master States
   const [installList, setInstallList] = useState<any[]>([]);
   const [orgList, setOrgList] = useState<any[]>([]);
   
-  // Specific Context Data States
   const [machineList, setMachineList] = useState<any[]>([]); 
   const [selectedMachine, setSelectedMachine] = useState<any>(null); 
   const [selectedOrg, setSelectedOrg] = useState<any>(null);
@@ -213,8 +217,8 @@ export default function SerialNumberScreen() {
       const [services, pmsData, visits, orders, payments, dues, couriers] = await Promise.all([
           fetchSaaSData("service_calls"),
           fetchSaaSData("pms_reports"),
-          fetchSaaSData("sales_reports"),
-          fetchSaaSData("orders"),
+          listSalesVisits(),  // was: fetchSaaSData("sales_reports")
+          listOrders(),       // was: fetchSaaSData("orders")
           fetchSaaSData("payments"),
           fetchSaaSData("dues"), // Make sure your context uses 'dues' collection
           fetchSaaSData("couriers")
@@ -691,16 +695,16 @@ export default function SerialNumberScreen() {
                             {/* CONDITIONAL RENDERING BASED ON EVENT TYPE */}
                             {selectedEvent.type === 'Order' && (
                                 <>
-                                    <DetailRow label="Product/Name" value={selectedEvent.rawData.name || selectedEvent.rawData.product} />
+                                    <DetailRow label="Product/Name" value={selectedEvent.rawData.name || selectedEvent.rawData.product || selectedEvent.rawData.productDetails} />
                                     {isFinanceRole && (
                                         <>
                                             <DetailRow label="Order Value" value={`₹ ${Number(selectedEvent.rawData.totalValue || selectedEvent.rawData.orderValue || selectedEvent.rawData.amount || 0).toLocaleString()}`} />
-                                            <DetailRow label="Amount Received" value={`₹ ${Number(selectedEvent.rawData.totalReceived || 0).toLocaleString()}`} />
-                                            <DetailRow label="Pending Balance" value={`₹ ${Number((selectedEvent.rawData.totalValue || 0) - (selectedEvent.rawData.totalReceived || 0)).toLocaleString()}`} />
+                                            <DetailRow label="Amount Received" value={`₹ ${Number(selectedEvent.rawData.totalReceived || selectedEvent.rawData.advanceAmount || 0).toLocaleString()}`} />
+                                            <DetailRow label="Pending Balance" value={`₹ ${Number(selectedEvent.rawData.balance ?? ((selectedEvent.rawData.totalValue || 0) - (selectedEvent.rawData.totalReceived || 0))).toLocaleString()}`} />
                                         </>
                                     )}
                                     <DetailRow label="Created By" value={selectedEvent.rawData.createdBy || selectedEvent.rawData.senderName} />
-                                    <DetailRow label="Client / Location" value={`${selectedEvent.rawData.client || selectedEvent.rawData.hospital} (${selectedEvent.rawData.location || selectedEvent.rawData.city || 'N/A'})`} />
+                                    <DetailRow label="Client / Location" value={`${selectedEvent.rawData.client || selectedEvent.rawData.hospital || selectedEvent.rawData.hospitalName} (${selectedEvent.rawData.location || selectedEvent.rawData.city || 'N/A'})`} />
                                 </>
                             )}
                             

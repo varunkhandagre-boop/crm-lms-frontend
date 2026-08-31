@@ -12,27 +12,23 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 3: spare parts now go through the new backend API
+import { createSparePart } from '../services/api/spareParts';
 
 export default function AddSparePartScreen() {
   const router = useRouter();
   
-  // 🔥 1. Context se sirf user aur notification nikala (refreshData ab zaroori nahi)
-  const { currentUser, addNotification } = useData();
-
-  // 🔥 2. Naya SaaS Engine connect kiya
-  const { addSaaSData } = useSaaSDB();
+  const { addNotification } = useData();
 
   const [partName, setPartName] = useState('');
   const [partNo, setPartNo] = useState('');
   const [price, setPrice] = useState('');
   const [models, setModels] = useState('');
-  const [stock, setStock] = useState('0'); // Initial Office Stock
+  const [stock, setStock] = useState('0');
   const [loading, setLoading] = useState(false);
 
-  // 🔥 3. SAAS SAVE LOGIC
+  // 🔥 SAVE LOGIC — via new backend API
   const handleSave = async () => {
       if (!partName.trim() || !partNo.trim() || !price.trim()) {
           Alert.alert("Error", "Please fill Name, Part No, and Price.");
@@ -41,37 +37,27 @@ export default function AddSparePartScreen() {
 
       setLoading(true);
       try {
-          // 🔥 CLEAN PAYLOAD: Engine automatically injects ID, Company ID, Sender ID, Created At
-          const newPart = {
+          await createSparePart({
               partName: partName.trim(),
               partNo: partNo.trim(),
-              price: price.trim(),
+              price: parseFloat(price.trim()) || 0,
               compatibleModels: models.trim(),
               officeStock: parseInt(stock) || 0,
-              stockHolders: {}, // Empty initially for engineers
-              role: currentUser?.role || 'Employee'
-          };
+          });
 
-          const res = await addSaaSData("spare_parts", newPart);
-
-          if (res.success) {
-              // 🔥 REAL PUSH NOTIFICATION
-              if (addNotification) {
-                  await addNotification({
-                      title: "New Spare Part ⚙️",
-                      message: `${partName} (PN: ${partNo}) added to inventory.`,
-                      to: "Admin", // 'Store' role ko bhi bhej sakte hain
-                      route: "/spare_parts",
-                      type: "info"
-                  });
-              }
-
-              Alert.alert("Success", "Spare Part Added Successfully!", [
-                  { text: "OK", onPress: () => router.back() }
-              ]);
-          } else {
-              Alert.alert("Error", "Could not save spare part.");
+          if (addNotification) {
+              await addNotification({
+                  title: "New Spare Part ⚙️",
+                  message: `${partName} (PN: ${partNo}) added to inventory.`,
+                  to: "Admin",
+                  route: "/spare_parts",
+                  type: "info"
+              });
           }
+
+          Alert.alert("Success", "Spare Part Added Successfully!", [
+              { text: "OK", onPress: () => router.back() }
+          ]);
       } catch (error: any) {
           Alert.alert("Error", error.message || "Something went wrong.");
       } finally {

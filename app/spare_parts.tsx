@@ -14,66 +14,59 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Firebase direct calls removed)
+// 🔥 SAAS IMPORTS (users + office_machines still Firestore — office_machines
+// is explicitly out of scope for this phase, see spareParts.ts adapter note)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 3: spare parts catalog + stock now go through the new backend API
+import { issueStock as apiIssueStock, listSpareParts } from '../services/api/spareParts';
 
 export default function SparePartsScreen() {
   const router = useRouter();
   
-  // 🔥 1. Context se sirf current user nikala gaya hai
   const { currentUser } = useData();
 
-  // 🔥 2. Naya SaaS Engine import
-  const { fetchSaaSData, addSaaSData, updateSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 SaaS Engine kept for users + office_machines only
+  const { fetchSaaSData, addSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
 
-  // 🔥 3. Lazy Loaded States for DB
   const [sparePartsList, setSparePartsList] = useState<any[]>([]);
   const [userList, setUserList] = useState<any[]>([]);
 
-  // --- STATES ---
   const [activeTab, setActiveTab] = useState<'Parts' | 'StockList'>('Parts'); 
   const [stockSubTab, setStockSubTab] = useState<'OfficeStock' | 'SpareList'>('OfficeStock'); 
   
   const [searchText, setSearchText] = useState('');
   
-  // Machine Add States
   const [modalVisible, setModalVisible] = useState(false);
   const [newMachineName, setNewMachineName] = useState('');
   const [newQuantity, setNewQuantity] = useState('');
   const [loading, setLoading] = useState(false);
   const [machinesList, setMachinesList] = useState<any[]>([]);
 
-  // Part Details Modal
   const [detailsModalVisible, setDetailsModalVisible] = useState(false);
   const [selectedPart, setSelectedPart] = useState<any>(null);
   
-  // Machine Details Modal
   const [machineDetailVisible, setMachineDetailVisible] = useState(false);
   const [selectedMachine, setSelectedMachine] = useState<any>(null);
 
-  // ISSUE STOCK STATES
   const [issueModalVisible, setIssueModalVisible] = useState(false);
   const [selectedEmpId, setSelectedEmpId] = useState('');
   const [issueQty, setIssueQty] = useState('');
 
-  // PAGINATION STATE
   const [visibleCount, setVisibleCount] = useState(20);
 
-  // RESET PAGINATION ON FILTER CHANGE
   useEffect(() => {
       setVisibleCount(20);
   }, [activeTab, stockSubTab, searchText]);
 
-  // Admin Check
   const userRole = (currentUser?.role || '').toLowerCase();
   const isAdmin = userRole.includes('admin') || userRole.includes('manager') || userRole.includes('store') || userRole.includes('superadmin');
 
-  // 🔥 4. LOAD CORE DATA
+  // 🔥 LOAD DATA — spare parts via new API; users/office_machines via Firestore
   const loadCoreData = async () => {
       if (currentUser?.companyId) {
           const [spares, users, machines] = await Promise.all([
-              fetchSaaSData("spare_parts"),
+              listSpareParts(), // was: fetchSaaSData("spare_parts")
               fetchSaaSData("users"),
               fetchSaaSData("office_machines")
           ]);
@@ -88,7 +81,6 @@ export default function SparePartsScreen() {
   }, [currentUser]);
 
 
-  // --- FILTER LOGIC ---
   const getCatalogList = () => {
       if (!sparePartsList) return [];
       return sparePartsList.filter((item: any) => 
@@ -105,7 +97,6 @@ export default function SparePartsScreen() {
                   const qty = part.stockHolders[uid];
                   if (qty > 0) {
                       const empName = userList.find((u:any) => u.uid === uid || u.id === uid)?.name || 'Unknown';
-                      // If NOT Admin, only show own stock
                       if(!isAdmin && uid !== (currentUser?.uid || currentUser?.id)) return;
 
                       stockData.push({
@@ -130,7 +121,6 @@ export default function SparePartsScreen() {
   const catalogList = getCatalogList();
   const employeeStockList = getEmployeeStock();
 
-  // Determine Current List for Pagination
   let currentList: any[] = [];
   if (activeTab === 'Parts') {
       currentList = employeeStockList;
@@ -144,10 +134,9 @@ export default function SparePartsScreen() {
       else currentList = catalogList;
   }
 
-  // SLICE FOR LIST (Rendered Data)
   const renderedList = currentList.slice(0, visibleCount);
 
-  // --- 🔥 SAAS: ADD MACHINE ---
+  // --- ADD MACHINE (still Firestore — office_machines out of scope) ---
   const handleAddMachine = async () => {
       if (!newMachineName || !newQuantity) {
           Alert.alert("Error", "Please fill Name and Quantity");
@@ -165,7 +154,7 @@ export default function SparePartsScreen() {
               setModalVisible(false);
               setNewMachineName('');
               setNewQuantity('');
-              await loadCoreData(); // Reload Lists
+              await loadCoreData();
               Alert.alert("Success", "Machine Added to Office Stock List");
           } else {
               Alert.alert("Error", "Failed to add machine.");
@@ -177,7 +166,7 @@ export default function SparePartsScreen() {
       }
   };
 
-  // --- 🔥 SAAS: DELETE MACHINE ---
+  // --- DELETE MACHINE (still Firestore) ---
   const handleDeleteMachine = async (id: string) => {
       Alert.alert("Confirm", "Delete this machine?", [
           { text: "Cancel" },
@@ -192,7 +181,7 @@ export default function SparePartsScreen() {
       ]);
   };
 
-  // --- 🔥 SAAS: ISSUE STOCK LOGIC ---
+  // 🔥 ISSUE STOCK — via new backend API (server does the stock math + concurrency-safe)
   const handleIssueStock = async () => {
       if (!selectedEmpId || !issueQty) {
           Alert.alert("Error", "Select Employee and Quantity");
@@ -201,38 +190,15 @@ export default function SparePartsScreen() {
       const qty = parseInt(issueQty);
       if (qty <= 0) return;
 
-      if ((selectedPart.officeStock || 0) < qty) {
-          Alert.alert("Error", "Not enough stock in office!");
-          return;
-      }
-
       setLoading(true);
       try {
-          const currentHolders = selectedPart.stockHolders || {};
-          const currentEmpQty = currentHolders[selectedEmpId] || 0;
-          
-          const updatedHolders = {
-              ...currentHolders,
-              [selectedEmpId]: currentEmpQty + qty
-          };
-
-          const res = await updateSaaSData("spare_parts", selectedPart.id, {
-              officeStock: (selectedPart.officeStock || 0) - qty,
-              stockHolders: updatedHolders,
-              lastIssuedTo: selectedEmpId,
-              lastIssuedDate: new Date().toISOString()
-          });
-
-          if(res.success) {
-              setIssueModalVisible(false);
-              setDetailsModalVisible(false);
-              await loadCoreData(); // Reload full list
-              Alert.alert("Success", "Stock Issued to Employee!");
-          } else {
-              Alert.alert("Error", "Failed to issue stock.");
-          }
+          await apiIssueStock(selectedPart.id, selectedEmpId, qty);
+          setIssueModalVisible(false);
+          setDetailsModalVisible(false);
+          await loadCoreData();
+          Alert.alert("Success", "Stock Issued to Employee!");
       } catch (e: any) {
-          Alert.alert("Error", e.message);
+          Alert.alert("Error", e?.message || "Failed to issue stock.");
       } finally {
           setLoading(false);
       }
@@ -251,7 +217,6 @@ export default function SparePartsScreen() {
       setMachineDetailVisible(true);
   };
 
-  // --- RENDER ITEMS ---
   const renderStockItem = ({item}: any) => (
       <TouchableOpacity style={styles.stockCard} onPress={() => openPartDetails(item)}>
           <View style={{flex:1}}>
@@ -310,7 +275,6 @@ export default function SparePartsScreen() {
 
   return (
     <View style={styles.container}>
-        {/* HEADER */}
         <View style={styles.header}>
             <View style={{flexDirection:'row', alignItems:'center'}}>
                 <TouchableOpacity onPress={() => router.back()}>
@@ -336,7 +300,6 @@ export default function SparePartsScreen() {
             )}
         </View>
 
-        {/* MAIN TABS */}
         <View style={styles.tabContainer}>
             <TouchableOpacity style={[styles.tab, activeTab === 'Parts' && styles.activeTab]} onPress={() => setActiveTab('Parts')}>
                 <Text style={[styles.tabText, activeTab === 'Parts' && styles.activeTabText]}>Spare Parts</Text>
@@ -346,14 +309,12 @@ export default function SparePartsScreen() {
             </TouchableOpacity>
         </View>
 
-        {/* SEARCH BAR */}
         <View style={styles.searchBar}>
             {isDbLoading ? <ActivityIndicator size="small" color="#3b5998"/> : <Ionicons name="search" size={20} color="gray" />}
             <TextInput style={styles.input} placeholder="Search..." value={searchText} onChangeText={setSearchText} />
             {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={18} color="gray"/></TouchableOpacity>}
         </View>
 
-        {/* TAB 2 SUB TABS */}
         {activeTab === 'StockList' && (
             <View style={styles.subTabContainer}>
                 <TouchableOpacity style={[styles.subTab, stockSubTab === 'OfficeStock' && styles.activeSubTab]} onPress={() => setStockSubTab('OfficeStock')}>
@@ -365,7 +326,6 @@ export default function SparePartsScreen() {
             </View>
         )}
 
-        {/* MAIN LIST */}
         <FlatList 
             data={renderedList}
             keyExtractor={(item, index) => item.uniqueId || item.id || index.toString()}

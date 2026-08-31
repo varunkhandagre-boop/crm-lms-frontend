@@ -23,15 +23,26 @@ export async function clearToken(): Promise<void> {
 interface ApiErrorBody {
   message: string;
   code?: string;
+  fieldErrors?: Record<string, string[] | undefined>;
 }
 
 export class ApiRequestError extends Error {
   status: number;
   code?: string;
+  fieldErrors?: Record<string, string[] | undefined>;
   constructor(status: number, error: ApiErrorBody) {
-    super(error.message);
+    // Fold field-level validation errors into the message so Alert.alert(...)
+    // and console logs actually show *what* was invalid, not just "Validation failed".
+    const detail = error.fieldErrors
+      ? Object.entries(error.fieldErrors)
+          .filter(([, msgs]) => msgs && msgs.length)
+          .map(([field, msgs]) => `${field}: ${msgs!.join(', ')}`)
+          .join(' | ')
+      : undefined;
+    super(detail ? `${error.message} — ${detail}` : error.message);
     this.status = status;
     this.code = error.code;
+    this.fieldErrors = error.fieldErrors;
   }
 }
 
@@ -51,6 +62,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const body = res.status === 204 ? {} : await res.json().catch(() => ({}));
 
   if (!res.ok) {
+    // Log the full error (incl. fieldErrors) to Metro so it's visible during
+    // development, even where the calling screen only shows err.message.
+    console.log(`[API ${options.method || 'GET'} ${path}] ${res.status}`, body.error || body);
     throw new ApiRequestError(res.status, body.error || { message: 'Request failed' });
   }
 

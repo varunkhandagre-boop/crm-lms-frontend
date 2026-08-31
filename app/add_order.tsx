@@ -21,9 +21,12 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Firebase direct DB imports removed)
+// 🔥 SAAS IMPORTS (organizations/users still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 3: orders & products now go through the new backend API
+import { createOrder } from '../services/api/orders';
+import { listProducts } from '../services/api/products';
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
@@ -32,19 +35,16 @@ import * as Sharing from 'expo-sharing';
 export default function AddOrderScreen() {
   const router = useRouter();
 
-  // 🔥 1. Context se sirf Core User, Notification & Profile
   const { currentUser, addNotification, companyProfile } = useData();
 
-  // 🔥 2. Naya SaaS Engine
-  const { fetchSaaSData, addSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 SaaS Engine kept for organizations/users + payment_collections (advance record)
+  const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
 
   const { mode, leadId, leadOrg, leadOrgId, leadPerson, leadMobile, leadEmail, leadCity, leadAddress, leadProduct } = useLocalSearchParams(); 
 
-  // 🔥 3. Lazy Loaded Lists
   const [orgList, setOrgList] = useState<any[]>([]);
   const [productList, setProductList] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
-  const [orderList, setOrderList] = useState<any[]>([]); 
 
   const [hospitalName, setHospitalName] = useState('');
   const [orgId, setOrgId] = useState(''); 
@@ -54,7 +54,6 @@ export default function AddOrderScreen() {
   const [mobile, setMobile] = useState('');
   const [email, setEmail] = useState('');
 
-  // ORDER TYPE
   const [saleType, setSaleType] = useState('Credit'); 
 
   const [poNumber, setPoNumber] = useState('');
@@ -67,7 +66,6 @@ export default function AddOrderScreen() {
   const [advancePdcDate, setAdvancePdcDate] = useState(new Date());
   const [showAdvancePdcPicker, setShowAdvancePdcPicker] = useState(false);
 
-  // MULTIPLE PRODUCTS
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
   const [otherProductText, setOtherProductText] = useState('');
   
@@ -92,20 +90,18 @@ export default function AddOrderScreen() {
 
   const canSelectSalesPerson = ['Admin', 'Manager', 'Account', 'Accountant', 'SuperAdmin'].includes(currentUser?.role || '');
 
-  // 🔥 4. LOAD DATA ON MOUNT
+  // 🔥 LOAD DATA — products via new API; organizations/users via Firestore
   useEffect(() => {
       const loadData = async () => {
           if (currentUser?.companyId) {
-              const [orgs, prods, usrs, orders] = await Promise.all([
+              const [orgs, prods, usrs] = await Promise.all([
                   fetchSaaSData("organizations"),
-                  fetchSaaSData("products"),
+                  listProducts(), // was: fetchSaaSData("products")
                   fetchSaaSData("users"),
-                  fetchSaaSData("orders")
               ]);
               setOrgList(orgs);
               setProductList(prods);
               if (canSelectSalesPerson) setUsers(usrs);
-              setOrderList(orders);
           }
       };
       loadData();
@@ -288,26 +284,6 @@ export default function AddOrderScreen() {
       } catch (error) { return null; }
   };
 
-  // 🔥 5. SMART SAAS FY ORDER ID GENERATOR
-  const generateOrderId = () => {
-      const targetMonth = poDate.getMonth(); 
-      const targetYear = poDate.getFullYear();
-      const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-      const fyString = `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`;
-
-      const fyStartDateStr = `${fyStartYear}-04-01`;
-      const fyEndDateStr = `${fyStartYear + 1}-03-31`;
-
-      const count = orderList ? orderList.filter((c: any) => {
-          const dDate = c.dateIso || c.date; 
-          if (!dDate) return false;
-          return dDate >= fyStartDateStr && dDate <= fyEndDateStr;
-      }).length + 1 : 1;
-
-      const prefix = companyProfile?.shortName ? companyProfile.shortName.toUpperCase() : 'ORD';
-      return `${prefix}-${fyString}-${String(count).padStart(3, '0')}`;
-  };
-
   const openModal = (type: string, data: any[]) => {
       setCurrentModalType(type);
       setFilteredData(data);
@@ -333,7 +309,6 @@ export default function AddOrderScreen() {
       }
   };
 
-  // 🔥 UPGRADED: Toggle Multiple Products
   const toggleProductSelection = (item: string) => {
       setSelectedProducts(prev => {
           if (prev.includes(item)) {
@@ -374,7 +349,6 @@ export default function AddOrderScreen() {
       }
       else if (currentModalType === 'Product') {
           toggleProductSelection(item);
-          // Keep modal open for multiple selection
       }
   };
 
@@ -422,7 +396,12 @@ export default function AddOrderScreen() {
       } catch (error) { Alert.alert("Error", "Could not open gallery."); }
   };
 
-  // 🔥 6. SAAS SAVE LOGIC
+  // 🔥 SAVE LOGIC — order via new backend API (auto-generates order ID,
+  // auto-closes the lead if leadId given). Advance payment record still
+  // goes to Firestore payment_collections until Phase 6.
+  // NOTE: PO file upload is not yet wired to the new backend (needs
+  // Supabase Storage) — the selected file is not persisted anywhere;
+  // flagged here rather than silently dropped.
   const handleSave = async () => {
       const finalProductString = getSelectedProductsText();
       
@@ -434,160 +413,121 @@ export default function AddOrderScreen() {
       setIsSaving(true); 
 
       const locationData = await getCurrentLocation();
-      const newOrderId = generateOrderId();
       
       const cleanAmount = parseFloat(amount.toString().replace(/[^0-9.]/g, '')) || 0;
       const cleanAdvance = parseFloat(advanceAmount.toString().replace(/[^0-9.]/g, '')) || 0; 
-      const initialBalance = cleanAmount - cleanAdvance; // Balance Calc
 
-      let finalSenderId = currentUser?.id || 'guest';
-      let finalSenderName = currentUser?.name || 'Unknown';
-      let finalRole = currentUser?.role || 'Employee';
-
-      // Override if Admin selected a different Sales Person
-      if (canSelectSalesPerson && selectedSalesPerson) {
-          finalSenderId = selectedSalesPerson.id;
-          finalSenderName = selectedSalesPerson.name;
-          finalRole = selectedSalesPerson.role || 'Sales Executive';
-      }
-
-      // Payload
-      const newOrder = {
-          orderId: newOrderId, 
-          orgId: orgId,
-          date: poDate.toISOString().split('T')[0], 
-          dateIso: poDate.toISOString().split('T')[0], 
-          hospitalName, address, city, contactPerson, mobile, email,
-          poNumber, 
-          amount: cleanAmount, 
-          advanceAmount: cleanAdvance,
-          balance: initialBalance,
-          paymentStatus: initialBalance <= 0 ? 'Paid' : 'Pending',
-          saleType: saleType, 
-          productDetails: finalProductString, 
-          paymentTerms, deliveryTerms, notes,
-          status: 'Pending', 
-          poFileName: selectedFile?.name || '',
-          poFileUri: selectedFile?.uri || '',
-          poFileType: selectedFile?.type || '',
-          bookedBy: currentUser?.name,        
-          location: locationData || null
-      };
+      const assignedToId = (canSelectSalesPerson && selectedSalesPerson) ? selectedSalesPerson.id : undefined;
+      const finalSenderName = (canSelectSalesPerson && selectedSalesPerson) ? selectedSalesPerson.name : (currentUser?.name || 'Unknown');
 
       try {
-          const res = await addSaaSData("orders", { ...newOrder, senderId: finalSenderId, senderName: finalSenderName, role: finalRole });
+          const savedOrder = await createOrder({
+              orgId: orgId || undefined,
+              orgName: hospitalName,
+              address, city, contactPerson, mobile, email: email || undefined,
+              poNumber,
+              amount: cleanAmount,
+              advanceAmount: cleanAdvance,
+              saleType: saleType as 'Cash' | 'Credit',
+              productDetails: finalProductString,
+              paymentTerms, deliveryTerms, notes,
+              date: poDate.toISOString().split('T')[0],
+              location: locationData ? { latitude: locationData.lat, longitude: locationData.lng } : null,
+              leadId: (leadId as string) || undefined,
+              assignedToId,
+          });
 
-          if (res.success) {
-              
-              // Record Advance Payment in SaaS DB
-              if (cleanAdvance > 0) {
-                  await addSaaSData("payment_collections", {
-                      orgId: orgId,
-                      orgName: hospitalName,
-                      amount: cleanAdvance,
-                      paymentType: 'Advance',
-                      mode: advanceMode,            
-                      refNumber: advanceMode !== 'Cash' ? advanceRef : '',        
-                      bankName: advanceMode !== 'Cash' ? advanceBankName : '',
-                      pdcDate: advanceMode !== 'Cash' ? formatDate(advancePdcDate) : '',
-                      date: new Date().toISOString().split('T')[0],
-                      dateIso: new Date().toISOString().split('T')[0],
-                      orderId: newOrderId,
-                      orderRef: res.id,
-                      addedBy: currentUser?.name || 'Unknown',
-                      userName: finalSenderName,
-                      senderId: finalSenderId,
-                      timestamp: Date.now(),
-                      note: 'Advance received at the time of Order Booking'
-                  });
-              }
+          // Record Advance Payment (still Firestore until Phase 6)
+          if (cleanAdvance > 0) {
+              await addSaaSData("payment_collections", {
+                  orgId: orgId,
+                  orgName: hospitalName,
+                  amount: cleanAdvance,
+                  paymentType: 'Advance',
+                  mode: advanceMode,            
+                  refNumber: advanceMode !== 'Cash' ? advanceRef : '',        
+                  bankName: advanceMode !== 'Cash' ? advanceBankName : '',
+                  pdcDate: advanceMode !== 'Cash' ? formatDate(advancePdcDate) : '',
+                  date: new Date().toISOString().split('T')[0],
+                  dateIso: new Date().toISOString().split('T')[0],
+                  orderId: savedOrder.orderId,
+                  orderRef: savedOrder.id,
+                  addedBy: currentUser?.name || 'Unknown',
+                  userName: finalSenderName,
+                  senderId: assignedToId || currentUser?.id,
+                  timestamp: Date.now(),
+                  note: 'Advance received at the time of Order Booking'
+              });
+          }
 
-              // 🔥 AUTO-CLOSE LEAD IF BOOKED FROM LEAD PAGE
-              if (leadId) {
-                  await updateSaaSData("leads", leadId as string, {
-                      status: 'Converted', 
-                      stage: 'Order Closed',
-                      isHot: false,
-                      type: 'Won',
-                      discussion: `🎉 Order Booked! (Order ID: ${newOrderId})\nValue: ₹${cleanAmount.toLocaleString('en-IN')}\nAdvance: ₹${cleanAdvance.toLocaleString('en-IN')}\n\n` 
-                  });
-              }
+          if (addNotification) {
+              await addNotification({
+                  title: "New Order Received 📦",
+                  message: `Order ${savedOrder.orderId} added by ${finalSenderName} for ${hospitalName}.`,
+                  to: "Admin", 
+                  type: "info",
+                  route: "/orders"
+              });
+          }
 
-              // PUSH NOTIFICATION
-              if (addNotification) {
-                  await addNotification({
-                      title: "New Order Received 📦",
-                      message: `Order ${newOrderId} added by ${finalSenderName} for ${hospitalName}.`,
-                      to: "Admin", 
-                      type: "info",
-                      route: "/orders"
-                  });
-              }
+          setIsSaving(false);
 
-              setIsSaving(false);
+          Alert.alert(
+              "Order Booked! 🎉", 
+              `Order ${savedOrder.orderId} has been saved successfully.\n\nDo you want to share the Order PDF now?`,
+              [
+                  { 
+                      text: "No", 
+                      style: 'cancel',
+                      onPress: () => askNextSteps() 
+                  },
+                  { 
+                      text: "Yes, Share PDF", 
+                      onPress: async () => { 
+                          await generateOrderPDF({ ...savedOrder, senderName: finalSenderName }); 
+                          askNextSteps(); 
+                      }
+                  }
+              ]
+          );
 
-              // 🔥 2-STEP MAGIC HANDOFF LOGIC
+          const askNextSteps = () => {
               Alert.alert(
-                  "Order Booked! 🎉", 
-                  `Order ${newOrderId} has been saved successfully.\n\nDo you want to share the Order PDF now?`,
+                  "What's Next? 🚀",
+                  "Do you want to assign installation?",
                   [
                       { 
-                          text: "No", 
+                          text: "Just Close", 
                           style: 'cancel',
-                          onPress: () => askNextSteps() 
+                          onPress: () => {
+                              router.back(); 
+                              if(mode === 'from_lead') router.back();
+                          }
                       },
                       { 
-                          text: "Yes, Share PDF", 
-                          onPress: async () => { 
-                              await generateOrderPDF({ ...newOrder, id: res.id, senderName: finalSenderName }); 
-                              askNextSteps(); 
+                          text: "Assign Install 🛠️", 
+                          onPress: () => { 
+                              router.replace({
+                                  pathname: '/add_installation',
+                                  params: {
+                                      hospital: hospitalName,
+                                      orgId: orgId,
+                                      city: city,
+                                      contactPerson: contactPerson,
+                                      mobile: mobile,
+                                      address: address,
+                                      product: finalProductString.split(',')[0]
+                                  }
+                              } as any);
                           }
                       }
                   ]
               );
+          };
 
-              // 🛠️ Step 2: Next Action Function
-              const askNextSteps = () => {
-                  Alert.alert(
-                      "What's Next? 🚀",
-                      "Do you want to assign installation?",
-                      [
-                          { 
-                              text: "Just Close", 
-                              style: 'cancel',
-                              onPress: () => {
-                                  router.back(); 
-                                  if(mode === 'from_lead') router.back();
-                              }
-                          },
-                          { 
-                              text: "Assign Install 🛠️", 
-                              onPress: () => { 
-                                  router.replace({
-                                      pathname: '/add_installation',
-                                      params: {
-                                          hospital: hospitalName,
-                                          orgId: orgId,
-                                          city: city,
-                                          contactPerson: contactPerson,
-                                          mobile: mobile,
-                                          address: address,
-                                          product: finalProductString.split(',')[0]
-                                      }
-                                  } as any);
-                              }
-                          }
-                      ]
-                  );
-              };
-
-          } else {
-              Alert.alert("Error", "Could not save order.");
-          }
-
-      } catch (err) {
+      } catch (err: any) {
           setIsSaving(false);
-          Alert.alert("Error", "Could not save order.");
+          Alert.alert("Error", err?.message || "Could not save order.");
       }
   };
 
@@ -637,7 +577,6 @@ export default function AddOrderScreen() {
                 {isDbLoading ? <ActivityIndicator size="small" color="#3b5998"/> : <Ionicons name="search" size={20} color="gray" />}
             </TouchableOpacity>
 
-            {/* ORDER TYPE TOGGLE */}
             <Text style={styles.label}>Order Type (Cash / Billed) *</Text>
             <View style={{flexDirection: 'row', gap: 10, marginBottom: 15}}>
                 <TouchableOpacity 
@@ -716,7 +655,6 @@ export default function AddOrderScreen() {
                 </View>
             )}
 
-            {/* MULTI PRODUCT SELECTOR */}
             <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center'}}>
                 <Text style={styles.label}>Product Configuration *</Text>
                 <TouchableOpacity onPress={() => openModal('Product', getProductOptions())}>
@@ -771,6 +709,11 @@ export default function AddOrderScreen() {
                     </TouchableOpacity>
                 )}
             </View>
+            {selectedFile && (
+                <Text style={{fontSize: 10, color: '#e65100', marginTop: -10, marginBottom: 15}}>
+                    ⚠️ Attachment upload isn't wired to the server yet — this file won't be saved with the order.
+                </Text>
+            )}
 
             <Text style={styles.label}>Remarks / Notes</Text>
             <TextInput style={[styles.input, {height: 60, textAlignVertical:'top'}]} multiline placeholder="Any special instructions..." value={notes} onChangeText={setNotes} />
@@ -888,7 +831,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', justifyContent: 'space-between' },
   col: { width: '48%' },
   divider: { height:1, backgroundColor:'#eee', marginVertical:10 },
-  uploadBox: { marginBottom: 20 },
+  uploadBox: { marginBottom: 5 },
   uploadBtn: { borderStyle:'dashed', borderWidth:1.5, borderColor:'#3b5998', borderRadius:10, padding:20, alignItems:'center', backgroundColor:'#f0f4ff' },
   filePreviewCard: { flexDirection:'row', alignItems:'center', padding:10, backgroundColor:'white', borderRadius:10, borderWidth:1, borderColor:'#ddd', elevation:2 },
   previewImage: { width: 50, height: 50, borderRadius: 5, resizeMode:'cover', backgroundColor:'#eee' },

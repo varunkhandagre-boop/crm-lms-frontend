@@ -18,20 +18,20 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Firebase DB imports removed)
+// 🔥 SAAS IMPORTS (kept for anything not yet migrated — none needed here now)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 3: product catalog now goes through the new backend API
+import { createProduct, deleteProduct, listProducts, updateProduct } from '../services/api/products';
 
 export default function ProductMasterScreen() {
     const router = useRouter();
     
-    // 🔥 1. Context se sirf user nikalenge
     const { currentUser } = useData();
     
-    // 🔥 2. Naya SaaS Engine
-    const { fetchSaaSData, addSaaSData, updateSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
+    // 🔥 isDbLoading kept for consistent loading-spinner UX; catalog itself is API-backed now
+    const { isDbLoading } = useSaaSDB();
 
-    // 🔥 3. Lazy Loaded States
     const [productList, setProductList] = useState<any[]>([]);
 
     // --- FORM STATES ---
@@ -41,7 +41,6 @@ export default function ProductMasterScreen() {
     const [desc, setDesc] = useState('');
     const [specifications, setSpecifications] = useState('');
     
-    // Price and GST State
     const [price, setPrice] = useState('');
     const [gstRate, setGstRate] = useState('');
     
@@ -66,10 +65,10 @@ export default function ProductMasterScreen() {
         setVisibleCount(20);
     }, [searchText]);
 
-    // 🔥 4. LOAD SAAS DATA ON MOUNT
+    // 🔥 LOAD DATA — via new backend API
     const loadProducts = async () => {
         if (currentUser?.companyId) {
-            const data = await fetchSaaSData("products");
+            const data = await listProducts();
             setProductList(data);
         }
     };
@@ -108,7 +107,7 @@ export default function ProductMasterScreen() {
         try { await Share.share({ message: `📄 ${type}: ${title}\n🔗 ${url}` }); } catch (error) {}
     };
 
-    // 🔥 5. SAAS ENGINE SAVE / UPDATE LOGIC
+    // 🔥 SAVE / UPDATE LOGIC — via new backend API
     const handleSave = async () => {
         if (!name.trim() || !model.trim()) return Alert.alert("Missing Fields", "Product Name and Model Name are required.");
         
@@ -121,38 +120,23 @@ export default function ProductMasterScreen() {
             specifications: specifications.trim(),
             price: Number(price) || 0,     
             gstRate: Number(gstRate) || 0, 
-            catalogs: catalogs, 
-            videos: videos,
-            updatedBy: currentUser?.name, 
-            updatedAt: new Date().toISOString()
+            catalogs, 
+            videos,
         };
 
         try {
             if (editingId) {
-                const res = await updateSaaSData("products", editingId, productData);
-                if (res.success) {
-                    setProductList(prev => prev.map(item => item.id === editingId ? { ...item, ...productData } : item));
-                    Alert.alert("Updated", "Product updated successfully!");
-                } else {
-                    throw new Error("Update Failed");
-                }
+                const updated = await updateProduct(editingId, productData);
+                setProductList(prev => prev.map(item => item.id === editingId ? updated : item));
+                Alert.alert("Updated", "Product updated successfully!");
             } else {
-                const newProductData = {
-                    ...productData,
-                    addedBy: currentUser?.name, 
-                    createdAt: new Date().toISOString() 
-                };
-                const res = await addSaaSData("products", newProductData);
-                if (res.success) {
-                    setProductList([{ id: res.id, ...newProductData }, ...productList]);
-                    Alert.alert("Success", "Product added successfully!");
-                } else {
-                    throw new Error("Add Failed");
-                }
+                const created = await createProduct(productData);
+                setProductList([created, ...productList]);
+                Alert.alert("Success", "Product added successfully!");
             }
             closeModal();
-        } catch (e) { 
-            Alert.alert("Error", "Operation failed."); 
+        } catch (e: any) { 
+            Alert.alert("Error", e?.message || "Operation failed."); 
         } finally { 
             setIsSaving(false); 
         }
@@ -168,11 +152,8 @@ export default function ProductMasterScreen() {
         setPrice(item.price ? item.price.toString() : '');       
         setGstRate(item.gstRate ? item.gstRate.toString() : ''); 
         
-        const oldCat = item.catalogLink ? [{title: 'Main Catalog', url: item.catalogLink}] : [];
-        const oldVid = item.videoLink ? [{title: 'Demo Video', url: item.videoLink}] : [];
-        
-        setCatalogs(item.catalogs || oldCat);
-        setVideos(item.videos || oldVid);
+        setCatalogs(item.catalogs || []);
+        setVideos(item.videos || []);
 
         setModalVisible(true);
     };
@@ -184,16 +165,14 @@ export default function ProductMasterScreen() {
         setLinkTitle(''); setLinkUrl('');
     };
 
-    // 🔥 6. SAAS ENGINE DELETE LOGIC
+    // 🔥 DELETE — via new backend API
     const handleDelete = async (id: string, pname: string) => {
         Alert.alert("Delete", `Remove ${pname}?`, [
             { text: "Cancel" },
             { text: "Delete", style: 'destructive', onPress: async () => { 
                 try { 
-                    const res = await deleteSaaSData("products", id); 
-                    if (res.success) {
-                        setProductList(prev => prev.filter(item => item.id !== id));
-                    }
+                    await deleteProduct(id); 
+                    setProductList(prev => prev.filter(item => item.id !== id));
                 } catch(e) {} 
             }}
         ]);
@@ -201,8 +180,8 @@ export default function ProductMasterScreen() {
 
     const renderItem = ({ item }: any) => {
         const isExpanded = expandedId === item.id;
-        const displayCatalogs = item.catalogs || (item.catalogLink ? [{title: 'Brochure', url: item.catalogLink}] : []);
-        const displayVideos = item.videos || (item.videoLink ? [{title: 'Video', url: item.videoLink}] : []);
+        const displayCatalogs = item.catalogs || [];
+        const displayVideos = item.videos || [];
 
         return (
             <TouchableOpacity style={styles.card} activeOpacity={0.9} onPress={() => setExpandedId(isExpanded ? null : item.id)}>

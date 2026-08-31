@@ -23,6 +23,7 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 1/2: leads now go through the new backend API
 import { createLead, listLeads, updateLead as apiUpdateLead } from '../services/api/leads';
+import { listProducts } from '../services/api/products';
 
 export default function AddLeadScreen() {
   const router = useRouter();
@@ -85,7 +86,7 @@ export default function AddLeadScreen() {
               const [orgs, users, prods, leads] = await Promise.all([
                   fetchSaaSData("organizations"),
                   fetchSaaSData("users"),
-                  fetchSaaSData("products"),
+                  listProducts(), // was: fetchSaaSData("products")
                   listLeads() // was: fetchSaaSData("leads")
               ]);
               setOrgList(orgs);

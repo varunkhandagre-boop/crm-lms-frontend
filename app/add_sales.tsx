@@ -25,6 +25,7 @@ import { useData } from './context/DataContext';
 // auto-creates/links a lead server-side for positive outcomes — no more
 // separate addSaaSData("leads", ...) call needed here.
 import { createSalesVisit } from '../services/api/salesVisits';
+import { listProducts } from '../services/api/products';
 
 export default function AddSalesScreen() {
     const router = useRouter();
@@ -70,13 +71,13 @@ export default function AddSalesScreen() {
 
     const outcomeOptions = ['Interested', 'Not Interested', 'Follow Up', 'Demo Planned'];
 
-    // 🔥 LOAD DATA ON MOUNT (organizations/products still SaaS/Firestore)
+    // 🔥 LOAD DATA ON MOUNT (organizations still Firestore; products via new API)
     useEffect(() => {
         const loadData = async () => {
             if (currentUser?.companyId) {
                 const [orgs, prods] = await Promise.all([
                     fetchSaaSData("organizations"),
-                    fetchSaaSData("products")
+                    listProducts() // was: fetchSaaSData("products")
                 ]);
                 setOrgList(orgs);
                 setProductList(prods);
