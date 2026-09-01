@@ -19,9 +19,24 @@ import {
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
-// 🔥 SAAS IMPORTS (Firebase DB imports removed)
+// 🔥 SAAS IMPORTS (kept for isDbLoading UX only)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 5: projects + expenses/payments/items now via new backend API
+import {
+    addProjectExpense,
+    addProjectItem,
+    addProjectPayment,
+    deleteProjectExpense,
+    deleteProjectItem,
+    deleteProjectPayment,
+    deliverProjectItem,
+    getProject,
+    listProjectExpenses,
+    listProjectItems,
+    listProjectPayments,
+    updateProject,
+} from '../services/api/projects';
 
 const CloseButton = ({onPress}: any) => (
     <TouchableOpacity onPress={onPress}>
@@ -43,13 +58,9 @@ export default function ProjectDetailsScreen() {
   const rawId = params.id;
   const id = Array.isArray(rawId) ? rawId[0] : rawId; 
 
-  // 🔥 1. Context se User
   const { currentUser } = useData();
+  const { isDbLoading } = useSaaSDB();
 
-  // 🔥 2. Naya SaaS Engine connect kiya
-  const { fetchSaaSData, addSaaSData, updateSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
-
-  // Master States
   const [project, setProject] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<'Overview' | 'Expenses' | 'Order'>('Overview'); 
   const [loading, setLoading] = useState(true);
@@ -60,7 +71,6 @@ export default function ProjectDetailsScreen() {
   const [itemsList, setItemsList] = useState<any[]>([]);
   const [combinedHistory, setCombinedHistory] = useState<any[]>([]);
 
-  // Modal States
   const [expenseModalVisible, setExpenseModalVisible] = useState(false);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [itemModalVisible, setItemModalVisible] = useState(false);
@@ -85,7 +95,6 @@ export default function ProjectDetailsScreen() {
 
   const [isSaving, setIsSaving] = useState(false);
 
-  // PROJECT EDIT STATES
   const [editProjectModalVisible, setEditProjectModalVisible] = useState(false);
   const [editTotalValue, setEditTotalValue] = useState('');
   const [editDescription, setEditDescription] = useState(''); 
@@ -96,33 +105,27 @@ export default function ProjectDetailsScreen() {
   const categories = ['Civil/Vendor', 'Labor Wages', 'Food/Daily', 'Travel', 'Local Purchase', 'Other'];
   const payModes = ['Bank Transfer', 'Cheque', 'Cash', 'UPI'];
 
-  // 🔥 3. MASSIVE PROJECT DATA LOAD (Replaces onSnapshot)
+  // 🔥 LOAD PROJECT + SUB-RESOURCES — via new backend API
   const loadAllProjectDetails = async () => {
     if (!id || !currentUser?.companyId) return;
     try {
-        const [projects, expenses, payments, items] = await Promise.all([
-            fetchSaaSData("projects"),
-            fetchSaaSData("project_expenses"),
-            fetchSaaSData("project_payments"),
-            fetchSaaSData("project_items")
+        const [foundProject, expenses, payments, items] = await Promise.all([
+            getProject(id),
+            listProjectExpenses(id),
+            listProjectPayments(id),
+            listProjectItems(id),
         ]);
 
-        const foundProject = projects.find((p: any) => p.id === id);
-        if (foundProject) {
-            setProject(foundProject);
-        } else {
-            Alert.alert("Data Error", "Project not found.");
-            router.back();
-            return;
-        }
-
-        setExpensesList(expenses.filter((e:any) => e.projectId === id).map(d => ({ ...d, type: 'Expense' })));
-        setPaymentsList(payments.filter((p:any) => p.projectId === id).map(d => ({ ...d, type: 'Payment' })));
-        setItemsList(items.filter((i:any) => i.projectId === id).map(d => ({ ...d, type: 'Item' })));
+        setProject(foundProject);
+        setExpensesList(expenses.map((d:any) => ({ ...d, type: 'Expense' })));
+        setPaymentsList(payments.map((d:any) => ({ ...d, type: 'Payment' })));
+        setItemsList(items.map((d:any) => ({ ...d, type: 'Item' })));
         
         setLoading(false);
     } catch (error) {
         console.error("Load Error:", error);
+        Alert.alert("Data Error", "Project not found.");
+        router.back();
     }
   };
 
@@ -173,29 +176,16 @@ export default function ProjectDetailsScreen() {
       }
   };
 
-  // 🔥 4. SAAS HANDLERS
+  // 🔥 HANDLERS — via new backend API. Total increments now happen
+  // atomically server-side (fixes the old read-then-write race condition),
+  // so there's no separate updateSaaSData("projects", ...) call here anymore.
   const handleAddExpense = async () => {
       if (!expAmount || !expNote) return Alert.alert("Missing", "Details required.");
       setIsSaving(true);
       try {
-          const amount = parseFloat(expAmount);
-          const res = await addSaaSData("project_expenses", { 
-              projectId: id, 
-              orgId: project?.orgId || '', 
-              orgName: project?.client || '', 
-              amount, 
-              category: expCategory, 
-              note: expNote, 
-              date: new Date().toISOString(), 
-              addedBy: currentUser?.name 
-          });
-
-          if (res.success) {
-              const newTotal = (project.totalExpense || 0) + amount;
-              await updateSaaSData("projects", project.id, { totalExpense: newTotal });
-              setExpenseModalVisible(false); setExpAmount(''); setExpNote('');
-              await loadAllProjectDetails(); // Silent Sync
-          }
+          await addProjectExpense(id, { amount: parseFloat(expAmount), category: expCategory, note: expNote });
+          setExpenseModalVisible(false); setExpAmount(''); setExpNote('');
+          await loadAllProjectDetails();
       } catch (e:any) { Alert.alert("Error", e.message); }
       setIsSaving(false);
   };
@@ -204,24 +194,9 @@ export default function ProjectDetailsScreen() {
       if (!payAmount) return Alert.alert("Missing", "Amount required.");
       setIsSaving(true);
       try {
-          const amount = parseFloat(payAmount);
-          const res = await addSaaSData("project_payments", { 
-              projectId: id, 
-              orgId: project?.orgId || '', 
-              orgName: project?.client || '', 
-              amount, 
-              mode: payMode, 
-              note: payNote, 
-              date: new Date().toISOString(), 
-              addedBy: currentUser?.name 
-          });
-
-          if (res.success) {
-              const newReceived = (project.totalReceived || 0) + amount;
-              await updateSaaSData("projects", project.id, { totalReceived: newReceived });
-              setPaymentModalVisible(false); setPayAmount(''); setPayNote('');
-              await loadAllProjectDetails();
-          }
+          await addProjectPayment(id, { amount: parseFloat(payAmount), mode: payMode, note: payNote });
+          setPaymentModalVisible(false); setPayAmount(''); setPayNote('');
+          await loadAllProjectDetails();
       } catch (e:any) { Alert.alert("Error", e.message); }
       setIsSaving(false);
   };
@@ -230,21 +205,9 @@ export default function ProjectDetailsScreen() {
       if (!itemName) return Alert.alert("Missing", "Name required.");
       setIsSaving(true);
       try {
-          const res = await addSaaSData("project_items", { 
-              projectId: id, 
-              orgId: project?.orgId || '', 
-              orgName: project?.client || '', 
-              name: itemName, 
-              qty: itemQty || '1', 
-              value: itemValue || '0', 
-              status: 'Pending', 
-              addedBy: currentUser?.name, 
-              date: new Date().toISOString() 
-          });
-          if (res.success) {
-              setItemModalVisible(false); setItemName(''); setItemQty(''); setItemValue('');
-              await loadAllProjectDetails();
-          }
+          await addProjectItem(id, { name: itemName, qty: itemQty || '1', value: itemValue ? parseFloat(itemValue) : 0 });
+          setItemModalVisible(false); setItemName(''); setItemQty(''); setItemValue('');
+          await loadAllProjectDetails();
       } catch (e:any) { Alert.alert("Error", e.message); }
       setIsSaving(false);
   };
@@ -253,29 +216,25 @@ export default function ProjectDetailsScreen() {
       if (!deliveryMode) return Alert.alert("Missing", "Mode required.");
       setIsSaving(true);
       try {
-          const res = await updateSaaSData("project_items", selectedItemForDelivery.id, { 
-              status: 'Delivered', 
-              deliveredBy: currentUser?.name, 
-              deliveryMode, 
-              deliveryDate: deliveryDate.toISOString() 
-          });
-          if (res.success) {
-              setDeliveryModalVisible(false); setSelectedItemForDelivery(null);
-              await loadAllProjectDetails();
-          }
+          await deliverProjectItem(id, selectedItemForDelivery.id, deliveryMode);
+          setDeliveryModalVisible(false); setSelectedItemForDelivery(null);
+          await loadAllProjectDetails();
       } catch (e: any) { Alert.alert("Error", e.message); }
       setIsSaving(false);
   };
 
-  const deleteProjectEntry = async (col: string, itemId: string) => {
+  const deleteProjectEntry = async (type: string, itemId: string) => {
       Alert.alert("Delete", "Are you sure?", [
           { text: "Cancel" }, 
           { text: "Delete", style: 'destructive', onPress: async () => { 
-              const mappedCol = col === 'project_expenses' ? 'project_expenses' : col === 'project_payments' ? 'project_payments' : 'project_items';
-              const res = await deleteSaaSData(mappedCol, itemId); 
-              if (res.success) {
+              try {
+                  if (type === 'Expense') await deleteProjectExpense(id, itemId);
+                  else if (type === 'Payment') await deleteProjectPayment(id, itemId);
+                  else await deleteProjectItem(id, itemId);
                   setDetailModalVisible(false); 
                   await loadAllProjectDetails();
+              } catch (e: any) {
+                  Alert.alert("Error", e.message);
               }
           } }
       ]);
@@ -285,15 +244,10 @@ export default function ProjectDetailsScreen() {
       if (!editTotalValue) return Alert.alert("Error", "Order Value cannot be empty");
       setIsUpdatingProject(true);
       try {
-          const res = await updateSaaSData("projects", project.id, { 
-              totalValue: Number(editTotalValue),
-              description: editDescription 
-          });
-          if (res.success) {
-              setEditProjectModalVisible(false);
-              await loadAllProjectDetails();
-              Alert.alert("Success", "Project updated! ✅");
-          }
+          await updateProject(project.id, { totalValue: Number(editTotalValue), description: editDescription });
+          setEditProjectModalVisible(false);
+          await loadAllProjectDetails();
+          Alert.alert("Success", "Project updated! ✅");
       } catch (error: any) {
           Alert.alert("Error", "Update failed.");
       } finally {
@@ -540,8 +494,7 @@ export default function ProjectDetailsScreen() {
                           <Text style={styles.label}>Notes</Text><Text style={{backgroundColor:'#f9f9f9', padding:10, borderRadius:8}}>{selectedDetailItem.note || selectedDetailItem.mode || selectedDetailItem.category || 'No Details'}</Text>
                           {selectedDetailItem.status === 'Delivered' && <View style={{marginTop:15, backgroundColor:'#e8f5e9', padding:10}}><Text style={{color:'green', fontWeight:'bold'}}>✅ Delivered via {selectedDetailItem.deliveryMode}</Text><Text style={{fontSize:11}}>on {new Date(selectedDetailItem.deliveryDate).toLocaleDateString()}</Text></View>}
                           <TouchableOpacity style={{alignSelf:'center', marginTop:20}} onPress={()=>{
-                              const col = detailType==='Expense'?'project_expenses':detailType==='Payment'?'project_payments':'project_items';
-                              deleteProjectEntry(col, selectedDetailItem.id); 
+                              deleteProjectEntry(detailType, selectedDetailItem.id); 
                           }}><Text style={{color:'red', fontWeight:'bold'}}>Delete Entry</Text></TouchableOpacity>
                       </View>
                   )}

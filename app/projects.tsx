@@ -3,20 +3,18 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-// 🔥 SAAS IMPORTS
+// 🔥 SAAS IMPORTS (kept only for isDbLoading UX)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 5: projects now via new backend API
+import { listProjects } from '../services/api/projects';
 
 export default function ProjectsScreen() {
   const router = useRouter();
   
-  // 🔥 1. Context se sirf current user nikala
   const { currentUser } = useData(); 
+  const { isDbLoading } = useSaaSDB();
 
-  // 🔥 2. Naya SaaS Engine connect kiya
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
-
-  // 🔥 3. Lazy Loaded States
   const [projectList, setProjectList] = useState<any[]>([]);
 
   const [searchText, setSearchText] = useState('');
@@ -25,7 +23,6 @@ export default function ProjectsScreen() {
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
 
-  // 🔒 SECURITY CHECK
   const allowedRoles = ['admin', 'manager', 'account', 'accountant', 'store', 'store keeper', 'hr', 'superadmin'];
   const userRole = currentUser?.role ? currentUser.role.toLowerCase() : '';
   const hasAccess = allowedRoles.includes(userRole);
@@ -45,11 +42,11 @@ export default function ProjectsScreen() {
       setVisibleCount(20);
   }, [searchText, viewMode, currentDate]);
 
-  // 🔥 4. LOAD SAAS DATA ON MOUNT
+  // 🔥 LOAD DATA — via new backend API
   useEffect(() => {
       const loadData = async () => {
           if (currentUser?.companyId && hasAccess) {
-              const data = await fetchSaaSData("projects");
+              const data = await listProjects(); // was: fetchSaaSData("projects")
               setProjectList(data);
           }
       };
@@ -103,7 +100,6 @@ export default function ProjectsScreen() {
       return "All Time";
   };
 
-  // --- FILTER LOGIC ---
   const getFilteredProjects = () => {
       let data = Array.isArray(projectList) ? [...projectList] : [];
 

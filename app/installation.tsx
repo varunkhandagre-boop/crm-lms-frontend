@@ -17,9 +17,15 @@ import {
   View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (No Direct Firebase DB calls)
+// 🔥 SAAS IMPORTS (users still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 4: installations now via new backend API
+import {
+    deleteInstallation as apiDeleteInstallation,
+    listInstallations,
+    updateInstallation as apiUpdateInstallation,
+} from '../services/api/installations';
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
@@ -29,7 +35,7 @@ export default function InstallationListScreen() {
   const router = useRouter();
   
   const { currentUser, companyProfile } = useData(); 
-  const { fetchSaaSData, updateSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
   const [installList, setInstallList] = useState<any[]>([]);
   const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
@@ -66,14 +72,13 @@ export default function InstallationListScreen() {
       else setVisibleCount(20); 
   }, [viewMode, currentDate, searchText, selectedEmployee]);
 
+  // 🔥 LOAD DATA — installations via new API; users via Firestore
   const loadData = async () => {
       if (currentUser?.companyId) {
           const [installs, users] = await Promise.all([
-              fetchSaaSData("installations"),
+              listInstallations(), // was: fetchSaaSData("installations")
               fetchSaaSData("users")
           ]);
-          console.log("🔥 FETCHED INSTALLS:", installs.length);
-          if (installs.length > 0) console.log("🔥 FIRST ITEM:", installs[0]);
           setInstallList(installs);
 
           if (isAdmin) {
@@ -293,7 +298,6 @@ export default function InstallationListScreen() {
       const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
 
       data = data.filter((item: any) => {
-        // 🔥 FIX: Ab yeh directly timestamp ya createdAt ka use karega (Bulletproof)
         let ts = item.timestamp;
         if (!ts && item.createdAt) ts = new Date(item.createdAt).getTime();
         if (!ts) ts = parseDate(item.dateIso || item.date || item.displayDate);
@@ -310,7 +314,6 @@ export default function InstallationListScreen() {
       });
     }
 
-    // 🔥 FIX: Sorting bhi ab createdAt ke hisaab se ekdum perfect hogi
     data.sort((a: any, b: any) => {
         let tsA = a.timestamp || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
         if (!tsA) tsA = parseDate(a.dateIso || a.date || a.displayDate);
@@ -318,7 +321,7 @@ export default function InstallationListScreen() {
         let tsB = b.timestamp || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
         if (!tsB) tsB = parseDate(b.dateIso || b.date || b.displayDate);
 
-        return tsB - tsA; // Newest first
+        return tsB - tsA;
     });
 
     return data;
@@ -358,6 +361,7 @@ export default function InstallationListScreen() {
       setEditModalVisible(true);
   };
 
+  // 🔥 EDIT — via new backend API
   const handleSaveEdit = async () => {
       if (!editData.id) return;
       if (!editData.hospital || !editData.serialNo) {
@@ -366,37 +370,31 @@ export default function InstallationListScreen() {
       }
       setIsSavingEdit(true);
       try {
-          const res = await updateSaaSData("installations", editData.id, {
-              hospital: editData.hospital,
-              orgName: editData.hospital, 
-              orgId: editData.orgId || '', 
+          const updated = await apiUpdateInstallation(editData.id, {
+              orgName: editData.hospital,
+              orgId: editData.orgId || undefined,
               city: editData.city,
               department: editData.department,
               engineer: editData.engineer,
               product: editData.product,
-              productName: editData.product, 
               model: editData.model,
               serialNo: editData.serialNo,
               date: editData.date,
-              displayDate: editData.date,
-              warrantyExpiry: editData.warrantyExpiry,
-              note: editData.note
+              warrantyExpiry: editData.warrantyExpiry || undefined,
+              note: editData.note,
           });
 
-          if (res.success) {
-              setInstallList(prev => prev.map(item => item.id === editData.id ? { ...item, ...editData } : item));
-              Alert.alert("Success", "Installation details updated!");
-              setEditModalVisible(false);
-          } else {
-              Alert.alert("Error", "Could not update installation.");
-          }
+          setInstallList(prev => prev.map(item => item.id === editData.id ? { ...item, ...updated } : item));
+          Alert.alert("Success", "Installation details updated!");
+          setEditModalVisible(false);
       } catch (error: any) {
-          Alert.alert("Error", "Could not update installation. " + error.message);
+          Alert.alert("Error", "Could not update installation. " + (error?.message || ''));
       } finally {
           setIsSavingEdit(false);
       }
   };
 
+  // 🔥 DELETE — via new backend API
   const handleDeleteInstallation = async () => {
       if (!selectedItem) return;
       Alert.alert(
@@ -410,14 +408,10 @@ export default function InstallationListScreen() {
                   onPress: async () => {
                       setIsDeleting(true);
                       try {
-                          const res = await deleteSaaSData("installations", selectedItem.id);
-                          if(res.success) {
-                              setInstallList(prev => prev.filter(i => i.id !== selectedItem.id));
-                              setModalVisible(false);
-                              Alert.alert("Deleted", "Installation record has been deleted successfully.");
-                          } else {
-                              Alert.alert("Error", "Failed to delete installation.");
-                          }
+                          await apiDeleteInstallation(selectedItem.id);
+                          setInstallList(prev => prev.filter(i => i.id !== selectedItem.id));
+                          setModalVisible(false);
+                          Alert.alert("Deleted", "Installation record has been deleted successfully.");
                       } catch (error: any) {
                           Alert.alert("Error", error.message);
                       } finally {
@@ -759,7 +753,6 @@ export default function InstallationListScreen() {
                     )}
                 </TouchableOpacity>
 
-                {/* ADMIN DELETE BUTTON */}
                 {isStrictAdmin && (
                     <TouchableOpacity 
                         style={{marginTop: 15, backgroundColor: '#ffebee', padding: 12, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#ef9a9a'}}
@@ -782,7 +775,6 @@ export default function InstallationListScreen() {
         </View>
       </Modal>
 
-      {/* EMPLOYEE PICKER MODAL */}
       <Modal visible={showEmployeePicker} transparent animationType="fade">
         <TouchableOpacity style={styles.pickerOverlay} onPress={() => setShowEmployeePicker(false)}>
           <View style={styles.pickerContainer}>

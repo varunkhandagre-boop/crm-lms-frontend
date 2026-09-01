@@ -18,9 +18,11 @@ import {
   View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Firebase DB imports removed)
+// 🔥 SAAS IMPORTS (organizations/users still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 4: service calls now via new backend API
+import { closeServiceCall as apiCloseServiceCall, listServiceCalls } from '../services/api/serviceCalls';
 
 // 🔥 PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
@@ -31,18 +33,15 @@ export default function ServiceCallScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   
-  // 🔥 1. Context se sirf current user & profile nikala
   const { currentUser, companyProfile } = useData(); 
 
-  // 🔥 2. Naya SaaS Engine connect kiya
-  const { fetchSaaSData, updateSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 SaaS Engine kept for organizations/users only
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-  // 🔥 3. Lazy Loaded Master States
   const [serviceCallList, setServiceCallList] = useState<any[]>([]);
   const [orgList, setOrgList] = useState<any[]>([]);
   const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
 
-  // --- STATES ---
   const [statusFilter, setStatusFilter] = useState<'Open' | 'Closed' | 'All'>('Open');
   useEffect(() => {
       if (params.filter === 'Closed') {
@@ -61,7 +60,6 @@ export default function ServiceCallScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false); 
 
-  // --- EMPLOYEE FILTER STATES ---
   const [selectedEmployee, setSelectedEmployee] = useState('All');
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
@@ -79,11 +77,11 @@ export default function ServiceCallScreen() {
   const isAdmin = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
   const openCount = serviceCallList.filter((i: any) => i.status === 'Open' || i.status === 'Assigned').length;
 
-  // 🔥 4. LOAD SAAS DATA ON MOUNT
+  // 🔥 LOAD DATA — service calls via new API; organizations/users via Firestore
   const loadData = async () => {
       if (currentUser?.companyId) {
           const [services, orgs, users] = await Promise.all([
-              fetchSaaSData("service_calls"),
+              listServiceCalls(), // was: fetchSaaSData("service_calls")
               fetchSaaSData("organizations"),
               fetchSaaSData("users")
           ]);
@@ -144,7 +142,6 @@ export default function ServiceCallScreen() {
     return "All Time";
   };
 
-  // 🔥 PDF GENERATOR
   const generateServicePDF = async (ticketData: any) => {
     setGeneratingPdf(true);
     try {
@@ -310,7 +307,6 @@ export default function ServiceCallScreen() {
       );
     }
 
-    // FY Boundaries Logic
     if (viewMode !== 'All') {
       const tYear = currentDate.getFullYear();
       const tMonth = currentDate.getMonth();
@@ -360,54 +356,27 @@ export default function ServiceCallScreen() {
     setDetailsModalVisible(true);
   };
 
-  // 🔥 5. SAAS CLOSE TICKET LOGIC
+  // 🔥 CLOSE TICKET LOGIC — via new backend API
   const handleCloseCall = async () => {
     if (!resolutionNote) { Alert.alert("Required", "Please enter a resolution note."); return; }
     setLoading(true);
     try {
-      const updateData = {
-        status: 'Resolved',
-        resolutionNote: resolutionNote,
-        resolvedAt: new Date().toISOString(),
-        resolvedBy: currentUser?.name || 'Admin'
-      };
+      const updated = await apiCloseServiceCall(selectedCall.id, resolutionNote);
+      setServiceCallList(prev => prev.map(item => item.id === selectedCall.id ? { ...item, ...updated } : item));
 
-      const res = await updateSaaSData("service_calls", selectedCall.id, updateData);
+      setDetailsModalVisible(false);
       
-      if (res.success) {
-          setServiceCallList(prev => prev.map(item => item.id === selectedCall.id ? { ...item, ...updateData } : item));
-
-          try {
-              const targetUser = currentUser?.role === 'Admin' || currentUser?.role === 'SuperAdmin' ? selectedCall.senderId : 'Admin';
-              await addSaaSData("notifications", {
-                  title: "Service Call Resolved ✅",
-                  message: `Ticket #${selectedCall.scrId} resolved by ${currentUser?.name}.`,
-                  to: targetUser, 
-                  userId: targetUser,
-                  screen: "/service_call?filter=Closed",
-                  read: false,
-                  createdAt: new Date().toISOString(),
-                  type: "success"
-              });
-          } catch (error) {}
-
-          setDetailsModalVisible(false);
-          
-          Alert.alert(
-              "Call Closed Successfully!", 
-              "Do you want to share the Service Report PDF?",
-              [
-                  { text: "No", style: 'cancel' },
-                  { text: "Yes, Share PDF", onPress: async () => { 
-                      const finalData = { ...selectedCall, ...updateData };
-                      await generateServicePDF(finalData);
-                  }}
-              ]
-          );
-      } else {
-          Alert.alert("Error", "Could not update status.");
-      }
-    } catch (error) { Alert.alert("Error", "Could not update status."); }
+      Alert.alert(
+          "Call Closed Successfully!", 
+          "Do you want to share the Service Report PDF?",
+          [
+              { text: "No", style: 'cancel' },
+              { text: "Yes, Share PDF", onPress: async () => { 
+                  await generateServicePDF(updated);
+              }}
+          ]
+      );
+    } catch (error: any) { Alert.alert("Error", error?.message || "Could not update status."); }
     finally { setLoading(false); }
   };
 

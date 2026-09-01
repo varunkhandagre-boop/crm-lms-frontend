@@ -17,29 +17,25 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS
+// 🔥 SAAS IMPORTS (organizations still Firestore)
 import * as Location from 'expo-location';
-import { useSaaSDB } from '../hooks/useSaaSDB'; // Apna correct path verify kar lein
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 5: activity plans now via new backend API
+import { createActivityPlan } from '../services/api/activityPlans';
 
 export default function AddActivityScreen() {
   const router = useRouter();
   
-  // 🔥 1. Context se sirf user details aur Notification engine nikala
   const { currentUser, addNotification } = useData();
-  
-  // 🔥 2. Naya SaaS Engine connect kiya
-  const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-  // 🔥 3. Lazy loaded list state
   const [orgList, setOrgList] = useState<any[]>([]);
 
-  // DATES
   const [date, setDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   
-  // --- NEW FIELDS ---
   const [organization, setOrganization] = useState('');
   const [address, setAddress] = useState('');
   const [city, setCity] = useState(''); 
@@ -52,7 +48,6 @@ export default function AddActivityScreen() {
   const [selectedPurpose, setSelectedPurpose] = useState('Select Purpose');
   const [planningNotes, setPlanningNotes] = useState('');
   
-  // MODALS
   const [modalVisible, setModalVisible] = useState(false);
   const [currentModalType, setCurrentModalType] = useState('');
   const [filteredData, setFilteredData] = useState<any[]>([]);
@@ -67,7 +62,6 @@ export default function AddActivityScreen() {
     'Conference/Exhibitions': ['Conference', 'Exhibitions', 'Medical Fair']
   };
 
-  // 🔥 4. LOAD ORGANIZATIONS ON MOUNT
   useEffect(() => {
       const loadOrganizations = async () => {
           if (currentUser?.companyId) {
@@ -78,7 +72,6 @@ export default function AddActivityScreen() {
       loadOrganizations();
   }, [currentUser]);
 
-  // DATE FORMATTER
   const formatDate = (rawDate: Date) => {
     let day = rawDate.getDate().toString().padStart(2, '0');
     let month = (rawDate.getMonth() + 1).toString().padStart(2, '0');
@@ -86,7 +79,6 @@ export default function AddActivityScreen() {
     return `${day}/${month}/${year}`;
   };
 
-  // GET CURRENT LOCATION FUNCTION 
   const getCurrentLocation = async () => {
       try {
           let { status } = await Location.requestForegroundPermissionsAsync();
@@ -94,7 +86,6 @@ export default function AddActivityScreen() {
               Alert.alert('Permission Denied', 'Location access is required to save entry.');
               return null;
           }
-          // Get location silently
           let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
           return {
               lat: location.coords.latitude,
@@ -107,7 +98,6 @@ export default function AddActivityScreen() {
       }
   };
 
-  // --- MODAL LOGIC (Searchable) ---
   const openModal = (type: string) => {
       setCurrentModalType(type);
       setSearchText('');
@@ -152,7 +142,7 @@ export default function AddActivityScreen() {
       }
       else if (currentModalType === 'Activity') {
           setSelectedActivity(item);
-          setSelectedPurpose('Select Purpose'); // Reset Purpose
+          setSelectedPurpose('Select Purpose');
       }
       else if (currentModalType === 'Purpose') {
           setSelectedPurpose(item);
@@ -161,7 +151,7 @@ export default function AddActivityScreen() {
       setModalVisible(false);
   };
 
-  // 🔥 5. SAAS SAVE LOGIC
+  // 🔥 SAVE LOGIC — via new backend API
   const handleSave = async () => {
       if (!organization || !city || !contactPerson) {
           Alert.alert("Missing Info", "Organization, City, and Contact Person are required.");
@@ -174,7 +164,6 @@ export default function AddActivityScreen() {
 
       setIsSaving(true);
 
-      // 📍 CAPTURE LOCATION BEFORE SAVING
       const locationData = await getCurrentLocation();
       if (!locationData) {
           setIsSaving(false);
@@ -188,25 +177,19 @@ export default function AddActivityScreen() {
       else if (selectedActivity === 'Service') finalType = 'Field Service';
       else if (selectedActivity === 'Sales') finalType = 'Sales Visit';
 
-      // 🔥 CLEAN PAYLOAD: Engine will auto-add ID, CompanyID, SenderID & CreatedAt
-      const newPlan = {
-          date: formatDate(date),
-          dateIso: date.toISOString().split('T')[0],
-          hospital: organization,
-          address, city, state, 
-          contactPerson, contactNumber, email,
-          type: finalType,
-          activity: selectedActivity,
-          purpose: selectedPurpose,
-          status: 'Planned',
-          planningNotes: planningNotes,
-          location: locationData
-      };
+      try {
+          await createActivityPlan({
+              hospital: organization,
+              address, city, state,
+              contactPerson, contactNumber, email: email || undefined,
+              type: finalType,
+              activity: selectedActivity,
+              purpose: selectedPurpose,
+              planningNotes,
+              date: date.toISOString().split('T')[0],
+              location: { latitude: locationData.lat, longitude: locationData.lng },
+          });
 
-      const result = await addSaaSData("activity_plans", newPlan);
-
-      if (result.success) {
-          // REAL PUSH NOTIFICATION
           if (addNotification) {
               await addNotification({
                   title: "New Activity Planned 📅",
@@ -218,11 +201,11 @@ export default function AddActivityScreen() {
           }
           Alert.alert("Success", "Activity Planned & Admin Notified!");
           router.back();
-      } else {
-          Alert.alert("Error", "Could not save the plan. Try again.");
+      } catch (error: any) {
+          Alert.alert("Error", error?.message || "Could not save the plan. Try again.");
+      } finally {
+          setIsSaving(false);
       }
-      
-      setIsSaving(false);
   };
 
   return (
@@ -242,7 +225,6 @@ export default function AddActivityScreen() {
             contentContainerStyle={{paddingBottom: 100}} 
             keyboardShouldPersistTaps="handled"
         >
-            {/* Date */}
             <View style={styles.row}>
                 <View style={styles.halfInput}>
                     <Text style={styles.label}>Date *</Text>
@@ -266,7 +248,6 @@ export default function AddActivityScreen() {
                 </View>
             </View>
 
-            {/* --- ORGANIZATION DETAILS --- */}
             <Text style={styles.sectionHeader}>Organization Details</Text>
             
             <Text style={styles.label}>Organization Name *</Text>
@@ -289,7 +270,6 @@ export default function AddActivityScreen() {
                 </View>
             </View>
 
-            {/* --- CONTACT DETAILS --- */}
             <Text style={styles.sectionHeader}>Contact Person</Text>
             
             <Text style={styles.label}>Name *</Text>
@@ -306,7 +286,6 @@ export default function AddActivityScreen() {
                 </View>
             </View>
 
-            {/* --- ACTIVITY DETAILS --- */}
             <Text style={styles.sectionHeader}>Activity Setup</Text>
 
             <Text style={styles.label}>Activity Type *</Text>
@@ -340,13 +319,11 @@ export default function AddActivityScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* SEARCHABLE MODAL */}
       <Modal visible={modalVisible} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
                 <Text style={styles.modalTitle}>Select {currentModalType}</Text>
                 
-                {/* Search Bar */}
                 <View style={styles.modalSearchBox}>
                     <Ionicons name="search" size={20} color="gray" />
                     <TextInput 
@@ -404,7 +381,6 @@ const styles = StyleSheet.create({
   saveButton: { backgroundColor: '#3b5998', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 30 },
   saveBtnText: { color: 'white', fontWeight: 'bold', fontSize: 18 },
   
-  // Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { width: '90%', backgroundColor: 'white', borderRadius: 10, padding: 20, maxHeight: '70%' },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center', color: '#3b5998' },

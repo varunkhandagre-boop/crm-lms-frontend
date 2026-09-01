@@ -3,40 +3,36 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-// 🔥 NAYA SAAS ENGINE AUR CONTEXT IMPORT
-import { useSaaSDB } from '../hooks/useSaaSDB'; // Apna correct path check kar lein
+// 🔥 SAAS IMPORTS (kept for isDbLoading UX only)
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 5: activity plans now via new backend API
+import { listActivityPlans, updateActivityPlanStatus } from '../services/api/activityPlans';
 
 export default function ActivityPlanScreen() {
   const router = useRouter();
   
-  // 🔥 1. Get current user from Context
   const { currentUser } = useData();
-  
-  // 🔥 2. Get Data Engine (SaaS Hook)
-  const { fetchSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+  const { isDbLoading } = useSaaSDB();
 
-  // STATES
-  const [activities, setActivities] = useState<any[]>([]); // Local state for data
+  const [activities, setActivities] = useState<any[]>([]);
   const [filter, setFilter] = useState<'Today' | 'Upcoming' | 'Completed' | 'All'>('Today');
-  const [updatingId, setUpdatingId] = useState<string | null>(null); // Loader for specific button
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
   
-  // POWER USER CHECK (Slightly improved to match your new roles)
   const role = currentUser?.role || '';
   const canManage = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr', 'SuperAdmin'].includes(role);
 
-  // --- FETCH DATA ON MOUNT ---
   useEffect(() => {
       loadData();
-  }, [currentUser]); // Refresh agar user change ho (jaise admin account switch kare)
+  }, [currentUser]);
 
+  // 🔥 LOAD DATA — via new backend API
   const loadData = async () => {
       if (!currentUser?.companyId) return;
-      const data = await fetchSaaSData("activity_plans");
+      const data = await listActivityPlans(); // was: fetchSaaSData("activity_plans")
       setActivities(data);
   };
 
-  // --- DATE HELPERS ---
   const getTodayFormatted = () => {
       const now = new Date();
       const d = String(now.getDate()).padStart(2, '0');
@@ -51,11 +47,9 @@ export default function ActivityPlanScreen() {
       return new Date(y, m - 1, d);
   };
 
-  // --- FILTER LOGIC (Now uses local 'activities' state) ---
   const getFilteredData = () => {
       let data = [...activities];
 
-      // Security: Agar manager nahi hai, toh sirf apna data dekhega
       if (!canManage && currentUser?.id) {
           data = data.filter((item: any) => item.senderId === currentUser.id);
       }
@@ -82,7 +76,7 @@ export default function ActivityPlanScreen() {
 
   const displayList = getFilteredData();
 
-  // --- ACTIONS (Upgraded to useSaaSDB) ---
+  // 🔥 ACTIONS — via new backend API
   const handleAction = async (item: any) => {
       if (item.status === 'Planned') {
           Alert.alert("Start Journey", "Are you reaching the location?", [
@@ -91,12 +85,10 @@ export default function ActivityPlanScreen() {
                   text: "Yes", 
                   onPress: async () => {
                       setUpdatingId(item.id);
-                      // 🔥 Naya Update Logic
-                      const res = await updateSaaSData("activity_plans", item.id, { status: 'Started' });
-                      if (res.success) {
-                          // UI ko turant update karo bina database reload kiye (Fast UX)
+                      try {
+                          await updateActivityPlanStatus(item.id, 'Started');
                           setActivities(prev => prev.map(a => a.id === item.id ? { ...a, status: 'Started' } : a));
-                      } else {
+                      } catch (e: any) {
                           Alert.alert("Error", "Could not start activity.");
                       }
                       setUpdatingId(null);
@@ -109,7 +101,6 @@ export default function ActivityPlanScreen() {
       }
   };
 
-  // 🔥 REDIRECTION LOGIC (Same as yours)
   const handleCompletionRedirect = (item: any) => {
       const note = (item.planningNotes || '').toLowerCase();
       const type = (item.type || ''); 
@@ -118,7 +109,7 @@ export default function ActivityPlanScreen() {
           org: item.hospital,      
           hospital: item.hospital, 
           serial: item.serialNo,   
-          activityId: item.id      // Connection ID
+          activityId: item.id      
       };
 
       if (type.includes('Installation') || note.includes('install')) {
@@ -187,7 +178,6 @@ export default function ActivityPlanScreen() {
         <View style={styles.headerTop}>
              <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
              <Text style={styles.headerTitle}>Activity Plans</Text>
-             {/* Refresh Button added for quick data sync */}
              <View style={{flexDirection: 'row', alignItems: 'center'}}>
                  <TouchableOpacity onPress={loadData} style={{marginRight: 15}} disabled={isDbLoading}>
                      <Ionicons name="refresh" size={24} color={isDbLoading ? "gray" : "#3b5998"} />

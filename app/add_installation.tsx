@@ -18,9 +18,13 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+// 🔥 SAAS IMPORTS (organizations/users still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 4: installations & products now via new backend API
+import { createInstallationBatch } from '../services/api/installations';
+import { listProducts } from '../services/api/products';
+import { completeActivityPlan } from '../services/api/activityPlans';
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
@@ -29,37 +33,16 @@ import * as Sharing from 'expo-sharing';
 // 🔥 OCR & CAMERA IMPORT
 import * as ImagePicker from 'expo-image-picker';
 
-// UPGRADED PINCODE DICTIONARY
-const districtPincodeMap: { [key: string]: string } = {
-    "Nagpur": "440001", "Pune": "411001", "Mumbai City": "400001", "Thane": "400601", "Nashik": "422001", "Aurangabad": "431001",
-    "Ahmedabad": "380001", "Surat": "395001", "Vadodara": "390001", "Rajkot": "360001",
-    "Indore": "452001", "Bhopal": "462001", "Jabalpur": "482001", "Gwalior": "474001",
-    "Raipur": "492001", "Bhilai": "490020", "Bilaspur": "495001",
-    "Patna": "800001", "Gaya": "823001", "Muzaffarpur": "842001",
-    "Jaipur": "302001", "Jodhpur": "342001", "Udaipur": "313001", "Kota": "324001",
-    "Lucknow": "226001", "Kanpur": "208001", "Varanasi": "221001", "Agra": "282001",
-    "Bengaluru Urban": "560001", "Mysuru": "570001", "Mangaluru": "575001",
-    "Chennai": "600001", "Coimbatore": "641001", "Madurai": "625001",
-    "Hyderabad": "500001", "Warangal": "506001",
-    "Kolkata": "700001", "Howrah": "711101",
-    "Delhi": "110001"
-};
-
 export default function AddInstallationScreen() {
   const router = useRouter();
   const params = useLocalSearchParams(); 
   
-  // 🔥 1. Context Se SaaS Requirements Nikale
-  const { currentUser, companyProfile, updateActivityStatus, addNotification } = useData();
+  const { currentUser, companyProfile, addNotification } = useData();
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-  // 🔥 2. Naya SaaS Engine
-  const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
-
-  // 🔥 3. Lazy Loaded States
   const [orgList, setOrgList] = useState<any[]>([]);
   const [productList, setProductList] = useState<any[]>([]);
   const [userList, setUserList] = useState<any[]>([]);
-  const [installList, setInstallList] = useState<any[]>([]);
 
   const [hospital, setHospital] = useState('');
   const [orgId, setOrgId] = useState('');
@@ -75,7 +58,6 @@ export default function AddInstallationScreen() {
   
   const [engineer, setEngineer] = useState(currentUser?.name || '');
 
-  // --- MACHINE DETAILS ---
   const [product, setProduct] = useState('');
   const [model, setModel] = useState('');
   const [customProduct, setCustomProduct] = useState('');
@@ -84,7 +66,6 @@ export default function AddInstallationScreen() {
   const [warrantyYears, setWarrantyYears] = useState('1 Year');
   const [notes, setNotes] = useState('');
 
-  // Custom Warranty States
   const [customWarranty, setCustomWarranty] = useState('');
   const [manualExpiry, setManualExpiry] = useState(new Date());
   const [showManualExpiryPicker, setShowManualExpiryPicker] = useState(false);
@@ -97,25 +78,22 @@ export default function AddInstallationScreen() {
   const [searchText, setSearchText] = useState(''); 
   const [isSaving, setIsSaving] = useState(false);
 
-  // OCR State
   const [isScanning, setIsScanning] = useState(false);
   
   const warrantyOptions = ['6 Months', '1 Year', '2 Years', '3 Years', '5 Years', 'Other'];
 
-  // 🔥 4. LOAD DATA ON MOUNT
+  // 🔥 LOAD DATA — products via new API; organizations/users via Firestore
   useEffect(() => {
       const loadData = async () => {
           if (currentUser?.companyId) {
-              const [orgs, prods, users, installs] = await Promise.all([
+              const [orgs, prods, users] = await Promise.all([
                   fetchSaaSData("organizations"),
-                  fetchSaaSData("products"),
+                  listProducts(), // was: fetchSaaSData("products")
                   fetchSaaSData("users"),
-                  fetchSaaSData("installations")
               ]);
               setOrgList(orgs);
               setProductList(prods);
               setUserList(users);
-              setInstallList(installs);
           }
       };
       loadData();
@@ -197,9 +175,6 @@ export default function AddInstallationScreen() {
       }
   };
 
-  // ==========================================
-  // 🔥 SMART MACHINE LABEL OCR PARSER
-  // ==========================================
   const handleScanMachineLabel = async () => {
       try {
           const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -225,7 +200,7 @@ export default function AddInstallationScreen() {
 
               const response = await fetch('https://api.ocr.space/parse/image', {
                   method: 'POST',
-                  headers: { 'apikey': 'helloworld' }, // You should replace this with your real API key
+                  headers: { 'apikey': 'helloworld' },
                   body: formData,
               });
 
@@ -288,27 +263,6 @@ export default function AddInstallationScreen() {
       }
   };
 
-  // 🔥 5. SMART SAAS FY INSTALLATION ID GENERATOR
-  const generateInstallationId = () => {
-      const targetMonth = installDate.getMonth(); 
-      const targetYear = installDate.getFullYear();
-      const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-      const fyString = `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`; 
-      
-      const fyStartDateStr = `${fyStartYear}-04-01`;
-      const fyEndDateStr = `${fyStartYear + 1}-03-31`;
-
-      const count = installList ? installList.filter((c: any) => {
-          const dDate = c.dateIso || c.date; // Use dateIso if available
-          if (!dDate) return false;
-          return dDate >= fyStartDateStr && dDate <= fyEndDateStr;
-      }).length + 1 : 1;
-
-      const prefix = companyProfile?.shortName ? companyProfile.shortName.toUpperCase() : 'INS';
-      return `${prefix}-INS-${fyString}-${String(count).padStart(3, '0')}`;
-  };
-
-  // 🔥 PDF GENERATOR
   const generateInstallationPDF = async (installId: string) => {
     try {
         const logoHTML = companyProfile?.logoUrl ? `<img src="${companyProfile.logoUrl}" style="height: 60px; margin-bottom: 10px;" />` : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
@@ -469,7 +423,6 @@ export default function AddInstallationScreen() {
       const finalWarrantyText = warrantyYears === 'Other' ? customWarranty : warrantyYears;
       const finalExpiryDate = warrantyYears === 'Other' ? manualExpiry.toISOString().split('T')[0] : getWarrantyExpiry(installDate, warrantyYears);
 
-      // 🔥 NAYA LOGIC: Agar "Other" hai toh custom wala naam lo, warna dropdown wala
       const finalProduct = product === 'Other' ? customProduct : product;
       const finalModel = model === 'Other' ? customModel : model;
 
@@ -489,7 +442,6 @@ export default function AddInstallationScreen() {
       };
 
       setAddedMachines([...addedMachines, machineEntry]);
-      // 🔥 Sab kuch clear (reset) kar do agli machine ke liye
       setProduct(''); setModel(''); setSerialNo(''); setNotes(''); setCustomWarranty('');
       setCustomProduct(''); setCustomModel(''); 
   };
@@ -500,64 +452,54 @@ export default function AddInstallationScreen() {
       setAddedMachines(newList);
   };
 
-  // 🔥 6. SAAS SAVE LOGIC
+  // 🔥 SAVE LOGIC — one batch API call for all machines (server auto-generates installId)
   const handleFinalSubmit = async () => {
       if (!hospital || !department) return Alert.alert("Missing", "Select Hospital and enter Department.");
       if (addedMachines.length === 0) return Alert.alert("Empty", "Add at least one machine.");
 
       setIsSaving(true); 
       const locationData = await getCurrentLocation();
-      const installId = generateInstallationId(); // Synchronous execution now
 
       try {
-        // Multi-machine Save via SaaS Hook
-        const promises = addedMachines.map(async (machine) => {
-            const newEntry = {
-                installId: installId, 
-                dateIso: installDate.toISOString().split('T')[0],
-                displayDate: formatDate(installDate),
-                hospital: hospital, orgName: hospital, orgId: orgId,
-                city, address, contactPerson, mobile, department, engineer,
-                status: 'Installed',
-                product: machine.product, productName: machine.product, model: machine.model, serialNo: machine.serialNo, 
-                warrantyExpiry: machine.warrantyExpiry, note: machine.note,
-                location: locationData
-            };
-            return addSaaSData("installations", newEntry);
+        const { installId } = await createInstallationBatch({
+            orgId: orgId || undefined,
+            orgName: hospital,
+            city, address, contactPerson, mobile, department, engineer,
+            date: installDate.toISOString().split('T')[0],
+            location: locationData ? { latitude: locationData.lat, longitude: locationData.lng } : null,
+            machines: addedMachines.map(m => ({
+                product: m.product,
+                model: m.model,
+                serialNo: m.serialNo,
+                warrantyExpiry: m.warrantyExpiry || undefined,
+                note: m.note,
+            })),
         });
 
-        const results = await Promise.all(promises);
-        const allSuccess = results.every(r => r.success);
-        
-        if (allSuccess) {
-            // REAL PUSH NOTIFICATION
-            if (addNotification) {
-                await addNotification({
-                    title: "Installation Completed 🛠️",
-                    message: `${currentUser?.name} installed ${addedMachines.length} machine(s) at ${hospital}.`,
-                    to: "Admin",
-                    route: "/installations",
-                    type: "success"
-                });
-            }
-
-            if (params.activityId && updateActivityStatus) {
-                await updateActivityStatus(params.activityId as string, 'Completed');
-            }
-
-            Alert.alert(
-                "Success ✅", 
-                `Installation Report ${installId} Saved!\nDo you want to share PDF?`,
-                [
-                    { text: "No", onPress: () => router.back(), style: 'cancel' },
-                    { text: "Yes, Share PDF", onPress: async () => { await generateInstallationPDF(installId); router.back(); }}
-                ]
-            );
-        } else {
-            Alert.alert("Warning", "Some machines might not have saved correctly.");
+        if (addNotification) {
+            await addNotification({
+                title: "Installation Completed 🛠️",
+                message: `${currentUser?.name} installed ${addedMachines.length} machine(s) at ${hospital}.`,
+                to: "Admin",
+                route: "/installations",
+                type: "success"
+            });
         }
-      } catch (err) {
-        Alert.alert("Error", "Could not save installation.");
+
+        if (params.activityId) {
+            await completeActivityPlan(params.activityId as string);
+        }
+
+        Alert.alert(
+            "Success ✅", 
+            `Installation Report ${installId} Saved!\nDo you want to share PDF?`,
+            [
+                { text: "No", onPress: () => router.back(), style: 'cancel' },
+                { text: "Yes, Share PDF", onPress: async () => { await generateInstallationPDF(installId); router.back(); }}
+            ]
+        );
+      } catch (err: any) {
+        Alert.alert("Error", err?.message || "Could not save installation.");
       } finally {
         setIsSaving(false);
       }
@@ -698,7 +640,6 @@ export default function AddInstallationScreen() {
                 </View>
             )}
 
-            {/* FINAL SUBMIT BUTTON */}
             <TouchableOpacity 
                 style={[styles.saveBtn, { backgroundColor: isSubmitDisabled ? '#ccc' : '#3b5998' }]} 
                 onPress={handleFinalSubmit} 

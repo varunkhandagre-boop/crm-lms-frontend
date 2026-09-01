@@ -14,40 +14,34 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Context DB removed)
+// 🔥 SAAS IMPORTS (kept for isDbLoading UX only)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 4: service calls now via new backend API
+import { listServiceCalls } from '../services/api/serviceCalls';
 
 const ITEMS_PER_PAGE = 20; 
 
 export default function OnlineServiceScreen() {
   const router = useRouter();
   
-  // 🔥 1. Context se current user nikala
   const { currentUser } = useData(); 
+  const { isDbLoading } = useSaaSDB();
 
-  // 🔥 2. Naya SaaS Engine
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
-
-  // 🔥 3. Lazy Loaded Master States
   const [serviceList, setServiceList] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
-  // --- STATES ---
   const [searchText, setSearchText] = useState('');
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [modalVisible, setModalVisible] = useState(false);
 
-  // --- PAGINATION STATES ---
   const [visibleLimit, setVisibleLimit] = useState(ITEMS_PER_PAGE);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  // 🔥 4. LOAD SAAS DATA ON MOUNT
+  // 🔥 LOAD DATA — via new backend API
   const loadData = async () => {
       if (currentUser?.companyId) {
-          const data = await fetchSaaSData("service_calls");
-          // Abhi ke liye hum assume kar rahe hain ki "Online" ek status ya property hai,
-          // Agar database me "type" field exist karta hai toh we map it accordingly.
+          const data = await listServiceCalls(); // was: fetchSaaSData("service_calls")
           setServiceList(data);
       }
   };
@@ -62,12 +56,10 @@ export default function OnlineServiceScreen() {
       setRefreshing(false);
   };
 
-  // --- 1. FILTER ONLY ONLINE SERVICES ---
   const onlineData = useMemo(() => {
      return serviceList ? serviceList.filter((item: any) => item.type === 'Online' || item.serviceType === 'Online') : [];
   }, [serviceList]);
 
-  // --- 2. SMART SEARCH LOGIC (Full Filtered List) ---
   const fullFilteredList = useMemo(() => {
     if (!searchText) return onlineData;
     
@@ -78,7 +70,6 @@ export default function OnlineServiceScreen() {
     });
   }, [searchText, onlineData]);
 
-  // --- 3. DISPLAY LIST (Sliced for View) ---
   const displayList = fullFilteredList.slice(0, visibleLimit);
 
   useEffect(() => {
@@ -179,7 +170,6 @@ export default function OnlineServiceScreen() {
         }
       />
 
-      {/* --- POPUP MODAL --- */}
       <Modal visible={modalVisible} transparent={true} animationType="fade" onRequestClose={() => setModalVisible(false)}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>

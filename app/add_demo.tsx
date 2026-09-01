@@ -24,6 +24,7 @@ import { useData } from './context/DataContext';
 // 🔥 Phase 2: demos now go through the new backend API
 import { createDemo, listDemos } from '../services/api/demos';
 import { listProducts } from '../services/api/products';
+import { completeActivityPlan } from '../services/api/activityPlans';
 
 // 🔥 PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
@@ -34,7 +35,7 @@ export default function AddDemoScreen() {
   const router = useRouter();
   const params = useLocalSearchParams(); 
   
-  const { currentUser, updateActivityStatus, companyProfile, addNotification } = useData();
+  const { currentUser, companyProfile, addNotification } = useData();
 
   // 🔥 SaaS Engine kept for organizations/products
   const { fetchSaaSData, isDbLoading } = useSaaSDB();
@@ -377,8 +378,8 @@ export default function AddDemoScreen() {
           });
       }
       
-      if (params.activityId && updateActivityStatus) {
-          await updateActivityStatus(params.activityId as string, 'Completed');
+      if (params.activityId) {
+          await completeActivityPlan(params.activityId as string);
       }
 
       Alert.alert(

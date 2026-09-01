@@ -12,50 +12,47 @@ import {
   View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+// 🔥 SAAS IMPORTS (kept for isDbLoading UX only; data itself is API-backed now)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 4: service calls now via new backend API
+import { listServiceCalls } from '../services/api/serviceCalls';
 
 const ITEMS_PER_PAGE = 20; 
 
 export default function FieldServiceScreen() {
   const router = useRouter();
 
-  // 🔥 1. Context se sirf current user nikala
   const { currentUser } = useData();
+  const { isDbLoading } = useSaaSDB();
 
-  // 🔥 2. Naya SaaS Engine
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
-
-  // 🔥 3. Lazy Loaded List
   const [serviceList, setServiceList] = useState<any[]>([]);
 
-  // --- STATES ---
   const [searchText, setSearchText] = useState('');
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [modalVisible, setModalVisible] = useState(false);
 
-  // --- PAGINATION STATES ---
   const [visibleLimit, setVisibleLimit] = useState(ITEMS_PER_PAGE);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  // 🔥 4. LOAD DATA ON MOUNT
+  // 🔥 LOAD DATA — via new backend API
   useEffect(() => {
       const loadData = async () => {
           if (currentUser?.companyId) {
-              const services = await fetchSaaSData("service_calls"); // Confirm your DB collection name
+              const services = await listServiceCalls(); // was: fetchSaaSData("service_calls")
               setServiceList(services);
           }
       };
       loadData();
   }, [currentUser]);
 
-  // --- 1. FILTER ONLY FIELD SERVICES ---
+  // Same client-side "Field" filter as before — the app never actually sets
+  // a distinct Field/Online type on creation (see Phase 4 migration notes),
+  // this behavior is preserved unchanged rather than redesigned.
   const fieldData = useMemo(() => {
     return serviceList ? serviceList.filter((item: any) => item.type === 'Field' || item.serviceType === 'Field' || item.serviceType === 'AMC' || item.serviceType === 'CMC' || item.serviceType === 'Breakdown') : [];
   }, [serviceList]);
 
-  // --- 2. SEARCH LOGIC ---
   const fullFilteredList = useMemo(() => {
     if (!searchText) return fieldData;
 
@@ -66,7 +63,6 @@ export default function FieldServiceScreen() {
     });
   }, [searchText, fieldData]);
 
-  // --- 3. PAGINATION LOGIC ---
   const displayList = fullFilteredList.slice(0, visibleLimit);
 
   useEffect(() => {
@@ -91,7 +87,6 @@ export default function FieldServiceScreen() {
   const renderItem = ({ item }: any) => (
     <TouchableOpacity style={styles.card} onPress={() => openDetails(item)}>
       <View style={styles.row}>
-        {/* Ticket ID */}
         <Text style={styles.boldText}>{item.ticketNo || item.scrId || item.id}</Text>
 
         <View style={{ flexDirection: 'row' }}>
@@ -107,7 +102,6 @@ export default function FieldServiceScreen() {
         </Text>
       </View>
 
-      {/* Breakdown Issue */}
       <View style={{ flexDirection: 'row', marginTop: 5 }}>
         <Text style={{ fontWeight: 'bold', marginRight: 5, color: '#333' }}>Breakdown:</Text>
         <Text style={{ width: '70%', color: '#555' }} numberOfLines={1}>{item.issue || item.remark}</Text>
@@ -124,7 +118,6 @@ export default function FieldServiceScreen() {
 
   return (
     <View style={styles.container}>
-      {/* HEADER */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#333" />
@@ -133,7 +126,6 @@ export default function FieldServiceScreen() {
         <View style={{ width: 24 }} />
       </View>
 
-      {/* SEARCH BAR */}
       <View style={styles.searchContainer}>
         {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
         <TextInput
@@ -149,14 +141,12 @@ export default function FieldServiceScreen() {
         )}
       </View>
 
-      {/* TOTAL COUNT INDICATOR */}
       <View style={styles.limitContainer}>
         <Text style={{ marginLeft: 'auto', fontSize: 12, color: 'gray' }}>
           Showing {Math.min(visibleLimit, fullFilteredList.length)} of {fullFilteredList.length}
         </Text>
       </View>
 
-      {/* LIST VIEW */}
       <FlatList
         data={displayList}
         keyExtractor={(item, index) => item.id || index.toString()}
@@ -194,7 +184,6 @@ export default function FieldServiceScreen() {
         }
       />
 
-      {/* --- POPUP MODAL --- */}
       <Modal visible={modalVisible} transparent={true} animationType="fade" onRequestClose={() => setModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -230,7 +219,6 @@ export default function FieldServiceScreen() {
   );
 }
 
-// Helper Components
 const DetailRow = ({ label, value, icon, highlight, color }: any) => (
   <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
     <View style={{ width: 30 }}><Ionicons name={icon} size={20} color="#3b5998" /></View>

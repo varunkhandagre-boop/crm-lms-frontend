@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
     ActivityIndicator,
@@ -14,14 +14,20 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
-import { useSaaSDB } from '../hooks/useSaaSDB';
+// 🔥 Phase 4: this is a PUBLIC, unauthenticated form — it does NOT use
+// useSaaSDB/useData (no login exists here). It hits a dedicated public
+// backend route instead, identified by a companyId in the URL.
+//
+// ⚠️ KNOWN GAP: the old screen never carried a companyId anywhere, so
+// there's no way yet to know which company a submission belongs to.
+// Whoever links/embeds this screen needs to pass ?companyId=<uuid> —
+// until then this form will show an error instead of silently failing.
+import { submitPublicComplaint } from '../services/api/publicComplaints';
 
 export default function CustomerComplaintForm() {
     const router = useRouter();
-    
-    // 🔥 Naya SaaS Engine
-    const { addSaaSData } = useSaaSDB();
+    const params = useLocalSearchParams();
+    const companyId = (params.companyId as string) || '';
 
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isSuccess, setIsSuccess] = useState(false);
@@ -35,49 +41,23 @@ export default function CustomerComplaintForm() {
         issue: ''
     });
 
-    // 🔥 SAAS ENGINE: SUBMIT TICKET LOGIC
+    // 🔥 SUBMIT TICKET LOGIC — via new public backend route (no auth)
     const handleSubmit = async () => {
         if (!formData.hospitalName || !formData.mobile || !formData.issue) {
             Alert.alert("Missing Details", "Please fill Hospital Name, Mobile, and Issue description.");
             return;
         }
+        if (!companyId) {
+            Alert.alert("Setup Needed", "This form isn't linked to a company yet. Please contact support.");
+            return;
+        }
 
         setIsSubmitting(true);
         try {
-            const today = new Date().toISOString().split('T')[0];
-
-            // 1. Save Ticket to SaaS database
-            const ticketData = {
-                ...formData,
-                status: 'Open',
-                date: today,
-                createdAt: new Date().toISOString(),
-                source: 'Customer Web Form',
-                senderName: 'Customer'
-            };
-
-            const ticketRes = await addSaaSData("service_calls", ticketData);
-
-            if (ticketRes.success) {
-                // 2. Send Notification to Admin/Service Manager using SaaS DB
-                await addSaaSData("notifications", {
-                    title: "New Service Request 🚨",
-                    message: `${formData.hospitalName} reported an issue: ${formData.issue}`,
-                    to: "Admin", // Depending on your DB logic, 'Admin' or specific UID
-                    type: "warning",
-                    route: "/service_call",
-                    createdAt: new Date().toISOString(),
-                    read: false,
-                    senderName: formData.contactPerson || 'Customer'
-                });
-
-                setIsSuccess(true);
-            } else {
-                throw new Error("Failed to add ticket.");
-            }
-
-        } catch (error) {
-            Alert.alert("Error", "Could not submit your request. Please try again or call us.");
+            await submitPublicComplaint(companyId, formData);
+            setIsSuccess(true);
+        } catch (error: any) {
+            Alert.alert("Error", error?.message || "Could not submit your request. Please try again or call us.");
         } finally {
             setIsSubmitting(false);
         }

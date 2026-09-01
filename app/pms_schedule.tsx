@@ -15,9 +15,11 @@ import {
   View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+// 🔥 SAAS IMPORTS (organizations/users still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 4: PMS reports now via new backend API
+import { listPmsReports } from '../services/api/pmsReports';
 
 // 🔥 PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
@@ -27,18 +29,13 @@ import * as Sharing from 'expo-sharing';
 export default function PMSScheduleScreen() {
   const router = useRouter();
   
-  // 🔥 1. Context se sirf current user & profile nikala
   const { currentUser, companyProfile } = useData(); 
-
-  // 🔥 2. Naya SaaS Engine connect kiya
   const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-  // 🔥 3. Lazy Loaded Master States
   const [pmsList, setPmsList] = useState<any[]>([]);
   const [orgList, setOrgList] = useState<any[]>([]);
   const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
 
-  // --- STATES ---
   const [filter, setFilter] = useState<'All' | 'Upcoming' | 'Completed' | 'Overdue'>('All');
   const [searchText, setSearchText] = useState('');
   
@@ -50,7 +47,6 @@ export default function PMSScheduleScreen() {
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [generatingPdf, setGeneratingPdf] = useState(false); 
 
-  // --- EMPLOYEE FILTER ---
   const [selectedEmployee, setSelectedEmployee] = useState('All');
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
@@ -67,11 +63,11 @@ export default function PMSScheduleScreen() {
       }
   }, [viewMode, currentDate, searchText, filter, selectedEmployee]);
 
-  // 🔥 4. LOAD SAAS DATA
+  // 🔥 LOAD DATA — PMS reports via new API; organizations/users via Firestore
   const loadData = async () => {
       if (currentUser?.companyId) {
           const [pms, orgs, users] = await Promise.all([
-              fetchSaaSData("pms_reports"),
+              listPmsReports(), // was: fetchSaaSData("pms_reports")
               fetchSaaSData("organizations"),
               fetchSaaSData("users")
           ]);
@@ -104,13 +100,11 @@ export default function PMSScheduleScreen() {
       setRefreshing(false);
   };
 
-  // --- HELPER: CHECK STATUS ---
   const isTaskCompleted = (status: string) => {
     const s = (status || '').toLowerCase();
     return s === 'done' || s === 'completed' || s === 'resolved' || s === 'closed';
   };
 
-  // --- DATE PARSER ---
   const parseDate = (dateStr: any) => {
     if (!dateStr) return 0;
     if (typeof dateStr === 'number') return dateStr;
@@ -303,11 +297,9 @@ export default function PMSScheduleScreen() {
 
   const processedList = getProcessedList();
 
-  // --- 🔥 MAIN FILTER LOGIC ---
   const getFilteredData = () => {
     let data = [...processedList];
 
-    // 0. Employee Filter
     if (isAdmin && selectedEmployee !== 'All') {
       data = data.filter((item: any) =>
         (item.userId === selectedEmployee) ||
@@ -320,7 +312,6 @@ export default function PMSScheduleScreen() {
       data = data.filter((item: any) => item.userId === myId || item.engineerId === myId || item.senderId === myId);
     }
 
-    // 1. Search Logic
     if (searchText) {
       const term = searchText.toLowerCase().trim();
       data = data.filter((item: any) =>
@@ -330,7 +321,6 @@ export default function PMSScheduleScreen() {
 
     const nowTs = new Date().setHours(0, 0, 0, 0);
 
-    // 2. STATUS FILTER
     if (filter === 'Completed') {
       data = data.filter((i: any) => isTaskCompleted(i.status));
     }
@@ -347,7 +337,6 @@ export default function PMSScheduleScreen() {
       });
     }
 
-    // 3. DATE FILTER (FY Boundaries)
     const shouldApplyDateFilter = viewMode !== 'All' && (filter === 'All' || filter === 'Completed');
 
     if (shouldApplyDateFilter) {
@@ -380,7 +369,6 @@ export default function PMSScheduleScreen() {
       });
     }
 
-    // 4. SORTING
     data.sort((a: any, b: any) => {
       if (filter === 'Upcoming' || filter === 'Overdue') {
         return parseDate(a.computedDueDate) - parseDate(b.computedDueDate);

@@ -18,9 +18,13 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+// 🔥 SAAS IMPORTS (organizations still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 4: PMS reports & installations now via new backend API
+import { createPmsReport } from '../services/api/pmsReports';
+import { listInstallations } from '../services/api/installations';
+import { completeActivityPlan } from '../services/api/activityPlans';
 
 // 🔥 PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
@@ -31,18 +35,12 @@ export default function AddPMSScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   
-  // 🔥 1. Context se sirf User, Profile aur Notifications nikale
-  const { currentUser, updateActivityStatus, companyProfile, addNotification } = useData();
+  const { currentUser, companyProfile, addNotification } = useData();
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-  // 🔥 2. Naya SaaS Engine connect kiya
-  const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
-
-  // 🔥 3. Lazy Loaded Lists
   const [orgList, setOrgList] = useState<any[]>([]);
   const [installList, setInstallList] = useState<any[]>([]);
-  const [pmsList, setPmsList] = useState<any[]>([]);
 
-  // --- FORM STATES ---
   const [org, setOrg] = useState('');
   const [orgId, setOrgId] = useState('');
 
@@ -54,7 +52,6 @@ export default function AddPMSScreen() {
   const [city, setCity] = useState('');
   const [address, setAddress] = useState('');
 
-  // --- DATE STATES ---
   const [pmsDate, setPmsDate] = useState(new Date());
   const [dueDate, setDueDate] = useState(new Date()); 
   
@@ -64,25 +61,22 @@ export default function AddPMSScreen() {
   const [remarks, setRemarks] = useState('');
   const [pmsType, setPmsType] = useState('Preventive'); 
 
-  // --- MODAL STATES ---
   const [modalVisible, setModalVisible] = useState(false);
   const [currentSelection, setCurrentSelection] = useState(''); 
   const [searchText, setSearchText] = useState('');
   const [filteredData, setFilteredData] = useState<any[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
-  // 🔥 4. LOAD DATA ON MOUNT
+  // 🔥 LOAD DATA — installations via new API; organizations via Firestore
   useEffect(() => {
       const loadData = async () => {
           if (currentUser?.companyId) {
-              const [orgs, installs, pmsReports] = await Promise.all([
+              const [orgs, installs] = await Promise.all([
                   fetchSaaSData("organizations"),
-                  fetchSaaSData("installations"),
-                  fetchSaaSData("pms_reports") // Required for accurate ID Counting
+                  listInstallations(), // was: fetchSaaSData("installations")
               ]);
               setOrgList(orgs);
               setInstallList(installs);
-              setPmsList(pmsReports);
           }
       };
       loadData();
@@ -95,7 +89,6 @@ export default function AddPMSScreen() {
     return `${day}/${month}/${year}`;
   };
 
-  // 🔥 Auto-Calculate Next Due Date (3 Months later)
   useEffect(() => {
       const nextDate = new Date(pmsDate);
       nextDate.setMonth(nextDate.getMonth() + 3); 
@@ -158,27 +151,6 @@ export default function AddPMSScreen() {
       }
   };
 
-  // 🔥 5. SMART SAAS FY PMS ID GENERATOR
-  const generatePMSId = () => {
-      const targetMonth = pmsDate.getMonth(); 
-      const targetYear = pmsDate.getFullYear();
-      
-      const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-      const fyString = `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`; 
-      const fyStartDateStr = `${fyStartYear}-04-01`;
-      const fyEndDateStr = `${fyStartYear + 1}-03-31`;
-
-      const count = pmsList ? pmsList.filter((c: any) => {
-          const dDate = c.dateIso || c.date; // Use dateIso if available
-          if (!dDate) return false;
-          return dDate >= fyStartDateStr && dDate <= fyEndDateStr;
-      }).length + 1 : 1;
-
-      const prefix = companyProfile?.shortName ? companyProfile.shortName.toUpperCase() : 'PMS';
-      return `${prefix}-PMS-${fyString}-${String(count).padStart(3, '0')}`;
-  };
-
-  // 🔥 PDF GENERATOR
   const generatePMSPDF = async (pmsData: any) => {
     try {
         const logoHTML = companyProfile?.logoUrl 
@@ -285,7 +257,6 @@ export default function AddPMSScreen() {
     }
   };
 
-  // --- MODAL LOGIC ---
   const openModal = (type: string) => {
     setCurrentSelection(type);
     setSearchText('');
@@ -334,7 +305,7 @@ export default function AddPMSScreen() {
     setModalVisible(false);
   };
 
-  // 🔥 6. SAAS SAVE LOGIC
+  // 🔥 SAVE LOGIC — via new backend API (server auto-generates PMS ID)
   const handleSave = async () => {
       if (!org || !serialNo) {
           Alert.alert("Error", "Organization and Serial No are required.");
@@ -349,69 +320,51 @@ export default function AddPMSScreen() {
           return; 
       }
 
-      // Generate Local ID
-      const newPmsId = generatePMSId();
-
-      // Clean Payload
-      const newPMS = {
-          pmsId: newPmsId, 
-          dateIso: pmsDate.toISOString().split('T')[0], // Added for sorting
-          date: pmsDate.toISOString().split('T')[0], 
-          lastDoneDate: pmsDate.toISOString().split('T')[0], 
-          dueDate: dueDate.toISOString().split('T')[0], 
-          hospitalName: org,
-          orgId: orgId, 
-          city: city, 
-          address: address, 
-          machine: machineName || 'Unknown',
-          model: modelName || 'Unknown', 
-          serialNo: serialNo,
-          department: department, 
-          type: pmsType,
-          remarks: remarks,
-          status: 'Completed', 
-          location: locationData
-      };
-
       try {
-          const res = await addSaaSData("pms_reports", newPMS);
+          const saved = await createPmsReport({
+              orgId: orgId || undefined,
+              orgName: org,
+              city, address,
+              machine: machineName || 'Unknown',
+              model: modelName || 'Unknown', 
+              serialNo,
+              department, 
+              type: pmsType as any,
+              remarks,
+              date: pmsDate.toISOString().split('T')[0],
+              dueDate: dueDate.toISOString().split('T')[0],
+              location: locationData ? { latitude: locationData.lat, longitude: locationData.lng } : null,
+          });
 
-          if (res.success) {
-              // REAL PUSH NOTIFICATION
-              if (addNotification) {
-                  await addNotification({
-                      title: "PMS Report Submitted ⚙️",
-                      message: `${currentUser?.name} submitted ${pmsType} report (${newPmsId}) for ${machineName} at ${org}.`,
-                      to: "Admin",
-                      route: "/pms_schedule",
-                      type: "info"
-                  });
-              }
-
-              if (params.activityId && updateActivityStatus) {
-                  await updateActivityStatus(params.activityId as string, 'Completed');
-              } 
-              
-              setIsSaving(false);
-              
-              // ASK FOR PDF (Pass senderName dynamically since it wasn't saved in payload manually)
-              Alert.alert(
-                  "Success ✅", 
-                  `PMS Report ${newPmsId} Saved Successfully!\nDo you want to share PDF?`,
-                  [
-                      { text: "No", onPress: () => router.back(), style: 'cancel' },
-                      { text: "Yes, Share PDF", onPress: async () => { 
-                          await generatePMSPDF({ ...newPMS, senderName: currentUser?.name });
-                          router.back(); 
-                      }}
-                  ]
-              );
-          } else {
-              Alert.alert("Error", "Could not save PMS report.");
-              setIsSaving(false);
+          if (addNotification) {
+              await addNotification({
+                  title: "PMS Report Submitted ⚙️",
+                  message: `${currentUser?.name} submitted ${pmsType} report (${saved.pmsId}) for ${machineName} at ${org}.`,
+                  to: "Admin",
+                  route: "/pms_schedule",
+                  type: "info"
+              });
           }
-      } catch (err) {
-          Alert.alert("Error", "Something went wrong.");
+
+          if (params.activityId) {
+              await completeActivityPlan(params.activityId as string);
+          } 
+          
+          setIsSaving(false);
+          
+          Alert.alert(
+              "Success ✅", 
+              `PMS Report ${saved.pmsId} Saved Successfully!\nDo you want to share PDF?`,
+              [
+                  { text: "No", onPress: () => router.back(), style: 'cancel' },
+                  { text: "Yes, Share PDF", onPress: async () => { 
+                      await generatePMSPDF({ ...saved, senderName: currentUser?.name });
+                      router.back(); 
+                  }}
+              ]
+          );
+      } catch (err: any) {
+          Alert.alert("Error", err?.message || "Something went wrong.");
           setIsSaving(false);
       }
   };
@@ -470,7 +423,6 @@ export default function AddPMSScreen() {
                 <Ionicons name="caret-down" size={18} color="gray" />
             </TouchableOpacity>
 
-            {/* INFO BOX */}
             <View style={styles.infoBox}>
                 <Text style={{fontSize:11, fontWeight:'bold', color:'#555', marginBottom:5}}>ADDITIONAL INFO (Auto-Filled)</Text>
                 <View style={styles.row}>
@@ -528,7 +480,6 @@ export default function AddPMSScreen() {
             
         </ScrollView>
 
-        {/* MODAL */}
         <Modal visible={modalVisible} transparent={true} animationType="fade">
           <View style={styles.modalOverlay}>
               <View style={styles.modalContent}>

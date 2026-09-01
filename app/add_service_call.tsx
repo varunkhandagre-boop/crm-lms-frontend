@@ -19,10 +19,15 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS
+// 🔥 SAAS IMPORTS (organizations still Firestore)
 import * as Location from 'expo-location';
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 4: service calls, installations, spare parts now via new backend API
+import { createServiceCall } from '../services/api/serviceCalls';
+import { listInstallations } from '../services/api/installations';
+import { listSpareParts } from '../services/api/spareParts';
+import { completeActivityPlan } from '../services/api/activityPlans';
 
 // 🔥 PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
@@ -33,17 +38,14 @@ export default function AddServiceCallScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   
-  // 🔥 1. Context se sirf user aur notification nikala
-  const { currentUser, updateActivityStatus, companyProfile, addNotification } = useData();
+  const { currentUser, companyProfile, addNotification } = useData();
   
-  // 🔥 2. Naya SaaS Engine
-  const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 SaaS Engine kept for organizations only
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-  // 🔥 3. Lazy Loaded Lists
   const [orgList, setOrgList] = useState<any[]>([]);
   const [installList, setInstallList] = useState<any[]>([]);
   const [sparePartsList, setSparePartsList] = useState<any[]>([]);
-  const [serviceCallList, setServiceCallList] = useState<any[]>([]);
 
   // --- FORM STATES ---
   const [org, setOrg] = useState('');
@@ -75,7 +77,6 @@ export default function AddServiceCallScreen() {
   const [newMachineModalVisible, setNewMachineModalVisible] = useState(false);
   const [tempSerial, setTempSerial] = useState('');
 
-  // Search Logic
   const [searchText, setSearchText] = useState('');
   const [filteredData, setFilteredData] = useState<any[]>([]); 
   const [currentSelection, setCurrentSelection] = useState(''); 
@@ -84,26 +85,23 @@ export default function AddServiceCallScreen() {
 
   const serviceOptions = ['Free', 'Paid', 'AMC', 'CMC', 'Under Warranty', 'Others'];
 
-  // 🔥 4. LOAD DATA ON MOUNT
+  // 🔥 LOAD DATA — installations & spare parts via new API; organizations via Firestore
   useEffect(() => {
       const loadData = async () => {
           if (currentUser?.companyId) {
-              const [orgs, installs, parts, calls] = await Promise.all([
+              const [orgs, installs, parts] = await Promise.all([
                   fetchSaaSData("organizations"),
-                  fetchSaaSData("installations"),
-                  fetchSaaSData("spare_parts"),
-                  fetchSaaSData("service_calls")
+                  listInstallations(), // was: fetchSaaSData("installations")
+                  listSpareParts(),    // was: fetchSaaSData("spare_parts")
               ]);
               setOrgList(orgs);
               setInstallList(installs);
               setSparePartsList(parts);
-              setServiceCallList(calls);
           }
       };
       loadData();
   }, [currentUser]);
 
-  // AUTO FILL ORG (From Param)
   useEffect(() => {
       if (params.org && org !== params.org) {
           setOrg(params.org as string);
@@ -161,26 +159,6 @@ export default function AddServiceCallScreen() {
           Alert.alert("GPS Required", "Please turn on your GPS Location to submit.");
           return null;
       }
-  };
-
-  // 🔥 5. SMART FY TICKET ID GENERATOR
-  const generateSequentialTicketId = () => {
-      const targetMonth = callDate.getMonth(); 
-      const targetYear = callDate.getFullYear();
-      
-      const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-      const fyString = `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`; 
-      const fyStartDateStr = `${fyStartYear}-04-01`;
-      const fyEndDateStr = `${fyStartYear + 1}-03-31`;
-
-      const count = serviceCallList ? serviceCallList.filter((c: any) => {
-          const dDate = c.dateIso || c.date; 
-          if (!dDate) return false;
-          return dDate >= fyStartDateStr && dDate <= fyEndDateStr;
-      }).length + 1 : 1;
-
-      const prefix = companyProfile?.shortName ? companyProfile.shortName.toUpperCase() : 'LMS';
-      return `${prefix}-SER-${fyString}-${String(count).padStart(3, '0')}`;
   };
 
   const generateServicePDF = async (ticketData: any) => {
@@ -385,7 +363,7 @@ export default function AddServiceCallScreen() {
       setNewMachineModalVisible(false);
   };
 
-  // 🔥 6. SAAS SAVE LOGIC
+  // 🔥 SAVE LOGIC — via new backend API (server auto-generates ticket ID)
   const handleSave = async () => {
       if (!org || !serialNo || !remark) {
           Alert.alert("Error", "Organization, Serial No, and Problem are required.");
@@ -400,15 +378,12 @@ export default function AddServiceCallScreen() {
           return; 
       }
 
-      const newTicketId = generateSequentialTicketId();
       const partsSummary = usedParts.map(p => `${p.partName} (${p.usedQty})`).join(', ');
 
-      const newCall = {
-          scrId: newTicketId, 
+      const payload = {
           date: callDate.toISOString().split('T')[0],
-          dateIso: callDate.toISOString().split('T')[0],
-          hospitalName: org,
           orgId: orgId,
+          orgName: org,
           city: city, 
           address: address,
           machine: machineName || 'Unknown',
@@ -417,53 +392,47 @@ export default function AddServiceCallScreen() {
           department: department,
           installationDate: installDate,
           serviceType: serviceType, 
-          status: status === 'Closed' ? 'Resolved' : 'Open',
+          status: (status === 'Closed' ? 'Resolved' : 'Open') as 'Open' | 'Resolved',
           resolutionNote: status === 'Closed' ? resolutionNote : '',
-          warrantyStatus: serviceType,
           remark: remark,
-          imageUri: image,
+          imageUri: image || undefined,
           partsUsed: usedParts, 
           partsText: partsSummary,
-          location: locationData
+          location: locationData ? { latitude: locationData.lat, longitude: locationData.lng } : null,
       };
 
       try {
-          const res = await addSaaSData("service_calls", newCall);
-          
-          if (res.success) {
-              if (addNotification) {
-                  await addNotification({
-                      title: `Service Ticket #${newTicketId} 🛠️`,
-                      message: `${currentUser?.name} created a service call for ${org} (${status}).`,
-                      to: "Admin",
-                      route: "/service_call",
-                      type: "alert"
-                  });
-              }
+          const saved = await createServiceCall(payload as any);
 
-              if (params.activityId && updateActivityStatus) {
-                  await updateActivityStatus(params.activityId as string, 'Completed');
-              }
-              
-              setIsSaving(false);
-              
-              Alert.alert(
-                  "Success ✅", 
-                  `Ticket #${newTicketId} Created!\nShare PDF?`,
-                  [
-                      { text: "No", onPress: () => router.back(), style: 'cancel' },
-                      { text: "Yes, Share PDF", onPress: async () => { 
-                          await generateServicePDF({...newCall, senderName: currentUser?.name});
-                          router.back(); 
-                      }}
-                  ]
-              );
-          } else {
-              Alert.alert("Error", "Could not save service ticket.");
-              setIsSaving(false);
+          if (addNotification) {
+              await addNotification({
+                  title: `Service Ticket #${saved.scrId} 🛠️`,
+                  message: `${currentUser?.name} created a service call for ${org} (${status}).`,
+                  to: "Admin",
+                  route: "/service_call",
+                  type: "alert"
+              });
           }
-      } catch (err) {
-          Alert.alert("Error", "Something went wrong.");
+
+          if (params.activityId) {
+              await completeActivityPlan(params.activityId as string);
+          }
+          
+          setIsSaving(false);
+          
+          Alert.alert(
+              "Success ✅", 
+              `Ticket #${saved.scrId} Created!\nShare PDF?`,
+              [
+                  { text: "No", onPress: () => router.back(), style: 'cancel' },
+                  { text: "Yes, Share PDF", onPress: async () => { 
+                      await generateServicePDF({...saved, senderName: currentUser?.name});
+                      router.back(); 
+                  }}
+              ]
+          );
+      } catch (err: any) {
+          Alert.alert("Error", err?.message || "Something went wrong.");
           setIsSaving(false);
       }
   };
@@ -579,6 +548,11 @@ export default function AddServiceCallScreen() {
                 </TouchableOpacity>
                 {image && <Image source={{ uri: image }} style={styles.previewImage} />}
             </View>
+            {image && (
+                <Text style={{fontSize: 10, color: '#e65100', marginTop: -5, marginBottom: 10}}>
+                    ⚠️ Photo upload isn't wired to the server yet — this image won't be saved with the ticket.
+                </Text>
+            )}
 
             <Text style={styles.label}>Problem Reported *</Text>
             <TextInput style={[styles.inputGray, {height: 60}, errors.remark && styles.errorBorder]} multiline placeholder="Describe issue..." value={remark} onChangeText={setRemark} />
@@ -710,7 +684,7 @@ export default function AddServiceCallScreen() {
                       renderItem={({item}) => (
                           <TouchableOpacity style={styles.partItem} onPress={() => handleAddPart(item)}>
                               <View><Text style={{fontWeight:'bold'}}>{item.partName}</Text><Text style={{fontSize:12, color:'gray'}}>PN: {item.partNo}</Text></View>
-                              <View style={{backgroundColor:'#e8f5e9', padding:5, borderRadius:4}}><Text style={{fontSize:11, color:'green'}}>Avail: {item.myStock || 0}</Text></View>
+                              <View style={{backgroundColor:'#e8f5e9', padding:5, borderRadius:4}}><Text style={{fontSize:11, color:'green'}}>Avail: {item.officeStock || 0}</Text></View>
                           </TouchableOpacity>
                       )}
                   />

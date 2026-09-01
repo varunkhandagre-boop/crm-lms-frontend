@@ -16,28 +16,24 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+// 🔥 SAAS IMPORTS (organizations still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 5: projects now via new backend API
+import { createProject } from '../services/api/projects';
 
 export default function AddProjectScreen() {
   const router = useRouter();
   
-  // 🔥 1. Context se sirf User aur Notification nikala
   const { currentUser, addNotification } = useData(); 
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-  // 🔥 2. Naya SaaS Engine connect kiya
-  const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
-
-  // 🔥 3. Lazy Loaded State for Organizations
   const [orgList, setOrgList] = useState<any[]>([]);
 
-  // --- FORM STATES ---
   const [name, setName] = useState('');
   const [totalValue, setTotalValue] = useState('');
   const [description, setDescription] = useState('');
   
-  // Auto-filled fields from Organization
   const [client, setClient] = useState('');
   const [orgId, setOrgId] = useState('');
   
@@ -49,13 +45,11 @@ export default function AddProjectScreen() {
   const [mobile, setMobile] = useState('');
   const [email, setEmail] = useState('');
 
-  // Modal States
   const [modalVisible, setModalVisible] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [filteredOrgs, setFilteredOrgs] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // 🔥 4. LOAD DATA ON MOUNT
   useEffect(() => {
       const loadData = async () => {
           if (currentUser?.companyId) {
@@ -67,7 +61,6 @@ export default function AddProjectScreen() {
       loadData();
   }, [currentUser]);
 
-  // Search Logic
   const handleSearch = (text: string) => {
       setSearchText(text);
       if (text) {
@@ -82,7 +75,6 @@ export default function AddProjectScreen() {
       }
   };
 
-  // Select Organization Logic (Auto-Fill)
   const handleSelectOrg = (org: any) => {
       setClient(org.orgName || org.name || '');
       setOrgId(org.id || ''); 
@@ -97,7 +89,7 @@ export default function AddProjectScreen() {
       setModalVisible(false);
   };
 
-  // 🔥 5. SAAS SAVE LOGIC
+  // 🔥 SAVE LOGIC — via new backend API
   const handleSave = async () => {
       if (!name || !client || !totalValue) {
           Alert.alert("Missing Fields", "Please fill Project Name, Client and Order Value.");
@@ -106,49 +98,36 @@ export default function AddProjectScreen() {
 
       setLoading(true);
 
-      // Clean payload: Engine automatically injects ID, Company ID, Sender ID, Created At
-      const newProject = {
-          name, 
-          client,
-          orgId, 
-          location, 
-          address,
-          state,
-          pincode,
-          contactPerson,
-          mobile,
-          email,
-          totalValue: Number(totalValue), 
-          description,
-          status: 'Ongoing',
-          totalExpense: 0, 
-          totalReceived: 0,
-          createdBy: currentUser?.name || 'Unknown',
-          role: currentUser?.role || 'Employee'
-      };
-
       try {
-          const res = await addSaaSData("projects", newProject);
-          
-          if (res.success) {
-              // 🔥 REAL PUSH NOTIFICATION
-              if (addNotification) {
-                  await addNotification({
-                      title: "New Project Started 🏗️",
-                      message: `${currentUser?.name} started project: ${name} for ${client}.`,
-                      to: "Admin", // Bhejte samay Manager/Accountant ko bhi notify kar sakte hain
-                      route: "/projects",
-                      type: "success"
-                  });
-              }
+          await createProject({
+              name, 
+              client,
+              orgId: orgId || undefined, 
+              location, 
+              address,
+              state,
+              pincode,
+              contactPerson,
+              mobile,
+              email: email || undefined,
+              totalValue: Number(totalValue), 
+              description,
+          });
 
-              Alert.alert("Success", "Project Started Successfully! 🏗️");
-              router.back();
-          } else {
-              Alert.alert("Error", "Could not create project.");
+          if (addNotification) {
+              await addNotification({
+                  title: "New Project Started 🏗️",
+                  message: `${currentUser?.name} started project: ${name} for ${client}.`,
+                  to: "Admin",
+                  route: "/projects",
+                  type: "success"
+              });
           }
-      } catch (error) {
-          Alert.alert("Error", "Something went wrong.");
+
+          Alert.alert("Success", "Project Started Successfully! 🏗️");
+          router.back();
+      } catch (error: any) {
+          Alert.alert("Error", error?.message || "Something went wrong.");
       } finally {
           setLoading(false);
       }
@@ -175,7 +154,6 @@ export default function AddProjectScreen() {
                 onChangeText={setName} 
             />
 
-            {/* ORGANIZATION SELECTOR */}
             <Text style={styles.label}>Select Client / Organization *</Text>
             <TouchableOpacity style={styles.dropdown} onPress={() => setModalVisible(true)}>
                 <View>
@@ -187,7 +165,6 @@ export default function AddProjectScreen() {
                 {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="#3b5998" />}
             </TouchableOpacity>
 
-            {/* AUTO-FILLED DETAILS PREVIEW */}
             {client ? (
                 <View style={styles.detailsBox}>
                     <Text style={styles.boxTitle}>Client Details (Auto-filled)</Text>
@@ -244,7 +221,6 @@ export default function AddProjectScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* SEARCH MODAL */}
       <Modal visible={modalVisible} animationType="slide">
           <View style={styles.modalContainer}>
               <View style={styles.modalHeader}>
@@ -293,10 +269,8 @@ const styles = StyleSheet.create({
   label: { marginTop: 15, marginBottom: 5, color: '#555', fontWeight: '600' },
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 12, fontSize: 16, backgroundColor: '#f9f9f9' },
   
-  // Dropdown Style
   dropdown: { borderWidth: 1, borderColor: '#3b5998', borderRadius: 8, padding: 12, backgroundColor: '#f0f4ff', flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
   
-  // Auto-filled Box
   detailsBox: { backgroundColor: '#f5f5f5', padding: 10, borderRadius: 8, marginTop: 10, borderWidth:1, borderColor:'#eee' },
   boxTitle: { fontSize: 12, fontWeight:'bold', color:'#3b5998', marginBottom:10 },
   row: { flexDirection:'row', marginBottom:5 },
@@ -306,7 +280,6 @@ const styles = StyleSheet.create({
   btn: { backgroundColor: '#3b5998', padding: 15, borderRadius: 8, alignItems: 'center', marginTop: 30, marginBottom: 50, elevation: 3 },
   btnText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
 
-  // Modal Styles
   modalContainer: { flex: 1, backgroundColor: 'white', paddingTop: 40 },
   modalHeader: { flexDirection: 'row', alignItems: 'center', padding: 10, borderBottomWidth: 1, borderBottomColor: '#eee' },
   searchInput: { flex: 1, marginLeft: 10, fontSize: 16, backgroundColor: '#f0f0f0', padding: 8, borderRadius: 8 },

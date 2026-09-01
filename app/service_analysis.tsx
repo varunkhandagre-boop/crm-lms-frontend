@@ -14,20 +14,45 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct DB imports removed)
+// 🔥 SAAS IMPORTS (users still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 4: this screen is now FULLY migrated — all four data sources
+// (service calls, PMS, demos, installations) come from the new backend API.
+// demos was already migrated in Phase 2; the other three complete in Phase 4.
+import { listServiceCalls } from '../services/api/serviceCalls';
+import { listPmsReports } from '../services/api/pmsReports';
+import { listDemos } from '../services/api/demos';
+import { listInstallations } from '../services/api/installations';
+
+const parseDateOnly = (dateStr: any) => {
+    if (!dateStr) return 0;
+    if (typeof dateStr === 'number') return dateStr; 
+    if (dateStr instanceof Date) return dateStr.getTime();
+
+    if (typeof dateStr === 'string') {
+        let cleanStr = dateStr.replace(/[\.\-]/g, '/');
+        const parts = cleanStr.split('/');
+        
+        if (parts.length === 3) {
+           if (parts[0].length === 4) {
+               return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])).getTime();
+           }
+           if (parts[2].length === 4) {
+               return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0])).getTime();
+           }
+        }
+    }
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? 0 : d.getTime();
+};
 
 export default function AnalysisScreen() {
     const router = useRouter();
     
-    // 🔥 1. Context se sirf user
     const { currentUser } = useData(); 
-
-    // 🔥 2. Naya SaaS Engine
     const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-    // 🔥 3. Lazy Loaded Master States
     const [serviceList, setServiceList] = useState<any[]>([]);
     const [pmsList, setPmsList] = useState<any[]>([]);
     const [demoList, setDemoList] = useState<any[]>([]);
@@ -35,7 +60,6 @@ export default function AnalysisScreen() {
     const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
     const [refreshing, setRefreshing] = useState(false);
 
-    // FILTERS
     const [reportType, setReportType] = useState('All'); 
     const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY'); 
     const [selectedDate, setSelectedDate] = useState(new Date());
@@ -59,37 +83,14 @@ export default function AnalysisScreen() {
         else setVisibleCount(20);
     }, [reportType, viewMode, selectedDate, searchText, selectedEmployee]);
 
-    // --- ROBUST DATE PARSER ---
-    const parseDate = (dateStr: any) => {
-        if (!dateStr) return 0;
-        if (typeof dateStr === 'number') return dateStr; 
-        if (dateStr instanceof Date) return dateStr.getTime();
-
-        if (typeof dateStr === 'string') {
-            let cleanStr = dateStr.replace(/[\.\-]/g, '/');
-            const parts = cleanStr.split('/');
-            
-            if (parts.length === 3) {
-               if (parts[0].length === 4) {
-                   return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])).getTime();
-               }
-               if (parts[2].length === 4) {
-                   return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0])).getTime();
-               }
-            }
-        }
-        const d = new Date(dateStr);
-        return isNaN(d.getTime()) ? 0 : d.getTime();
-    };
-
-    // 🔥 4. MASSIVE SAAS DATA LOAD
+    // 🔥 LOAD DATA — service calls, PMS, demos, installations all via new API; users via Firestore
     const loadAllData = async () => {
         if (currentUser?.companyId) {
             const [services, pms, demos, installs, users] = await Promise.all([
-                fetchSaaSData("service_calls"),
-                fetchSaaSData("pms_reports"),
-                fetchSaaSData("demos"),
-                fetchSaaSData("installations"),
+                listServiceCalls(),   // was: fetchSaaSData("service_calls")
+                listPmsReports(),     // was: fetchSaaSData("pms_reports")
+                listDemos(),          // was: fetchSaaSData("demos")
+                listInstallations(),  // was: fetchSaaSData("installations")
                 fetchSaaSData("users")
             ]);
             
@@ -118,13 +119,9 @@ export default function AnalysisScreen() {
         setRefreshing(false);
     };
 
-    // ==========================================
-    // 1. DATA MERGING & FILTERING
-    // ==========================================
     useEffect(() => {
         let allData: any[] = [];
 
-        // 👉 1. INSTALLATION
         if (Array.isArray(installationList)) {
             allData = [...allData, ...installationList.map((i:any) => ({
                 ...i,
@@ -141,7 +138,6 @@ export default function AnalysisScreen() {
             }))];
         }
 
-        // 👉 2. PMS
         if (Array.isArray(pmsList)) {
             allData = [...allData, ...pmsList.map((i:any) => ({
                 ...i,
@@ -158,7 +154,6 @@ export default function AnalysisScreen() {
             }))];
         }
 
-        // 👉 3. SERVICE CALLS
         if (Array.isArray(serviceList)) {
             allData = [...allData, ...serviceList.map((i:any) => ({
                 ...i,
@@ -175,7 +170,6 @@ export default function AnalysisScreen() {
             }))];
         }
 
-        // 👉 4. DEMOS
         if (Array.isArray(demoList)) {
             allData = [...allData, ...demoList.map((i:any) => ({
                 ...i,
@@ -192,9 +186,6 @@ export default function AnalysisScreen() {
             }))];
         }
 
-        // --- FILTER LOGIC ---
-        
-        // 1. Employee Filter
         if (isAdmin && selectedEmployee !== 'All') {
             const targetName = selectedEmployeeName.toLowerCase().trim();
             allData = allData.filter(i => 
@@ -212,12 +203,10 @@ export default function AnalysisScreen() {
             ); 
         }
 
-        // 2. Report Type Filter
         if (reportType !== 'All') {
             allData = allData.filter(i => i.reportType === reportType);
         }
 
-        // 3. Search Filter
         if (searchText) {
             const lower = searchText.toLowerCase();
             allData = allData.filter(i => {
@@ -227,7 +216,6 @@ export default function AnalysisScreen() {
             });
         }
 
-        // 4. Date View Filter
         if (viewMode !== 'All') {
             const targetYear = selectedDate.getFullYear();
             const targetMonth = selectedDate.getMonth();
@@ -243,7 +231,7 @@ export default function AnalysisScreen() {
             }
 
             allData = allData.filter(item => {
-                const ts = parseDate(item.displayDate);
+                const ts = parseDateOnly(item.displayDate);
                 if (!ts) return false; 
 
                 const d = new Date(ts);
@@ -257,8 +245,7 @@ export default function AnalysisScreen() {
             });
         }
 
-        // Sorting
-        allData.sort((a, b) => parseDate(b.displayDate) - parseDate(a.displayDate));
+        allData.sort((a, b) => parseDateOnly(b.displayDate) - parseDateOnly(a.displayDate));
         
         setFilteredData(allData);
 
@@ -275,7 +262,7 @@ export default function AnalysisScreen() {
 
     const formatDate = (dateStr: any) => {
         if (!dateStr) return "-";
-        const ts = parseDate(dateStr); 
+        const ts = parseDateOnly(dateStr); 
         if(!ts) return dateStr;
         return new Date(ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
     };
@@ -457,7 +444,6 @@ export default function AnalysisScreen() {
 
             </View>
 
-            {/* DETAIL POPUP */}
             <Modal visible={detailModalVisible} transparent={true} animationType="fade">
                 <View style={styles.modalOverlay}>
                     <View style={styles.detailCard}>
@@ -527,7 +513,6 @@ export default function AnalysisScreen() {
                 </View>
             </Modal>
 
-            {/* EMPLOYEE PICKER MODAL */}
             <Modal visible={showEmployeePicker} transparent animationType="fade">
                 <TouchableOpacity style={styles.pickerOverlay} onPress={() => setShowEmployeePicker(false)}>
                     <View style={styles.pickerContainer}>
