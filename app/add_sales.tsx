@@ -24,8 +24,10 @@ import { useData } from './context/DataContext';
 // 🔥 Phase 2: sales visits now go through the new backend API, which
 // auto-creates/links a lead server-side for positive outcomes — no more
 // separate addSaaSData("leads", ...) call needed here.
-import { createSalesVisit } from '../services/api/salesVisits';
+import { recordLocationLog } from '../services/api/locationLogs';
+import { fetchOrganizations } from '../services/api/organizations';
 import { listProducts } from '../services/api/products';
+import { createSalesVisit } from '../services/api/salesVisits';
 
 export default function AddSalesScreen() {
     const router = useRouter();
@@ -76,7 +78,7 @@ export default function AddSalesScreen() {
         const loadData = async () => {
             if (currentUser?.companyId) {
                 const [orgs, prods] = await Promise.all([
-                    fetchSaaSData("organizations"),
+                    fetchOrganizations({ limit: 200 }),
                     listProducts() // was: fetchSaaSData("products")
                 ]);
                 setOrgList(orgs);
@@ -194,6 +196,15 @@ export default function AddSalesScreen() {
 
         setIsSubmitting(true);
         const locationData = await getCurrentLocation();
+if (locationData) {
+    recordLocationLog({
+        latitude: locationData.lat,
+        longitude: locationData.lng,
+        type: 'Visit',
+    }).catch(() => {});
+}
+
+
         const nextDateISO = nextDate.toISOString().split('T')[0];
 
         let finalProductsToSave = selectedProducts.filter(p => p !== 'Other');

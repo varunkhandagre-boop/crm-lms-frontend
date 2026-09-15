@@ -19,11 +19,17 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS
+// 🔥 SAAS IMPORTS ("users" stays on Firestore until Phase 10)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 import { manageAttendanceReminders } from '../utils/notificationHelper';
+
+// 🔥 Phase 7: attendance/leaves/holidays now come from Postgres via these adapters
+import { dayIn as dayInApi, dayOut as dayOutApi, fetchAttendance, fetchTodayAttendance } from '../services/api/attendance';
+import { fetchHolidays } from '../services/api/holidays';
+import { fetchLeaves } from '../services/api/leaves';
+import { fetchTeamMembers } from '../services/api/users';
 
 export default function DayInScreen() {
     useKeepAwake();
@@ -32,8 +38,10 @@ export default function DayInScreen() {
     // 🔥 1. Context se sirf User nikalenge
     const { currentUser } = useData();
 
-    // 🔥 2. Naya SaaS Engine
-    const { fetchSaaSData, addSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+    // 🔥 2. "users" still Firestore; attendance/leaves/holidays are Postgres now
+    const { fetchSaaSData, isDbLoading: isUsersLoading } = useSaaSDB();
+    const [isAttendanceLoading, setIsAttendanceLoading] = useState(true);
+    const isDbLoading = isUsersLoading || isAttendanceLoading;
 
     // 🔥 3. Lazy Loaded Lists
     const [attendanceList, setAttendanceList] = useState<any[]>([]);
@@ -45,7 +53,8 @@ export default function DayInScreen() {
     const [location, setLocation] = useState<Location.LocationObject | null>(null);
     const [address, setAddress] = useState<string>('Ready to fetch location...');
     const [loading, setLoading] = useState(false);
-    const [status, setStatus] = useState('Out'); 
+    const [status, setStatus] = useState('Out');
+    const [workLocationType, setWorkLocationType] = useState<string | null>(null);
     const [timer, setTimer] = useState(0); 
     const [todayDocId, setTodayDocId] = useState<string | null>(null);
     const [startTime, setStartTime] = useState<number | null>(null);
@@ -73,25 +82,69 @@ export default function DayInScreen() {
 
     const canManage = currentUser?.role === 'Admin' || currentUser?.role === 'Manager' || currentUser?.role === 'Hr' || currentUser?.role === 'Accountant' || currentUser?.role === 'SuperAdmin';
 
-    // 🔥 4. LOAD DATA ON MOUNT
+    // 🔥 Bounded fetch range matching the currently selected history view
+    const getFetchRange = () => {
+        if (viewMode === 'Day') {
+            const d = currentDate.toISOString().split('T')[0];
+            return { fromDate: d, toDate: d };
+        }
+        if (viewMode === 'Month') {
+            const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+            const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+            return { fromDate: start.toISOString().split('T')[0], toDate: end.toISOString().split('T')[0] };
+        }
+        const start = new Date(currentDate.getFullYear(), 0, 1);
+        const end = new Date(currentDate.getFullYear(), 11, 31);
+        return { fromDate: start.toISOString().split('T')[0], toDate: end.toISOString().split('T')[0] };
+    };
+
+    // 🔥 4a. Users list loads once per session (still Firestore)
+    useEffect(() => {
+        const loadUsers = async () => {
+            if (currentUser?.companyId) {
+                const users = await fetchTeamMembers();
+                setUserList(users);
+            }
+        };
+        loadUsers();
+    }, [currentUser]);
+
+    // 🔥 4b. Attendance/leaves/holidays — bounded date-range fetch, re-run when the
+    // view window or selected employee changes. Waits for userList so a manager's
+    // employee filter resolves to the correct userId instead of falling back to self.
     const loadAllData = async () => {
-        if (currentUser?.companyId) {
-            const [attendance, holidays, leaves, users] = await Promise.all([
-                fetchSaaSData("attendance"),
-                fetchSaaSData("holidays"),
-                fetchSaaSData("leaves"),
-                fetchSaaSData("users")
+        if (!currentUser?.companyId) return;
+        if (canManage && filterUser !== 'All' && userList.length === 0) return; // wait for users to resolve the id
+
+        const { fromDate, toDate } = getFetchRange();
+        let targetUserId: string | undefined;
+        if (canManage) {
+            if (filterUser === 'All') {
+                targetUserId = 'all';
+            } else {
+                const match = userList.find((u: any) => u.name === filterUser);
+                targetUserId = match?.id;
+            }
+        } // else undefined => self, enforced server-side regardless
+
+        setIsAttendanceLoading(true);
+        try {
+            const [attendance, holidays, leaves] = await Promise.all([
+                fetchAttendance({ userId: targetUserId, fromDate, toDate, limit: 500 }),
+                fetchHolidays(fromDate, toDate),
+                fetchLeaves({ userId: targetUserId, limit: 200 }),
             ]);
             setAttendanceList(attendance);
             setHolidayList(holidays);
             setLeaveList(leaves);
-            setUserList(users);
+        } finally {
+            setIsAttendanceLoading(false);
         }
     };
 
     useEffect(() => {
         loadAllData();
-    }, [currentUser]);
+    }, [currentUser, viewMode, currentDate, filterUser, userList]);
 
     // HELPER: Unique Users
     const uniqueUsers = useMemo(() => {
@@ -159,45 +212,47 @@ export default function DayInScreen() {
         setExpenses({ ...newExpenses, totalAmount: total >= 0 ? total.toString() : '' });
     };
 
+    // 🔥 Phase 7: checks today's punch state via GET /api/v1/attendance/today
+    // instead of scanning the locally-loaded attendanceList (which may not include
+    // today if the view range is filtered elsewhere).
     useFocusEffect(
         useCallback(() => {
-            const checkStatus = () => {
+            const checkStatus = async () => {
                 const now = new Date();
-                const offset = now.getTimezoneOffset() * 60000;
-                const localDate = new Date(now.getTime() - offset);
-                const todayStr = localDate.toISOString().split('T')[0];
-                
-                const myEntry = attendanceList.find((a: any) => 
-                    a.date === todayStr && (isSameUser(a.userName, currentUser?.name) || a.userId === currentUser?.id || a.senderId === currentUser?.id)
-                );
 
-                if (myEntry) {
-                    setTodayDocId(myEntry.id);
-                    
-                    if (myEntry.outTime && myEntry.outTime !== '--') {
-                        setStatus('Completed');
-                        setTimer(0);
+                try {
+                    const myEntry = await fetchTodayAttendance();
+
+                    if (myEntry) {
+                        setTodayDocId(myEntry.id);
+
+                        if (myEntry.outTime && myEntry.outTime !== '--') {
+                            setStatus('Completed');
+                            setTimer(0);
+                        } else {
+                            if (status === 'Completed') return;
+                            setStatus('In');
+                            const start = new Date(myEntry.createdAt).getTime();
+                            setStartTime(start);
+                            const diff = Math.floor((now.getTime() - start) / 1000);
+                            setTimer(diff > 0 ? diff : 0);
+                        }
+
+                        if (myEntry.location?.address && address.includes('Ready')) {
+                            setAddress(myEntry.location.address);
+                        }
                     } else {
-                        if (status === 'Completed') return;
-                        setStatus('In');
-                        const start = new Date(myEntry.createdAt || myEntry.timestamp).getTime();
-                        setStartTime(start);
-                        const diff = Math.floor((now.getTime() - start) / 1000);
-                        setTimer(diff > 0 ? diff : 0);
+                        setStatus('Out');
+                        setTimer(0);
+                        setTodayDocId(null);
                     }
-                    
-                    if(myEntry.location?.address && address.includes('Ready')) {
-                        setAddress(myEntry.location.address);
-                    }
-                } else {
-                    setStatus('Out');
-                    setTimer(0);
-                    setTodayDocId(null);
+                } catch (e) {
+                    console.log('Today attendance check failed', e);
                 }
             };
 
-            if(attendanceList && currentUser) checkStatus();
-        }, [attendanceList, currentUser, status])
+            if (currentUser) checkStatus();
+        }, [currentUser, status])
     );
 
     useEffect(() => {
@@ -398,26 +453,23 @@ export default function DayInScreen() {
     const leavesOrAbsent = finalData.filter(i => getStatus(i) === 'LEAVE' || getStatus(i) === 'ABSENT').length;
     const midLabel = "Leaves/Abs";
 
-    // 🔥 5. SAAS DAY IN LOGIC
+    // 🔥 5. Day-In — Phase 7: posts to /api/v1/attendance via dayInApi()
     const handleDayIn = async () => {
         setLoading(true);
         setAddress("Fetching GPS...");
         try {
             const now = new Date();
             const todayStr = getStandardDateForHoliday(now);
-            
-            const existingEntry = attendanceList.find((a: any) => 
-                a.date === todayStr && (a.userId === currentUser?.id || isSameUser(a.userName, currentUser?.name) || isSameUser(a.senderName, currentUser?.name))
-            );
 
-            if (existingEntry) {
+            // Guard against double punch-in — server also enforces this via the
+            // (user_id, date) unique constraint, this is just a fast local check.
+            const existing = await fetchTodayAttendance();
+            if (existing) {
                 Alert.alert("Already Punched In", "You have already marked your attendance for today.");
-                setStatus(existingEntry.outTime && existingEntry.outTime !== '--' ? 'Completed' : 'In');
+                setStatus(existing.outTime && existing.outTime !== '--' ? 'Completed' : 'In');
                 setLoading(false);
                 return;
             }
-
-            let realName = currentUser?.name || 'Unknown';
 
             let { status: permStatus } = await Location.requestForegroundPermissionsAsync();
             if (permStatus !== 'granted') throw new Error("Denied");
@@ -444,34 +496,27 @@ export default function DayInScreen() {
             }
             setAddress(currentAddr);
 
-            const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-            const newAttendanceData = {
+            const res = await dayInApi({
                 date: todayStr,
-                dateIso: todayStr,
-                inTime: timeString,
-                outTime: '', workHrs: '', status: 'Present',
-                expenses: { da: '0', hotel: '0', misc: '0', totalAmount: '0' },
-                location: { address: currentAddr, latitude: loc.coords.latitude, longitude: loc.coords.longitude },
+                checkInAt: now.toISOString(),
+                checkInLocation: { latitude: loc.coords.latitude, longitude: loc.coords.longitude },
+                checkInAddress: currentAddr,
                 note: 'Marked via GPS',
-                userName: realName, 
-                senderName: realName,
-                role: currentUser?.role || 'Employee'
-            };
+            });
 
-            const res = await addSaaSData("attendance", newAttendanceData);
-            
             if (res.success) {
                 setTodayDocId(res.id);
                 setStatus('In');
                 setStartTime(now.getTime());
+                setWorkLocationType(res.record?.workLocationType ?? null);
                 await manageAttendanceReminders('LOGGED_IN', holidayList);
                 
                 // Silent refresh
                 await loadAllData();
+                const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 Alert.alert("Success", `✅ Punched In at ${timeString}\n📍 ${currentAddr}`);
             } else {
-                throw new Error("Could not save to SaaS DB");
+                throw new Error("Could not save to Postgres");
             }
         } catch (error) {
             console.log(error);
@@ -488,7 +533,7 @@ export default function DayInScreen() {
         else Alert.alert("Done", "Aaj ka kaam ho gaya hai.");
     };
 
-    // 🔥 6. SAAS DAY OUT LOGIC
+    // 🔥 6. Day-Out — Phase 7: PATCHes /api/v1/attendance/:id via dayOutApi()
     const handleFinalizeDayOut = async () => {
         if (!todayDocId) return;
         if (!startTime) {
@@ -499,22 +544,14 @@ export default function DayInScreen() {
         setLoading(true);
 
         try {
-            const nowMs = new Date().getTime();
-            const actualDurationSeconds = Math.floor((nowMs - startTime) / 1000);
-            const finalSeconds = actualDurationSeconds > 0 ? actualDurationSeconds : 0;
-            const hoursWorked = finalSeconds / 3600;
-            
-            const attendanceStatus = hoursWorked < 4 ? 'Short Day' : 'Present';
-
             const finalExpenses = {
-                da: expenses.da || '0',
-                hotel: expenses.hotel || '0',
-                misc: expenses.misc || '0',
-                totalAmount: expenses.totalAmount || '0',
+                da: parseFloat(expenses.da) || 0,
+                hotel: parseFloat(expenses.hotel) || 0,
+                misc: parseFloat(expenses.misc) || 0,
                 note: expenses.note || '' 
             };
 
-            let outLocData = null;
+            let outLocData: { latitude: number; longitude: number } | undefined;
             let outAddr = "Unknown";
             try {
                 let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
@@ -533,16 +570,15 @@ export default function DayInScreen() {
                 }
             } catch (e) { console.log("Out loc failed"); }
 
-            const updatedData = {
-                outTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                workHrs: formatTime(finalSeconds), 
-                status: attendanceStatus,
-                expenses: finalExpenses,
-                outLocation: outLocData,
-                outAddress: outAddr
-            };
-
-            const res = await updateSaaSData("attendance", todayDocId, updatedData);
+            const res = await dayOutApi(todayDocId, {
+                checkOutAt: new Date().toISOString(),
+                checkOutLocation: outLocData,
+                checkOutAddress: outAddr,
+                expenseDa: finalExpenses.da,
+                expenseHotel: finalExpenses.hotel,
+                expenseMisc: finalExpenses.misc,
+                expenseNote: finalExpenses.note,
+            });
 
             if (res.success) {
                 await Notifications.dismissAllNotificationsAsync();
@@ -551,12 +587,13 @@ export default function DayInScreen() {
 
                 setStatus('Completed');
                 setExpenseModalVisible(false);
+                const totalAmount = res.record.expenses.totalAmount;
                 setExpenses({ da: '', hotel: '', misc: '', totalAmount: '', note: '' });
 
                 await loadAllData();
-                Alert.alert("Day End", `✅ Punched Out Successfully!\nTotal Expense: ₹${finalExpenses.totalAmount}`);
+                Alert.alert("Day End", `✅ Punched Out Successfully!\nTotal Expense: ₹${totalAmount}`);
             } else {
-                throw new Error("Failed to update in SaaS DB");
+                throw new Error("Failed to update in Postgres");
             }
         } catch (error) {
             Alert.alert("Error", "Day Out Update Failed.");
@@ -642,6 +679,16 @@ export default function DayInScreen() {
                         {loading ? <ActivityIndicator size="small" color="#3b5998" style={{marginLeft:10}} /> : 
                             <Text style={styles.locText} numberOfLines={1}>{address}</Text>
                         }
+                        {workLocationType && (
+                            <View style={{
+                                width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginLeft: 8,
+                                backgroundColor: workLocationType === 'Office' ? '#2e7d32' : '#e65100'
+                            }}>
+                                <Text style={{ fontSize: 11, fontWeight: 'bold', color: 'white' }}>
+                                    {workLocationType === 'Office' ? 'O' : 'F'}
+                                </Text>
+                            </View>
+                        )}
                     </View>
 
                     <TouchableOpacity 

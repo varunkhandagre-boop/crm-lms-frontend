@@ -16,8 +16,10 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (No Direct Firebase DB calls)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+
+// 🔥 Phase 10: organizations now come from Postgres via these adapters
+import { fetchOrganizations, deleteOrganization } from '../services/api/organizations';
 
 export default function OrganizationScreen() {
   const router = useRouter();
@@ -26,8 +28,8 @@ export default function OrganizationScreen() {
   const { currentUser, user } = useData(); 
   const activeUser = currentUser || user;
 
-  // 🔥 Naya SaaS Engine
-  const { fetchSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 Local loading state (no more useSaaSDB here)
+  const [isDbLoading, setIsDbLoading] = useState(true);
   const [orgList, setOrgList] = useState<any[]>([]);
 
   // --- STATES ---
@@ -46,11 +48,15 @@ export default function OrganizationScreen() {
       setVisibleCount(20);
   }, [searchText]);
 
-  // 🔥 LOAD SAAS DATA ON MOUNT
+  // 🔥 Phase 10: loads from Postgres via fetchOrganizations()
   const loadData = async () => {
-      if (activeUser?.companyId) {
-          const orgs = await fetchSaaSData("organizations");
+      if (!activeUser?.companyId) return;
+      setIsDbLoading(true);
+      try {
+          const orgs = await fetchOrganizations();
           setOrgList(orgs);
+      } finally {
+          setIsDbLoading(false);
       }
   };
 
@@ -100,7 +106,7 @@ export default function OrganizationScreen() {
       else Alert.alert("Error", "No mobile number available.");
   };
 
-  // 🔥 SAAS ISOLATED DELETE FUNCTION
+  // 🔥 Phase 10: DELETEs via deleteOrganization()
   const handleDeleteOrg = async () => {
       if (!selectedOrg) return;
       Alert.alert(
@@ -114,7 +120,7 @@ export default function OrganizationScreen() {
                   onPress: async () => {
                       setIsDeleting(true);
                       try {
-                          const res = await deleteSaaSData("organizations", selectedOrg.id);
+                          const res = await deleteOrganization(selectedOrg.id);
                           if (res.success) {
                               setOrgList(prev => prev.filter(o => o.id !== selectedOrg.id));
                               setDetailsModalVisible(false);

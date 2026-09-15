@@ -14,9 +14,15 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS
+// 🔥 SAAS IMPORTS (still used for "users" — user profile master list stays on Firestore until Phase 10)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+
+// 🔥 Phase 7: leaves/attendance/holidays now come from Postgres via these adapters
+import { fetchAttendance } from '../services/api/attendance';
+import { fetchHolidays } from '../services/api/holidays';
+import { fetchLeaves, fetchLeaveSummary, updateLeaveStatus as updateLeaveStatusApi } from '../services/api/leaves';
+import { fetchTeamMembers } from '../services/api/users';
 
 export default function LeaveApplicationScreen() {
   const router = useRouter();
@@ -24,8 +30,10 @@ export default function LeaveApplicationScreen() {
   // 🔥 1. Context se sirf user aur notifications
   const { currentUser, addNotification } = useData();
 
-  // 🔥 2. Naya SaaS Engine
-  const { fetchSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 2. "users" abhi bhi Firestore se (Phase 10 tak) — baaki sab Postgres se
+  const { fetchSaaSData, isDbLoading: isUsersLoading } = useSaaSDB();
+  const [isLeaveDataLoading, setIsLeaveDataLoading] = useState(true);
+  const isDbLoading = isUsersLoading || isLeaveDataLoading;
 
   // 🔥 3. Lazy Loaded Master States
   const [leaveList, setLeaveList] = useState<any[]>([]);
@@ -38,9 +46,14 @@ export default function LeaveApplicationScreen() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [searchText, setSearchText] = useState('');
   
+  // 🔥 Phase 7: quota/used/balance/absents/short/lwp now come from GET /api/v1/leaves/summary
+  // (server-computed for the employee's current FY) instead of a client-side day-by-day loop.
+  // Note: this card is always FY-scoped now, regardless of the Day/Month/FY/All tabs below —
+  // those tabs still filter the *list* of leave records, just not this balance summary.
   const [stats, setStats] = useState({ 
       baseTotal: 0, earned: 0, total: 0, used: 0, absents: 0, shortDays: 0, balance: 0, lwp: 0 
   });
+  const [summaryLoading, setSummaryLoading] = useState(false);
   
   const [autoRecords, setAutoRecords] = useState<any[]>([]);
 
@@ -48,7 +61,7 @@ export default function LeaveApplicationScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
 
-  const [employees, setEmployees] = useState<{name: string, yearlyLeaves?: number, joiningDate?: any, createdAt?: any}[]>([]);
+  const [employees, setEmployees] = useState<{name: string, id?: string, yearlyLeaves?: number, joiningDate?: any, createdAt?: any}[]>([]);
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All'); 
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
@@ -62,18 +75,60 @@ export default function LeaveApplicationScreen() {
       else setVisibleCount(20); 
   }, [viewMode, currentDate, searchText, selectedEmployeeName]);
 
-  // 🔥 4. LOAD DATA ON MOUNT
+  const currentFyStartYear = () => {
+      const m = currentDate.getMonth();
+      const y = currentDate.getFullYear();
+      return m >= 3 ? y : y - 1;
+  };
+
+  const fyBounds = (fyStartYear: number) => ({
+      fyStart: new Date(fyStartYear, 3, 1),
+      fyEnd: new Date(fyStartYear + 1, 2, 31),
+  });
+
+  // 🔥 4. LOAD DATA — leaves/attendance/holidays from Postgres, users still from Firestore.
+  // Attendance/holidays are bounded to the current FY (not "since joining") to keep the
+  // autoRecords feed (Earned/Absent/Half-Day rows) cheap regardless of company size.
   const loadAllData = async () => {
-      if (currentUser?.companyId) {
-          const [leaves, attendance, holidays, users] = await Promise.all([
-              fetchSaaSData("leaves"),
-              fetchSaaSData("attendance"),
-              fetchSaaSData("holidays"),
-              fetchSaaSData("users")
+      if (!currentUser?.companyId) return;
+      if (canManage && selectedEmployeeName !== 'All' && employees.length === 0) return; // wait for employees to resolve the picked id
+
+      const fyStartYear = currentFyStartYear();
+      const { fyStart, fyEnd } = fyBounds(fyStartYear);
+      const fromDate = fyStart.toISOString().split('T')[0];
+      const toDate = (fyEnd < new Date() ? fyEnd : new Date()).toISOString().split('T')[0];
+
+      let targetUserId: string | undefined;
+      if (canManage) {
+          if (selectedEmployeeName === 'All') {
+              targetUserId = 'all';
+          } else {
+              targetUserId = employees.find(e => e.name === selectedEmployeeName)?.id;
+          }
+      } // else undefined => self, enforced server-side regardless
+
+      setIsLeaveDataLoading(true);
+      try {
+          const [leaves, attendance, holidays] = await Promise.all([
+              fetchLeaves({ userId: targetUserId, limit: 200 }),
+              fetchAttendance({ userId: targetUserId, fromDate, toDate, limit: 500 }),
+              fetchHolidays(fromDate, toDate),
           ]);
           setLeaveList(leaves);
           setAttendanceList(attendance);
           setHolidayList(holidays);
+      } finally {
+          setIsLeaveDataLoading(false);
+      }
+  };
+
+  // 🔥 Users list (+ derived employee picker options) loads once per session — separate
+  // from the leaves/attendance fetch above so switching the employee filter doesn't
+  // re-fetch the whole users list every time.
+  useEffect(() => {
+      const loadUsers = async () => {
+          if (!currentUser?.companyId) return;
+          const users = await fetchTeamMembers();
           setUserList(users);
 
           if (canManage) {
@@ -82,6 +137,7 @@ export default function LeaveApplicationScreen() {
                   if (u.name && !uniqueUsersMap.has(u.name)) {
                       uniqueUsersMap.set(u.name, {
                           name: u.name,
+                          id: u.id,
                           yearlyLeaves: u.yearlyLeaves || 18,
                           joiningDate: u.joiningDate || null,
                           createdAt: u.createdAt || null
@@ -90,12 +146,52 @@ export default function LeaveApplicationScreen() {
               });
               setEmployees([{ name: 'All', yearlyLeaves: 0, joiningDate: null, createdAt: null }, ...Array.from(uniqueUsersMap.values())]);
           }
-      }
-  };
+      };
+      loadUsers();
+  }, [currentUser]);
 
   useEffect(() => {
       loadAllData();
-  }, [currentUser]);
+  }, [currentUser, selectedEmployeeName, employees]);
+
+  // 🔥 Phase 7: fetch the server-computed balance summary whenever the target employee
+  // or the visible FY (driven by currentDate) changes.
+  useEffect(() => {
+      const loadSummary = async () => {
+          if (!currentUser?.companyId) return;
+          setSummaryLoading(true);
+          try {
+              const targetEmployee = employees.find(e => e.name === selectedEmployeeName);
+              const targetUserId = canManage
+                  ? (selectedEmployeeName === 'All' ? undefined : targetEmployee?.id)
+                  : undefined; // self
+
+              // "All employees" selected by a manager: summary card doesn't make sense for
+              // a whole company at once, so we skip the call and zero it out.
+              if (canManage && selectedEmployeeName === 'All') {
+                  setStats({ baseTotal: 0, earned: 0, total: 0, used: 0, absents: 0, shortDays: 0, balance: 0, lwp: 0 });
+                  return;
+              }
+
+              const summary = await fetchLeaveSummary({ userId: targetUserId, fyStartYear: currentFyStartYear() });
+              setStats({
+                  baseTotal: summary.baseQuota,
+                  earned: summary.earned,
+                  total: summary.totalQuota,
+                  used: summary.used,
+                  absents: summary.absents,
+                  shortDays: summary.shortDays,
+                  balance: summary.balance,
+                  lwp: summary.lwp,
+              });
+          } catch (e) {
+              console.log('Leave summary fetch failed', e);
+          } finally {
+              setSummaryLoading(false);
+          }
+      };
+      loadSummary();
+  }, [currentUser, selectedEmployeeName, employees, currentDate]);
 
   // DATE HELPERS
   const getTimestampFromDDMMYYYY = (dateStr: string) => {
@@ -123,52 +219,33 @@ export default function LeaveApplicationScreen() {
   };
 
   // ==========================================
-  // 🔥 CORE LOGIC: ADVANCED ATTENDANCE & LEAVE ENGINE
+  // 🔥 AUTO-RECORDS FEED (Earned / Half-Day / Cancelled rows shown in the list)
+  // Bounded to the current FY window fetched above — NOT the balance card anymore
+  // (that comes from the server summary in the effect above).
   // ==========================================
   useEffect(() => {
       if (leaveList.length === 0 && attendanceList.length === 0) return;
 
       let generatedRecords: any[] = [];
-      let totalBase = 0, totalEarned = 0, totalUsed = 0, totalAbsents = 0, totalShort = 0, totalCancelled = 0;
 
-      let usersToProcess = [];
+      let usersToProcess: any[] = [];
       if (canManage && selectedEmployeeName === 'All') {
           usersToProcess = employees.filter(e => e.name !== 'All');
       } else if (canManage) {
           usersToProcess = employees.filter(e => e.name === selectedEmployeeName);
       } else {
-          usersToProcess = [{ name: currentUser?.name, yearlyLeaves: currentUser?.yearlyLeaves || 18, joiningDate: currentUser?.joiningDate, createdAt: currentUser?.createdAt }];
+          usersToProcess = [{ name: currentUser?.name }];
       }
-
-      const targetY = currentDate.getFullYear();
-      const targetM = currentDate.getMonth();
-      const targetD = currentDate.getDate();
-      
-      const fYearStart = targetM >= 3 ? targetY : targetY - 1;
-      const fyStartMs = new Date(fYearStart, 3, 1).getTime(); 
-      const fyEndMs = new Date(fYearStart + 1, 2, 31, 23, 59, 59).getTime();
 
       const todayObj = new Date();
       const todayStr = getStandardDate(todayObj);
+      const { fyStart } = fyBounds(currentFyStartYear());
 
       usersToProcess.forEach(emp => {
           if (!emp || !emp.name) return;
           const empName = emp.name;
-          totalBase += (emp.yearlyLeaves || 18);
 
-          let startOfCalculation = new Date(fYearStart, 3, 1); 
-          const APP_LAUNCH_DATE = new Date(2026, 0, 1); 
-          if (startOfCalculation < APP_LAUNCH_DATE) startOfCalculation = APP_LAUNCH_DATE;
-          
-          if (emp.joiningDate) {
-              const joinD = new Date(emp.joiningDate);
-              if (joinD > startOfCalculation) startOfCalculation = joinD; 
-          } else if (emp.createdAt) {
-              const createD = new Date(emp.createdAt);
-              if (createD > startOfCalculation) startOfCalculation = createD;
-          }
-
-          let d = new Date(startOfCalculation);
+          let d = new Date(fyStart);
           d.setHours(0,0,0,0);
           const todayLimit = new Date();
           todayLimit.setHours(0,0,0,0);
@@ -188,7 +265,7 @@ export default function LeaveApplicationScreen() {
               });
 
               const attRecord = attendanceList?.find((a:any) => 
-                  (a.userName === empName || a.senderName === empName) && (a.dateIso === dateStr || a.date === dateStr) && a.status !== 'Absent' && a.status !== 'ABSENT' && a.inTime && a.inTime !== '-'
+                  (a.userName === empName || a.senderName === empName) && (a.dateIso === dateStr || a.date === dateStr) && a.inTime && a.inTime !== '-'
               );
 
               const isToday = (dateStr === todayStr);
@@ -207,41 +284,31 @@ export default function LeaveApplicationScreen() {
                   else { if ((hasLoggedOut && hours < 4) || !hasLoggedOut) isHalfDay = true; }
               }
 
-              let shouldCountForStats = false;
-              if (viewMode === 'All') shouldCountForStats = true;
-              else if (viewMode === 'FY') shouldCountForStats = (loopTime >= fyStartMs && loopTime <= fyEndMs);
-              else if (viewMode === 'Month') shouldCountForStats = (d.getFullYear() === targetY && d.getMonth() === targetM);
-              else if (viewMode === 'Day') shouldCountForStats = (d.getFullYear() === targetY && d.getMonth() === targetM && d.getDate() === targetD);
-
               const parts = dateStr.split('-');
               const displayDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
 
               if (isPresent) {
                   if (isOnLeave) {
-                      if (shouldCountForStats) totalCancelled += (isHalfDay ? 0.5 : 1);
-                      if (shouldCountForStats) generatedRecords.push({
+                      generatedRecords.push({
                           id: `cancel-${dateStr}-${empName}`, isAutoRecord: true, isCancelled: true, senderName: empName, fromDate: displayDate,
                           days: `-${isHalfDay ? 0.5 : 1}`, type: 'Leave Cancelled', status: 'Worked', reason: 'Present on an approved leave day', createdAt: d.toISOString() 
                       });
                   } else if (isSunday || isHoliday) {
-                      if (shouldCountForStats) totalEarned += (isHalfDay ? 0.5 : 1);
-                      if (shouldCountForStats) generatedRecords.push({
+                      generatedRecords.push({
                           id: `earned-${dateStr}-${empName}`, isAutoRecord: true, isEarned: true, senderName: empName, fromDate: displayDate,
                           days: `+${isHalfDay ? 0.5 : 1}`, type: 'Earned Leave', status: 'Approved', reason: isSunday ? 'Worked on Sunday' : 'Worked on Holiday', createdAt: d.toISOString() 
                       });
                   }
                   
                   if (isHalfDay) {
-                      if (shouldCountForStats) totalShort += 0.5;
-                      if (shouldCountForStats) generatedRecords.push({
+                      generatedRecords.push({
                           id: `half-${dateStr}-${empName}`, isAutoRecord: true, senderName: empName, fromDate: displayDate,
                           days: "0.5", type: 'Half Day', status: 'Absent', reason: isToday ? 'Short Working Hours' : 'Short Hours / Forgot Day-Out', createdAt: d.toISOString() 
                       });
                   }
               } else {
                   if (!isSunday && !isHoliday && !isOnLeave && dateStr <= todayStr) {
-                      if (shouldCountForStats) totalAbsents += 1;
-                      if (shouldCountForStats) generatedRecords.push({
+                      generatedRecords.push({
                           id: `absent-${dateStr}-${empName}`, isAutoRecord: true, senderName: empName, fromDate: displayDate,
                           days: "1", type: 'Auto-Deduction', status: 'Absent', reason: 'System Auto-Marked Absent', createdAt: d.toISOString() 
                       });
@@ -250,54 +317,10 @@ export default function LeaveApplicationScreen() {
 
               d.setDate(d.getDate() + 1);
           }
-
-          leaveList?.forEach((l: any) => {
-              if (l.senderName === empName && l.status === 'Approved') {
-                  const lTime = getTimestampFromDDMMYYYY(l.fromDateIso || l.fromDate);
-                  let shouldCount = false;
-                  
-                  if (viewMode === 'All') shouldCount = lTime >= startOfCalculation.getTime();
-                  else if (viewMode === 'FY') shouldCount = (lTime >= fyStartMs && lTime <= fyEndMs);
-                  else if (viewMode === 'Month') {
-                      const lDate = parseDate(l.fromDateIso || l.fromDate);
-                      shouldCount = (lDate.getFullYear() === targetY && lDate.getMonth() === targetM);
-                  }
-                  else if (viewMode === 'Day') {
-                      const lDate = parseDate(l.fromDateIso || l.fromDate);
-                      shouldCount = (lDate.getFullYear() === targetY && lDate.getMonth() === targetM && lDate.getDate() === targetD);
-                  }
-
-                  if (shouldCount) totalUsed += (parseFloat(l.days) || 0);
-              }
-          });
       });
 
       setAutoRecords(generatedRecords);
-
-      const actualTotalQuota = totalBase + totalEarned; 
-      const actualUsedLeaves = totalUsed - totalCancelled;
-      const finalAbsents = totalAbsents + totalShort;
-      
-      let remainingBalance = actualTotalQuota - actualUsedLeaves - finalAbsents;
-      let lwpDays = 0;
-
-      if (remainingBalance < 0) {
-          lwpDays = Math.abs(remainingBalance);
-          remainingBalance = 0; 
-      }
-
-      setStats({
-          baseTotal: totalBase,
-          earned: totalEarned,
-          total: actualTotalQuota,
-          used: actualUsedLeaves,
-          absents: totalAbsents,
-          shortDays: totalShort, 
-          balance: remainingBalance,
-          lwp: lwpDays
-      });
-
-  }, [leaveList, attendanceList, holidayList, currentUser, selectedEmployeeName, employees, viewMode, currentDate]);
+  }, [leaveList, attendanceList, holidayList, currentUser, selectedEmployeeName, employees]);
 
 
   const changeDate = (dir: number) => {
@@ -391,7 +414,7 @@ export default function LeaveApplicationScreen() {
   const renderedList = fullList.slice(0, visibleCount);
   const pendingCount = fullList.filter(i => i.status === 'Pending' && !i.isAutoRecord).length;
 
-  // 🔥 5. SAAS STATUS UPDATE LOGIC
+  // 🔥 5. SAAS STATUS UPDATE LOGIC — Phase 7: now calls PATCH /api/v1/leaves/:id/status
   const handleStatusChange = async (status: string) => {
       if(selectedItem.isAutoRecord) {
           Alert.alert("Action Not Allowed", "This is an auto-generated system record.");
@@ -399,7 +422,7 @@ export default function LeaveApplicationScreen() {
       }
       setUpdatingStatus(status); 
       try {
-          const res = await updateSaaSData("leaves", selectedItem.id, { status: status });
+          const res = await updateLeaveStatusApi(selectedItem.id, status as 'Approved' | 'Rejected');
 
           if (res.success) {
               const targetUserId = selectedItem.senderId || selectedItem.userId;
@@ -480,7 +503,7 @@ export default function LeaveApplicationScreen() {
               <View style={styles.statBox}>
                   <Text style={styles.statLabel}>Total Quota</Text>
                   <Text style={styles.statValue}>
-                      {stats.total} 
+                      {summaryLoading ? '...' : stats.total}
                       {stats.earned > 0 && <Text style={{fontSize:10, color:'#2e7d32'}}> (+{stats.earned})</Text>}
                   </Text>
               </View>

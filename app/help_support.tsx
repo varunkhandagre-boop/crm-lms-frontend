@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { doc, getDoc } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -11,7 +10,8 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db } from '../firebaseConfig';
+
+import { fetchPublicSupportSettings } from '../services/api/settings';
 
 // =========================================================
 // 🔥 DEFAULT FALLBACK
@@ -329,7 +329,6 @@ const GUIDE_SECTIONS = [
 // 📋 FAQ DATA
 // =========================================================
 const FAQS = [
-    // ─── ATTENDANCE ───────────────────────────────────────
     {
         category: 'Attendance',
         q: 'Problem with Day In — attendance is not marking',
@@ -355,8 +354,6 @@ const FAQS = [
         q: 'My attendance is showing "Not Marked" on the home screen even after marking',
         a: `1. Pull down on the home screen to refresh the data.\n2. Close the app fully and reopen it.\n3. Check if your internet was ON when you marked attendance — if it was off, the entry may not have saved.\n4. Go to the Attendance screen and check if today's entry appears in the list.\n\nIf the entry is missing, contact your Admin to manually record it.`,
     },
-
-    // ─── CONNECTIVITY ─────────────────────────────────────
     {
         category: 'Connectivity',
         q: 'App is not loading or showing a blank screen',
@@ -372,8 +369,6 @@ const FAQS = [
         q: 'The app works on Wi-Fi but not on mobile data',
         a: `1. Check if mobile data is enabled for this app: Settings → Apps → [App Name] → Data Usage → enable "Mobile Data".\n2. Some phones restrict background data — disable "Data Saver" mode temporarily.\n3. Check if your mobile data plan is active and has balance.\n4. Try turning mobile data off and on again.\n5. Restart the app after making these changes.`,
     },
-
-    // ─── COMPANY PROFILE & PDFs ───────────────────────────
     {
         category: 'Company Profile & PDFs',
         q: 'How do I update company details — name, address, contact?',
@@ -404,8 +399,6 @@ const FAQS = [
         q: 'Signature is not appearing on PDFs',
         a: `1. Go to Sidebar → Company Profile.\n2. Upload your signature image in the "Signature" field (white background recommended).\n3. Tap Save.\n4. Generate a new PDF — the signature will appear at the bottom as the authorized signatory.\n\nTip: Use a clear signature on a white background for best print quality.`,
     },
-
-    // ─── REPORTS & PDFs ───────────────────────────────────
     {
         category: 'Reports & PDFs',
         q: 'How do I generate and share a PDF (Receipt, Challan, Report)?',
@@ -426,8 +419,6 @@ const FAQS = [
         q: 'PDF is showing blank or missing data fields',
         a: `Blank fields in PDFs happen when the original record was saved without filling all details, OR when Company Profile is incomplete.\n\n1. First check Company Profile — make sure Name, Address, Phone, and Bank Details are filled.\n2. Open the specific record and check if all fields are filled.\n3. Edit the record and fill missing details, then regenerate the PDF.`,
     },
-
-    // ─── ORDERS & PAYMENTS ────────────────────────────────
     {
         category: 'Orders & Payments',
         q: 'I submitted an order but it is not showing in the list',
@@ -443,8 +434,6 @@ const FAQS = [
         q: 'How do I check my payment collection history?',
         a: `1. Go to "Collect Payment" under Sales Analysis.\n2. The list shows all payments recorded.\n3. Admins and Accountants can see all payments across the team.\n4. Filter by date or client name to find specific records.`,
     },
-
-    // ─── AUTOMATION ───────────────────────────────────────
     {
         category: 'Automation',
         q: 'WhatsApp / Email message was not sent to the customer',
@@ -460,8 +449,6 @@ const FAQS = [
         q: 'I do not want to send WhatsApp messages for a specific entry',
         a: `1. Make sure the client's mobile number field is left blank — messages are only sent if a number is present.\n2. Alternatively, ask your Admin to temporarily turn off automation from Automation Settings, add the entry, then turn it back on.`,
     },
-
-    // ─── SUBSCRIPTION ─────────────────────────────────────
     {
         category: 'Subscription',
         q: 'My plan is expiring soon — how do I renew?',
@@ -482,8 +469,6 @@ const FAQS = [
         q: 'Can I add more employees without changing my plan?',
         a: `1. The number of employees allowed depends on your current plan's "Max Employees" limit.\n2. If you need more users, contact the Super Admin to increase your employee limit.\n3. The limit can be increased without changing the entire plan — a small upgrade fee may apply.\n4. Until the limit is increased, new employee accounts cannot be created.`,
     },
-
-    // ─── USERS & ACCESS ───────────────────────────────────
     {
         category: 'Users & Access',
         q: 'How do I add a new employee to the app?',
@@ -509,8 +494,6 @@ const FAQS = [
         q: 'An employee cannot see a certain screen or feature',
         a: `1. Go to Sidebar → Admin Control → Permissions tab.\n2. Select the employee's role.\n3. Enable the module/feature you want them to see.\n4. The employee needs to close and reopen the app for changes to take effect.\n\nIf the feature is still not visible, contact your Super Admin — some features are restricted at the plan level.`,
     },
-
-    // ─── ADMIN TOOLS ──────────────────────────────────────
     {
         category: 'Admin Tools',
         q: 'How do I see the complete history of a client or machine?',
@@ -536,8 +519,6 @@ const FAQS = [
         q: 'How do I see all service history for a specific machine?',
         a: `Two ways:\n\n1. Go to Sidebar → Serial Number → enter the machine's Serial Number — all service, installation, and PMS records appear.\n\n2. Go to Activity Report → Service Analysis → search by machine model or serial number to see all tickets, their status, and resolution details.`,
     },
-
-    // ─── GENERAL ──────────────────────────────────────────
     {
         category: 'General',
         q: 'The app is running slow or crashing',
@@ -570,7 +551,6 @@ const FAQS = [
     },
 ];
 
-// Group FAQs by category
 const groupedFaqs = FAQS.reduce((acc: Record<string, typeof FAQS>, item) => {
     if (!acc[item.category]) acc[item.category] = [];
     acc[item.category].push(item);
@@ -590,9 +570,6 @@ const CATEGORY_ICONS: Record<string, any> = {
     General: 'settings',
 };
 
-// =========================================================
-// Active tab type
-// =========================================================
 type TabKey = 'contact' | 'guide' | 'faq';
 
 export default function HelpSupportScreen() {
@@ -611,16 +588,13 @@ export default function HelpSupportScreen() {
 
     const loadSupportConfig = async () => {
         try {
-            const docSnap = await getDoc(doc(db, 'settings', 'support_config'));
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                setSupportConfig({
-                    supportPhone: data.supportPhone || DEFAULTS.supportPhone,
-                    supportEmail: data.supportEmail || DEFAULTS.supportEmail,
-                    userManualUrl: data.userManualUrl || DEFAULTS.userManualUrl,
-                    videoTutorialUrl: data.videoTutorialUrl || DEFAULTS.videoTutorialUrl,
-                });
-            }
+            const data = await fetchPublicSupportSettings();
+            setSupportConfig({
+                supportPhone: data.supportPhone || DEFAULTS.supportPhone,
+                supportEmail: data.supportEmail || DEFAULTS.supportEmail,
+                userManualUrl: data.userManualUrl || DEFAULTS.userManualUrl,
+                videoTutorialUrl: data.videoTutorialUrl || DEFAULTS.videoTutorialUrl,
+            });
         } catch (e) {
             console.log('Support config load failed, using defaults:', e);
         } finally {
@@ -653,7 +627,6 @@ export default function HelpSupportScreen() {
 
     return (
         <View style={styles.container}>
-            {/* HEADER */}
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => router.back()}>
                     <Ionicons name="arrow-back" size={24} color="#333" />
@@ -662,7 +635,6 @@ export default function HelpSupportScreen() {
                 <View style={{ width: 24 }} />
             </View>
 
-            {/* TABS */}
             <View style={styles.tabRow}>
                 {TABS.map(tab => {
                     const isActive = activeTab === tab.key;
@@ -681,7 +653,6 @@ export default function HelpSupportScreen() {
 
             <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
-                {/* ── TAB 1: CONTACT ── */}
                 {activeTab === 'contact' && (
                     <>
                         <Text style={styles.sectionTitle}>Contact Us</Text>
@@ -723,7 +694,6 @@ export default function HelpSupportScreen() {
                             <Ionicons name="chevron-forward" size={20} color="#ccc" />
                         </TouchableOpacity>
 
-                        {/* Quick links to other tabs */}
                         <View style={styles.quickLinksRow}>
                             <TouchableOpacity style={styles.quickLink} onPress={() => setActiveTab('guide')}>
                                 <Ionicons name="book" size={16} color="#3b5998" />
@@ -743,7 +713,6 @@ export default function HelpSupportScreen() {
                     </>
                 )}
 
-                {/* ── TAB 2: USER GUIDE ── */}
                 {activeTab === 'guide' && (
                     <>
                         <Text style={styles.introText}>
@@ -787,7 +756,6 @@ export default function HelpSupportScreen() {
                     </>
                 )}
 
-                {/* ── TAB 3: FAQ ── */}
                 {activeTab === 'faq' && (
                     <>
                         <Text style={styles.introText}>
@@ -854,7 +822,6 @@ export default function HelpSupportScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f5f6fa' },
-
     header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -865,8 +832,6 @@ const styles = StyleSheet.create({
         elevation: 2,
     },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
-
-    // Tabs
     tabRow: {
         flexDirection: 'row',
         backgroundColor: 'white',
@@ -893,10 +858,8 @@ const styles = StyleSheet.create({
     },
     tabText: { fontSize: 12, fontWeight: '600', color: '#aaa' },
     tabTextActive: { color: '#3b5998' },
-
     content: { padding: 16, paddingBottom: 60 },
     introText: { fontSize: 13, color: '#888', marginBottom: 14, lineHeight: 19 },
-
     sectionTitle: {
         fontSize: 13,
         fontWeight: '700',
@@ -906,8 +869,6 @@ const styles = StyleSheet.create({
         textTransform: 'uppercase',
         letterSpacing: 0.7,
     },
-
-    // Contact
     contactRow: { flexDirection: 'row', gap: 10 },
     contactCard: {
         flex: 1,
@@ -922,8 +883,6 @@ const styles = StyleSheet.create({
         shadowOffset: { width: 0, height: 2 },
     },
     contactLabel: { fontSize: 12, fontWeight: '600', color: '#333', marginTop: 7 },
-
-    // Guide cards (Contact tab — PDF/Video)
     guideCard: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -944,8 +903,6 @@ const styles = StyleSheet.create({
     },
     guideTitle: { fontSize: 14, fontWeight: 'bold', color: '#333' },
     guideSubtitle: { fontSize: 12, color: '#888', marginTop: 2 },
-
-    // Quick links
     quickLinksRow: { marginTop: 8, gap: 8 },
     quickLink: {
         flexDirection: 'row',
@@ -956,8 +913,6 @@ const styles = StyleSheet.create({
         borderRadius: 10,
     },
     quickLinkText: { flex: 1, fontSize: 13, fontWeight: '600', color: '#3b5998' },
-
-    // User Guide cards
     guideCardFull: {
         backgroundColor: 'white',
         borderRadius: 12,
@@ -978,7 +933,6 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     guideCardTitle: { flex: 1, fontSize: 14, fontWeight: 'bold', color: '#333' },
-
     stepsBox: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#eee' },
     stepRow: { flexDirection: 'row', marginBottom: 10, alignItems: 'flex-start' },
     stepNum: {
@@ -992,8 +946,6 @@ const styles = StyleSheet.create({
     },
     stepNumText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
     stepText: { flex: 1, fontSize: 13, color: '#555', lineHeight: 20 },
-
-    // FAQ
     categoryBlock: { marginBottom: 8 },
     categoryHeader: {
         flexDirection: 'row',
@@ -1016,7 +968,6 @@ const styles = StyleSheet.create({
     categoryTitle: { fontSize: 13, fontWeight: '700', color: '#333', flex: 1 },
     categoryCount: { backgroundColor: '#eef1fb', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2 },
     categoryCountText: { fontSize: 11, fontWeight: 'bold', color: '#3b5998' },
-
     faqCard: {
         backgroundColor: '#f9f9fb',
         borderRadius: 10,
@@ -1031,7 +982,6 @@ const styles = StyleSheet.create({
     faqQuestion: { fontSize: 13, fontWeight: '600', color: '#333', flex: 1, marginRight: 8, lineHeight: 19 },
     answerBox: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#dde3f5' },
     faqAnswer: { fontSize: 13, color: '#555', lineHeight: 21 },
-
     footerNote: {
         textAlign: 'center',
         color: '#aaa',

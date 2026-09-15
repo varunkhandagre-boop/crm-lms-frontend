@@ -11,6 +11,7 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: quotations now go through the new backend API
 import { listQuotations } from '../services/api/quotations';
+import { fetchTeamMembers } from '../services/api/users';
 
 
 export default function QuotationsListScreen() {
@@ -53,7 +54,7 @@ export default function QuotationsListScreen() {
         try {
             const [quotes, users] = await Promise.all([
                 listQuotations(), // was: fetchSaaSData("quotations")
-                fetchSaaSData("users")
+                fetchTeamMembers()
             ]);
             
             quotes.sort((a: any, b: any) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());

@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -14,19 +13,9 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { db } from '../../firebaseConfig';
+import { fetchSupportSettings, saveSupportSettings, SupportSettings } from '../../services/api/superadminSettings';
 
-// ─── Firestore path: settings/support_config ─────────────
-const SUPPORT_DOC = doc(db, 'settings', 'support_config');
-
-type SupportConfig = {
-    supportPhone: string;
-    supportEmail: string;
-    userManualUrl: string;
-    videoTutorialUrl: string;
-};
-
-const EMPTY_CONFIG: SupportConfig = {
+const EMPTY_CONFIG: SupportSettings = {
     supportPhone: '',
     supportEmail: '',
     userManualUrl: '',
@@ -35,8 +24,8 @@ const EMPTY_CONFIG: SupportConfig = {
 
 export default function SuperAdminSupportSettings() {
     const router = useRouter();
-    const [config, setConfig] = useState<SupportConfig>(EMPTY_CONFIG);
-    const [original, setOriginal] = useState<SupportConfig>(EMPTY_CONFIG);
+    const [config, setConfig] = useState<SupportSettings>(EMPTY_CONFIG);
+    const [original, setOriginal] = useState<SupportSettings>(EMPTY_CONFIG);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
 
@@ -47,14 +36,16 @@ export default function SuperAdminSupportSettings() {
     const loadConfig = async () => {
         setLoading(true);
         try {
-            const snap = await getDoc(SUPPORT_DOC);
-            if (snap.exists()) {
-                const data = snap.data() as SupportConfig;
-                setConfig(data);
-                setOriginal(data);
+            const data = await fetchSupportSettings();
+            const merged = { ...EMPTY_CONFIG, ...data };
+            setConfig(merged);
+            setOriginal(merged);
+        } catch (e: any) {
+            // A fresh DB with no support-settings row yet isn't an error —
+            // just start from the empty form. Only surface real failures.
+            if (e.status !== 404) {
+                Alert.alert('Error', e.message || 'Could not load support settings.');
             }
-        } catch (e) {
-            Alert.alert('Error', 'Could not load support settings.');
         } finally {
             setLoading(false);
         }
@@ -65,7 +56,7 @@ export default function SuperAdminSupportSettings() {
     const validate = (): string | null => {
         const { supportPhone, supportEmail } = config;
 
-        if (!supportPhone.trim()) return 'Support phone number is required.';
+        if (!supportPhone?.trim()) return 'Support phone number is required.';
 
         // Phone: digits only, 10–15 chars, optionally starting with country code
         const phoneClean = supportPhone.replace(/\D/g, '');
@@ -73,7 +64,7 @@ export default function SuperAdminSupportSettings() {
             return 'Phone must be 10–15 digits (include country code, e.g. 919876543210).';
         }
 
-        if (!supportEmail.trim()) return 'Support email is required.';
+        if (!supportEmail?.trim()) return 'Support email is required.';
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supportEmail.trim())) {
             return 'Please enter a valid email address.';
         }
@@ -98,21 +89,22 @@ export default function SuperAdminSupportSettings() {
                     onPress: async () => {
                         setSaving(true);
                         try {
-                            const cleaned: SupportConfig = {
-                                supportPhone: config.supportPhone.replace(/\D/g, ''),
-                                supportEmail: config.supportEmail.trim().toLowerCase(),
-                                userManualUrl: config.userManualUrl.trim(),
-                                videoTutorialUrl: config.videoTutorialUrl.trim(),
+                            // Backend validates userManualUrl/videoTutorialUrl as proper
+                            // URLs when present — omit them entirely if left blank
+                            // rather than sending an empty string (which fails .url()).
+                            const cleaned: SupportSettings = {
+                                supportPhone: config.supportPhone!.replace(/\D/g, ''),
+                                supportEmail: config.supportEmail!.trim().toLowerCase(),
+                                ...(config.userManualUrl?.trim() ? { userManualUrl: config.userManualUrl.trim() } : {}),
+                                ...(config.videoTutorialUrl?.trim() ? { videoTutorialUrl: config.videoTutorialUrl.trim() } : {}),
                             };
-                            await setDoc(SUPPORT_DOC, {
-                                ...cleaned,
-                                updatedAt: new Date().toISOString(),
-                            }, { merge: true });
-                            setConfig(cleaned);
-                            setOriginal(cleaned);
+                            const saved = await saveSupportSettings(cleaned);
+                            const merged = { ...EMPTY_CONFIG, ...saved };
+                            setConfig(merged);
+                            setOriginal(merged);
                             Alert.alert('Saved ✅', 'Support settings updated successfully.\n\nAll users will see the new details immediately.');
-                        } catch (e) {
-                            Alert.alert('Error', 'Could not save settings. Check Firestore permissions.');
+                        } catch (e: any) {
+                            Alert.alert('Error', e.message || 'Could not save settings.');
                         } finally {
                             setSaving(false);
                         }
@@ -122,7 +114,7 @@ export default function SuperAdminSupportSettings() {
         );
     };
 
-    const update = (key: keyof SupportConfig, value: string) => {
+    const update = (key: keyof SupportSettings, value: string) => {
         setConfig(prev => ({ ...prev, [key]: value }));
     };
 
@@ -216,7 +208,7 @@ export default function SuperAdminSupportSettings() {
                         autoCapitalize="none"
                     />
                     <Text style={styles.hint}>
-                        Upload the PDF to Firebase Storage and paste the download URL here.
+                        Upload the PDF to Supabase Storage and paste the download URL here.
                     </Text>
                 </View>
 

@@ -29,8 +29,15 @@ import { useData } from './context/DataContext';
 // those specific detail-modal lines may show blank/undefined until this
 // screen gets a full rewrite in a later phase; the org-level financial
 // totals and timeline dates/amounts are correct.
-import { listSalesVisits } from '../services/api/salesVisits';
+import { fetchCouriers } from '../services/api/couriers';
+import { listInstallations } from '../services/api/installations';
 import { listOrders } from '../services/api/orders';
+import { fetchOrganizations } from '../services/api/organizations';
+import { listPaymentCollections } from '../services/api/paymentCollections';
+import { listPaymentDues } from '../services/api/paymentDues';
+import { listPmsReports } from '../services/api/pmsReports';
+import { listSalesVisits } from '../services/api/salesVisits';
+import { listServiceCalls } from '../services/api/serviceCalls';
 
 export default function SerialNumberScreen() {
   const router = useRouter();
@@ -77,8 +84,8 @@ export default function SerialNumberScreen() {
           if (currentUser?.companyId) {
               setIsDataFetching(true);
               const [installs, orgs] = await Promise.all([
-                  fetchSaaSData("installations"),
-                  fetchSaaSData("organizations")
+                  listInstallations(),
+                  fetchOrganizations({ limit: 200 }),
               ]);
               setInstallList(installs);
               setOrgList(orgs);
@@ -162,8 +169,8 @@ export default function SerialNumberScreen() {
       setIsDataFetching(true);
       
       const [serviceCalls, pmsReports] = await Promise.all([
-          fetchSaaSData("service_calls"),
-          fetchSaaSData("pms_reports")
+          listServiceCalls(),
+          listPmsReports(),
       ]);
 
       const services = serviceCalls.filter((item: any) => item.serialNo?.toLowerCase() === machine.serialNo?.toLowerCase());
@@ -215,13 +222,13 @@ export default function SerialNumberScreen() {
       setIsDataFetching(true);
       
       const [services, pmsData, visits, orders, payments, dues, couriers] = await Promise.all([
-          fetchSaaSData("service_calls"),
-          fetchSaaSData("pms_reports"),
-          listSalesVisits(),  // was: fetchSaaSData("sales_reports")
-          listOrders(),       // was: fetchSaaSData("orders")
-          fetchSaaSData("payments"),
-          fetchSaaSData("dues"), // Make sure your context uses 'dues' collection
-          fetchSaaSData("couriers")
+          listServiceCalls(),
+          listPmsReports(),
+          listSalesVisits(),
+          listOrders(),
+          listPaymentCollections(),
+          listPaymentDues(),
+          fetchCouriers({ limit: 500 }),
       ]);
       
       const orgId = String(org.id || '').trim(); 

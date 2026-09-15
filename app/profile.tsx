@@ -17,8 +17,10 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (Firebase DB imports removed)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+
+// 🔥 Phase 10: self profile now comes from Postgres via these adapters
+import { fetchSelf, updateTeamMember } from '../services/api/users';
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
@@ -29,9 +31,6 @@ export default function ProfileScreen() {
   
   // 🔥 1. Context se global details
   const { currentUser, logout, companyProfile } = useData();
-  
-  // 🔥 2. Naya SaaS Engine
-  const { fetchSaaSData, updateSaaSData } = useSaaSDB();
 
   const [uploading, setUploading] = useState(false);
   const [sharing, setSharing] = useState(false);
@@ -40,26 +39,16 @@ export default function ProfileScreen() {
   const [currentImage, setCurrentImage] = useState((currentUser as any)?.profileImage || null);
   const [userData, setUserData] = useState<any>(currentUser);
 
-  // 🔥 3. LOAD PROFILE DATA (SAAS IMPLEMENTATION)
+  // 🔥 3. LOAD PROFILE DATA — Phase 10: Postgres via fetchSelf()
   useEffect(() => {
     const fetchLatestProfile = async () => {
-      if ((currentUser as any)?.email) {
-        try {
-          const users = await fetchSaaSData("users");
-          const userEmail = (currentUser as any).email.toLowerCase();
-          
-          // Find the current user in the tenant's user list
-          const data: any = users.find((u: any) => u.id === userEmail || u.email === userEmail);
-          
-          if (data) {
-            // 1. Photo update karo (data ko any type diya gaya hai)
-            setCurrentImage(data.profileImage || null);
-            // 2. Baki details (City, State) bhi update karo
-            setUserData({ ...currentUser, ...data });
-          }
-        } catch (error) {
-          console.log("Error fetching profile:", error);
-        }
+      if (!currentUser?.companyId) return;
+      try {
+        const data = await fetchSelf();
+        setCurrentImage(data.profileImage || null);
+        setUserData({ ...currentUser, ...data });
+      } catch (error) {
+        console.log("Error fetching profile:", error);
       }
     };
     fetchLatestProfile();
@@ -81,14 +70,12 @@ export default function ProfileScreen() {
       ]);
   };
 
-  // 🔥 4. SAAS PHOTO REMOVAL
+  // 🔥 4. Phase 10: PATCHes /users/:id (self-edit — allowed for any role, see users.service.ts)
   const removeProfilePhoto = async () => {
-      if (!currentUser?.email) return;
+      if (!currentUser?.id) return;
       setUploading(true);
       try {
-          const userEmail = currentUser.email.toLowerCase();
-          const res = await updateSaaSData("users", userEmail, { profileImage: null, updatedAt: new Date().toISOString() });
-          
+          const res = await updateTeamMember(currentUser.id, { profileImage: '' });
           if (res.success) {
               setCurrentImage(null);
               Alert.alert("Success", "Profile photo removed.");
@@ -109,21 +96,18 @@ export default function ProfileScreen() {
             mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.2, base64: true, 
         });
         if (!result.canceled && result.assets[0].base64) {
-            savePhotoToFirebase(result.assets[0].uri, result.assets[0].base64);
+            savePhoto(result.assets[0].base64);
         }
       } catch (error) { Alert.alert("Error", "Could not open gallery."); }
   };
 
-  // 🔥 5. SAAS PHOTO UPDATE
-  const savePhotoToFirebase = async (localUri: string, base64: string) => {
-      if (!currentUser?.email) return;
+  // 🔥 5. Phase 10: PATCHes /users/:id (self-edit)
+  const savePhoto = async (base64: string) => {
+      if (!currentUser?.id) return;
       setUploading(true);
       try {
           const imageString = `data:image/jpeg;base64,${base64}`;
-          const userEmail = currentUser.email.toLowerCase();
-          
-          const res = await updateSaaSData("users", currentUser.id, { profileImage: imageString, updatedAt: new Date().toISOString() });
-          
+          const res = await updateTeamMember(currentUser.id, { profileImage: imageString });
           if (res.success) {
               setCurrentImage(imageString);
               Alert.alert("Success", "Profile Photo Updated!");

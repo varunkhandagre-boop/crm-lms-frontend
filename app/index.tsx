@@ -20,14 +20,16 @@ import {
 
 // 🔥 SAAS IMPORTS
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useSaaSDB } from '../hooks/useSaaSDB';
+import { fetchCompanyProfile } from '../services/api/companies';
+import { fetchHomeSummary, HomeSummary } from '../services/api/homeSummary';
 import { useData } from './context/DataContext';
 
 // NOTIFICATION IMPORTS
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { doc, setDoc } from 'firebase/firestore';
-import { db } from './../firebaseConfig';
+import { savePushTokenToBackend } from '../services/api/users';
+import { auth, db } from './../firebaseConfig';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -47,64 +49,36 @@ export default function HomeScreen() {
   const router = useRouter();
   
   const { 
-      activeSection, setActiveSection, 
-      currentUser, logout, 
-      shouldOpenSidebar, setShouldOpenSidebar,
-      appPermissions, notificationCount, companyProfile 
-  } = useData();
+    activeSection, setActiveSection, 
+    currentUser, logout, 
+    shouldOpenSidebar, setShouldOpenSidebar,
+    appPermissions, notificationCount, companyProfile,
+    loading
+} = useData();
 
-  const { fetchSaaSData } = useSaaSDB();
-
-  const [taskList, setTaskList] = useState<any[]>([]);
-  const [leadList, setLeadList] = useState<any[]>([]);
-  const [pmsList, setPmsList] = useState<any[]>([]);
-  const [dueList, setDueList] = useState<any[]>([]);
-  const [courierList, setCourierList] = useState<any[]>([]);
-  const [serviceCallList, setServiceCallList] = useState<any[]>([]);
-  const [salesVisitList, setSalesVisitList] = useState<any[]>([]);
-  const [attendanceList, setAttendanceList] = useState<any[]>([]);
-  const [leaveList, setLeaveList] = useState<any[]>([]);
-  const [expenseList, setExpenseList] = useState<any[]>([]);
-  const [advanceList, setAdvanceList] = useState<any[]>([]);
-  const [orderList, setOrderList] = useState<any[]>([]);
-  const [cardRequestList, setCardRequestList] = useState<any[]>([]);
-  const [installList, setInstallList] = useState<any[]>([]);
-  const [demoList, setDemoList] = useState<any[]>([]);
-  const [paymentList, setPaymentList] = useState<any[]>([]);
-  
-  const [sidebarVisible, setSidebarVisible] = useState(false); 
+  const [summary, setSummary] = useState<HomeSummary | null>(null);
   const [planDaysLeft, setPlanDaysLeft] = useState<number | null>(null);
+  const [sidebarVisible, setSidebarVisible] = useState(false); 
   const [expoPushToken, setExpoPushToken] = useState('');
   const [checkedOnboarding, setCheckedOnboarding] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
-        const loadCountsData = async () => {
+        const loadData = async () => {
             if (currentUser?.companyId) {
-                const [
-                    tasks, leads, pms, dues, couriers, services, sales,
-                    attendance, leaves, expenses, advances, orders,
-                    cards, installs, demos, payments
-                ] = await Promise.all([
-                    fetchSaaSData("tasks"), fetchSaaSData("leads"), fetchSaaSData("pms_reports"),
-                    fetchSaaSData("dues"), fetchSaaSData("couriers"), fetchSaaSData("service_calls"),
-                    fetchSaaSData("sales_reports"), fetchSaaSData("attendance"), fetchSaaSData("leaves"),
-                    fetchSaaSData("expenses"), fetchSaaSData("advances"), fetchSaaSData("orders"),
-                    fetchSaaSData("visiting_cards"), fetchSaaSData("installations"), fetchSaaSData("demos"),
-                    fetchSaaSData("payments")
-                ]);
-
-                setTaskList(tasks); setLeadList(leads); setPmsList(pms); setDueList(dues);
-                setCourierList(couriers); setServiceCallList(services); setSalesVisitList(sales);
-                setAttendanceList(attendance); setLeaveList(leaves); setExpenseList(expenses);
-                setAdvanceList(advances); setOrderList(orders); setCardRequestList(cards);
-                setInstallList(installs); setDemoList(demos); setPaymentList(payments);
+                try {
+                    const data = await fetchHomeSummary();
+                    setSummary(data);
+                } catch (e) {
+                    // Badge counts staying at their last-known values on a
+                    // transient error beats crashing the home screen.
+                }
             }
 
             try {
-                const companies = await fetchSaaSData("companies");
-                if (companies?.length > 0) {
-                    const expiry = new Date((companies[0] as any).expiryDate);
+                const profile = await fetchCompanyProfile();
+                if (profile?.expiryDate) {
+                    const expiry = new Date(profile.expiryDate);
                     const diff = Math.ceil((expiry.getTime() - Date.now()) / 86400000);
                     setPlanDaysLeft(diff);
                 }
@@ -112,7 +86,7 @@ export default function HomeScreen() {
 
             if (shouldOpenSidebar) { setSidebarVisible(true); setShouldOpenSidebar(false); }
         };
-        loadCountsData();
+        loadData();
     }, [currentUser, shouldOpenSidebar])
 );
 
@@ -151,141 +125,29 @@ const [branding, setBranding] = useState({
       return null; 
   };
 
-  const today = new Date().toISOString().split('T')[0];
-  const currentMonth = today.slice(0, 7); 
-  
-  const isBoss = ['Admin', 'Manager', 'SuperAdmin'].includes(currentUser?.role);
-  const isHRBoss = ['Admin', 'Manager', 'Hr', 'Account', 'Accountant', 'SuperAdmin'].includes(currentUser?.role);
+  // Badge counts — all sourced from the single /home/summary call now.
+  const pendingTaskCount = summary?.taskCount ?? 0;
+  const pendingDueCount = summary?.dueCount ?? 0;
+  const pendingCourierCount = summary?.courierCount ?? 0;
+  const pendingServiceCount = summary?.serviceCount ?? 0;
+  const pmsDueCount = summary?.pmsDueCount ?? 0;
+  const pendingLeadCount = summary?.leadCount ?? 0;
+  const todayInstallCount = summary?.installCount ?? 0;
+  const todayDemoCount = summary?.demoCount ?? 0;
+  const todayPaymentCount = summary?.paymentCount ?? 0;
+  const salesFollowUpCount = summary?.salesFollowUpCount ?? 0;
+  const pendingLeaveCount = summary?.leaveCount ?? 0;
+  const pendingExpenseCount = summary?.expenseCount ?? 0;
+  const pendingAdvanceCount = summary?.advanceCount ?? 0;
+  const pendingOrderCount = summary?.orderCount ?? 0;
+  const pendingCardCount = summary?.cardCount ?? 0;
 
-  const pendingTaskCount = taskList.filter((t:any) => {
-      if (t.status !== 'Pending') return false;
-      if (isBoss) return true;
-      return t.to === currentUser?.name;
-  }).length;
-
-  const pendingDueCount = dueList.filter((d:any) => d.status !== 'Collected').length;
-
-  const pendingCourierCount = courierList.filter((c:any) => {
-      if (c.status !== 'Pending') return false;
-      const isLogisticsRole = ['Admin', 'Manager', 'Accountant', 'Store Keeper'].includes(currentUser?.role);
-      if (isLogisticsRole) return true;
-      const isMine = c.senderId === currentUser?.uid || (c.receiver && currentUser?.name && c.receiver.toLowerCase().includes(currentUser.name.toLowerCase()));
-      return isMine;
-  }).length;
-
-  const pendingServiceCount = serviceCallList.filter((s: any) => {
-      const isStatusOpen = s.status === 'Open' || s.status === 'Assigned';
-      if (!isStatusOpen) return false;
-      if (isBoss) return true;
-      return s.senderId === currentUser?.uid || s.senderId === currentUser?.id;
-  }).length;
-
-  const pmsDueCount = pmsList.filter((p:any) => {
-      const isDue = p.nextServiceDate && p.nextServiceDate.startsWith(currentMonth) && p.status !== 'Done';
-      if (!isDue) return false;
-      if (isBoss) return true;
-      return p.senderId === currentUser?.uid;
-  }).length;
-
-  const pendingLeadCount = leadList.filter((l:any) => {
-       const isToday = l.nextFollowUp === today && l.status !== 'Closed';
-       if (!isToday) return false;
-       if (isBoss) return true;
-       return l.senderId === currentUser?.uid;
-  }).length;
-
-  const todayInstallCount = installList.filter((i: any) => {
-      const itemDate = i.date || (i.createdAt ? i.createdAt.split('T')[0] : '');
-      return itemDate === today && (isBoss || i.senderId === currentUser?.id || i.senderId === currentUser?.uid);
-  }).length;
-
-  const todayDemoCount = demoList.filter((d: any) => {
-      const itemDate = d.date || (d.createdAt ? d.createdAt.split('T')[0] : '');
-      return itemDate === today && (isBoss || d.senderId === currentUser?.id || d.senderId === currentUser?.uid);
-  }).length;
-
-  const todayPaymentCount = paymentList.filter((p: any) => {
-      const itemDate = p.date || (p.createdAt ? p.createdAt.split('T')[0] : '');
-      return itemDate === today && (isBoss || p.senderId === currentUser?.id || p.senderId === currentUser?.uid);
-  }).length;
-
-  const getSalesFollowUpCount = () => {
-      const todayStr = new Date().toISOString().split('T')[0]; 
-
-      const activeVisits = salesVisitList.filter((v:any) => {
-          const outcome = (v.outcome || '').toLowerCase();
-          const isClosed = outcome.includes('order closed') || outcome.includes('lost') || outcome.includes('not interested');
-          const isMine = isBoss || v.senderId === currentUser?.uid || v.senderId === currentUser?.id;
-          const isDueToday = v.nextFollowUp && v.nextFollowUp === todayStr;
-          return !isClosed && isMine && isDueToday;
-      }).length;
-
-      const activeLeads = leadList.filter((l:any) => {
-          const status = (l.status || '').toLowerCase();
-          const isClosed = status.includes('converted') || status.includes('lost') || status.includes('drop');
-          const isMine = isBoss || l.senderId === currentUser?.uid || l.senderId === currentUser?.id;
-          const isDueToday = l.nextFollowUp && l.nextFollowUp === todayStr;
-          return !isClosed && isMine && isDueToday;
-      }).length;
-
-      return activeVisits + activeLeads;
+  const attendanceStatusMap: Record<string, { text: string; icon: string; color: string }> = {
+      not_marked: { text: "Not Marked", icon: "ellipse-outline", color: "#FFCC80" },
+      checked_in: { text: "Logged In", icon: "time", color: "#A5D6A7" },
+      checked_out: { text: "Logged Out", icon: "checkmark-circle", color: "#EF9A9A" },
   };
-  const salesFollowUpCount = getSalesFollowUpCount();
-
-  const pendingLeaveCount = leaveList.filter((l: any) => {
-      const status = l.status || 'Pending';
-      if (status !== 'Pending') return false;
-      if (isHRBoss) return true;
-      return l.senderId === currentUser?.uid || l.senderId === currentUser?.id;
-  }).length;
-
-  const pendingExpenseCount = expenseList.filter((e: any) => {
-      const status = e.status || 'Pending';
-      if (status !== 'Pending') return false;
-      if (isHRBoss) return true;
-      return e.senderId === currentUser?.uid || e.senderId === currentUser?.id;
-  }).length;
-
-  const pendingAdvanceCount = advanceList.filter((a: any) => {
-      const status = a.status || 'Pending';
-      if (status !== 'Pending') return false;
-      if (isHRBoss) return true;
-      return a.senderId === currentUser?.uid || a.senderId === currentUser?.id;
-  }).length;
-
-  const pendingOrderCount = orderList.filter((o: any) => {
-      const status = o.status || 'Pending';
-      if (status !== 'Pending') return false;
-      if (isBoss) return true;
-      return o.senderId === currentUser?.uid || o.senderId === currentUser?.id;
-  }).length;
-
-  const pendingCardCount = cardRequestList.filter((c: any) => {
-      if (c.status !== 'Pending') return false;
-      if (isBoss) return true; 
-      return c.senderId === currentUser?.id || c.userId === currentUser?.id;
-  }).length;
-
-  const todayStrStr = new Date().toISOString().split('T')[0];
-  const myEntry = attendanceList.find((a: any) => 
-      a.date === todayStrStr && (a.userName === currentUser?.name || a.userId === currentUser?.id || a.senderId === currentUser?.id)
-  );
-
-  let statusText = "Not Marked";
-  let statusIcon = "ellipse-outline";
-  let statusColor = "#FFCC80"; 
-
-  if (myEntry) {
-      if (myEntry.outTime) {
-          statusText = "Logged Out";
-          statusIcon = "checkmark-circle";
-          statusColor = "#EF9A9A"; 
-      } else {
-          statusText = "Logged In";
-          statusIcon = "time";
-          statusColor = "#A5D6A7"; 
-      }
-  }
+  const { text: statusText, icon: statusIcon, color: statusColor } = attendanceStatusMap[summary?.attendanceStatus ?? 'not_marked'];
 
   let dashboardLabel = "Follow-ups";
   let dashboardCount = salesFollowUpCount; 
@@ -320,11 +182,11 @@ const [branding, setBranding] = useState({
       checkOnboarding();
   }, [currentUser]);
 
-  useEffect(() => {
-      if (!checkedOnboarding) return;
+    useEffect(() => {
+      if (!checkedOnboarding || loading) return; // wait for DataContext to finish checking both Firebase and Postgres sessions
       const timer = setTimeout(() => { if (!currentUser) router.replace('/login' as any); }, 100);
       return () => clearTimeout(timer);
-  }, [currentUser, checkedOnboarding]);
+  }, [currentUser, checkedOnboarding, loading]);
 
   useEffect(() => {
       if(currentUser) {
@@ -335,14 +197,26 @@ const [branding, setBranding] = useState({
   }, [currentUser]);
 
 const saveTokenToDatabase = async (token: string) => {
-      // 🔥 FIX: email ki jagah id (uid) use karenge
-      if (!currentUser?.id) return; 
+      if (!currentUser?.id) return;
+
+      // Always save to Postgres now — works for every user regardless of
+      // whether they also have a Firebase session.
+      try {
+          await savePushTokenToBackend(token);
+      } catch (e) {
+          console.log("❌ Error saving token to backend:", e);
+      }
+
+      // Best-effort: also keep the Firestore copy in sync for legacy
+      // Firebase-linked users, since some not-yet-migrated features may
+      // still read pushToken from there. Silently skipped for Postgres-only
+      // sessions (no Firebase auth to write with — would always fail).
+      if (!auth.currentUser) return;
       try {
           const userRef = doc(db, "users", currentUser.id);
-          // 🔥 FIX: updateDoc ki jagah setDoc use karenge with { merge: true }
           await setDoc(userRef, { pushToken: token }, { merge: true });
       } catch (e) { 
-          console.log("❌ Error saving token:", e); 
+          console.log("❌ Error saving token to Firestore:", e); 
       }
 };
 
@@ -386,19 +260,14 @@ const saveTokenToDatabase = async (token: string) => {
   };
 
   const canSee = (moduleKey: string) => {
-    // 1. Agar currentUser load nahi hua, toh hide karo
     if (!currentUser?.role) return false; 
     
-    // Common modules sabko dikhenge
     if (moduleKey === 'common') return true;
 
-    // 2. Role ko lowercase mein convert karo (Admin, ADMIN, admin sab same ho jayega)
     const myRole = currentUser.role.toLowerCase().trim();
 
-    // 3. Strict Admin Check (Ab case mismatch ki problem nahi hogi)
     if (myRole === 'admin' || myRole === 'superadmin') return true; 
-
-    // 4. Employee Mapping
+    
     let userRoleKey = 'Sales Executive'; 
     if (myRole.includes('sales')) userRoleKey = 'Sales Executive';
     else if (myRole.includes('engineer') || myRole.includes('service')) userRoleKey = 'Service Engineer';
@@ -406,23 +275,19 @@ const saveTokenToDatabase = async (token: string) => {
     else if (myRole.includes('store') || myRole.includes('back office')) userRoleKey = 'Store Keeper';
     else if (myRole.includes('hr')) userRoleKey = 'Hr';
     else if (myRole.includes('manager')) userRoleKey = 'Manager';
-    else userRoleKey = currentUser.role; // Default fallback
+    else userRoleKey = currentUser.role;
 
-    // 5. Firebase Permissions Object (Agar net slow hai toh {} default manega)
     const rolePerms = appPermissions?.[userRoleKey] || {};
     const userSpecificPerms = appPermissions?.[currentUser.id] || appPermissions?.[currentUser.email] || {};
 
-    // 6. User-specific permission hamesha pehle check hogi
     if (userSpecificPerms[moduleKey] !== undefined) {
         return userSpecificPerms[moduleKey] === true; 
     }
     
-    // 7. Warna general role permission return karega
     return rolePerms[moduleKey] === true; 
   };
   
   const sidebarItems = [
-      // 🔥 NEW: Super Admin Panel Link added here
       { id: '999', title: 'Super Admin Panel', icon: 'globe', route: '/superadmin/super_admin', module: 'superadmin_only' },      
       { id: '1', title: 'Serial Number', icon: 'pricetag', route: '/serial_number', module: 'asset_history' }, 
       { id: '7', title: 'Attendance Report', icon: 'person', route: '/attendance', module: 'attendance' },
@@ -431,6 +296,8 @@ const saveTokenToDatabase = async (token: string) => {
       { id: '96', title: 'Personal Notes', icon: 'journal', route: '/personal_notes', module: 'personal_notes' },
       { id: '99', title: 'Sales Calculation', icon: 'calculator', route: '/sales_team_report', module: 'sales_team_report' },
       { id: '93', title: 'Activity Timeline', icon: 'time', route: '/employee_timeline', module: 'users' },
+      { id: '103', title: 'Messaging Center', icon: 'chatbubbles', route: '/messaging_center', module: 'company_profile' },
+      { id: '91', title: 'Payroll', icon: 'cash', route: '/payroll', module: 'payroll' },
       { id: '92', title: 'Admin Control', icon: 'settings', route: '/manage_team', module: 'users' },
       { id: '101', title: 'Automation Settings', icon: 'chatbubbles', route: '/automation_settings', module: 'company_profile' },
       { id: '90', title: 'Company Profile', icon: 'business', route: '/company_profile', module: 'company_profile' },
@@ -466,11 +333,9 @@ const saveTokenToDatabase = async (token: string) => {
       { title: "Pending Dues", icon: "time", color: "#c0392b", route: '/payment_duelist', count: pendingDueCount, module: 'payment_due' },
   ];
 
-  // 🔥 UPDATE: Added logic to restrict superadmin_only module
   const filterItems = (items: any[]) => {
     return items.filter(i => {
         if (i.module === 'personal_notes') return true;
-        // Specifically block "superadmin_only" modules from regular Admins
         if (i.module === 'superadmin_only') return currentUser?.role === 'SuperAdmin';
         return canSee(i.module);
     });

@@ -19,17 +19,20 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import { urlToBase64Image } from '../utils/pdfImageHelper';
 
 // 🔥 SAAS IMPORTS (payments/users still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
+import { listPaymentCollections } from '../services/api/paymentCollections';
+import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 // 🔥 Phase 3: orders now go through the new backend API
 import {
     billOrder as apiBillOrder,
     deleteOrder as apiDeleteOrder,
-    listOrders,
     updateOrder as apiUpdateOrder,
     updateOrderStatus as apiUpdateOrderStatus,
+    listOrders,
 } from '../services/api/orders';
 
 export default function OrderListScreen() {
@@ -83,8 +86,8 @@ export default function OrderListScreen() {
       if (currentUser?.companyId) {
           const [orders, payments, users] = await Promise.all([
               listOrders(), // was: fetchSaaSData("orders")
-              fetchSaaSData("payments"),
-              fetchSaaSData("users")
+              listPaymentCollections(), // was: fetchSaaSData("payments")
+              fetchTeamMembers()
           ]);
           
           setOrderList(orders);
@@ -154,12 +157,15 @@ export default function OrderListScreen() {
   const generateOrderPDF = async (orderData: any) => {
     setGeneratingPdf(true);
     try {
-        const logoHTML = companyProfile?.logoUrl 
-            ? `<img src="${companyProfile.logoUrl}" style="height: 60px; margin-bottom: 10px;" />` 
+                const logoBase64 = await urlToBase64Image(companyProfile?.logoUrl);
+        const signatureBase64 = await urlToBase64Image(companyProfile?.signatureUrl);
+
+        const logoHTML = logoBase64 
+            ? `<img src="${logoBase64}" style="height: 60px; margin-bottom: 10px;" />` 
             : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
 
-        const signatureHTML = companyProfile?.signatureUrl 
-            ? `<img src="${companyProfile.signatureUrl}" style="max-height: 60px; max-width: 150px;" />` 
+        const signatureHTML = signatureBase64 
+            ? `<img src="${signatureBase64}" style="max-height: 60px; max-width: 150px;" />` 
             : `<div style="font-weight: bold; margin-top: 30px;">Authorized Signatory</div>`;
 
         const companyBankHTML = companyProfile?.bankDetails1?.accountNo 
@@ -196,7 +202,7 @@ export default function OrderListScreen() {
                     <div class="company-name" style="margin-top: 0;">${companyProfile?.companyName || 'Our Company'}</div>
                     <div style="font-size: 12px; margin-top: 5px; max-width: 280px; line-height: 1.5;">${companyProfile?.address || companyProfile?.addressLine || ''}</div>
                     <div style="font-size: 12px; margin-top: 4px;">Phone: ${companyProfile?.contactPhone || '-'} | Email: ${companyProfile?.contactEmail || '-'}</div>
-                    <div style="font-size: 12px; font-weight: bold; margin-top: 5px;">GSTIN: ${companyProfile?.gstNumber || '-'}</div>
+                                        ${companyProfile?.gstNumber ? `<div style="font-size: 12px; font-weight: bold; margin-top: 5px;">GSTIN: ${companyProfile.gstNumber}</div>` : ''}
                 </div>
                 <div style="width: 250px; text-align: right; margin-top: 0; padding-top: 0;">
                     ${companyProfile?.logoUrl ? `<img src="${companyProfile.logoUrl}" style="max-height: 120px; max-width: 240px; object-fit: contain; object-position: top; display: block; margin-left: auto;" />` : ''}
@@ -214,11 +220,11 @@ export default function OrderListScreen() {
                     <div style="font-size: 12px; margin-top: 5px;">${orderData.address || ''}, ${orderData.city || ''}</div>
                     <div style="font-size: 12px;">Contact: ${orderData.contactPerson || ''} (${orderData.mobile || ''})</div>
                 </div>
-                <div style="text-align: right; font-size: 13px; line-height: 1.8;">
+                                <div style="text-align: right; font-size: 13px; line-height: 1.8;">
                     <div><strong>Order ID:</strong> ${orderData.orderId}</div>
                     <div><strong>Date:</strong> ${new Date(orderData.date).toLocaleDateString('en-GB')}</div>
                     <div><strong>PO Number:</strong> ${orderData.poNumber}</div>
-                    <div style="margin-top: 5px; display: inline-block; padding: 4px 8px; background-color: #fff3e0; border-radius: 4px; color: #e65100; font-weight: bold;">Status: ${orderData.status}</div>
+                    <div style="margin-top: 5px; display: inline-block; padding: 4px 8px; background-color: ${(orderData.status === 'Completed' || orderData.status === 'Billed') ? '#e8f5e9' : orderData.status === 'Dispatched' ? '#e3f2fd' : '#fff3e0'}; border-radius: 4px; color: ${(orderData.status === 'Completed' || orderData.status === 'Billed') ? '#2e7d32' : orderData.status === 'Dispatched' ? '#1565c0' : '#e65100'}; font-weight: bold;">Status: ${orderData.status}</div>
                 </div>
             </div>
 

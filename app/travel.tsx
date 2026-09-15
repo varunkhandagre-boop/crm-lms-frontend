@@ -17,7 +17,11 @@ import {
 
 // 🔥 SAAS IMPORTS (Direct DB imports removed)
 import { useSaaSDB } from '../hooks/useSaaSDB';
+import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
+
+// 🔥 Phase 8: travel notes now come from Postgres via these adapters
+import { fetchTravelNotes, settleTravelNotesForUser } from '../services/api/travelNotes';
 
 export default function TravelNoteScreen() {
   const router = useRouter();
@@ -25,8 +29,8 @@ export default function TravelNoteScreen() {
   // 🔥 1. Context se current user nikala
   const { currentUser } = useData(); 
 
-  // 🔥 2. Naya SaaS Engine connect kiya
-  const { fetchSaaSData, updateSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 2. "users" still Firestore; travel notes are Postgres now
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
   // 🔥 3. Lazy Loaded States for DB
   const [travelList, setTravelList] = useState<any[]>([]);
@@ -61,28 +65,56 @@ export default function TravelNoteScreen() {
       }
   }, [viewMode, currentDate, searchText, selectedEmployeeName]);
 
-  // 🔥 4. LOAD SAAS DATA ON MOUNT
-  const loadData = async () => {
-      if (currentUser?.companyId) {
-          const [travels, users] = await Promise.all([
-              fetchSaaSData("travel_notes"), // Make sure your context mapped 'travelList' to this SaaS collection
-              fetchSaaSData("users")
-          ]);
-          
-          setTravelList(travels);
-          setUserList(users);
+  function getFetchRange(): { fromDate?: string; toDate?: string } {
+      const toIso = (d: Date) => d.toISOString().split('T')[0];
+      if (viewMode === 'All') return {};
+      if (viewMode === 'Day') return { fromDate: toIso(currentDate), toDate: toIso(currentDate) };
+      if (viewMode === 'Month') {
+          const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+          const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+          return { fromDate: toIso(start), toDate: toIso(end) };
+      }
+      const m = currentDate.getMonth();
+      const y = currentDate.getFullYear();
+      const fyStartYear = m >= 3 ? y : y - 1;
+      return { fromDate: toIso(new Date(fyStartYear, 3, 1)), toDate: toIso(new Date(fyStartYear + 1, 2, 31)) };
+  }
 
-          if (canManage) {
-              const uniqueUsers = Array.from(new Set(users.map((a:any) => a.name)))
-                  .map(name => users.find((a:any) => a.name === name));
-              setEmployees([{ id: 'All', name: 'All' }, ...uniqueUsers as any]);
-          }
+  // 🔥 4a. Users list — still Firestore, loads once per session
+  const loadUsers = async () => {
+      if (!currentUser?.companyId) return;
+      const users = await fetchTeamMembers();
+      setUserList(users);
+      if (canManage) {
+          const uniqueUsers = Array.from(new Set(users.map((a:any) => a.name)))
+              .map(name => users.find((a:any) => a.name === name));
+          setEmployees([{ id: 'All', name: 'All' }, ...uniqueUsers as any]);
       }
   };
 
   useEffect(() => {
-      loadData();
+      loadUsers();
   }, [currentUser]);
+
+  // 🔥 4b. Travel notes — Postgres, bounded by view window + employee filter
+  const loadData = async () => {
+      if (!currentUser?.companyId) return;
+      if (canManage && selectedEmployeeName !== 'All' && employees.length === 0) return; // wait for employees to resolve the picked id
+
+      const { fromDate, toDate } = getFetchRange();
+      let targetUserId: string | undefined;
+      if (canManage) {
+          if (selectedEmployeeName === 'All') targetUserId = 'all';
+          else targetUserId = employees.find(e => e.name === selectedEmployeeName)?.id;
+      }
+
+      const travels = await fetchTravelNotes({ userId: targetUserId, fromDate, toDate, limit: 500 });
+      setTravelList(travels);
+  };
+
+  useEffect(() => {
+      loadData();
+  }, [currentUser, viewMode, currentDate, selectedEmployeeName, employees]);
 
   const onRefresh = async () => {
       setRefreshing(true);
@@ -127,16 +159,8 @@ export default function TravelNoteScreen() {
   const getFilteredData = () => {
       let data = Array.isArray(travelList) ? [...travelList] : [];
 
-      if (canManage) {
-          if(selectedEmployeeName !== 'All') {
-              data = data.filter((item: any) => (item.senderName || item.userName) === selectedEmployeeName);
-          }
-      } else {
-          const myId = currentUser?.uid || currentUser?.id;
-          if(myId) {
-              data = data.filter((item: any) => item.senderId === myId || item.senderUid === myId);
-          }
-      }
+      // employee + date-range already applied server-side (see loadData above);
+      // search stays client-side over the bounded fetched set.
 
       if (searchText) {
           const term = searchText.toLowerCase();
@@ -214,42 +238,27 @@ export default function TravelNoteScreen() {
       );
   };
 
+  // --- 🔥 Phase 8: SETTLEMENT via settleTravelNotesForUser() — single atomic bulk update.
+  // (The old "notify employee their claims were settled" push is dropped here: the old
+  // code sourced the Firestore userId off the first pre-fetched note; the new bulk
+  // endpoint settles server-side without returning individual records to key off of.
+  // Re-add via addNotification once notifications move off Firestore in Phase 9.)
   const processSettlement = async () => {
       setIsSettling(true);
       try {
-          const itemsToSettle = displayList.filter(item => item.status === 'Pending' || item.status === 'Approved');
-
-          if (itemsToSettle.length === 0) {
-              Alert.alert("Info", "No pending items to settle.");
+          const targetUserId = employees.find(e => e.name === selectedEmployeeName)?.id;
+          if (!targetUserId) {
+              Alert.alert("Error", "Could not resolve the selected employee.");
               setIsSettling(false);
               return;
           }
 
-          // Convert to Array of promises to use SaaS engine individually
-          const updatePromises = itemsToSettle.map(item => 
-              updateSaaSData("travel_notes", item.id, { 
-                  status: 'Settled', 
-                  settlementDate: new Date().toISOString() 
-              })
-          );
-
-          await Promise.all(updatePromises);
-          
-          try {
-              const targetUserId = itemsToSettle[0].senderId;
-              if(targetUserId) {
-                  await addSaaSData("notifications", {
-                      title: "Travel Expenses Settled 💰",
-                      message: `Your travel claims have been settled.`,
-                      to: selectedEmployeeName,
-                      userId: targetUserId,
-                      route: "/travel",
-                      read: false,
-                      createdAt: new Date().toISOString(),
-                      type: "success"
-                  });
-              }
-          } catch(e) {}
+          const result = await settleTravelNotesForUser(targetUserId);
+          if (result.settledCount === 0) {
+              Alert.alert("Info", "No pending items to settle.");
+              setIsSettling(false);
+              return;
+          }
 
           await loadData(); 
           Alert.alert("Success", "Travel Expenses Settled!");
@@ -357,7 +366,7 @@ export default function TravelNoteScreen() {
 
               <View style={{alignItems:'center', flex:1}}>
                   <Text style={styles.statLabel}>Total Spent</Text>
-                  <Text style={[styles.statValue, {color:'#3b5998'}]}>₹{totalHistoryAmount.toLocaleString()}</Text>
+                  <Text style={[styles.statValue, {color:'#3b5998'}]}>�{totalHistoryAmount.toLocaleString()}</Text>
               </View>
           </View>
 

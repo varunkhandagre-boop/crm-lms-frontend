@@ -17,17 +17,17 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+
+// 🔥 Phase 8: visiting card requests now go to Postgres via this adapter
+import { createVisitingCardRequest } from '../services/api/visitingCards';
 
 export default function AddVisitingCardScreen() {
   const router = useRouter();
   
-  // 🔥 1. Context se User, Notification aur List Teeno le liye (No extra fetching!)
-  const { currentUser, addNotification, cardRequestList = [] } = useData();
-
-  // 🔥 2. Naya SaaS Engine sirf data Save karne ke liye connect kiya
-  const { addSaaSData } = useSaaSDB();
+  // 🔥 1. Context se User aur Notification engine (cardRequestList ab zaroori nahi —
+  // reqId ab server-side generate hota hai, is FY ke count se)
+  const { currentUser, addNotification } = useData();
 
   // --- FORM DATA ---
   const [shippingAddress, setShippingAddress] = useState('');
@@ -78,7 +78,7 @@ export default function AddVisitingCardScreen() {
     setRows(rows.map(row => row.id === id ? { ...row, customType: text } : row));
   };
 
-  // 🔥 3. SAAS SAVE LOGIC
+  // 🔥 3. SAAS SAVE LOGIC — Phase 8: posts to Postgres; server generates reqId
   const handleSave = async () => {
       if (!shippingAddress) {
           Alert.alert("Required", "Please enter shipping address.");
@@ -100,41 +100,7 @@ export default function AddVisitingCardScreen() {
               quantity: r.quantity
           }));
 
-          // SMART FINANCIAL YEAR LOGIC
-          const today = new Date();
-          const targetMonth = today.getMonth(); 
-          const targetYear = today.getFullYear();
-          
-          const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-          const fyString = `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`; 
-          
-          const fyStartDateStr = `${fyStartYear}-04-01`;
-          const fyEndDateStr = `${fyStartYear + 1}-03-31`;
-
-          // Global Context list se count nikal liya (Fast & Free)
-          const validList = Array.isArray(cardRequestList) ? cardRequestList : [];
-          const count = validList.filter((c: any) => {
-              const reqDate = c.date || (c.createdAt ? c.createdAt.split('T')[0] : '');
-              if (!reqDate) return false;
-              return reqDate >= fyStartDateStr && reqDate <= fyEndDateStr;
-          }).length + 1;
-
-          const nextNum = String(count).padStart(2, '0'); 
-
-          // Clean Payload (Engine adds ID, CompanyId, SenderId, CreatedAt)
-          const newRequest = {
-              reqId: `VCR-${fyString}-${nextNum}`, 
-              date: today.toISOString().split('T')[0],
-              dateIso: today.toISOString().split('T')[0],
-              shippingAddress: shippingAddress,
-              items: finalItems,
-              status: 'Pending',
-              trackingNo: '', 
-              outDate: '',
-              role: currentUser?.role || 'Employee'
-          };
-
-          const res = await addSaaSData("visiting_cards", newRequest);
+          const res = await createVisitingCardRequest({ shippingAddress, items: finalItems });
 
           if (res.success) {
               // 🔥 REAL PUSH NOTIFICATION

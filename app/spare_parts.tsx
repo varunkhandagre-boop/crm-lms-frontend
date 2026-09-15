@@ -20,6 +20,7 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 3: spare parts catalog + stock now go through the new backend API
 import { issueStock as apiIssueStock, listSpareParts } from '../services/api/spareParts';
+import { fetchTeamMembers } from '../services/api/users';
 
 export default function SparePartsScreen() {
   const router = useRouter();
@@ -67,7 +68,7 @@ export default function SparePartsScreen() {
       if (currentUser?.companyId) {
           const [spares, users, machines] = await Promise.all([
               listSpareParts(), // was: fetchSaaSData("spare_parts")
-              fetchSaaSData("users"),
+              fetchTeamMembers(),
               fetchSaaSData("office_machines")
           ]);
           setSparePartsList(spares);

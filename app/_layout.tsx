@@ -11,6 +11,8 @@ import { manageAttendanceReminders, setupNotificationPermissions } from '../util
 
 import * as Location from 'expo-location';
 // 🔥 Firestore direct imports minimized
+import { fetchCompanyProfile } from '../services/api/companies';
+import { recordLocationLog } from '../services/api/locationLogs';
 
 // 🔥 SAAS IMPORT
 import { useSaaSDB } from '../hooks/useSaaSDB';
@@ -41,19 +43,19 @@ function PlanExpiryIndicator() {
     const { fetchSaaSData } = useSaaSDB();
 
     useEffect(() => {
-        const check = async () => {
-            if (!currentUser?.companyId) return;
-            try {
-                const companies = await fetchSaaSData("companies");
-                if (companies?.length > 0) {
-                    const expiry = new Date((companies[0] as any).expiryDate);
-                    const diff = Math.ceil((expiry.getTime() - Date.now()) / 86400000);
-                    setDaysLeft(diff);
-                }
-            } catch (e) {}
-        };
-        check();
-    }, [currentUser]);
+    const check = async () => {
+        if (!currentUser?.companyId) return;
+        try {
+            const profile = await fetchCompanyProfile();
+            if (profile?.expiryDate) {
+                const expiry = new Date(profile.expiryDate);
+                const diff = Math.ceil((expiry.getTime() - Date.now()) / 86400000);
+                setDaysLeft(diff);
+            }
+        } catch (e) {}
+    };
+    check();
+}, [currentUser]);
 
     if (pathname !== '/' || daysLeft === null || daysLeft > 30) return null;
 
@@ -237,22 +239,15 @@ function NavigationLayout() {
                     lastUpdateTimestamp = now;
 
                     try {
-                        // 🔥 COMPANY ID ATTACHED USING addSaaSData INSTEAD OF addDoc
-                        await addSaaSData("location_logs", {
-                            userId: currentUser.email || currentUser.uid || currentUser.id,
-                            userName: currentUser.name || "App User",
-                            latitude: loc.coords.latitude,
-                            longitude: loc.coords.longitude,
-                            timestamp: new Date().toISOString(), // SaaS uses ISO strings easily
-                            date: new Date().toISOString().split('T')[0],
-                            time: new Date().toLocaleTimeString(),
-                            type: "🟣 Auto-Track (30 min)", 
-                            device: "App",
-                            isStationary: true 
-                        });
-                    } catch (dbError) {
-                        console.error("DB Error:", dbError);
-                    }
+    await recordLocationLog({
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+        type: "Auto-Track (30 min)",
+        device: "App",
+    });
+} catch (dbError) {
+    console.error("DB Error:", dbError);
+}
                 }
             );
 

@@ -20,6 +20,7 @@ import {
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 5: projects now via new backend API
+import { fetchOrganizations } from '../services/api/organizations';
 import { createProject } from '../services/api/projects';
 
 export default function AddProjectScreen() {
@@ -53,7 +54,7 @@ export default function AddProjectScreen() {
   useEffect(() => {
       const loadData = async () => {
           if (currentUser?.companyId) {
-              const orgs = await fetchSaaSData("organizations");
+              const orgs = await fetchOrganizations({ limit: 200 });
               setOrgList(orgs);
               setFilteredOrgs(orgs);
           }

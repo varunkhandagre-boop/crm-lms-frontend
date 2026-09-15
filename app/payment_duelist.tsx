@@ -14,26 +14,26 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (No Direct Firebase calls)
+// 🔥 SAAS IMPORTS (organizations still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 6: orders (Phase 3), payment dues, payment collections now via new backend API
+import { listOrders, remindOrder } from '../services/api/orders';
+import { fetchOrganizations } from '../services/api/organizations';
+import { listPaymentCollections } from '../services/api/paymentCollections';
+import { listPaymentDues, remindPaymentDue } from '../services/api/paymentDues';
 
 export default function PaymentDueList() {
     const router = useRouter();
     
-    // 🔥 1. Context se Core Info
     const { currentUser, companyProfile } = useData(); 
-    
-    // 🔥 2. Naya SaaS Engine
-    const { fetchSaaSData, updateSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
+    const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-    // 🔥 3. Lazy Loaded States
     const [dueList, setDueList] = useState<any[]>([]);
     const [orderList, setOrderList] = useState<any[]>([]);
     const [paymentList, setPaymentList] = useState<any[]>([]);
     const [orgList, setOrgList] = useState<any[]>([]);
 
-    // STATES
     const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All');
     const [currentDate, setCurrentDate] = useState(new Date());
     const [searchTerm, setSearchTerm] = useState('');
@@ -47,14 +47,14 @@ export default function PaymentDueList() {
         else setVisibleCount(20); 
     }, [viewMode, currentDate, searchTerm]);
 
-    // 🔥 4. LOAD SAAS DATA ON MOUNT
+    // 🔥 LOAD DATA — dues, orders, payment collections via new API; organizations via Firestore
     const loadData = async () => {
         if (currentUser?.companyId) {
             const [dues, orders, payments, orgs] = await Promise.all([
-                fetchSaaSData("payment_dues"), 
-                fetchSaaSData("orders"),
-                fetchSaaSData("payment_collections"),
-                fetchSaaSData("organizations")
+                  listPaymentDues(),          // was: fetchSaaSData("payment_dues")
+                  listOrders(),                // was: fetchSaaSData("orders")
+                  listPaymentCollections(),    // was: fetchSaaSData("payment_collections")
+                 fetchOrganizations({ limit: 200 })
             ]);
             setDueList(dues);
             setOrderList(orders);
@@ -100,7 +100,10 @@ export default function PaymentDueList() {
         return "All Time";
     };
 
-    // 🔥 5. SAAS REMINDER TRACKING ENGINE
+    // 🔥 REMINDER — via new backend API. The old "outbound_messages" queue
+    // write is dropped: nothing ever consumed it (no WhatsApp API
+    // integration exists), so it was just data hygiene, not an active
+    // feature. Reminder tracking (lastReminderDate/reminderHistory) is kept.
     const handleSendReminder = async (item: any) => {
         Alert.alert(
             "Send Reminder",
@@ -111,71 +114,20 @@ export default function PaymentDueList() {
                     text: "Yes, Send",
                     onPress: async () => {
                         try {
-                            let mobile = item.mobile;
-                            if (!mobile) {
-                                const org = orgList.find((o: any) => o.id === item.orgId || o.orgName === item.orgName || o.name === item.orgName);
-                                if (org) mobile = org.mobile || org.phone;
-                            }
-
-                            if (!mobile) {
-                                Alert.alert("Missing Detail", "Mobile number not found.");
-                                return;
-                            }
-
-                            let finalTo = mobile;
-                            if (!finalTo.startsWith('91') && !finalTo.startsWith('+91')) {
-                                finalTo = `91${finalTo.replace(/[^0-9]/g, '')}`; 
-                            }
-
-                            const dueAmt = item.balance !== undefined ? item.balance : item.amount;
-                            const todayStr = new Date().toLocaleDateString('en-GB');
-                            const timestampStr = new Date().toLocaleString('en-GB');
-
-                            // 1. Queue the message in SaaS (Global outbox simulation)
-                            await addSaaSData('outbound_messages', {
-                                type: 'whatsapp',
-                                to: finalTo,
-                                templateName: 'payment_reminder',
-                                variables: {
-                                    customer_name: item.orgName || item.hospitalName,
-                                    amount: String(dueAmt),
-                                    company_name: companyProfile?.companyName || 'Our Company'
-                                },
-                                status: 'pending', 
-                                createdAt: new Date().toISOString(),
-                                retryCount: 0
-                            });
-
-                            // 2. Update Tracking in Due/Order Record using SaaS
-                            const updatedHistory = item.reminderHistory ? [...item.reminderHistory] : [];
-                            updatedHistory.push({
-                                date: timestampStr,
-                                sentBy: currentUser?.name || 'System'
-                            });
-
                             const collectionName = item.collectionName || 'payment_dues';
+                            const updated = collectionName === 'orders'
+                                ? await remindOrder(item.id)
+                                : await remindPaymentDue(item.id);
 
-                            const res = await updateSaaSData(collectionName, item.id, {
-                                lastReminderDate: todayStr,
-                                reminderHistory: updatedHistory
-                            });
-
-                            if(res.success) {
-                                // Sync local state depending on where it came from
-                                if (collectionName === 'payment_dues') {
-                                    setDueList(prev => prev.map(d => d.id === item.id ? { ...d, lastReminderDate: todayStr, reminderHistory: updatedHistory } : d));
-                                } else {
-                                    setOrderList(prev => prev.map(o => o.id === item.id ? { ...o, lastReminderDate: todayStr, reminderHistory: updatedHistory } : o));
-                                }
-                                
-                                // Also update the popup if open
-                                setSelectedItem((prev: any) => ({ ...prev, lastReminderDate: todayStr, reminderHistory: updatedHistory }));
-                                
-                                Alert.alert("Success ✅", "Reminder sent and tracked!");
+                            if (collectionName === 'payment_dues') {
+                                setDueList(prev => prev.map(d => d.id === item.id ? { ...d, lastReminderDate: updated.lastReminderDate, reminderHistory: updated.reminderHistory } : d));
                             } else {
-                                throw new Error("Update Failed");
+                                setOrderList(prev => prev.map(o => o.id === item.id ? { ...o, lastReminderDate: updated.lastReminderDate, reminderHistory: updated.reminderHistory } : o));
                             }
                             
+                            setSelectedItem((prev: any) => prev ? ({ ...prev, lastReminderDate: updated.lastReminderDate, reminderHistory: updated.reminderHistory }) : prev);
+                            
+                            Alert.alert("Success ✅", "Reminder sent and tracked!");
                         } catch(e) {
                             Alert.alert("Error", "Could not track reminder.");
                         }
@@ -185,9 +137,8 @@ export default function PaymentDueList() {
         );
     };
 
-    // 🔥 FIX: MERGING MANUAL DUES AND SYSTEM ORDERS
+    // MERGING MANUAL DUES AND SYSTEM ORDERS (unchanged logic, now fed by API data)
     const getData = () => {
-        // 1. Get Manual Dues
         const validDues = dueList ? dueList.filter((d:any) => {
             const rawBal = d.balance !== undefined ? d.balance : d.amount;
             const currentBal = parseFloat(String(rawBal).replace(/[^0-9.-]/g, '')) || 0;
@@ -200,7 +151,6 @@ export default function PaymentDueList() {
             return true;
         }).map((d: any) => ({ ...d, collectionName: 'payment_dues' })) : [];
 
-        // 2. Get Billed System Orders (Credit Only) - 🔥 BULLETPROOF CHECK
         const validOrders = orderList ? orderList.filter((o:any) => {
             const rawBal = o.balance !== undefined ? o.balance : o.amount;
             const currentBal = parseFloat(String(rawBal).replace(/[^0-9.-]/g, '')) || 0;
@@ -212,15 +162,13 @@ export default function PaymentDueList() {
 
             if (oStatus === 'collected' || payStatus === 'paid') return false;
             
-            // 🔥 'Billed' orders hi yahan aayenge
-            const isCreditStatus = ['billed', 'approved', 'dispatched', 'completed'].includes(oStatus);
+            const isCreditStatus = ['billed', 'dispatched', 'completed'].includes(oStatus);
             if (!isCreditStatus) return false;
             if (payMode === 'cash') return false;
             
             return true;
         }).map((o: any) => ({ ...o, collectionName: 'orders' })) : [];
 
-        // 3. Combine both lists
         let filtered = [...validDues, ...validOrders];
 
         if (searchTerm) {
@@ -278,40 +226,62 @@ export default function PaymentDueList() {
         return diffDays > 0 ? diffDays : 0;
     };
 
-   // 🔥 FIX: BULLETPROOF SMART MATCHING (Ignores spaces and cases)
-    const getPartyHistory = (partyItem: any) => {
-    if (!partyItem || !paymentList) return [];
+        const getPartyHistory = (partyItem: any) => {
+        if (!partyItem) return [];
 
-    return paymentList
-        .filter((p: any) => {
-            const pOrderRef = String(p.orderRef || '').trim().toLowerCase();
-            const pOrderId = String(p.orderId || '').trim().toLowerCase();
-            const pLinkedId = String(p.linkedId || '').trim().toLowerCase();
-            const pBillRef = String(p.billRef || '').trim().toLowerCase();
+        const realPayments = paymentList ? paymentList
+            .filter((p: any) => {
+                const pOrderRef = String(p.orderRef || '').trim().toLowerCase();
+                const pLinkedOrderId = String(p.linkedOrderId || '').trim().toLowerCase();
+                const pLinkedDueId = String(p.linkedDueId || '').trim().toLowerCase();
+                const pBillRef = String(p.billRef || '').trim().toLowerCase();
 
-            const partyId = String(partyItem.id || '').trim().toLowerCase();
-            const partyOrderId = String(partyItem.orderId || '').trim().toLowerCase();
-            const partyBillNo = String(partyItem.billNo || partyItem.poNumber || '').trim().toLowerCase();
+                const partyId = String(partyItem.id || '').trim().toLowerCase();
+                const partyOrderId = String(partyItem.orderId || '').trim().toLowerCase();
+                const partyBillNo = String(partyItem.billNo || partyItem.poNumber || '').trim().toLowerCase();
 
-            // 1. Direct DB ID match
-            if (partyId && (pLinkedId === partyId || pOrderId === partyId)) return true;
+                if (partyId && (pLinkedDueId === partyId || pLinkedOrderId === partyId)) return true;
+                if (partyOrderId && pOrderRef === partyOrderId) return true;
+                if (partyBillNo && (pBillRef === partyBillNo || pOrderRef === partyBillNo)) return true;
 
-            // 2. Order ID match (ORD-XXXX)
-            if (partyOrderId && (pOrderRef === partyOrderId || pOrderId === partyOrderId)) return true;
+                return false;
+            }) : [];
 
-            // 3. Bill No match (manual dues ke liye)
-            if (partyBillNo && (pBillRef === partyBillNo || pOrderRef === partyBillNo)) return true;
+                // Order advance amounts are captured at order-creation time — they
+        // never become a real PaymentCollection row, so they'd otherwise be
+        // invisible here even though they reduced the balance. Surface them
+        // as a display-only pseudo-entry (id prefixed so it's obviously not
+        // a real payment record if ever inspected/clicked).
+        // Two shapes reach here: a manual PaymentDue with an `orderId` link,
+        // OR the Order itself shown directly as a "due" (collectionName ===
+        // 'orders'), where the order's own id IS partyItem.id.
+        const pseudoEntries: any[] = [];
+        let linkedOrder: any = null;
+        if (partyItem.collectionName === 'orders') {
+            linkedOrder = partyItem;
+        } else if (partyItem.orderId && orderList) {
+            linkedOrder = orderList.find((o: any) => String(o.id).trim().toLowerCase() === String(partyItem.orderId).trim().toLowerCase());
+        }
+        if (linkedOrder && Number(linkedOrder.advanceAmount) > 0) {
+            pseudoEntries.push({
+                id: `advance-${linkedOrder.id}`,
+                amount: Number(linkedOrder.advanceAmount),
+                mode: 'Advance (at Order)',
+                date: linkedOrder.date || linkedOrder.dateIso,
+                dateIso: linkedOrder.dateIso || linkedOrder.date,
+                billRef: partyItem.billNo || partyItem.poNumber,
+                isAdvancePseudoEntry: true,
+            });
+        }
 
-            // ❌ OrgName/OrgId fallback NAHI — ye remove kar diya
-            return false;
-        })
-        .sort((a: any, b: any) => {
-            const dateA = new Date(a.dateIso || a.date || a.createdAt || 0).getTime();
-            const dateB = new Date(b.dateIso || b.date || b.createdAt || 0).getTime();
-            return dateB - dateA;
-        })
-        .slice(0, 5);
-};
+        return [...realPayments, ...pseudoEntries]
+            .sort((a: any, b: any) => {
+                const dateA = new Date(a.dateIso || a.date || 0).getTime();
+                const dateB = new Date(b.dateIso || b.date || 0).getTime();
+                return dateB - dateA;
+            })
+            .slice(0, 5);
+    };
 
     const handleCollect = (item: any) => {
         const currentDue = item.balance !== undefined ? item.balance : item.amount;
@@ -533,9 +503,14 @@ export default function PaymentDueList() {
                                     {getPartyHistory(selectedItem).length > 0 ? (
                                         getPartyHistory(selectedItem).map((p: any) => (
                                             <View key={p.id} style={{flexDirection:'row', justifyContent:'space-between', paddingVertical:6, borderBottomWidth:1, borderBottomColor:'#f0f0f0'}}>
-                                                <View>
+                                                                                                <View>
                                                     <Text style={{fontSize:12, fontWeight:'bold', color:'#333'}}>₹ {p.amount}</Text>
                                                     <Text style={{fontSize:10, color:'gray'}}>{p.mode} • {p.date}</Text>
+                                                    {p.mode === 'Cheque' && p.chequeStatus && p.chequeStatus !== 'Pending' && (
+                                                        <Text style={{fontSize:10, fontWeight:'bold', color: p.chequeStatus === 'Bounced' ? '#d32f2f' : '#2e7d32', marginTop: 2}}>
+                                                            {p.chequeStatus === 'Bounced' ? '❌ Bounced' : '✅ Cleared'}
+                                                        </Text>
+                                                    )}
                                                 </View>
                                                 {p.billRef === (selectedItem.billNo || selectedItem.poNumber) && (
                                                     <View style={{backgroundColor:'#e8f5e9', padding:2, borderRadius:4}}>

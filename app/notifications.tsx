@@ -14,8 +14,13 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (Removed DataContext notification functions)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+
+// 🔥 Phase 9: notifications now come from Postgres via these adapters.
+// Visibility (mine by recipientId, or broadcast to my role) is now
+// server-enforced — the old client-side name/id/role string-matching
+// (getMyNotifications) is gone, it's just the fetched list now.
+import { fetchNotifications, markNotificationRead as markNotificationReadApi, markAllNotificationsRead } from '../services/api/notifications';
 
 // Tab State Memory
 let savedTabState = 'Unread'; 
@@ -26,8 +31,8 @@ export default function NotificationScreen() {
   // 🔥 1. Context se sirf current user nikala
   const { currentUser } = useData();
   
-  // 🔥 2. Naya SaaS Engine
-  const { fetchSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 2. Local loading state (no more useSaaSDB here)
+  const [isDbLoading, setIsDbLoading] = useState(true);
 
   // 🔥 3. Lazy Loaded States
   const [notificationList, setNotificationList] = useState<any[]>([]);
@@ -44,11 +49,15 @@ export default function NotificationScreen() {
       setVisibleCount(20);
   }, [filter, searchText]);
 
-  // 🔥 4. LOAD SAAS DATA
+  // 🔥 4. LOAD DATA — Phase 9: fetches from Postgres, already scoped to me server-side
   const loadNotifications = async () => {
-      if (currentUser?.companyId) {
-          const data = await fetchSaaSData("notifications");
+      if (!currentUser?.companyId) return;
+      setIsDbLoading(true);
+      try {
+          const data = await fetchNotifications({ filter: 'all', limit: 200 });
           setNotificationList(data);
+      } finally {
+          setIsDbLoading(false);
       }
   };
 
@@ -69,25 +78,9 @@ export default function NotificationScreen() {
       setSearchText(''); 
   };
 
-  // --- FILTER LOGIC ---
-  const getMyNotifications = () => {
-      if (!currentUser || !notificationList) return [];
-
-      const myName = currentUser.name?.toLowerCase().trim();
-      const myId = currentUser.uid || currentUser.id;
-      const myRole = currentUser.role?.toLowerCase().trim();
-
-      return notificationList.filter((n: any) => {
-          const target = (n.to || '').toLowerCase().trim();
-          if (target === myName) return true;
-          if (n.to === myId || n.userId === myId) return true;
-          if (target === myRole) return true;
-          if (myRole === 'admin' && target === 'admin') return true;
-          return false;
-      });
-  };
-
-  let myData = getMyNotifications();
+  // Server already scopes the list to "mine" (recipientId=me OR recipientRole=my role) —
+  // no client-side name/id/role matching needed anymore.
+  let myData = [...notificationList];
   myData.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   let displayList = myData;
@@ -113,14 +106,12 @@ export default function NotificationScreen() {
 
   const renderedList = displayList.slice(0, visibleCount);
 
-  // 🔥 6. SAAS MARK AS READ
+  // 🔥 6. Phase 9: PATCHes via markNotificationReadApi()
   const markNotificationRead = async (id: string) => {
       try {
-          if (id && typeof id === 'string' && id.length > 10) {
-              const res = await updateSaaSData("notifications", id, { read: true });
-              if (res.success) {
-                  setNotificationList(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
-              }
+          const res = await markNotificationReadApi(id);
+          if (res.success) {
+              setNotificationList(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
           }
       } catch (error) {
           console.log("❌ Notification update failed:", error);
@@ -163,21 +154,15 @@ export default function NotificationScreen() {
       }
   };
 
-  // 🔥 7. SAAS BATCH MARK ALL READ
+  // 🔥 7. Phase 9: single atomic bulk PATCH via markAllNotificationsRead()
+  // (replaces the old client-side Promise.all of individual updates)
   const handleMarkAll = () => {
       if (displayList.length === 0) return;
       Alert.alert("Mark All Read", "Are you sure?", [
           { text: "Cancel", style: "cancel" },
           { text: "Yes", onPress: async () => {
-              const unreadItems = displayList.filter(item => !item.read);
-              const promises = unreadItems.map(item => updateSaaSData("notifications", item.id, { read: true }));
-              
-              await Promise.all(promises);
-              
-              setNotificationList(prev => prev.map(n => {
-                  if (unreadItems.some(ui => ui.id === n.id)) return { ...n, read: true };
-                  return n;
-              }));
+              await markAllNotificationsRead();
+              setNotificationList(prev => prev.map(n => ({ ...n, read: true })));
               Alert.alert("Success", "All notifications marked as read.");
           }}
       ]);

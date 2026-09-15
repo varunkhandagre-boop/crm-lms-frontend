@@ -112,8 +112,13 @@ export async function createInstallationBatch(payload: CreateInstallationBatchPa
   return { installId: res.data.installId, installations: res.data.installations.map(toLegacyInstallation) };
 }
 
-export async function updateInstallation(id: string, payload: Partial<CreateInstallationBatchPayload> & { product?: string; serialNo?: string }): Promise<any> {
+export async function updateInstallation(id: string, payload: Partial<CreateInstallationBatchPayload> & { product?: string; serialNo?: string; model?: string; warrantyExpiry?: string; note?: string }): Promise<any> {
   const res = await apiClient.patch<OneResponse>(`/installations/${id}`, payload);
+  return toLegacyInstallation(res.data);
+}
+
+export async function sendAmcReminder(id: string): Promise<any> {
+  const res = await apiClient.post<OneResponse>(`/installations/${id}/remind`);
   return toLegacyInstallation(res.data);
 }
 

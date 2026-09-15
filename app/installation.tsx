@@ -22,14 +22,17 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: installations now via new backend API
 import {
-    deleteInstallation as apiDeleteInstallation,
-    listInstallations,
-    updateInstallation as apiUpdateInstallation,
+  deleteInstallation as apiDeleteInstallation,
+  updateInstallation as apiUpdateInstallation,
+  listInstallations,
+  sendAmcReminder,
 } from '../services/api/installations';
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { fetchTeamMembers } from '../services/api/users';
+import { urlToBase64Image } from '../utils/pdfImageHelper';
 
 export default function InstallationListScreen() {
   const router = useRouter();
@@ -77,7 +80,7 @@ export default function InstallationListScreen() {
       if (currentUser?.companyId) {
           const [installs, users] = await Promise.all([
               listInstallations(), // was: fetchSaaSData("installations")
-              fetchSaaSData("users")
+              fetchTeamMembers()
           ]);
           setInstallList(installs);
 
@@ -142,91 +145,188 @@ export default function InstallationListScreen() {
     return "All Time";
   };
 
-  const generatePDF = async (item: any) => {
+      const generatePDF = async (item: any) => {
     setGeneratingPdf(true);
-    try {
-        const logoHTML = companyProfile?.logoUrl 
-            ? `<img src="${companyProfile.logoUrl}" style="height: 60px; margin-bottom: 10px;" />` 
-            : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
+        try {
+        const logoBase64 = await urlToBase64Image(companyProfile?.logoUrl);
+        const signatureBase64 = await urlToBase64Image(companyProfile?.signatureUrl);
 
-        const signatureHTML = companyProfile?.signatureUrl 
-            ? `<img src="${companyProfile.signatureUrl}" style="height: 40px; margin-top: 5px; margin-bottom: 2px;" />` 
-            : `<div style="height: 40px;"></div>`;
+        const logoHTML = logoBase64 
+            ? `<img src="${logoBase64}" style="height: 62px; object-fit: contain;" />` 
+            : `<div style="font-size:24px; font-weight:800; color:#0f2557; letter-spacing:0.5px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
+
+        const signatureHTML = signatureBase64 
+            ? `<img src="${signatureBase64}" style="height: 50px; object-fit: contain; margin-bottom: 6px;" />` 
+            : `<div style="height: 50px;"></div>`;
+
+        const reportNo = item.installId || item.id || '-';
+        const genDate = new Date().toLocaleDateString('en-GB');
+
+        // Warranty duration isn't stored as its own field — derived from the
+        // gap between install date and warranty expiry (rounded to the
+        // nearest whole year, e.g. "1 Year", "2 Years").
+        let warrantyYearsLabel = '';
+        const installDateRaw = item.date || item.dateIso;
+        if (installDateRaw && item.warrantyExpiry) {
+            const start = new Date(installDateRaw);
+            const end = new Date(item.warrantyExpiry);
+            if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && end > start) {
+                const years = Math.round((end.getTime() - start.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+                if (years > 0) warrantyYearsLabel = `${years} Year${years > 1 ? 's' : ''} — `;
+            }
+        }
 
         const htmlContent = `
         <html>
           <head>
+            <meta charset="utf-8" />
             <style>
-              body { font-family: 'Helvetica', sans-serif; padding: 30px; border: 2px solid #333; }
-              .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px; }
-              .title { font-size: 22px; font-weight: bold; color: #1a237e; text-transform: uppercase; }
-              .sub-title { font-size: 12px; margin-top: 2px; color: #333; line-height: 1.4; }
-              .box { border: 1px solid #000; padding: 15px; margin-top: 10px; background-color: #fcfcfc; }
-              .table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-              .table th, .table td { padding: 10px; border: 1px solid #000; text-align: left; font-size: 12px; }
-              .table th { background-color: #eee; }
-              .footer { margin-top: 50px; display: flex; justify-content: space-between; align-items: flex-end; }
-              .sign-box { text-align: center; width: 45%; }
-              .sign-line { border-top: 1px solid #000; width: 100%; margin-top: 5px; margin-bottom: 5px; }
+              * { box-sizing: border-box; }
+              body {
+                font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+                color: #1a1a2e;
+                margin: 0;
+                padding: 0;
+              }
+              .sheet { padding: 0 40px 40px; }
+
+              .topbar {
+                display: flex; justify-content: space-between; align-items: center;
+                padding: 28px 40px; background: #0f2557; color: #ffffff;
+              }
+              .topbar .company-meta { text-align: right; font-size: 12px; line-height: 1.7; opacity: 0.92; }
+
+              .doc-band {
+                display: flex; justify-content: space-between; align-items: center;
+                background: #eef2fb; border-bottom: 4px solid #0f2557;
+                padding: 18px 40px; margin-bottom: 28px;
+              }
+              .doc-title { font-size: 19px; font-weight: 800; letter-spacing: 1.4px; color: #0f2557; }
+              .doc-meta { text-align: right; font-size: 12.5px; color: #4a4a68; line-height: 1.7; }
+              .doc-meta b { color: #0f2557; }
+
+              .status-pill {
+                display: inline-block; background: #16a34a; color: white;
+                font-size: 11.5px; font-weight: 700; letter-spacing: 0.6px;
+                padding: 5px 14px; border-radius: 20px; margin-top: 6px;
+              }
+
+              .grid { display: flex; gap: 20px; margin-bottom: 24px; }
+              .card {
+                flex: 1; background: #fafbfe; border: 1px solid #e2e6f0; border-radius: 12px;
+                padding: 20px 22px;
+              }
+              .card-label { font-size: 11px; font-weight: 700; color: #6b7280; letter-spacing: 1px; margin-bottom: 14px; }
+              .row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px; }
+              .row .k { color: #6b7280; }
+              .row .v { font-weight: 600; color: #1a1a2e; text-align: right; }
+
+              .table { width: 100%; border-collapse: collapse; margin-bottom: 26px; border-radius: 12px; overflow: hidden; }
+              .table th {
+                background: #0f2557; color: white; font-size: 12.5px; letter-spacing: 0.5px;
+                text-align: left; padding: 15px 18px; font-weight: 600;
+              }
+              .table td {
+                padding: 16px 18px; font-size: 14px; border-bottom: 1px solid #e9ecf5; background: #ffffff;
+              }
+              .table .model-sub { color: #6b7280; font-size: 12px; margin-top: 4px; }
+
+              .remarks {
+                background: #fffbeb; border-left: 4px solid #f59e0b; border-radius: 8px;
+                padding: 16px 20px; font-size: 13.5px; color: #4a4a68; margin-bottom: 34px; line-height: 1.6;
+              }
+              .remarks b { color: #92400e; }
+
+              .footer { display: flex; justify-content: space-between; margin-top: 20px; }
+              .sign-box { width: 46%; text-align: center; }
+              .sign-space { height: 56px; }
+              .sign-line { border-top: 1.5px solid #1a1a2e; margin-bottom: 8px; }
+              .sign-label { font-size: 13px; font-weight: 700; color: #1a1a2e; }
+              .sign-sub { font-size: 11.5px; color: #6b7280; margin-top: 3px; }
+
+              .doc-footer {
+                margin-top: 40px; padding-top: 16px; border-top: 1px solid #e9ecf5;
+                font-size: 10.5px; color: #9ca3af; text-align: center;
+              }
             </style>
           </head>
           <body>
-            <div class="header">
+            <div class="topbar">
               ${logoHTML}
-              ${companyProfile?.logoUrl ? `<div class="title">${companyProfile.companyName}</div>` : ''}
-              <div class="sub-title">${companyProfile?.address || ''}</div>
-              <div class="sub-title">
-                Phone: ${companyProfile?.contactPhone || companyProfile?.phone || '-'} | 
-                Email: ${companyProfile?.contactEmail || companyProfile?.email || '-'}
+              <div class="company-meta">
+                <div style="font-weight:700; font-size:14px; margin-bottom:3px;">${companyProfile?.companyName || ''}</div>
+                <div>${companyProfile?.address || ''}</div>
+                <div>${companyProfile?.contactPhone || companyProfile?.phone || '-'} &nbsp;•&nbsp; ${companyProfile?.contactEmail || companyProfile?.email || '-'}</div>
               </div>
             </div>
 
-            <h3 style="text-align: center; text-decoration: underline;">INSTALLATION REPORT</h3>
-
-            <div class="box">
-              <div style="font-size: 14px;"><b>Client Name:</b> ${item.orgName || item.hospital}</div>
-              <div style="font-size: 14px;"><b>Address:</b> ${item.address || ''}, ${item.city || ''}</div>
-              <div style="font-size: 14px;"><b>Contact:</b> ${item.contactPerson || '-'} (${item.mobile || '-'})</div>
-              <div style="font-size: 14px; margin-top:5px;"><b>Department:</b> ${item.department || '-'}</div>
-              <div style="font-size: 14px;"><b>Installation Date:</b> ${item.date || item.displayDate || item.dateIso || '-'}</div>
+            <div class="doc-band">
+              <div>
+                <div class="doc-title">INSTALLATION REPORT</div>
+                <div class="status-pill">✓ COMPLETED</div>
+              </div>
+              <div class="doc-meta">
+                <div>Report No: <b>${reportNo}</b></div>
+                <div>Install Date: <b>${item.date || item.displayDate || item.dateIso || '-'}</b></div>
+              </div>
             </div>
 
-            <table class="table">
+            <div class="sheet">
+              <div class="grid">
+                <div class="card">
+                  <div class="card-label">CLIENT DETAILS</div>
+                  <div class="row"><span class="k">Hospital / Client</span><span class="v">${item.orgName || item.hospital || '-'}</span></div>
+                  <div class="row"><span class="k">Address</span><span class="v">${item.address || '-'}${item.city ? ', ' + item.city : ''}</span></div>
+                  <div class="row"><span class="k">Department</span><span class="v">${item.department || '-'}</span></div>
+                </div>
+                <div class="card">
+                  <div class="card-label">CONTACT PERSON</div>
+                  <div class="row"><span class="k">Name</span><span class="v">${item.contactPerson || '-'}</span></div>
+                  <div class="row"><span class="k">Mobile</span><span class="v">${item.mobile || '-'}</span></div>
+                  <div class="row"><span class="k">Engineer</span><span class="v">${item.engineer || item.senderName || '-'}</span></div>
+                </div>
+              </div>
+
+              <table class="table">
                 <thead>
-                    <tr>
-                        <th style="width: 40%;">Product / Model</th>
-                        <th style="width: 30%;">Serial No.</th>
-                        <th style="width: 30%;">Warranty Expiry</th>
-                    </tr>
+                  <tr>
+                    <th style="width: 42%;">Product</th>
+                    <th style="width: 22%;">Serial No.</th>
+                    <th style="width: 36%;">Warranty</th>
+                  </tr>
                 </thead>
                 <tbody>
-                    <tr>
-                        <td>
-                            <b>${item.product || item.productName}</b><br>
-                            <span style="color:#555;">Model: ${item.model || '-'}</span>
-                        </td>
-                        <td><b>${item.serialNo}</b></td>
-                        <td>${item.warrantyExpiry || '-'}</td>
-                    </tr>
+                  <tr>
+                    <td>
+                      <b>${item.product || item.productName || '-'}</b>
+                      <div class="model-sub">Model: ${item.model || '-'}</div>
+                    </td>
+                    <td><b>${item.serialNo || '-'}</b></td>
+                    <td>${warrantyYearsLabel}${item.warrantyExpiry ? `Exp: ${item.warrantyExpiry}` : '-'}</td>
+                  </tr>
                 </tbody>
-            </table>
+              </table>
 
-            <div style="margin-top: 20px; font-size: 12px; color: #555;">
+              <div class="remarks">
                 <b>Engineer Remarks:</b> ${item.note || 'Installation completed successfully.'}
-            </div>
-
-            <div class="footer">
-              <div class="sign-box">
-                <div style="height: 60px;"></div> 
-                <div class="sign-line"></div>
-                <div style="font-weight: bold;">Client Signature & Stamp</div>
               </div>
 
-              <div class="sign-box">
-                <div style="font-weight: bold; font-size: 12px;">Installed By: ${item.engineer || item.senderName || '-'}</div>
-                ${signatureHTML}
-                <div class="sign-line"></div>
-                <div style="font-weight: bold;">Engineer Signature</div>
+              <div class="footer">
+                <div class="sign-box">
+                  <div class="sign-space"></div>
+                  <div class="sign-line"></div>
+                  <div class="sign-label">Client Signature & Stamp</div>
+                </div>
+                <div class="sign-box">
+                  <div class="sign-sub" style="margin-bottom:6px;">${item.engineer || item.senderName || ''}</div>
+                  ${signatureHTML}
+                  <div class="sign-line"></div>
+                  <div class="sign-label">Engineer Signature</div>
+                </div>
+              </div>
+
+              <div class="doc-footer">
+                This is a system-generated report from ${companyProfile?.companyName || 'our company'} • Generated on ${genDate}
               </div>
             </div>
           </body>
@@ -235,7 +335,6 @@ export default function InstallationListScreen() {
         const { uri } = await Print.printToFileAsync({ html: htmlContent });
         const cleanName = `Installation_${(item.orgName || 'Client').replace(/ /g, '_')}_${Date.now()}.pdf`;
         const newPath = `${(FileSystem as any).cacheDirectory}${cleanName}`;
-
         try {
             await FileSystem.copyAsync({ from: uri, to: newPath });
             await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Report` });
@@ -738,7 +837,7 @@ export default function InstallationListScreen() {
                   </View>
                 ) : null}
 
-                <TouchableOpacity 
+                                <TouchableOpacity 
                     style={styles.pdfBtn}
                     onPress={() => generatePDF(selectedItem)}
                     disabled={generatingPdf}
@@ -751,6 +850,30 @@ export default function InstallationListScreen() {
                             <Text style={styles.pdfBtnText}>Share Report PDF</Text>
                         </>
                     )}
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                    style={[styles.pdfBtn, { backgroundColor: '#25D366', borderColor: '#1DA851', marginTop: 10 }]}
+                    onPress={() => {
+                        Alert.alert(
+                            "Send AMC Reminder",
+                            `Send warranty/AMC renewal reminder to ${selectedItem?.hospital || selectedItem?.orgName}?`,
+                            [
+                                { text: "Cancel", style: "cancel" },
+                                { text: "Send", onPress: async () => {
+                                    try {
+                                        await sendAmcReminder(selectedItem.id);
+                                        Alert.alert("Success ✅", "AMC Reminder sent!");
+                                    } catch (e: any) {
+                                        Alert.alert("Error", e?.message || "Could not send reminder.");
+                                    }
+                                }}
+                            ]
+                        );
+                    }}
+                >
+                    <Ionicons name="logo-whatsapp" size={20} color="white" />
+                    <Text style={[styles.pdfBtnText, { color: 'white' }]}>Send AMC Reminder</Text>
                 </TouchableOpacity>
 
                 {isStrictAdmin && (

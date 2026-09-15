@@ -31,6 +31,10 @@ import { listProducts } from '../services/api/products';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { recordLocationLog } from '../services/api/locationLogs';
+import { fetchOrganizations } from '../services/api/organizations';
+import { fetchTeamMembers } from '../services/api/users';
+import { urlToBase64Image } from '../utils/pdfImageHelper';
 
 export default function AddOrderScreen() {
   const router = useRouter();
@@ -95,9 +99,9 @@ export default function AddOrderScreen() {
       const loadData = async () => {
           if (currentUser?.companyId) {
               const [orgs, prods, usrs] = await Promise.all([
-                  fetchSaaSData("organizations"),
+                  fetchOrganizations({ limit: 200 }),
                   listProducts(), // was: fetchSaaSData("products")
-                  fetchSaaSData("users"),
+                  fetchTeamMembers(),
               ]);
               setOrgList(orgs);
               setProductList(prods);
@@ -139,12 +143,15 @@ export default function AddOrderScreen() {
   // 🔥 PDF GENERATOR
   const generateOrderPDF = async (orderData: any) => {
     try {
-        const logoHTML = companyProfile?.logoUrl 
-            ? `<img src="${companyProfile.logoUrl}" style="height: 60px; margin-bottom: 10px;" />` 
+                const logoBase64 = await urlToBase64Image(companyProfile?.logoUrl);
+        const signatureBase64 = await urlToBase64Image(companyProfile?.signatureUrl);
+
+        const logoHTML = logoBase64 
+            ? `<img src="${logoBase64}" style="height: 60px; margin-bottom: 10px;" />` 
             : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
 
-        const signatureHTML = companyProfile?.signatureUrl 
-            ? `<img src="${companyProfile.signatureUrl}" style="height: 50px; margin-top: 10px;" />` 
+        const signatureHTML = signatureBase64 
+            ? `<img src="${signatureBase64}" style="height: 50px; margin-top: 10px;" />` 
             : `<div style="font-weight: bold; margin-top: 30px;">Authorized Signatory</div>`;
 
         const companyBankHTML = companyProfile?.bankDetails1?.accountNo 
@@ -181,10 +188,10 @@ export default function AddOrderScreen() {
                     <div class="company-name" style="margin-top: 0;">${companyProfile?.companyName || 'Our Company'}</div>
                     <div style="font-size: 12px; margin-top: 5px; max-width: 280px; line-height: 1.5;">${companyProfile?.address || companyProfile?.addressLine || ''}</div>
                     <div style="font-size: 12px; margin-top: 4px;">Phone: ${companyProfile?.contactPhone || companyProfile?.phone || '-'} | Email: ${companyProfile?.contactEmail || companyProfile?.email || '-'}</div>
-                    <div style="font-size: 12px; font-weight: bold; margin-top: 5px;">GSTIN: ${companyProfile?.gstNumber || '-'}</div>
+                                        ${companyProfile?.gstNumber ? `<div style="font-size: 12px; font-weight: bold; margin-top: 5px;">GSTIN: ${companyProfile.gstNumber}</div>` : ''}
                 </div>
                 <div style="width: 250px; text-align: right; margin-top: 0; padding-top: 0;">
-                    ${companyProfile?.logoUrl ? `<img src="${companyProfile.logoUrl}" style="max-height: 120px; max-width: 240px; object-fit: contain; object-position: top; display: block; margin-left: auto;" />` : ''}
+                    ${logoBase64 ? `<img src="${logoBase64}" style="max-height: 120px; max-width: 240px; object-fit: contain; object-position: top; display: block; margin-left: auto;" />` : ''}
                 </div>
             </div>
 
@@ -203,7 +210,7 @@ export default function AddOrderScreen() {
                     <div><strong>Order ID:</strong> ${orderData.orderId}</div>
                     <div><strong>Date:</strong> ${new Date(orderData.date).toLocaleDateString('en-GB')}</div>
                     <div><strong>PO Number:</strong> ${orderData.poNumber}</div>
-                    <div style="margin-top: 5px; display: inline-block; padding: 4px 8px; background-color: #fff3e0; border-radius: 4px; color: #e65100; font-weight: bold;">Status: ${orderData.status}</div>
+                    <div style="margin-top: 5px; display: inline-block; padding: 4px 8px; background-color: ${(orderData.status === 'Completed' || orderData.status === 'Billed') ? '#e8f5e9' : orderData.status === 'Dispatched' ? '#e3f2fd' : '#fff3e0'}; border-radius: 4px; color: ${(orderData.status === 'Completed' || orderData.status === 'Billed') ? '#2e7d32' : orderData.status === 'Dispatched' ? '#1565c0' : '#e65100'}; font-weight: bold;">Status: ${orderData.status}</div>
                 </div>
             </div>
 
@@ -413,6 +420,17 @@ export default function AddOrderScreen() {
       setIsSaving(true); 
 
       const locationData = await getCurrentLocation();
+
+// Fire-and-forget: tag this location as an "Order" activity so it shows up
+// as an orange marker on the Tracking tab's map, distinct from the plain
+// background-tracker path. Never blocks/fails order-saving if this errors.
+if (locationData) {
+    recordLocationLog({
+        latitude: locationData.lat,
+        longitude: locationData.lng,
+        type: 'Order',
+    }).catch(() => {});
+}
       
       const cleanAmount = parseFloat(amount.toString().replace(/[^0-9.]/g, '')) || 0;
       const cleanAdvance = parseFloat(advanceAmount.toString().replace(/[^0-9.]/g, '')) || 0; 

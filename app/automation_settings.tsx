@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -14,7 +13,7 @@ import {
     View
 } from 'react-native';
 
-import { db } from '../firebaseConfig';
+import { AutomationSettings, fetchAutomationSettings, saveAutomationSettings } from '../services/api/automationSettings';
 import { useData } from './context/DataContext';
 
 const WHATSAPP_PROVIDERS = [
@@ -33,18 +32,15 @@ export default function AutomationSettingsScreen() {
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-
-    // 🔒 Ye naya state - SuperAdmin ne is company ke liye Automation
-    // Add-on enable kiya hai ya nahi, `companies/{companyId}` se check hota hai
     const [addonEnabled, setAddonEnabled] = useState(false);
 
     const [whatsappEnabled, setWhatsappEnabled] = useState(false);
-    const [whatsappProvider, setWhatsappProvider] = useState('aisensy');
+    const [whatsappProvider, setWhatsappProvider] = useState<'aisensy' | 'meta_cloud' | 'gupshup'>('aisensy');
     const [whatsappApiKey, setWhatsappApiKey] = useState('');
     const [whatsappSenderId, setWhatsappSenderId] = useState('');
 
     const [emailEnabled, setEmailEnabled] = useState(false);
-    const [emailProvider, setEmailProvider] = useState('sendgrid');
+    const [emailProvider, setEmailProvider] = useState<'sendgrid'>('sendgrid');
     const [emailApiKey, setEmailApiKey] = useState('');
     const [emailFromAddress, setEmailFromAddress] = useState('');
 
@@ -52,42 +48,30 @@ export default function AutomationSettingsScreen() {
 
     useEffect(() => {
         const loadSettings = async () => {
-            if (!currentUser?.companyId) { setLoading(false); return; }
+            if (!isAllowed) { setLoading(false); return; }
             try {
-                // 🔒 Sabse pehle entitlement check karo
-                const companyRef = doc(db, 'companies', currentUser.companyId);
-                const companySnap = await getDoc(companyRef);
-                const isEnabled = companySnap.exists() && companySnap.data()?.automationAddonEnabled === true;
-                setAddonEnabled(isEnabled);
+                const { entitled, settings } = await fetchAutomationSettings();
+                setAddonEnabled(entitled);
+                if (!entitled) { setLoading(false); return; }
 
-                // Agar entitled nahi hai, to settings load karne ki zaroorat nahi
-                if (!isEnabled) { setLoading(false); return; }
-
-                const ref = doc(db, 'tenants', currentUser.companyId, 'settings', 'notifications');
-                const snap = await getDoc(ref);
-                if (snap.exists()) {
-                    const data = snap.data();
-                    setWhatsappEnabled(!!data.whatsappEnabled);
-                    setWhatsappProvider(data.whatsappProvider || 'aisensy');
-                    setWhatsappApiKey(data.whatsappApiKey || '');
-                    setWhatsappSenderId(data.whatsappSenderId || '');
-                    setEmailEnabled(!!data.emailEnabled);
-                    setEmailProvider(data.emailProvider || 'sendgrid');
-                    setEmailApiKey(data.emailApiKey || '');
-                    setEmailFromAddress(data.emailFromAddress || '');
-                }
-            } catch (e) {
+                setWhatsappEnabled(settings.whatsappEnabled);
+                setWhatsappProvider(settings.whatsappProvider);
+                setWhatsappApiKey(settings.whatsappApiKey || '');
+                setWhatsappSenderId(settings.whatsappSenderId || '');
+                setEmailEnabled(settings.emailEnabled);
+                setEmailProvider(settings.emailProvider);
+                setEmailApiKey(settings.emailApiKey || '');
+                setEmailFromAddress(settings.emailFromAddress || '');
+            } catch (e: any) {
                 console.log('Settings load error:', e);
             } finally {
                 setLoading(false);
             }
         };
         loadSettings();
-    }, [currentUser]);
+    }, []);
 
     const handleSave = async () => {
-        if (!currentUser?.companyId) return;
-
         if (whatsappEnabled && !whatsappApiKey.trim()) {
             Alert.alert('Missing API Key', 'An API key is required to enable WhatsApp.');
             return;
@@ -99,20 +83,17 @@ export default function AutomationSettingsScreen() {
 
         setSaving(true);
         try {
-            const ref = doc(db, 'tenants', currentUser.companyId, 'settings', 'notifications');
-            await setDoc(ref, {
+            const payload: AutomationSettings = {
                 whatsappEnabled,
                 whatsappProvider,
-                whatsappApiKey: whatsappApiKey.trim(),
-                whatsappSenderId: whatsappSenderId.trim(),
+                whatsappApiKey: whatsappApiKey.trim() || null,
+                whatsappSenderId: whatsappSenderId.trim() || null,
                 emailEnabled,
                 emailProvider,
-                emailApiKey: emailApiKey.trim(),
-                emailFromAddress: emailFromAddress.trim(),
-                updatedAt: new Date().toISOString(),
-                updatedBy: currentUser?.name || 'Admin',
-            }, { merge: true });
-
+                emailApiKey: emailApiKey.trim() || null,
+                emailFromAddress: emailFromAddress.trim() || null,
+            };
+            await saveAutomationSettings(payload);
             Alert.alert('Saved', 'Automation settings saved successfully.');
         } catch (e: any) {
             Alert.alert('Error', e.message || 'Could not save, please try again.');
@@ -138,7 +119,6 @@ export default function AutomationSettingsScreen() {
         );
     }
 
-    // 🔒 SuperAdmin ne is company ke liye add-on enable nahi kiya - locked screen
     if (!addonEnabled) {
         return (
             <View style={styles.container}>
@@ -188,7 +168,7 @@ export default function AutomationSettingsScreen() {
                             <TouchableOpacity
                                 key={p.value}
                                 style={[styles.pill, whatsappProvider === p.value && styles.pillActive]}
-                                onPress={() => setWhatsappProvider(p.value)}
+                                onPress={() => setWhatsappProvider(p.value as any)}
                             >
                                 <Text style={[styles.pillText, whatsappProvider === p.value && styles.pillTextActive]}>
                                     {p.label}
@@ -236,7 +216,7 @@ export default function AutomationSettingsScreen() {
                             <TouchableOpacity
                                 key={p.value}
                                 style={[styles.pill, emailProvider === p.value && styles.pillActive]}
-                                onPress={() => setEmailProvider(p.value)}
+                                onPress={() => setEmailProvider(p.value as any)}
                             >
                                 <Text style={[styles.pillText, emailProvider === p.value && styles.pillTextActive]}>
                                     {p.label}

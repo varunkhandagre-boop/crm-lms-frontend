@@ -3,12 +3,18 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-// 🔥 SAAS IMPORTS (DataContext & Engine)
+// 🔥 SAAS IMPORTS ("users" stays on Firestore until Phase 10)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+
+// 🔥 Phase 7: attendance/leaves/holidays now come from Postgres via these adapters
+import { fetchAttendance } from '../services/api/attendance';
+import { fetchHolidays } from '../services/api/holidays';
+import { fetchLeaves } from '../services/api/leaves';
+import { fetchTeamMembers } from '../services/api/users';
 
 export default function AttendanceScreen() {
   const router = useRouter();
@@ -16,8 +22,10 @@ export default function AttendanceScreen() {
   // 🔥 1. Context se sirf logged in User
   const { currentUser } = useData();
   
-  // 🔥 2. Naya SaaS Engine
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 2. "users" still Firestore; attendance/leaves/holidays are Postgres now
+  const { fetchSaaSData, isDbLoading: isUsersLoading } = useSaaSDB();
+  const [isAttendanceLoading, setIsAttendanceLoading] = useState(true);
+  const isDbLoading = isUsersLoading || isAttendanceLoading;
 
   // 🔥 3. Lazy Loaded Lists
   const [attendanceList, setAttendanceList] = useState<any[]>([]);
@@ -46,51 +54,33 @@ export default function AttendanceScreen() {
       else setVisibleCount(20);  
   }, [viewMode, currentDate, filterUser]);
 
-  // 🔥 4. MASSIVE DATA LOAD ON MOUNT
-  useEffect(() => {
-      const loadAllData = async () => {
-          if (currentUser?.companyId) {
-              const [attendance, leaves, holidays, users] = await Promise.all([
-                  fetchSaaSData("attendance"),
-                  fetchSaaSData("leaves"),
-                  fetchSaaSData("holidays"),
-                  fetchSaaSData("users")
-              ]);
-              setAttendanceList(attendance);
-              setLeaveList(leaves);
-              setHolidayList(holidays);
-              setUserList(users);
-          }
-      };
-      loadAllData();
-  }, [currentUser]);
-
-  // DEFINE VARIABLES
   const DEFAULT_QUOTA = 18;
   const canManage = ['Admin', 'Manager', 'Account', 'Accountant' ,'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
-  
-  const targetName = (filterUser === 'All' || !canManage) ? currentUser?.name : filterUser;
 
-  // SORT USERS
-  const uniqueUsers = useMemo(() => {
-    if (!canManage) return [];
-    const safeList = Array.isArray(userList) ? userList : [];
-    
-    // Safer unique logic
-    const map = new Map();
-    safeList.forEach((u: any) => {
-        if (u.name && !map.has(u.name)) {
-            map.set(u.name, { name: u.name, quota: u.yearlyLeaves || DEFAULT_QUOTA });
-        }
-    });
-    return Array.from(map.values()).sort((a: any, b: any) => a.name.localeCompare(b.name));
-  }, [userList, canManage]);
+  // 🔥 4. Bounded date range for the fetch, matching the currently selected view —
+  // replaces the old "fetch the entire collection" pattern.
+  const getFetchRange = () => {
+      if (viewMode === 'Day') {
+          const d = getStandardDateStr(currentDate);
+          return { fromDate: d, toDate: d };
+      }
+      if (viewMode === 'Month') {
+          const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+          const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+          return { fromDate: getStandardDateStr(start), toDate: getStandardDateStr(end) };
+      }
+      // FY
+      const targetMonth = currentDate.getMonth();
+      const targetYear = currentDate.getFullYear();
+      const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
+      let start = new Date(fyStartYear, 3, 1);
+      const APP_LAUNCH_DATE = new Date(2026, 0, 1);
+      if (start < APP_LAUNCH_DATE) start = APP_LAUNCH_DATE;
+      const end = new Date(fyStartYear + 1, 2, 31);
+      return { fromDate: getStandardDateStr(start), toDate: getStandardDateStr(end) };
+  };
 
-  // --- HELPER: Dates ---
-  const formatMonth = (date: Date) => date.toLocaleString('default', { month: 'long', year: 'numeric' });
-  const formatFullDate = (date: Date) => date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-  
-  const getStandardDate = (dateInput: any): string => {
+  function getStandardDateStr(dateInput: any): string {
       if (!dateInput) return "";
       try {
           if (dateInput instanceof Date) {
@@ -113,7 +103,78 @@ export default function AttendanceScreen() {
           }
       } catch (e) { return ""; }
       return "";
-  };
+  }
+
+  // 🔥 Users list loads once per session (still Firestore, unrelated to date-range paging)
+  useEffect(() => {
+      const loadUsers = async () => {
+          if (currentUser?.companyId) {
+              const users = await fetchTeamMembers();
+              setUserList(users);
+
+          }
+      };
+      loadUsers();
+  }, [currentUser]);
+
+  // 🔥 Bounded date-range fetch for attendance/leaves/holidays — replaces the old
+  // "fetch the entire collection" pattern. Re-runs when the view window or the
+  // selected employee changes. Waits for userList so a manager's employee filter
+  // resolves to the correct userId instead of silently falling back to "self".
+  useEffect(() => {
+      const loadAttendanceData = async () => {
+          if (!currentUser?.companyId) return;
+          if (canManage && filterUser !== 'All' && userList.length === 0) return; // wait for users to resolve the id
+
+          const { fromDate, toDate } = getFetchRange();
+          let targetUserId: string | undefined;
+          if (canManage) {
+              if (filterUser === 'All') {
+                  targetUserId = 'all';
+              } else {
+                  const match = userList.find((u: any) => u.name === filterUser);
+                  targetUserId = match?.id; // if not found, adapter/route falls back to self — acceptable edge case
+              }
+          } // else undefined => self, enforced server-side regardless
+
+          setIsAttendanceLoading(true);
+          try {
+              const [attendance, leaves, holidays] = await Promise.all([
+                  fetchAttendance({ userId: targetUserId, fromDate, toDate, limit: 500 }),
+                  fetchLeaves({ userId: targetUserId, limit: 200 }),
+                  fetchHolidays(fromDate, toDate),
+              ]);
+              setAttendanceList(attendance);
+              setLeaveList(leaves);
+              setHolidayList(holidays);
+          } finally {
+              setIsAttendanceLoading(false);
+          }
+      };
+      loadAttendanceData();
+  }, [currentUser, viewMode, currentDate, filterUser, userList]);
+
+  const targetName = (filterUser === 'All' || !canManage) ? currentUser?.name : filterUser;
+
+  // SORT USERS
+  const uniqueUsers = useMemo(() => {
+    if (!canManage) return [];
+    const safeList = Array.isArray(userList) ? userList : [];
+    
+    const map = new Map();
+    safeList.forEach((u: any) => {
+        if (u.name && !map.has(u.name)) {
+            map.set(u.name, { name: u.name, quota: u.yearlyLeaves || DEFAULT_QUOTA });
+        }
+    });
+    return Array.from(map.values()).sort((a: any, b: any) => a.name.localeCompare(b.name));
+  }, [userList, canManage]);
+
+  // --- HELPER: Dates ---
+  const formatMonth = (date: Date) => date.toLocaleString('default', { month: 'long', year: 'numeric' });
+  const formatFullDate = (date: Date) => date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  
+  const getStandardDate = getStandardDateStr;
 
   const formatDateDisplay = (dateStr: string) => {
       const std = getStandardDate(dateStr);
@@ -171,7 +232,7 @@ export default function AttendanceScreen() {
       return 'PRESENT';
   };
 
-  // --- CORE DATA LOGIC ---
+  // --- CORE DATA LOGIC (unchanged — now operates on the already-bounded fetched lists) ---
   const getDisplayData = () => {
     let finalOutput: any[] = [];
     
@@ -232,7 +293,6 @@ export default function AttendanceScreen() {
         }
 
         if (targetUsers.length > 0) {
-            // Deduplicate target users
             const uniqueTargetUsers = new Map();
             targetUsers.forEach((u:any) => uniqueTargetUsers.set(u.name, u));
 
@@ -350,19 +410,20 @@ export default function AttendanceScreen() {
   // Download Report
   const downloadReport = async () => {
       try {
-          let csvHeader = "Date,Employee,Status,In Time,Out Time,Work Hrs,Total Expense,Note\n";
-          let csvRows = "";
-          
-          finalData.forEach((item: any) => {
-              const date = formatDateDisplay(item.date);
-              const name = item.senderName || 'Unknown';
-              const status = getStatus(item);
-              const inTime = item.inTime || '-';
-              const outTime = item.outTime || '-';
-              const hrs = item.workHrs || '-';
-              const expense = item.expenses?.totalAmount || '0';
+            let csvHeader = "Date,Employee,Status,Location,In Time,Out Time,Work Hrs,Total Expense,Note\n";
+            let csvRows = "";
+            
+            finalData.forEach((item: any) => {
+                const date = formatDateDisplay(item.date);
+                const name = item.senderName || 'Unknown';
+                const status = getStatus(item);
+                const location = item.workLocationType || '-';
+                const inTime = item.inTime || '-';
+                const outTime = item.outTime || '-';
+                const hrs = item.workHrs || '-';
+                const expense = item.expenses?.totalAmount || '0';
               const note = item.location === 'On Leave' ? 'Leave' : (item.outTime === 'Sunday Off' ? 'Sunday' : '-');
-              csvRows += `${date},${name},${status},${inTime},${outTime},${hrs},${expense},${note}\n`;
+              csvRows += `${date},${name},${status},${location},${inTime},${outTime},${hrs},${expense},${note}\n`;
           });
 
           const fileUri = (FileSystem as any).cacheDirectory + `Attendance_${targetName || 'Report'}.csv`;
@@ -404,8 +465,18 @@ export default function AttendanceScreen() {
               ) : isAbsent ? (
                   <><Text style={{color:'#d32f2f', fontWeight:'bold'}}>Absent</Text>{(viewMode === 'Day') && <Text style={{fontSize:11, color:'#3b5998', fontWeight:'bold', marginTop:2}}>👤 {item.senderName?.split(' ')[0]}</Text>}</>
               ) : (
-                  <View style={{flexDirection:'column'}}>
+                    <View style={{flexDirection:'column'}}>
                       <View style={{flexDirection:'row', alignItems:'center'}}>
+                          {item.workLocationType && (
+                              <View style={{
+                                  width: 18, height: 18, borderRadius: 9, justifyContent: 'center', alignItems: 'center', marginRight: 6,
+                                  backgroundColor: item.workLocationType === 'Office' ? '#2e7d32' : '#e65100'
+                              }}>
+                                  <Text style={{ fontSize: 10, fontWeight: 'bold', color: 'white' }}>
+                                      {item.workLocationType === 'Office' ? 'O' : 'F'}
+                                  </Text>
+                              </View>
+                          )}
                           <Text style={{fontSize:12, color:'green', fontWeight:'bold'}}>IN: {item.inTime}</Text>
                           <Text style={{fontSize:12, color: showForgot?'orange':'red', fontWeight:'bold', marginLeft:8}}>OUT: {showForgot ? 'Forgot?' : (item.outTime || '--')}</Text>
                       </View>
@@ -638,6 +709,19 @@ export default function AttendanceScreen() {
                         
                         {selectedItem.inTime && selectedItem.inTime !== '-' && selectedItem.inTime !== 'LEAVE' ? (
                             <>
+                                {selectedItem.workLocationType && (
+                                    <View style={{
+                                        alignSelf: 'center', marginBottom: 10, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12,
+                                        backgroundColor: selectedItem.workLocationType === 'Office' ? '#e8f5e9' : '#fff3e0'
+                                    }}>
+                                        <Text style={{
+                                            fontSize: 12, fontWeight: 'bold',
+                                            color: selectedItem.workLocationType === 'Office' ? '#2e7d32' : '#e65100'
+                                        }}>
+                                            {selectedItem.workLocationType === 'Office' ? '🏢 Office' : '📍 Field'}
+                                        </Text>
+                                    </View>
+                                )}
                                 <View style={styles.divider}/>
                                 <View style={{flexDirection:'row', justifyContent:'space-between', backgroundColor:'#f9f9f9', padding:10, borderRadius:8}}>
                                     <View style={{alignItems:'center'}}>

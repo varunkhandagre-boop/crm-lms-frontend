@@ -15,24 +15,22 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+// 🔥 SAAS IMPORTS (users still Firestore, needed for employee names)
 import { useSaaSDB } from '../hooks/useSaaSDB';
+import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
+// 🔥 Phase 6: expenses now via new backend API
+import { listExpenses, settleExpensesForEmployee, updateExpenseStatus } from '../services/api/expenses';
 
 export default function ExpenseScreen() {
   const router = useRouter();
   
-  // 🔥 1. Context se User & Notification
   const { currentUser, addNotification } = useData();
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-  // 🔥 2. Naya SaaS Engine
-  const { fetchSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
-
-  // 🔥 3. Lazy Loaded Master States
   const [expenseList, setExpenseList] = useState<any[]>([]);
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
 
-  // STATES
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [searchText, setSearchText] = useState('');
@@ -43,6 +41,7 @@ export default function ExpenseScreen() {
 
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
 
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState('All');
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All'); 
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
@@ -50,20 +49,21 @@ export default function ExpenseScreen() {
 
   const canManage = ['Admin', 'Manager', 'Hr', 'Account', 'Accountant', 'SuperAdmin'].includes(currentUser?.role || '');
 
-  // RESET PAGINATION ON FILTER CHANGE
   useEffect(() => {
       if (viewMode === 'Day') setVisibleCount(100); 
       else setVisibleCount(20); 
   }, [viewMode, currentDate, selectedEmployeeName, searchText]);
 
-  // 🔥 4. LOAD DATA ON MOUNT
+  // 🔥 LOAD DATA — expenses via new API; users via Firestore (for name lookup)
   const loadData = async () => {
       if (currentUser?.companyId) {
           const [expenses, users] = await Promise.all([
-              fetchSaaSData("expenses"),
-              fetchSaaSData("users")
+              listExpenses(), // was: fetchSaaSData("expenses")
+              fetchTeamMembers()
           ]);
-          setExpenseList(expenses);
+
+          const userMap = new Map(users.map((u: any) => [u.id, u.name]));
+          setExpenseList(expenses.map((e: any) => ({ ...e, senderName: userMap.get(e.senderId) || 'Unknown' })));
 
           if (canManage) {
               const uniqueMap = new Map();
@@ -81,7 +81,6 @@ export default function ExpenseScreen() {
       loadData();
   }, [currentUser]);
 
-  // 1. DATE PARSER
   const parseDate = (dateStr: any) => {
       if (!dateStr) return new Date();
       if (dateStr instanceof Date) return dateStr;
@@ -114,23 +113,20 @@ export default function ExpenseScreen() {
       return "All Time";
   };
 
-  // --- FILTER LOGIC ---
+  // --- FILTER LOGIC — filters by senderId now, not senderName ---
   const getFilteredData = () => {
     let data = Array.isArray(expenseList) ? [...expenseList] : [];
 
-    // 1. SECURITY FILTER
     if (canManage) {
-        if(selectedEmployeeName !== 'All') {
-            data = data.filter((item: any) => item.senderName === selectedEmployeeName);
+        if(selectedEmployeeId !== 'All') {
+            data = data.filter((item: any) => item.senderId === selectedEmployeeId);
         }
     } else {
-        if(currentUser?.uid || currentUser?.id) {
-            const myId = currentUser.uid || currentUser.id;
-            data = data.filter((item: any) => item.senderId === myId || item.userId === myId);
+        if(currentUser?.id) {
+            data = data.filter((item: any) => item.senderId === currentUser.id);
         }
     }
 
-    // 2. DATE FILTER
     if (viewMode !== 'All') {
         const targetYear = currentDate.getFullYear();
         const targetMonth = currentDate.getMonth();
@@ -152,7 +148,6 @@ export default function ExpenseScreen() {
         });
     }
 
-    // 3. SEARCH
     if (searchText) {
         const term = searchText.toLowerCase();
         data = data.filter((item: any) => {
@@ -176,10 +171,9 @@ export default function ExpenseScreen() {
       .filter((item: any) => item.status !== 'Rejected')
       .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
 
-
-  // 🔥 5. SAAS SETTLEMENT LOGIC (Batch Simulation)
+  // 🔥 SETTLEMENT — via new backend API bulk-settle endpoint
   const handleSettlement = async () => {
-      if (selectedEmployeeName === 'All') {
+      if (selectedEmployeeId === 'All') {
           Alert.alert("Error", "Please select a specific employee to settle accounts.");
           return;
       }
@@ -202,18 +196,7 @@ export default function ExpenseScreen() {
   const processSettlement = async () => {
       setIsSettling(true);
       try {
-          const itemsToSettle = fullFilteredList.filter(item => item.status === 'Pending' || item.status === 'Approved');
-
-          // Running multiple update requests parallelly through SaaS Engine
-          const promises = itemsToSettle.map(item => {
-              return updateSaaSData("expenses", item.id, { 
-                  status: 'Settled', 
-                  settlementDate: new Date().toISOString() 
-              });
-          });
-
-          await Promise.all(promises);
-          
+          await settleExpensesForEmployee(selectedEmployeeId);
           await loadData(); // Silent Reload
           Alert.alert("Success", "Expenses Settled! Balance is now 0.");
       } catch (error) {
@@ -228,31 +211,27 @@ export default function ExpenseScreen() {
       setModalVisible(true);
   };
 
-  // 🔥 6. SAAS STATUS UPDATE LOGIC
+  // 🔥 STATUS UPDATE — via new backend API
   const handleStatusUpdate = async (status: string) => {
       setUpdatingStatus(status); 
       try {
-          const res = await updateSaaSData("expenses", selectedItem.id, { status: status });
+          await updateExpenseStatus(selectedItem.id, status as 'Approved' | 'Rejected');
 
-          if (res.success) {
-              const targetUserId = selectedItem.senderId || selectedItem.userId;
-              if (addNotification && targetUserId && targetUserId !== (currentUser?.id || currentUser?.uid)) {
-                  await addNotification({
-                      title: `Expense Claim ${status}`,
-                      message: `Your claim of ₹${selectedItem.amount} has been ${status}.`,
-                      type: status === 'Approved' ? 'success' : 'alert',
-                      userId: targetUserId,
-                      to: selectedItem.senderName,
-                      route: '/expense'
-                  });
-              }
-              
-              setExpenseList(prev => prev.map(item => item.id === selectedItem.id ? { ...item, status: status } : item));
-              setModalVisible(false);
-              Alert.alert("Updated", `Claim marked as ${status}`);
-          } else {
-              Alert.alert("Error", "Could not update status.");
+          const targetUserId = selectedItem.senderId;
+          if (addNotification && targetUserId && targetUserId !== currentUser?.id) {
+              await addNotification({
+                  title: `Expense Claim ${status}`,
+                  message: `Your claim of ₹${selectedItem.amount} has been ${status}.`,
+                  type: status === 'Approved' ? 'success' : 'alert',
+                  userId: targetUserId,
+                  to: selectedItem.senderName,
+                  route: '/expense'
+              });
           }
+          
+          setExpenseList(prev => prev.map(item => item.id === selectedItem.id ? { ...item, status: status } : item));
+          setModalVisible(false);
+          Alert.alert("Updated", `Claim marked as ${status}`);
       } catch (error) {
           Alert.alert("Error", "Could not update status.");
       } finally {
@@ -327,7 +306,7 @@ export default function ExpenseScreen() {
           </View>
           
           <View style={{flexDirection:'row', justifyContent:'space-between', width:'100%', marginTop:10, alignItems:'center', borderTopWidth:1, borderTopColor:'#eee', paddingTop:10}}>
-              {canManage && selectedEmployeeName !== 'All' ? (
+              {canManage && selectedEmployeeId !== 'All' ? (
                   <>
                     <Text style={{color:'#3b5998', fontSize:12, fontWeight:'bold'}}>👤 {selectedEmployeeName}</Text>
                     <TouchableOpacity style={[styles.settleBtn, outstandingAmount === 0 && {backgroundColor:'#ccc'}]} onPress={handleSettlement} disabled={isSettling || outstandingAmount === 0}>
@@ -355,7 +334,7 @@ export default function ExpenseScreen() {
               <TouchableOpacity style={styles.employeeFilterBtn} onPress={() => setShowEmployeePicker(true)}>
                   <Ionicons name="people" size={18} color="#2e7d32" />
                   <Text style={{fontSize:13, marginLeft:8, color:'#2e7d32', fontWeight:'600'}}>
-                      {selectedEmployeeName === 'All' ? 'View All Staff' : selectedEmployeeName}
+                      {selectedEmployeeId === 'All' ? 'View All Staff' : selectedEmployeeName}
                   </Text>
                   <Ionicons name="chevron-down" size={16} color="#2e7d32" style={{marginLeft:'auto'}}/>
               </TouchableOpacity>
@@ -424,7 +403,6 @@ export default function ExpenseScreen() {
         }
       />
 
-      {/* MODAL */}
       <Modal visible={modalVisible} transparent={true} animationType="fade">
           <View style={styles.modalOverlay}>
               <View style={styles.modalContent}>
@@ -491,9 +469,9 @@ export default function ExpenseScreen() {
                     data={employees} 
                     keyExtractor={(item, index) => index.toString()} 
                     renderItem={({item}) => (
-                      <TouchableOpacity style={styles.pickerItem} onPress={() => { setSelectedEmployeeName(item.name); setShowEmployeePicker(false); }}>
+                      <TouchableOpacity style={styles.pickerItem} onPress={() => { setSelectedEmployeeId(item.id); setSelectedEmployeeName(item.name); setShowEmployeePicker(false); }}>
                           <Text style={{fontSize:16, color:'#333'}}>{item.name}</Text>
-                          {selectedEmployeeName === item.name && <Ionicons name="checkmark" size={18} color="green" />}
+                          {selectedEmployeeId === item.id && <Ionicons name="checkmark" size={18} color="green" />}
                       </TouchableOpacity>
                   )} />
               </View>

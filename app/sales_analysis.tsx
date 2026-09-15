@@ -19,7 +19,12 @@ import {
 
 // 🔥 SAAS IMPORTS (No direct Firebase DB imports)
 import { useSaaSDB } from '../hooks/useSaaSDB';
+import { listOrders } from '../services/api/orders';
+import { fetchOrganizations } from '../services/api/organizations';
+import { listPaymentCollections } from '../services/api/paymentCollections';
+import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
+
 
 export default function SalesAnalysisScreen() {
   const router = useRouter();
@@ -83,15 +88,15 @@ export default function SalesAnalysisScreen() {
   const loadData = async () => {
       if (currentUser?.companyId) {
           const [orders, payments, orgs, users] = await Promise.all([
-              fetchSaaSData("orders"),
-              fetchSaaSData("payment_collections"),
-              fetchSaaSData("organizations"),
-              fetchSaaSData("users")
-          ]);
-          setOrderList(orders);
-          setPaymentList(payments);
-          setOrgList(orgs);
-          setUserList(users);
+    listOrders(),
+    listPaymentCollections(),
+    fetchOrganizations({ limit: 200 }),
+    fetchTeamMembers(),
+]);
+setOrderList(orders);
+setPaymentList(payments);
+setOrgList(orgs);
+setUserList(users);
 
           if (isAdmin) {
               const mappedUsers = users.map((u: any) => ({

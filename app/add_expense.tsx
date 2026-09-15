@@ -19,20 +19,16 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
-import { useSaaSDB } from '../hooks/useSaaSDB';
+// 🔥 SAAS IMPORTS (kept for parity, not used for writes anymore)
 import { useData } from './context/DataContext';
+// 🔥 Phase 6: expenses now via new backend API
+import { createExpense } from '../services/api/expenses';
 
 export default function AddExpenseScreen() {
   const router = useRouter();
   
-  // 🔥 1. Context se Current User aur Notification Engine nikala
   const { currentUser, addNotification } = useData();
-  
-  // 🔥 2. Naya SaaS Engine connect kiya
-  const { addSaaSData } = useSaaSDB();
 
-  // States
   const [date, setDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   
@@ -42,11 +38,9 @@ export default function AddExpenseScreen() {
   const [image, setImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Modal State
   const [modalVisible, setModalVisible] = useState(false);
   const expenseTypes = ["Travel", "Food", "Lodging/Hotel", "Fuel", "Mobile/Internet", "Office Stationary", "Misc"];
 
-  // DATE FORMATTER
   const formatDate = (rawDate: Date) => {
     let day = rawDate.getDate().toString().padStart(2, '0');
     let month = (rawDate.getMonth() + 1).toString().padStart(2, '0');
@@ -54,20 +48,17 @@ export default function AddExpenseScreen() {
     return `${day}/${month}/${year}`;
   };
 
-  // --- CAMERA LOGIC ---
   const pickImage = async () => {
-      // 1. Permission
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
           Alert.alert("Permission Denied", "Camera access is needed to upload bills.");
           return;
       }
 
-      // 2. Open Camera
       let result = await ImagePicker.launchCameraAsync({
           mediaTypes: ImagePicker.MediaTypeOptions.Images,
           allowsEditing: false, 
-          quality: 0.5, // Compress for speed
+          quality: 0.5,
       });
 
       if (!result.canceled) {
@@ -75,7 +66,9 @@ export default function AddExpenseScreen() {
       }
   };
 
-  // 🔥 3. SAAS SAVE LOGIC
+  // 🔥 SAVE LOGIC — via new backend API. Note: imageUri is passed through as
+  // a local file URI only — it isn't uploaded to Supabase Storage yet, same
+  // known gap as Order PO files and Service Call photos.
   const handleSave = async () => {
       if (type === 'Select Type' || !amount) {
           Alert.alert("Missing Fields", "Please select Type and enter Amount.");
@@ -84,40 +77,28 @@ export default function AddExpenseScreen() {
 
       setLoading(true);
       try {
-          // 🔥 4. CLEAN PAYLOAD: Engine will auto-add ID, CompanyID, SenderID & CreatedAt
-          const newEntry = {
-              date: formatDate(date),
-              dateIso: date.toISOString().split('T')[0],
-              type: type,
-              amount: parseFloat(amount) || 0, // Ensure amount is a number
-              remark: remark,
-              imageUri: image,
-              status: 'Pending', // Manager Approval Needed
-              role: currentUser?.role || 'Employee'
-          };
+          await createExpense({
+              date: date.toISOString(),
+              type,
+              amount: parseFloat(amount) || 0,
+              remark,
+              imageUri: image || undefined,
+          });
 
-          const result = await addSaaSData("expenses", newEntry);
-          
-          if (result.success) {
-              // 🔥 5. REAL PUSH NOTIFICATION
-              if (addNotification) {
-                  await addNotification({
-                      title: "New Expense Claim 💸",
-                      message: `${currentUser?.name} claimed ₹${amount} for ${type}.`,
-                      to: "Accountant", // Defaulting to Accountant, or "Admin"
-                      route: "/expense",
-                      type: "warning"
-                  });
-              }
-
-              Alert.alert("Success", "Expense Claim Submitted & Admin Notified!");
-              router.back();
-          } else {
-              Alert.alert("Error", "Could not submit claim.");
+          if (addNotification) {
+              await addNotification({
+                  title: "New Expense Claim 💸",
+                  message: `${currentUser?.name} claimed ₹${amount} for ${type}.`,
+                  to: "Accountant",
+                  route: "/expense",
+                  type: "warning"
+              });
           }
-      } catch (e) {
-          Alert.alert("Error", "Could not submit claim.");
-          console.error(e);
+
+          Alert.alert("Success", "Expense Claim Submitted & Admin Notified!");
+          router.back();
+      } catch (e: any) {
+          Alert.alert("Error", e?.message || "Could not submit claim.");
       } finally {
           setLoading(false);
       }
@@ -133,7 +114,6 @@ export default function AddExpenseScreen() {
         <View style={{width:24}} /> 
       </View>
 
-      {/* KEYBOARD AVOIDING VIEW */}
       <KeyboardAvoidingView 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
         style={{flex: 1}}
@@ -144,7 +124,6 @@ export default function AddExpenseScreen() {
             keyboardShouldPersistTaps="handled"
         >
             
-            {/* Date Picker */}
             <Text style={styles.label}>Date</Text>
             <TouchableOpacity style={styles.inputBox} onPress={() => setShowDatePicker(true)}>
                 <Text style={{flex:1, color:'#333'}}>{formatDate(date)}</Text>
@@ -158,14 +137,12 @@ export default function AddExpenseScreen() {
                 />
             )}
 
-            {/* Expense Type */}
             <Text style={styles.label}>Expense Type *</Text>
             <TouchableOpacity style={styles.inputBox} onPress={() => setModalVisible(true)}>
                 <Text style={{color: type === 'Select Type' ? 'gray' : 'black'}}>{type}</Text>
                 <Ionicons name="caret-down" size={14} color="gray" />
             </TouchableOpacity>
 
-            {/* Amount */}
             <Text style={styles.label}>Amount (₹) *</Text>
             <TextInput 
                 style={styles.inputBox} 
@@ -175,7 +152,6 @@ export default function AddExpenseScreen() {
                 placeholder="0.00"
             />
 
-            {/* Remark */}
             <Text style={styles.label}>Description / Remark</Text>
             <TextInput 
                 style={[styles.inputBox, {height: 80, textAlignVertical:'top'}]} 
@@ -185,7 +161,6 @@ export default function AddExpenseScreen() {
                 placeholder="Details..."
             />
 
-            {/* Bill Upload */}
             <Text style={styles.label}>Upload Bill / Ticket</Text>
             <View style={styles.uploadContainer}>
                 {image ? (
@@ -204,7 +179,6 @@ export default function AddExpenseScreen() {
                 )}
             </View>
 
-            {/* SAVE BUTTON WITH BLUR EFFECT */}
             <TouchableOpacity 
                 style={[styles.saveBtn, loading && { opacity: 0.6 }]} 
                 onPress={handleSave} 
@@ -216,7 +190,6 @@ export default function AddExpenseScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Type Modal */}
       <Modal visible={modalVisible} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
@@ -250,7 +223,6 @@ const styles = StyleSheet.create({
   label: { marginBottom: 5, color:'#555', fontWeight:'600', fontSize:13, marginTop:15 },
   inputBox: { flexDirection:'row', alignItems:'center', justifyContent:'space-between', backgroundColor: '#f9f9f9', borderWidth:1, borderColor:'#ddd', borderRadius: 8, padding: 12, fontSize:16 },
   
-  // Upload Styles
   uploadContainer: { marginTop: 5, marginBottom: 10 },
   cameraBtn: { height: 120, borderWidth: 1, borderColor: '#3b5998', borderStyle: 'dashed', borderRadius: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: '#eef2ff' },
   previewImage: { width: '100%', height: 200, borderRadius: 10, resizeMode: 'cover' },
@@ -259,7 +231,6 @@ const styles = StyleSheet.create({
   saveBtn: { backgroundColor: '#3b5998', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 30 },
   saveBtnText: { color: 'white', fontWeight: 'bold', fontSize: 18 },
   
-  // Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
   modalContent: { backgroundColor: 'white', borderRadius: 10, padding: 20, maxHeight:'60%' },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, color: '#3b5998', textAlign:'center' },

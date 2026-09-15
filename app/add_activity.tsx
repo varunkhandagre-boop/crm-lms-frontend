@@ -23,6 +23,7 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 5: activity plans now via new backend API
 import { createActivityPlan } from '../services/api/activityPlans';
+import { fetchOrganizations } from '../services/api/organizations';
 
 export default function AddActivityScreen() {
   const router = useRouter();
@@ -65,7 +66,7 @@ export default function AddActivityScreen() {
   useEffect(() => {
       const loadOrganizations = async () => {
           if (currentUser?.companyId) {
-              const data = await fetchSaaSData("organizations");
+              const data = await fetchOrganizations({ limit: 200 });
               setOrgList(data);
           }
       };

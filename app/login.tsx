@@ -59,7 +59,7 @@ export default function LoginScreen() {
   }, []);
 
   // 🔥 FORGOT PASSWORD FUNCTION
-  const handleForgotPassword = async () => {
+    const handleForgotPassword = async () => {
       if (!email) {
           Alert.alert("Email Required", "Please enter your registered email ID in the box above to reset your password.");
           return;
@@ -72,8 +72,19 @@ export default function LoginScreen() {
               "A password reset link has been sent to your email address. Please check your inbox (and spam folder) to create a new password."
           );
       } catch (error: any) {
+          // Employees created via the migrated Users tab have no Firebase
+          // account, so this always fails with "user-not-found" for them —
+          // that's expected, not a real error. Guide them to the one
+          // reset path that always works instead of showing a confusing
+          // Firebase-specific message.
+          if (error.message?.includes('user-not-found')) {
+              Alert.alert(
+                  "Contact Your Admin",
+                  "We couldn't find a self-service reset for this account. Please ask your company Admin to reset your password from Manage Team."
+              );
+              return;
+          }
           let msg = error.message;
-          if (msg.includes('user-not-found')) msg = "This email is not registered with us.";
           if (msg.includes('invalid-email')) msg = "Please enter a valid email address.";
           Alert.alert("Error", msg);
       }

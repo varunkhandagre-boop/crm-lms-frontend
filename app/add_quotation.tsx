@@ -10,8 +10,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: quotations now go through the new backend API
-import { createQuotation, listQuotations, updateQuotation } from '../services/api/quotations';
+import { fetchOrganizations } from '../services/api/organizations';
 import { listProducts } from '../services/api/products';
+import { createQuotation, listQuotations, updateQuotation } from '../services/api/quotations';
 
 export default function AddQuotationScreen() {
     const router = useRouter();
@@ -47,7 +48,7 @@ export default function AddQuotationScreen() {
         const loadData = async () => {
             if (currentUser?.companyId) {
                 const [orgs, prods, quotes] = await Promise.all([
-                    fetchSaaSData("organizations"),
+                    fetchOrganizations({ limit: 200 }),
                     listProducts(), // was: fetchSaaSData("products")
                     listQuotations() // was: fetchSaaSData("quotations")
                 ]);

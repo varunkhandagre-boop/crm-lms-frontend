@@ -17,12 +17,12 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (DataContext & Engine)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
-// 🔥 FIREBASE IMPORTS (Strictly for Cascading Batch Updates on Edit)
-import { collection, getDocs, query, where, writeBatch } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+// 🔥 Phase 10: organizations now go to Postgres via these adapters — the
+// cascading rename (into orders/leads/service_calls/etc.) happens server-side
+// inside the PATCH transaction now, so the old Firestore writeBatch code is gone.
+import { fetchOrganizations, createOrganization, updateOrganization } from '../services/api/organizations';
 
 // 🔥 OCR & CAMERA IMPORT
 import * as ImagePicker from 'expo-image-picker';
@@ -38,8 +38,8 @@ export default function AddOrganizationScreen() {
   // 🔥 1. Context se sirf User & Notification
   const { currentUser, addNotification } = useData();
 
-  // 🔥 2. Naya SaaS Engine
-  const { fetchSaaSData, addSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 2. Local loading state (no more useSaaSDB here)
+  const [isDbLoading, setIsDbLoading] = useState(true);
 
   // 🔥 3. Lazy Loaded Organization List (For Edit Mode Auto-fill)
   const [orgList, setOrgList] = useState<any[]>([]);
@@ -150,12 +150,16 @@ export default function AddOrganizationScreen() {
   ];
   const territoryOptions = ["North", "South", "East", "West", "Central"];
 
-  // 🔥 4. LOAD ORGS ON MOUNT (Needed for Edit Mode)
+  // 🔥 4. LOAD ORGS ON MOUNT (Needed for Edit Mode) — Phase 10: Postgres via fetchOrganizations()
   useEffect(() => {
       const loadData = async () => {
-          if (currentUser?.companyId) {
-              const orgs = await fetchSaaSData("organizations");
+          if (!currentUser?.companyId) return;
+          setIsDbLoading(true);
+          try {
+              const orgs = await fetchOrganizations();
               setOrgList(orgs);
+          } finally {
+              setIsDbLoading(false);
           }
       };
       loadData();
@@ -407,7 +411,7 @@ export default function AddOrganizationScreen() {
     setModalVisible(false);
   };
 
-  // 🔥 5. SAAS SAVE & BATCH UPDATE LOGIC
+  // 🔥 5. SAAS SAVE LOGIC — Phase 10: server does the cascading rename now (see PATCH /organizations/:id)
   const handleSave = async () => {
       if (!orgName || customerGroup === 'Select' || selectedState === 'Select' || !mobile) {
           Alert.alert("Missing Fields", "Please fill Organization, Customer Group, State, and Mobile No.");
@@ -417,59 +421,27 @@ export default function AddOrganizationScreen() {
       setIsSaving(true);
 
       const orgData = {
-          name: orgName, orgName: orgName, type: customerGroup, city: city || selectedDistrict, 
+          name: orgName, type: customerGroup, city: city || selectedDistrict, 
           equipment: { ventilator: 0, anesthesia: 0, bubble: 0, compressor: 0, monitor: 0 },
-          beds, address1, address: address1, address2,
+          beds, address1, address2,
           salutation, firstName, lastName, country, 
           mobile, phone, email, state: selectedState, district: selectedDistrict, 
           designation, territory, pincode,
-          dob: dob ? dob.toISOString().split('T')[0] : '',
-          anniversary: anniversary ? anniversary.toISOString().split('T')[0] : '',
-          gstNumber: gstNumber ? gstNumber.toUpperCase() : '',
-          contactPerson: `${salutation} ${firstName} ${lastName}`
+          dob: dob ? dob.toISOString().split('T')[0] : undefined,
+          anniversary: anniversary ? anniversary.toISOString().split('T')[0] : undefined,
+          gstNumber: gstNumber ? gstNumber.toUpperCase() : undefined,
       };
 
       try {
           if (isEditMode) {
-              const res = await updateSaaSData("organizations", params.editId as string, orgData);
-              
-              if (res.success && orgName) {
-                  // 🔥 CASCADING BATCH UPDATE MAGIC (If Name Changed)
-                  const batch = writeBatch(db);
-                  let updateCount = 0;
-                  const orgIdToUpdate = params.editId as string;
-
-                  const updateOldRecords = async (colName: string, fieldsToUpdate: any) => {
-                      // Note: Filtering by orgId ensures we only update this specific hospital's old records
-                      const q = query(collection(db, colName), where("orgId", "==", orgIdToUpdate));
-                      const snap = await getDocs(q);
-                      snap.forEach((docItem) => {
-                          batch.update(docItem.ref, fieldsToUpdate);
-                          updateCount++;
-                      });
-                  };
-
-                  await updateOldRecords("orders", { hospitalName: orgName });
-                  await updateOldRecords("payment_collections", { orgName: orgName }); 
-                  await updateOldRecords("payment_dues", { orgName: orgName });
-                  await updateOldRecords("leads", { orgName: orgName, companyName: orgName });
-                  await updateOldRecords("service_calls", { hospitalName: orgName, orgName: orgName });
-                  await updateOldRecords("installations", { hospitalName: orgName, orgName: orgName });
-                  await updateOldRecords("pms_reports", { hospitalName: orgName, orgName: orgName });
-                  await updateOldRecords("demos", { hospitalName: orgName, orgName: orgName });
-                  await updateOldRecords("couriers", { orgName: orgName, hospitalName: orgName });
-
-                  if (updateCount > 0) {
-                      await batch.commit();
-                      console.log(`🚀 Magic Success! Changed old names in ${updateCount} places across ALL collections.`);
-                  }
-
+              const res = await updateOrganization(params.editId as string, orgData);
+              if (res.success) {
                   Alert.alert("Updated", "Organization details updated!");
               } else {
                   Alert.alert("Error", "Could not update organization.");
               }
           } else {
-              const res = await addSaaSData("organizations", orgData);
+              const res = await createOrganization(orgData);
               if (res.success) {
                   if (addNotification) {
                       await addNotification({
@@ -486,8 +458,8 @@ export default function AddOrganizationScreen() {
               }
           }
           router.back();
-      } catch (e) {
-          Alert.alert("Error", "Something went wrong.");
+      } catch (e: any) {
+          Alert.alert("Error", e?.message || "Something went wrong.");
       } finally {
           setIsSaving(false);
       }

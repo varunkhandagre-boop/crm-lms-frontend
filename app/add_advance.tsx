@@ -15,29 +15,23 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (No direct Firebase DB imports needed for writing data)
-import { useSaaSDB } from '../hooks/useSaaSDB'; // Path check kar lijiye
+// 🔥 SAAS IMPORTS (kept for parity, not used for writes anymore)
 import { useData } from './context/DataContext';
+// 🔥 Phase 6: advances now via new backend API
+import { createAdvance } from '../services/api/advances';
 
 export default function AddAdvanceScreen() {
   const router = useRouter();
   
-  // 🔥 1. Context se Current User & Notification Engine nikala
   const { currentUser, addNotification } = useData();
-  
-  // 🔥 2. Naya SaaS Engine connect kiya
-  const { addSaaSData } = useSaaSDB();
 
-  // STATES
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // DATE PICKER STATE
   const [date, setDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
 
-  // DATE FORMATTER
   const formatDate = (rawDate: Date) => {
     let day = rawDate.getDate().toString().padStart(2, '0');
     let month = (rawDate.getMonth() + 1).toString().padStart(2, '0');
@@ -45,6 +39,7 @@ export default function AddAdvanceScreen() {
     return `${day}/${month}/${year}`;
   };
 
+  // 🔥 SAVE LOGIC — via new backend API
   const handleSave = async () => {
       if (!amount || !reason) {
           Alert.alert("Missing Fields", "Please enter Amount and Reason.");
@@ -53,38 +48,26 @@ export default function AddAdvanceScreen() {
 
       setLoading(true);
       try {
-          // 🔥 3. CLEAN PAYLOAD: Engine will auto-add ID, CompanyID, SenderID & CreatedAt
-          const newEntry = {
-              date: formatDate(date), 
-              dateIso: date.toISOString().split('T')[0], 
-              amount: amount,
-              reason: reason,
-              status: 'Pending', 
-              role: currentUser?.role || 'Employee',
-          };
+          await createAdvance({
+              amount: parseFloat(amount),
+              reason,
+              date: date.toISOString(),
+          });
 
-          // 🔥 4. Save to Database via SaaS Hook
-          const result = await addSaaSData("advances", newEntry);
-
-          if (result.success) {
-              // 🔥 5. REAL PUSH NOTIFICATION
-              if (addNotification) {
-                  await addNotification({
-                      title: "New Advance Request 💰",
-                      message: `${currentUser?.name} requested ₹${amount} advance.`,
-                      to: "Accountant", // Aap isko "Admin" bhi rakh sakte hain
-                      route: "/advance", 
-                      type: "warning"
-                  });
-              }
-
-              Alert.alert("Success", "Advance Request Sent & Admin Notified!");
-              router.back();
-          } else {
-              Alert.alert("Error", "Could not submit request.");
+          if (addNotification) {
+              await addNotification({
+                  title: "New Advance Request 💰",
+                  message: `${currentUser?.name} requested ₹${amount} advance.`,
+                  to: "Accountant",
+                  route: "/advance", 
+                  type: "warning"
+              });
           }
-      } catch (e) {
-          Alert.alert("Error", "Something went wrong.");
+
+          Alert.alert("Success", "Advance Request Sent & Admin Notified!");
+          router.back();
+      } catch (e: any) {
+          Alert.alert("Error", e?.message || "Something went wrong.");
       } finally {
           setLoading(false);
       }
@@ -92,7 +75,6 @@ export default function AddAdvanceScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#333" />
@@ -101,7 +83,6 @@ export default function AddAdvanceScreen() {
         <View style={{width:24}} /> 
       </View>
 
-      {/* Keyboard Avoiding View */}
       <KeyboardAvoidingView 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
         style={{flex: 1}}
@@ -112,7 +93,6 @@ export default function AddAdvanceScreen() {
             keyboardShouldPersistTaps="handled"
         >
             
-            {/* DATE PICKER */}
             <Text style={styles.label}>Date Required</Text>
             <TouchableOpacity style={styles.inputBox} onPress={() => setShowDatePicker(true)}>
                 <Text style={{flex:1, color:'#333'}}>{formatDate(date)}</Text>
@@ -127,7 +107,6 @@ export default function AddAdvanceScreen() {
                 />
             )}
 
-            {/* Amount */}
             <Text style={styles.label}>Amount Required (₹) *</Text>
             <TextInput 
                 style={styles.inputBox} 
@@ -137,7 +116,6 @@ export default function AddAdvanceScreen() {
                 placeholder="Ex: 5000"
             />
 
-            {/* Reason */}
             <Text style={styles.label}>Reason / Remark *</Text>
             <TextInput 
                 style={[styles.inputBox, {height: 100, textAlignVertical:'top'}]} 
@@ -147,7 +125,6 @@ export default function AddAdvanceScreen() {
                 placeholder="Why do you need advance?"
             />
 
-            {/* SUBMIT BUTTON WITH LOADER */}
             <TouchableOpacity 
                 style={[styles.saveBtn, loading && { opacity: 0.6 }]} 
                 onPress={handleSave} 

@@ -18,21 +18,24 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import { urlToBase64Image } from '../utils/pdfImageHelper';
 
 // 🔥 SAAS IMPORTS (organizations still Firestore)
 import * as Location from 'expo-location';
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: service calls, installations, spare parts now via new backend API
-import { createServiceCall } from '../services/api/serviceCalls';
-import { listInstallations } from '../services/api/installations';
-import { listSpareParts } from '../services/api/spareParts';
 import { completeActivityPlan } from '../services/api/activityPlans';
+import { listInstallations } from '../services/api/installations';
+import { fetchOrganizations } from '../services/api/organizations';
+import { createServiceCall } from '../services/api/serviceCalls';
+import { listSpareParts } from '../services/api/spareParts';
 
 // 🔥 PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { recordLocationLog } from '../services/api/locationLogs';
 
 export default function AddServiceCallScreen() {
   const router = useRouter();
@@ -90,7 +93,7 @@ export default function AddServiceCallScreen() {
       const loadData = async () => {
           if (currentUser?.companyId) {
               const [orgs, installs, parts] = await Promise.all([
-                  fetchSaaSData("organizations"),
+                  fetchOrganizations({ limit: 200 }),
                   listInstallations(), // was: fetchSaaSData("installations")
                   listSpareParts(),    // was: fetchSaaSData("spare_parts")
               ]);
@@ -161,118 +164,212 @@ export default function AddServiceCallScreen() {
       }
   };
 
-  const generateServicePDF = async (ticketData: any) => {
+    const generateServicePDF = async (ticketData: any) => {
     try {
-        const logoHTML = companyProfile?.logoUrl 
-            ? `<img src="${companyProfile.logoUrl}" style="height: 60px; margin-bottom: 10px;" />` 
-            : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
+        // Warranty isn't stored on ServiceCall — looked up by matching
+        // serialNo against the Installation record.
+        let warrantyHTML = '';
+        const matchedInstall = installList.find((i: any) => 
+            i.serialNo && ticketData.serialNo && 
+            String(i.serialNo).trim().toLowerCase() === String(ticketData.serialNo).trim().toLowerCase()
+        );
+        if (matchedInstall?.warrantyExpiry) {
+            const expiryDate = new Date(matchedInstall.warrantyExpiry);
+            const today = new Date();
+            const isInWarranty = expiryDate >= today;
+            const expiryDisplay = expiryDate.toLocaleDateString('en-GB');
+            warrantyHTML = `<span style="color:${isInWarranty ? '#16a34a' : '#dc2626'}; font-weight:700;">${isInWarranty ? 'In Warranty' : 'Out of Warranty'}</span> (Exp: ${expiryDisplay})`;
+        } else {
+            warrantyHTML = `<span style="color:#9ca3af;">Not Available</span>`;
+        }
 
-        const signatureHTML = companyProfile?.signatureUrl 
-            ? `<img src="${companyProfile.signatureUrl}" style="height: 40px; margin-top: 5px; margin-bottom: 2px;" />` 
+        const logoBase64 = await urlToBase64Image(companyProfile?.logoUrl);
+        const logoHTML = logoBase64 
+            ? `<img src="${logoBase64}" style="height: 62px; object-fit: contain;" />` 
+            : `<div style="font-size:24px; font-weight:800; color:#0f2557; letter-spacing:0.5px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
+
+        const signatureBase64 = await urlToBase64Image(companyProfile?.signatureUrl);
+        const signatureHTML = signatureBase64 
+            ? `<img src="${signatureBase64}" style="height: 40px; margin-top: 5px; margin-bottom: 2px;" />` 
             : `<div style="height: 40px;"></div>`;
+
+        const genDate = new Date().toLocaleDateString('en-GB');
+        const ticketDate = new Date(ticketData.date).toLocaleDateString('en-GB');
+        const isResolved = (ticketData.status || '').toLowerCase() === 'closed' || (ticketData.status || '').toLowerCase() === 'resolved';
 
         let partsHTML = '';
         if (ticketData.partsUsed && ticketData.partsUsed.length > 0) {
             const rows = ticketData.partsUsed.map((p: any, i: number) => `
                 <tr>
-                    <td style="padding:5px; border:1px solid #ddd; text-align:center;">${i + 1}</td>
-                    <td style="padding:5px; border:1px solid #ddd;">${p.partName} (${p.partNo || '-'})</td>
-                    <td style="padding:5px; border:1px solid #ddd; text-align:center;">${p.usedQty}</td>
+                    <td style="text-align:center; color:#6b7280;">${i + 1}</td>
+                    <td><b>${p.partName}</b><div class="model-sub">${p.partNo || '-'}</div></td>
+                    <td style="text-align:center;">${p.usedQty}</td>
                 </tr>
             `).join('');
 
             partsHTML = `
-                <div style="margin-top: 15px;">
-                    <div style="font-weight:bold; margin-bottom:5px;">Spare Parts Consumed:</div>
-                    <table style="width:100%; border-collapse:collapse;">
-                        <tr style="background:#eee;">
-                            <th style="padding:5px; border:1px solid #000; width:10%;">#</th>
-                            <th style="padding:5px; border:1px solid #000; width:70%;">Part Name</th>
-                            <th style="padding:5px; border:1px solid #000; width:20%;">Qty</th>
+                <table class="table" style="margin-top: 6px;">
+                    <thead>
+                        <tr>
+                            <th style="width: 10%; text-align:center;">#</th>
+                            <th style="width: 65%;">Part Name</th>
+                            <th style="width: 25%; text-align:center;">Qty</th>
                         </tr>
-                        ${rows}
-                    </table>
-                </div>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
             `;
         } else {
-            partsHTML = `<div style="margin-top: 15px; font-style:italic; color:#555;">No spare parts used.</div>`;
+            partsHTML = `<div class="note" style="margin-bottom: 26px;">No spare parts used for this service.</div>`;
         }
 
         const htmlContent = `
         <html>
           <head>
+            <meta charset="utf-8" />
             <style>
-              body { font-family: 'Helvetica', sans-serif; padding: 30px; border: 2px solid #333; }
-              .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px; }
-              .title { font-size: 22px; font-weight: bold; color: #1a237e; text-transform: uppercase; }
-              .sub-title { font-size: 12px; margin-top: 2px; color: #333; line-height: 1.4; }
-              .box { border: 1px solid #000; padding: 15px; margin-top: 10px; background-color: #fcfcfc; }
-              .row { display: flex; justify-content: space-between; margin-bottom: 5px; }
-              .label { font-weight: bold; color: #444; width: 120px; display: inline-block; }
-              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; }
-              .sign-box { text-align: center; width: 45%; }
-              .sign-line { border-top: 1px solid #000; width: 100%; margin-top: 5px; margin-bottom: 5px; }
+              * { box-sizing: border-box; }
+              body {
+                font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+                color: #1a1a2e;
+                margin: 0;
+                padding: 0;
+              }
+              .sheet { padding: 0 40px 40px; }
+
+              .topbar {
+                display: flex; justify-content: space-between; align-items: center;
+                padding: 28px 40px; background: #0f2557; color: #ffffff;
+              }
+              .topbar .company-meta { text-align: right; font-size: 12px; line-height: 1.7; opacity: 0.92; }
+
+              .doc-band {
+                display: flex; justify-content: space-between; align-items: center;
+                background: #eef2fb; border-bottom: 4px solid #0f2557;
+                padding: 18px 40px; margin-bottom: 28px;
+              }
+              .doc-title { font-size: 19px; font-weight: 800; letter-spacing: 1.4px; color: #0f2557; }
+              .doc-meta { text-align: right; font-size: 12.5px; color: #4a4a68; line-height: 1.7; }
+              .doc-meta b { color: #0f2557; }
+
+              .status-pill {
+                display: inline-block; color: white;
+                font-size: 11.5px; font-weight: 700; letter-spacing: 0.6px;
+                padding: 5px 14px; border-radius: 20px; margin-top: 6px;
+                background: ${isResolved ? '#16a34a' : '#ea580c'};
+              }
+
+              .grid { display: flex; gap: 20px; margin-bottom: 24px; }
+              .card {
+                flex: 1; background: #fafbfe; border: 1px solid #e2e6f0; border-radius: 12px;
+                padding: 20px 22px;
+              }
+              .card-label { font-size: 11px; font-weight: 700; color: #6b7280; letter-spacing: 1px; margin-bottom: 14px; }
+              .row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px; }
+              .row .k { color: #6b7280; }
+              .row .v { font-weight: 600; color: #1a1a2e; text-align: right; }
+
+              .table { width: 100%; border-collapse: collapse; margin-bottom: 26px; border-radius: 12px; overflow: hidden; }
+              .table th {
+                background: #0f2557; color: white; font-size: 12.5px; letter-spacing: 0.5px;
+                text-align: left; padding: 15px 18px; font-weight: 600;
+              }
+              .table td {
+                padding: 14px 18px; font-size: 14px; border-bottom: 1px solid #e9ecf5; background: #ffffff;
+              }
+              .table .model-sub { color: #6b7280; font-size: 12px; margin-top: 4px; }
+
+              .section-label { font-size: 11px; font-weight: 700; color: #6b7280; letter-spacing: 1px; margin: 20px 0 10px; }
+              .problem-box {
+                background: #fef2f2; border-left: 4px solid #dc2626; border-radius: 8px;
+                padding: 16px 20px; font-size: 13.5px; color: #4a4a68; margin-bottom: 18px; line-height: 1.6;
+              }
+              .resolution-box {
+                background: #f0fdf4; border-left: 4px solid #16a34a; border-radius: 8px;
+                padding: 16px 20px; font-size: 13.5px; color: #4a4a68; margin-bottom: 26px; line-height: 1.6;
+              }
+
+              .note { font-size: 11.5px; color: #6b7280; font-style: italic; }
+
+              .footer { display: flex; justify-content: space-between; margin-top: 20px; }
+              .sign-box { width: 46%; text-align: center; }
+              .sign-space { height: 56px; }
+              .sign-line { border-top: 1.5px solid #1a1a2e; margin-bottom: 8px; }
+              .sign-label { font-size: 13px; font-weight: 700; color: #1a1a2e; }
+              .sign-sub { font-size: 11.5px; color: #6b7280; margin-top: 3px; }
+
+              .doc-footer {
+                margin-top: 40px; padding-top: 16px; border-top: 1px solid #e9ecf5;
+                font-size: 10.5px; color: #9ca3af; text-align: center;
+              }
             </style>
           </head>
           <body>
-            <div class="header">
+            <div class="topbar">
               ${logoHTML}
-              ${companyProfile?.logoUrl ? `<div class="title">${companyProfile.companyName}</div>` : ''}
-              <div class="sub-title">${companyProfile?.address || ''}</div>
-              <div class="sub-title">
-                Phone: ${companyProfile?.contactPhone || companyProfile?.phone || '-'} | 
-                Email: ${companyProfile?.contactEmail || companyProfile?.email || '-'}
+              <div class="company-meta">
+                <div style="font-weight:700; font-size:14px; margin-bottom:3px;">${companyProfile?.companyName || ''}</div>
+                <div>${companyProfile?.address || ''}</div>
+                <div>${companyProfile?.contactPhone || companyProfile?.phone || '-'} &nbsp;•&nbsp; ${companyProfile?.contactEmail || companyProfile?.email || '-'}</div>
               </div>
             </div>
 
-            <h3 style="text-align: center; text-decoration: underline;">SERVICE REPORT</h3>
+            <div class="doc-band">
+              <div>
+                <div class="doc-title">SERVICE REPORT</div>
+                <div class="status-pill">${isResolved ? '✓ RESOLVED' : '⏳ ' + (ticketData.status || 'OPEN').toUpperCase()}</div>
+              </div>
+              <div class="doc-meta">
+                <div>Ticket No: <b>${ticketData.scrId || '-'}</b></div>
+                <div>Date: <b>${ticketDate}</b> &nbsp;•&nbsp; Type: <b>${ticketData.serviceType || '-'}</b></div>
+              </div>
+            </div>
 
-            <div class="box">
-                <div class="row">
-                    <div><span class="label">Ticket No:</span> <b>${ticketData.scrId}</b></div>
-                    <div><span class="label">Date:</span> ${new Date(ticketData.date).toLocaleDateString('en-GB')}</div>
+            <div class="sheet">
+              <div class="grid">
+                <div class="card">
+                  <div class="card-label">CLIENT DETAILS</div>
+                  <div class="row"><span class="k">Hospital / Client</span><span class="v">${ticketData.hospitalName || '-'}</span></div>
+                  <div class="row"><span class="k">Address</span><span class="v">${ticketData.address || '-'}${ticketData.city ? ', ' + ticketData.city : ''}</span></div>
+                  <div class="row"><span class="k">Department</span><span class="v">${ticketData.department || '-'}</span></div>
                 </div>
-                <div class="row">
-                    <div><span class="label">Status:</span> <b>${ticketData.status}</b></div>
-                    <div><span class="label">Type:</span> ${ticketData.serviceType}</div>
+                <div class="card">
+                  <div class="card-label">MACHINE DETAILS</div>
+                  <div class="row"><span class="k">Machine</span><span class="v">${ticketData.machine || '-'}</span></div>
+                  <div class="row"><span class="k">Model</span><span class="v">${ticketData.model || '-'}</span></div>
+                  <div class="row"><span class="k">Serial No</span><span class="v">${ticketData.serialNo || '-'}</span></div>
+                  <div class="row"><span class="k">Installed On</span><span class="v">${ticketData.installationDate || '-'}</span></div>
+                  <div class="row"><span class="k">Warranty</span><span class="v">${warrantyHTML}</span></div>
                 </div>
-            </div>
-
-            <div class="box">
-                <div style="font-size:14px; margin-bottom:5px;"><b>Client:</b> ${ticketData.hospitalName}</div>
-                <div style="font-size:14px; margin-bottom:5px;"><b>Address:</b> ${ticketData.address}, ${ticketData.city}</div>
-                <div style="font-size:14px; margin-bottom:5px;"><b>Department:</b> ${ticketData.department || '-'}</div>
-            </div>
-
-            <div class="box">
-                <div class="row"><div><span class="label">Machine:</span> ${ticketData.machine}</div></div>
-                <div class="row"><div><span class="label">Model:</span> ${ticketData.model}</div></div>
-                <div class="row"><div><span class="label">Serial No:</span> <b>${ticketData.serialNo}</b></div></div>
-                <div class="row"><div><span class="label">Installed On:</span> ${ticketData.installationDate || '-'}</div></div>
-            </div>
-
-            <div class="box">
-                <div style="font-weight:bold; text-decoration:underline;">Problem Reported:</div>
-                <div style="margin-top:5px; margin-bottom:15px;">${ticketData.remark}</div>
-
-                <div style="font-weight:bold; text-decoration:underline;">Action Taken / Resolution:</div>
-                <div style="margin-top:5px;">${ticketData.resolutionNote || 'Work in progress / Pending for parts.'}</div>
-            </div>
-
-            ${partsHTML}
-
-            <div class="footer">
-              <div class="sign-box">
-                <div style="height: 60px;"></div> 
-                <div class="sign-line"></div>
-                <div style="font-weight: bold;">Customer Sign & Stamp</div>
               </div>
 
-              <div class="sign-box">
-                <div style="font-weight: bold; font-size: 12px;">Engineer: ${ticketData.senderName}</div>
-                ${signatureHTML}
-                <div class="sign-line"></div>
-                <div style="font-weight: bold;">Engineer Signature</div>
+              <div class="problem-box">
+                <b style="color:#991b1b;">Problem Reported:</b> ${ticketData.remark || '-'}
+              </div>
+
+              <div class="resolution-box">
+                <b style="color:#15803d;">Action Taken / Resolution:</b> ${ticketData.resolutionNote || 'Work in progress / Pending for parts.'}
+              </div>
+
+              <div class="section-label">SPARE PARTS CONSUMED</div>
+              ${partsHTML}
+
+              <div class="footer">
+                <div class="sign-box">
+                  <div class="sign-space"></div>
+                  <div class="sign-line"></div>
+                  <div class="sign-label">Customer Sign & Stamp</div>
+                </div>
+                <div class="sign-box">
+                  <div class="sign-sub" style="margin-bottom:6px;">${ticketData.senderName || ''}</div>
+                  ${signatureHTML}
+                  <div class="sign-line"></div>
+                  <div class="sign-label">Engineer Signature</div>
+                </div>
+              </div>
+
+              <div class="doc-footer">
+                This is a system-generated report from ${companyProfile?.companyName || 'our company'} • Generated on ${genDate}
               </div>
             </div>
           </body>
@@ -286,6 +383,7 @@ export default function AddServiceCallScreen() {
         try {
             await FileSystem.copyAsync({ from: uri, to: newPath });
             await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Report` });
+
         } catch (error) {
             await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
         }
@@ -373,10 +471,15 @@ export default function AddServiceCallScreen() {
       setIsSaving(true); 
 
       const locationData = await getCurrentLocation();
-      if (!locationData) {
-          setIsSaving(false);
-          return; 
-      }
+if (!locationData) {
+    setIsSaving(false);
+    return; 
+}
+recordLocationLog({
+    latitude: locationData.lat,
+    longitude: locationData.lng,
+    type: 'Service',
+}).catch(() => {});
 
       const partsSummary = usedParts.map(p => `${p.partName} (${p.usedQty})`).join(', ');
 

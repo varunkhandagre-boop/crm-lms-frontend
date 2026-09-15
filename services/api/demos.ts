@@ -90,6 +90,7 @@ export async function listDemos(params: ListDemosParams = {}): Promise<any[]> {
 
 export interface CreateDemoPayload {
   demoRef?: string;
+  orgId?: string;
   orgName: string;
   address?: string;
   city?: string;
@@ -108,6 +109,11 @@ export interface CreateDemoPayload {
 
 export async function createDemo(payload: CreateDemoPayload): Promise<any> {
   const res = await apiClient.post<OneResponse>('/demos', payload);
+  return toLegacyDemo(res.data);
+}
+
+export async function updateDemo(id: string, payload: Partial<CreateDemoPayload>): Promise<any> {
+  const res = await apiClient.patch<OneResponse>(`/demos/${id}`, payload);
   return toLegacyDemo(res.data);
 }
 

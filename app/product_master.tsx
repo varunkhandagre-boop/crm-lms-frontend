@@ -282,13 +282,21 @@ export default function ProductMasterScreen() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+                        <View style={styles.header}>
                 <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={28} color="#333" /></TouchableOpacity>
                 <Text style={styles.headerTitle}>Product Master</Text>
                 {canEdit ? (
-                    <TouchableOpacity style={styles.addIconBtn} onPress={() => setModalVisible(true)}>
-                        <Ionicons name="add" size={30} color="white" />
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <TouchableOpacity 
+                            style={[styles.addIconBtn, { backgroundColor: '#2e7d32' }]} 
+                            onPress={() => router.push('/bulk_import_products' as any)}
+                        >
+                            <Ionicons name="cloud-upload" size={22} color="white" />
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.addIconBtn} onPress={() => setModalVisible(true)}>
+                            <Ionicons name="add" size={30} color="white" />
+                        </TouchableOpacity>
+                    </View>
                 ) : <View style={{width: 30}} />}
             </View>
 

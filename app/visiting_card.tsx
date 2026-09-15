@@ -19,7 +19,11 @@ import {
 
 // 🔥 SAAS IMPORTS
 import { useSaaSDB } from '../hooks/useSaaSDB';
+import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
+
+// 🔥 Phase 8: visiting card requests now come from Postgres via these adapters
+import { dispatchVisitingCardRequest, fetchVisitingCards, receiveVisitingCardRequest } from '../services/api/visitingCards';
 
 export default function VisitingCardScreen() {
   const router = useRouter();
@@ -27,8 +31,9 @@ export default function VisitingCardScreen() {
   // 🔥 1. Context se sirf Current User lenge
   const { currentUser } = useData(); 
 
-  // 🔥 2. Naya SaaS Engine for fetching and updating
-  const { fetchSaaSData, updateSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 2. "users" still Firestore; visiting card requests are Postgres now.
+  // addSaaSData kept only for "notifications" — that collection isn't migrated until Phase 9.
+  const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
 
   // 🔥 3. Local States for independent loading
   const [cardRequestList, setCardRequestList] = useState<any[]>([]);
@@ -65,30 +70,60 @@ export default function VisitingCardScreen() {
   const canViewAll = ['admin', 'manager', 'store', 'account', 'accountant', 'hr', 'superadmin'].some(r => myRole.includes(r));
   const canDispatch = canViewAll; 
 
-  // 🔥 4. CRASH-PROOF DATA LOADER
+  function getFetchRange(): { fromDate?: string; toDate?: string } {
+      const toIso = (d: Date) => d.toISOString().split('T')[0];
+      if (viewMode === 'All') return {};
+      if (viewMode === 'Day') return { fromDate: toIso(currentDate), toDate: toIso(currentDate) };
+      if (viewMode === 'Month') {
+          const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+          const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+          return { fromDate: toIso(start), toDate: toIso(end) };
+      }
+      const m = currentDate.getMonth();
+      const y = currentDate.getFullYear();
+      const fyStartYear = m >= 3 ? y : y - 1;
+      return { fromDate: toIso(new Date(fyStartYear, 3, 1)), toDate: toIso(new Date(fyStartYear + 1, 2, 31)) };
+  }
+
+  // 🔥 4a. Users list — still Firestore, loads once per session
+  const loadUsers = async () => {
+      if (!currentUser?.companyId) return;
+      const users = await fetchTeamMembers();
+      const validUsers = Array.isArray(users) ? users : [];
+      setUserList(validUsers);
+      
+      if (canViewAll) {
+          const uniqueUsers = Array.from(new Set(validUsers.map((a:any) => a?.name).filter(Boolean)))
+              .map(name => validUsers.find((a:any) => a?.name === name));
+          setEmployees([{ id: 'All', name: 'All' }, ...uniqueUsers as any]);
+      }
+  };
+
+  useEffect(() => {
+      loadUsers();
+  }, [currentUser]);
+
+  // 🔥 4b. Requests — Postgres, bounded by view window + employee/status filter
   const loadData = async () => {
       if (!currentUser?.companyId) return;
+      if (canViewAll && selectedEmployeeName !== 'All' && employees.length === 0) return; // wait for employees to resolve the picked id
+
       setIsFetching(true);
       try {
-          // Direct Firebase fetch skipping DataContext restrictions
-          const [cards, users] = await Promise.all([
-              fetchSaaSData("visiting_cards"),
-              fetchSaaSData("users")
-          ]);
-
-          // Safe Array fallbacks to prevent crash
-          const validCards = Array.isArray(cards) ? cards : [];
-          const validUsers = Array.isArray(users) ? users : [];
-
-          setCardRequestList(validCards);
-          setUserList(validUsers);
-
+          const { fromDate, toDate } = getFetchRange();
+          let targetUserId: string | undefined;
           if (canViewAll) {
-              const uniqueUsers = Array.from(new Set(validUsers.map((a:any) => a?.name).filter(Boolean)))
-                  .map(name => validUsers.find((a:any) => a?.name === name));
-                  
-              setEmployees([{ id: 'All', name: 'All' }, ...uniqueUsers as any]);
+              if (selectedEmployeeName === 'All') targetUserId = 'all';
+              else targetUserId = employees.find(e => e.name === selectedEmployeeName)?.id;
           }
+
+          const cards = await fetchVisitingCards({
+              userId: targetUserId,
+              status: activeStatus !== 'All' ? (activeStatus as any) : undefined,
+              fromDate, toDate,
+              limit: 500,
+          });
+          setCardRequestList(cards);
       } catch (error) {
           console.log("Error loading visiting cards:", error);
       } finally {
@@ -96,10 +131,9 @@ export default function VisitingCardScreen() {
       }
   };
 
-  // Initial Load
   useEffect(() => {
       loadData();
-  }, [currentUser]);
+  }, [currentUser, viewMode, currentDate, selectedEmployeeName, activeStatus, employees]);
 
   // Pull to Refresh
   const onRefresh = async () => {
@@ -155,17 +189,8 @@ export default function VisitingCardScreen() {
   const getFilteredData = () => {
       let data = Array.isArray(cardRequestList) ? [...cardRequestList] : [];
 
-      if (canViewAll) {
-          if (selectedEmployeeName !== 'All') {
-              data = data.filter((item: any) => item.userName === selectedEmployeeName);
-          }
-      } else {
-          data = data.filter((item: any) => item.senderId === currentUser?.id || item.senderId === currentUser?.uid || item.userName === currentUser?.name);
-      }
-
-      if (activeStatus !== 'All') {
-          data = data.filter((item: any) => item.status === activeStatus);
-      }
+      // employee/status/date-range already applied server-side (see loadData above);
+      // search stays client-side over the bounded fetched set.
 
       if (searchText) {
           const lowerText = searchText.toLowerCase();
@@ -216,7 +241,7 @@ export default function VisitingCardScreen() {
       setModalVisible(true);
   };
 
-  // --- 🔥 SAAS ENGINE: DISPATCH LOGIC ---
+  // --- 🔥 Phase 8: DISPATCH via dispatchVisitingCardRequest() ---
   const handleDispatch = async () => {
       if (!dispatchTracking) {
           Alert.alert("Required", "Please enter Courier Name & Tracking Number");
@@ -224,11 +249,7 @@ export default function VisitingCardScreen() {
       }
       setIsDispatching(true); 
       try {
-          const res = await updateSaaSData("visiting_cards", selectedRequest.id, {
-               status: 'Sent',
-               trackingNo: dispatchTracking,
-               outDate: new Date().toISOString().split('T')[0]
-          });
+          const res = await dispatchVisitingCardRequest(selectedRequest.id, dispatchTracking);
            
           if (res.success) {
               if (selectedRequest.senderId) {
@@ -254,14 +275,14 @@ export default function VisitingCardScreen() {
       }
   };
 
-  // --- 🔥 SAAS ENGINE: RECEIVE LOGIC ---
+  // --- 🔥 Phase 8: RECEIVE via receiveVisitingCardRequest() ---
   const handleReceive = () => {
       Alert.alert("Confirm Receipt", "Confirm that you received items?", [
           { text: "Cancel", style: "cancel" },
           { text: "Yes", onPress: async () => {
               setIsReceiving(true); 
               try {
-                  const res = await updateSaaSData("visiting_cards", selectedRequest.id, { status: 'Received' });
+                  const res = await receiveVisitingCardRequest(selectedRequest.id);
                   if (res.success) {
                       setModalVisible(false);
                       await loadData(); // Data reload manually

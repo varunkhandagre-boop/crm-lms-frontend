@@ -18,17 +18,16 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+
+// 🔥 Phase 8: travel notes now go to Postgres via this adapter
+import { createTravelNote } from '../services/api/travelNotes';
 
 export default function AddTravelScreen() {
   const router = useRouter();
   
   // 🔥 1. Context se Current User aur Notification Engine nikala
   const { currentUser, addNotification } = useData(); 
-
-  // 🔥 2. Naya SaaS Engine connect kiya
-  const { addSaaSData } = useSaaSDB();
 
   // Form States
   const [date, setDate] = useState(new Date()); 
@@ -94,7 +93,7 @@ export default function AddTravelScreen() {
     }
   };
 
-  // 🔥 3. SAAS SAVE LOGIC
+  // 🔥 3. SAAS SAVE LOGIC — Phase 8: posts to Postgres via createTravelNote()
   const handleSave = async () => {
     if (!fromLoc || !toLoc || !distance || !amount) {
         Alert.alert("Missing Fields", "Please fill From, To, Distance and Amount.");
@@ -104,25 +103,18 @@ export default function AddTravelScreen() {
     setSaveLoading(true); 
 
     try {
-        // 🔥 4. CLEAN PAYLOAD: Engine will auto-add ID, CompanyID, SenderID & CreatedAt
-        const newNote = {
-            date: formatDate(date), 
-            dateIso: date.toISOString().split('T')[0], // Added for sorting
-            rawDate: date.toISOString(), 
-            from: fromLoc,
-            to: toLoc,
+        const result = await createTravelNote({
+            date: date.toISOString().split('T')[0],
+            fromLocation: fromLoc,
+            toLocation: toLoc,
             mode: mode === 'Select Mode' ? 'Bike' : mode,
-            distance: distance,
-            amount: amount,
+            distanceKm: parseFloat(distance) || 0,
+            amount: parseFloat(amount) || 0,
             purpose: purpose || 'Official Visit',
-            status: 'Pending',
-            role: currentUser?.role || 'Employee' 
-        };
-
-        const result = await addSaaSData("travel_notes", newNote);
+        });
         
         if (result.success) {
-            // 🔥 5. REAL PUSH NOTIFICATION
+            // 🔥 4. REAL PUSH NOTIFICATION
             if (addNotification) {
                 await addNotification({
                     title: "New Travel Logged 🚴",

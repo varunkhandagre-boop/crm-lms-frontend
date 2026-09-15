@@ -17,14 +17,17 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import { urlToBase64Image } from '../utils/pdfImageHelper';
 
 // 🔥 SAAS IMPORTS (organizations/products still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: demos now go through the new backend API
-import { createDemo, listDemos } from '../services/api/demos';
-import { listProducts } from '../services/api/products';
 import { completeActivityPlan } from '../services/api/activityPlans';
+import { createDemo, listDemos, updateDemo } from '../services/api/demos';
+import { recordLocationLog } from '../services/api/locationLogs';
+import { fetchOrganizations } from '../services/api/organizations';
+import { listProducts } from '../services/api/products';
 
 // 🔥 PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
@@ -34,7 +37,11 @@ import * as Sharing from 'expo-sharing';
 export default function AddDemoScreen() {
   const router = useRouter();
   const params = useLocalSearchParams(); 
-  
+  // 🔥 Edit mode: demo.tsx passes editId + the existing field values via
+  // router params when the user taps "Edit" on a past demo record.
+  const editId = params.editId as string | undefined;
+  const isEditMode = !!editId;
+
   const { currentUser, companyProfile, addNotification } = useData();
 
   // 🔥 SaaS Engine kept for organizations/products
@@ -82,7 +89,7 @@ export default function AddDemoScreen() {
       const loadData = async () => {
           if (currentUser?.companyId) {
               const [orgs, prods, demos] = await Promise.all([
-                  fetchSaaSData("organizations"),
+                  fetchOrganizations({ limit: 200 }),
                   listProducts(), // was: fetchSaaSData("products")
                   listDemos() // was: fetchSaaSData("demos")
               ]);
@@ -107,8 +114,34 @@ export default function AddDemoScreen() {
       return [...new Set(models), 'Other'];
   };
 
+  // 🔥 Edit mode: pre-fill every field from the params passed by demo.tsx.
+  // Runs once, on mount — editId won't change mid-screen.
   useEffect(() => {
-      if (params.hospital && orgList.length > 0) {
+      if (isEditMode) {
+          setHospital((params.hospital as string) || '');
+          setOrgId((params.orgId as string) || '');
+          setAddress((params.address as string) || '');
+          setCity((params.city as string) || '');
+          setDepartment((params.department as string) || '');
+          setProduct((params.product as string) || '');
+          setModel((params.model as string) || '');
+          setSerialNo((params.serialNo as string) || '');
+          setContactPerson((params.contactPerson as string) || '');
+          setDesignation((params.designation as string) || '');
+          setContactNumber((params.contactNumber as string) || '');
+          setEmail((params.email as string) || '');
+          setDuration((params.duration as string) || '');
+          setResult((params.result as string) || '');
+          setNotes((params.notes as string) || '');
+          if (params.date) {
+              const parsed = new Date(params.date as string);
+              if (!isNaN(parsed.getTime())) setDemoDate(parsed);
+          }
+      }
+  }, []);
+
+  useEffect(() => {
+      if (!isEditMode && params.hospital && orgList.length > 0) {
           setHospital(params.hospital as string);
           const found = orgList.find((o:any) => (o.orgName === params.hospital || o.name === params.hospital));
           if(found) selectOrganization(found);
@@ -142,92 +175,176 @@ export default function AddDemoScreen() {
       return `${prefix}-DEMO-${fyString}-${String(count).padStart(3, '0')}`;
   };
 
-  const generateDemoPDF = async (demoData: any) => {
+    const generateDemoPDF = async (demoData: any) => {
     try {
-        const logoHTML = companyProfile?.logoUrl 
-            ? `<img src="${companyProfile.logoUrl}" style="height: 60px; margin-bottom: 10px;" />` 
-            : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
+        const logoBase64 = await urlToBase64Image(companyProfile?.logoUrl);
+        const signatureBase64 = await urlToBase64Image(companyProfile?.signatureUrl);
 
-        const signatureHTML = companyProfile?.signatureUrl 
-            ? `<img src="${companyProfile.signatureUrl}" style="height: 40px; margin-top: 5px; margin-bottom: 2px;" />` 
-            : `<div style="height: 40px;"></div>`;
+        const logoHTML = logoBase64 
+            ? `<img src="${logoBase64}" style="height: 62px; object-fit: contain;" />` 
+            : `<div style="font-size:24px; font-weight:800; color:#0f2557; letter-spacing:0.5px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
+
+        const signatureHTML = signatureBase64 
+            ? `<img src="${signatureBase64}" style="height: 50px; object-fit: contain; margin-bottom: 6px;" />` 
+            : `<div style="height: 50px;"></div>`;
+
+        const genDate = new Date().toLocaleDateString('en-GB');
 
         const htmlContent = `
         <html>
           <head>
+            <meta charset="utf-8" />
             <style>
-              body { font-family: 'Helvetica', sans-serif; padding: 30px; border: 2px solid #333; }
-              .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px; }
-              .title { font-size: 22px; font-weight: bold; color: #1a237e; text-transform: uppercase; }
-              .sub-title { font-size: 12px; margin-top: 2px; color: #333; line-height: 1.4; }
-              .box { border: 1px solid #000; padding: 15px; margin-top: 10px; background-color: #fcfcfc; }
-              .row { display: flex; justify-content: space-between; margin-bottom: 5px; }
-              .label { font-weight: bold; color: #444; width: 130px; display: inline-block; }
-              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; }
-              .sign-box { text-align: center; width: 45%; }
-              .sign-line { border-top: 1px solid #000; width: 100%; margin-top: 5px; margin-bottom: 5px; }
+              * { box-sizing: border-box; }
+              body {
+                font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+                color: #1a1a2e;
+                margin: 0;
+                padding: 0;
+              }
+              .sheet { padding: 0 40px 40px; }
+
+              .topbar {
+                display: flex; justify-content: space-between; align-items: center;
+                padding: 28px 40px; background: #0f2557; color: #ffffff;
+              }
+              .topbar .company-meta { text-align: right; font-size: 12px; line-height: 1.7; opacity: 0.92; }
+
+              .doc-band {
+                display: flex; justify-content: space-between; align-items: center;
+                background: #eef2fb; border-bottom: 4px solid #0f2557;
+                padding: 18px 40px; margin-bottom: 28px;
+              }
+              .doc-title { font-size: 19px; font-weight: 800; letter-spacing: 1.4px; color: #0f2557; }
+              .doc-meta { text-align: right; font-size: 12.5px; color: #4a4a68; line-height: 1.7; }
+              .doc-meta b { color: #0f2557; }
+
+              .status-pill {
+                display: inline-block; background: #7c3aed; color: white;
+                font-size: 11.5px; font-weight: 700; letter-spacing: 0.6px;
+                padding: 5px 14px; border-radius: 20px; margin-top: 6px;
+              }
+
+              .grid { display: flex; gap: 20px; margin-bottom: 24px; }
+              .card {
+                flex: 1; background: #fafbfe; border: 1px solid #e2e6f0; border-radius: 12px;
+                padding: 20px 22px;
+              }
+              .card-label { font-size: 11px; font-weight: 700; color: #6b7280; letter-spacing: 1px; margin-bottom: 14px; }
+              .row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px; }
+              .row .k { color: #6b7280; }
+              .row .v { font-weight: 600; color: #1a1a2e; text-align: right; }
+
+              .table { width: 100%; border-collapse: collapse; margin-bottom: 26px; border-radius: 12px; overflow: hidden; }
+              .table th {
+                background: #0f2557; color: white; font-size: 12.5px; letter-spacing: 0.5px;
+                text-align: left; padding: 15px 18px; font-weight: 600;
+              }
+              .table td {
+                padding: 16px 18px; font-size: 14px; border-bottom: 1px solid #e9ecf5; background: #ffffff;
+              }
+              .table .model-sub { color: #6b7280; font-size: 12px; margin-top: 4px; }
+
+              .remarks {
+                background: #f5f3ff; border-left: 4px solid #7c3aed; border-radius: 8px;
+                padding: 16px 20px; font-size: 13.5px; color: #4a4a68; margin-bottom: 20px; line-height: 1.6;
+              }
+              .remarks b { color: #5b21b6; }
+
+              .note {
+                font-size: 11.5px; color: #6b7280; font-style: italic; margin-bottom: 34px; padding: 0 4px;
+              }
+
+              .footer { display: flex; justify-content: space-between; margin-top: 20px; }
+              .sign-box { width: 46%; text-align: center; }
+              .sign-space { height: 56px; }
+              .sign-line { border-top: 1.5px solid #1a1a2e; margin-bottom: 8px; }
+              .sign-label { font-size: 13px; font-weight: 700; color: #1a1a2e; }
+              .sign-sub { font-size: 11.5px; color: #6b7280; margin-top: 3px; }
+
+              .doc-footer {
+                margin-top: 40px; padding-top: 16px; border-top: 1px solid #e9ecf5;
+                font-size: 10.5px; color: #9ca3af; text-align: center;
+              }
             </style>
           </head>
           <body>
-            <div class="header">
+            <div class="topbar">
               ${logoHTML}
-              ${companyProfile?.logoUrl ? `<div class="title">${companyProfile.companyName}</div>` : ''}
-              <div class="sub-title">${companyProfile?.address || ''}</div>
-              <div class="sub-title">
-                Phone: ${companyProfile?.contactPhone || companyProfile?.phone || '-'} | 
-                Email: ${companyProfile?.contactEmail || companyProfile?.email || '-'}
+              <div class="company-meta">
+                <div style="font-weight:700; font-size:14px; margin-bottom:3px;">${companyProfile?.companyName || ''}</div>
+                <div>${companyProfile?.address || ''}</div>
+                <div>${companyProfile?.contactPhone || companyProfile?.phone || '-'} &nbsp;•&nbsp; ${companyProfile?.contactEmail || companyProfile?.email || '-'}</div>
               </div>
             </div>
 
-            <h3 style="text-align: center; text-decoration: underline; margin-bottom: 20px;">PRODUCT DEMO REPORT</h3>
+            <div class="doc-band">
+              <div>
+                <div class="doc-title">PRODUCT DEMO REPORT</div>
+                <div class="status-pill">✓ DEMO COMPLETED</div>
+              </div>
+              <div class="doc-meta">
+                <div>Report No: <b>${demoData.demoId}</b></div>
+                <div>Date: <b>${demoData.displayDate}</b> &nbsp;•&nbsp; Duration: <b>${demoData.duration || '1'} Day${(demoData.duration || 1) > 1 ? 's' : ''}</b></div>
+              </div>
+            </div>
 
-            <div class="box">
-                <div class="row">
-                    <div><span class="label">Report No:</span> <b style="font-size:16px;">${demoData.demoId}</b></div>
-                    <div><span class="label">Date:</span> ${demoData.displayDate}</div>
+            <div class="sheet">
+              <div class="grid">
+                <div class="card">
+                  <div class="card-label">CLIENT DETAILS</div>
+                  <div class="row"><span class="k">Hospital / Client</span><span class="v">${demoData.hospital}</span></div>
+                  <div class="row"><span class="k">Address</span><span class="v">${demoData.address || '-'}${demoData.city ? ', ' + demoData.city : ''}</span></div>
+                  <div class="row"><span class="k">Department</span><span class="v">${demoData.department || '-'}</span></div>
                 </div>
-                <div class="row" style="margin-top: 5px;">
-                    <div><span class="label">Duration:</span> ${demoData.duration || '1'} Days</div>
+                <div class="card">
+                  <div class="card-label">CONTACT PERSON</div>
+                  <div class="row"><span class="k">Name</span><span class="v">${demoData.contactPerson}</span></div>
+                  <div class="row"><span class="k">Designation</span><span class="v">${demoData.designation || '-'}</span></div>
+                  <div class="row"><span class="k">Mobile</span><span class="v">${demoData.contactNumber || '-'}</span></div>
                 </div>
-            </div>
-
-            <div class="box">
-                <div style="font-size:14px; margin-bottom:5px;"><b>Client:</b> ${demoData.hospital}</div>
-                <div style="font-size:14px; margin-bottom:5px;"><b>Address:</b> ${demoData.address}, ${demoData.city}</div>
-                <div style="font-size:14px;"><b>Department:</b> ${demoData.department || '-'}</div>
-            </div>
-
-            <div class="box">
-                <div class="row"><div><span class="label">Contact Person:</span> <b>${demoData.contactPerson}</b></div></div>
-                <div class="row"><div><span class="label">Designation:</span> ${demoData.designation || '-'}</div></div>
-                <div class="row"><div><span class="label">Mobile:</span> ${demoData.contactNumber || '-'}</div></div>
-            </div>
-
-            <div class="box">
-                <div style="font-weight:bold; margin-bottom:10px; text-decoration:underline;">Product Details</div>
-                <div class="row"><div><span class="label">Product Name:</span> <b>${demoData.product}</b></div></div>
-                <div class="row"><div><span class="label">Model:</span> ${demoData.model}</div></div>
-                <div class="row"><div><span class="label">Serial No:</span> ${demoData.serialNo || 'N/A'}</div></div>
-            </div>
-
-            <div class="box">
-                <div style="font-weight:bold; margin-bottom:5px; text-decoration:underline;">Demo Outcome / Remarks:</div>
-                <div style="margin-top:5px; min-height: 50px;">${demoData.result || 'Demo completed successfully.'}</div>
-                ${demoData.notes ? `<div style="margin-top:10px; font-style:italic; font-size:12px;">Internal Note: ${demoData.notes}</div>` : ''}
-            </div>
-
-            <div class="footer">
-              <div class="sign-box">
-                <div style="height: 60px;"></div> 
-                <div class="sign-line"></div>
-                <div style="font-weight: bold;">Client Signature & Stamp</div>
               </div>
 
-              <div class="sign-box">
-                <div style="font-weight: bold; font-size: 12px;">Given By: ${demoData.senderName}</div>
-                ${signatureHTML}
-                <div class="sign-line"></div>
-                <div style="font-weight: bold;">Engineer Signature</div>
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 55%;">Product</th>
+                    <th style="width: 45%;">Serial No.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      <b>${demoData.product}</b>
+                      <div class="model-sub">Model: ${demoData.model}</div>
+                    </td>
+                    <td><b>${demoData.serialNo || 'N/A'}</b></td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div class="remarks">
+                <b>Demo Outcome / Remarks:</b> ${demoData.result || 'Demo completed successfully.'}
+              </div>
+
+              ${demoData.notes ? `<div class="note">Internal Note: ${demoData.notes}</div>` : ''}
+
+              <div class="footer">
+                <div class="sign-box">
+                  <div class="sign-space"></div>
+                  <div class="sign-line"></div>
+                  <div class="sign-label">Client Signature & Stamp</div>
+                </div>
+                <div class="sign-box">
+                  <div class="sign-sub" style="margin-bottom:6px;">${demoData.senderName || ''}</div>
+                  ${signatureHTML}
+                  <div class="sign-line"></div>
+                  <div class="sign-label">Engineer Signature</div>
+                </div>
+              </div>
+
+              <div class="doc-footer">
+                This is a system-generated report from ${companyProfile?.companyName || 'our company'} • Generated on ${genDate}
               </div>
             </div>
           </body>
@@ -329,7 +446,9 @@ export default function AddDemoScreen() {
       setModalVisible(false);
   };
 
-  // 🔥 SAVE LOGIC — via new backend API
+  // 🔥 SAVE LOGIC — via new backend API. Create flow unchanged; edit flow
+  // calls updateDemo() instead, skips the location-log/PDF/notification
+  // steps that only make sense for a brand-new demo visit.
   const handleSubmit = async () => {
     if (!hospital || !product || !contactPerson) {
       Alert.alert("Missing Fields", "Hospital, Product Name and Contact Person are required.");
@@ -338,20 +457,55 @@ export default function AddDemoScreen() {
 
     setLoading(true);
 
+    const finalProduct = product === 'Other' ? customProduct : product;
+    const finalModel = model === 'Other' ? customModel : model;
+
+    if (isEditMode) {
+      try {
+        await updateDemo(editId!, {
+            orgId: orgId || undefined,
+            orgName: hospital,
+            address: address,
+            city: city,
+            department: department,
+            product: finalProduct,
+            model: finalModel,
+            serialNo: serialNo,
+            contactPerson: contactPerson,
+            designation: designation,
+            contactNumber: contactNumber,
+            date: demoDate.toISOString().split('T')[0],
+            duration: Number(duration) || 1,
+            outcome: result,
+            notes: notes,
+        });
+        Alert.alert("Success ✅", "Demo Report Updated!");
+        router.back();
+      } catch (error: any) {
+        Alert.alert("Error", error?.message || "Something went wrong.");
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     try {
       const locationData = await getCurrentLocation();
       if (!locationData) { 
           setLoading(false); 
           return; 
       }
+      recordLocationLog({
+          latitude: locationData.lat,
+          longitude: locationData.lng,
+          type: 'Demo',
+      }).catch(() => {});
 
       const newDemoId = generateDemoId();
 
-      const finalProduct = product === 'Other' ? customProduct : product;
-      const finalModel = model === 'Other' ? customModel : model;
-
       const createdDemo = await createDemo({
           demoRef: newDemoId,
+          orgId: orgId || undefined,
           orgName: hospital,
           address: address,
           city: city,
@@ -425,7 +579,7 @@ export default function AddDemoScreen() {
             <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="white" />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>New Demo Entry</Text>
+            <Text style={styles.headerTitle}>{isEditMode ? 'Edit Demo Entry' : 'New Demo Entry'}</Text>
             <View style={{ width: 24 }} />
         </View>
 
@@ -528,12 +682,14 @@ export default function AddDemoScreen() {
                 onPress={handleSubmit} 
                 disabled={loading}
             >
-                {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>SAVE DEMO</Text>}
+                {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>{isEditMode ? 'UPDATE DEMO' : 'SAVE DEMO'}</Text>}
             </TouchableOpacity>
             
-            <Text style={{textAlign:'center', color:'gray', fontSize:10, marginTop:10}}>
-                📍 Location will be captured automatically.
-            </Text>
+            {!isEditMode && (
+                <Text style={{textAlign:'center', color:'gray', fontSize:10, marginTop:10}}>
+                    📍 Location will be captured automatically.
+                </Text>
+            )}
             
             <View style={{height: 100}} />
 

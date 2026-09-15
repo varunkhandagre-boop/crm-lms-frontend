@@ -20,9 +20,13 @@ import {
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
+// 🔥 Phase 8: couriers now come from Postgres via these adapters
+import { deleteCourier, fetchCouriers, updateCourier, updateCourierStatus } from '../services/api/couriers';
+
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { fetchOrganizations } from '../services/api/organizations';
 
 export default function CourierScreen() {
   const router = useRouter();
@@ -30,8 +34,10 @@ export default function CourierScreen() {
   // 🔥 1. Context se sirf Profile, User & Notifications Nikala
   const { currentUser, addNotification, companyProfile } = useData(); 
 
-  // 🔥 2. Naya SaaS Engine
-  const { fetchSaaSData, updateSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 2. "organizations" still Firestore; couriers are Postgres now
+  const { fetchSaaSData, isDbLoading: isOrgsLoading } = useSaaSDB();
+  const [isCourierLoading, setIsCourierLoading] = useState(true);
+  const isDbLoading = isOrgsLoading || isCourierLoading;
 
   // 🔥 3. Lazy Loaded Lists
   const [courierList, setCourierList] = useState<any[]>([]);
@@ -63,20 +69,49 @@ export default function CourierScreen() {
       else setVisibleCount(20); 
   }, [viewMode, currentDate, activeTab, activeStatus, searchText]);
 
-  // 🔥 4. LOAD DATA ON MOUNT
+  // 🔥 4. LOAD DATA — couriers bounded by the current view window + type/status filter
+  // (server-enforced visibility: non-office roles automatically only see their own).
+  function getFetchRange(): { fromDate?: string; toDate?: string } {
+      const toIso = (d: Date) => d.toISOString().split('T')[0];
+      if (viewMode === 'All') return {};
+      if (viewMode === 'Day') return { fromDate: toIso(currentDate), toDate: toIso(currentDate) };
+      if (viewMode === 'Month') {
+          const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+          const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+          return { fromDate: toIso(start), toDate: toIso(end) };
+      }
+      // FY
+      const m = currentDate.getMonth();
+      const y = currentDate.getFullYear();
+      const fyStartYear = m >= 3 ? y : y - 1;
+      return { fromDate: toIso(new Date(fyStartYear, 3, 1)), toDate: toIso(new Date(fyStartYear + 1, 2, 31)) };
+  }
+
   useEffect(() => {
-      const loadData = async () => {
-          if (currentUser?.companyId) {
-              const [couriers, orgs] = await Promise.all([
-                  fetchSaaSData("couriers"),
-                  fetchSaaSData("organizations")
-              ]);
+      const loadOrgs = async () => {
+          if (currentUser?.companyId) setOrgList(await fetchOrganizations({ limit: 200 }));
+      };
+      loadOrgs();
+  }, [currentUser]);
+
+  useEffect(() => {
+      const loadCouriers = async () => {
+          if (!currentUser?.companyId) return;
+          setIsCourierLoading(true);
+          try {
+              const { fromDate, toDate } = getFetchRange();
+              // type/status intentionally NOT filtered server-side here — the tab
+              // badges (inwardPending/outwardPending below) need visibility across
+              // every type+status within the current date window, not just the
+              // currently-selected tab.
+              const couriers = await fetchCouriers({ fromDate, toDate, limit: 500 });
               setCourierList(couriers);
-              setOrgList(orgs);
+          } finally {
+              setIsCourierLoading(false);
           }
       };
-      loadData();
-  }, [currentUser]);
+      loadCouriers();
+  }, [currentUser, viewMode, currentDate]);
 
   // POWER USER CHECK
   const role = currentUser?.role || ''; 
@@ -104,7 +139,7 @@ export default function CourierScreen() {
       return new Date(0);
   };
 
-  const generateChallan = async (data: any) => {
+    const generateChallan = async (data: any) => {
       try {
           let tableRows = '';
           let totalQty = 0;
@@ -128,23 +163,23 @@ export default function CourierScreen() {
                   
                   tableRows += `
                     <tr>
-                      <td style="text-align: center;">${index + 1}</td>
-                      <td style="text-align: left;">${item.description.replace(/\n/g, '<br>')}</td>
-                      <td style="text-align: center;">${item.qty}</td>
+                      <td style="text-align: center; color:#6b7280;">${index + 1}</td>
+                      <td>${item.description.replace(/\n/g, '<br>')}</td>
+                      <td style="text-align: center; font-weight:600;">${item.qty}</td>
                     </tr>
                   `;
               });
           } else {
-              tableRows = `<tr><td colspan="3" style="text-align: center;">No Material Details</td></tr>`;
+              tableRows = `<tr><td colspan="3" style="text-align: center; color:#9ca3af;">No Material Details</td></tr>`;
           }
 
           const logoHTML = companyProfile?.logoUrl 
-                ? `<img src="${companyProfile.logoUrl}" style="height: 60px; margin-bottom: 10px;" />` 
-                : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
+                ? `<img src="${companyProfile.logoUrl}" style="height: 62px; object-fit: contain;" />` 
+                : `<div style="font-size:24px; font-weight:800; color:#0f2557; letter-spacing:0.5px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
 
           const signatureHTML = companyProfile?.signatureUrl 
-                ? `<img src="${companyProfile.signatureUrl}" style="height: 50px; margin-top: 5px;" />` 
-                : `<div style="height: 40px;"></div>`;
+                ? `<img src="${companyProfile.signatureUrl}" style="height: 50px; object-fit: contain; margin-bottom: 6px;" />` 
+                : `<div style="height: 50px;"></div>`;
 
           let receiverName = data.receiver ? data.receiver.split(',')[0] : '-';
           let receiverAddr = data.toCity || '';
@@ -159,79 +194,143 @@ export default function CourierScreen() {
               receiverAddr = org.address ? `${org.address}, ${org.city || ''}` : (org.city || receiverAddr);
           }
 
+          const genDate = new Date().toLocaleDateString('en-GB');
+
           const htmlContent = `
           <html>
             <head>
+              <meta charset="utf-8" />
               <style>
-                body { font-family: 'Helvetica', sans-serif; padding: 30px; border: 2px solid #000; }
-                .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px; }
-                .title { font-size: 24px; font-weight: bold; color: #1a237e; text-transform: uppercase; }
-                .sub-title { font-size: 12px; margin-top: 5px; color: #333; }
-                .row { display: flex; justify-content: space-between; margin-bottom: 15px; }
-                .label { font-weight: bold; font-size: 14px; }
-                .box { border: 1px solid #000; padding: 10px; margin-top: 10px; }
-                .table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-                .table th, .table td { border: 1px solid #000; padding: 8px; text-align: center; vertical-align: top; }
-                .footer { margin-top: 50px; display: flex; justify-content: space-between; align-items: flex-end; }
-                .sign { border-top: 1px solid #000; width: 150px; text-align: center; padding-top: 5px; font-size: 12px; }
-                .sign-img-box { text-align: center; width: 150px; }
+                * { box-sizing: border-box; }
+                body {
+                  font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+                  color: #1a1a2e;
+                  margin: 0;
+                  padding: 0;
+                }
+                .sheet { padding: 0 40px 40px; }
+
+                .topbar {
+  display: flex; align-items: flex-start; justify-content: center; position: relative;
+  padding: 28px 40px; background: #0f2557; color: #ffffff;
+}
+.topbar .logo-corner { position: absolute; left: 40px; top: 28px; }
+.topbar .company-meta { text-align: center; font-size: 12px; line-height: 1.7; opacity: 0.92; }
+
+.doc-band {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  background: #eef2fb; border-bottom: 4px solid #0f2557;
+  padding: 18px 40px; margin-bottom: 28px;
+}
+.doc-title { font-size: 19px; font-weight: 800; letter-spacing: 1.4px; color: #0f2557; }
+                .doc-meta { text-align: right; font-size: 12.5px; color: #4a4a68; line-height: 1.7; }
+                .doc-meta b { color: #0f2557; }
+
+                .grid { display: flex; gap: 20px; margin-bottom: 24px; }
+                .card {
+                  flex: 1; background: #fafbfe; border: 1px solid #e2e6f0; border-radius: 12px;
+                  padding: 20px 22px;
+                }
+                .card-label { font-size: 11px; font-weight: 700; color: #6b7280; letter-spacing: 1px; margin-bottom: 12px; }
+                .consignee-name { font-size: 18px; font-weight: 800; color: #0f2557; text-transform: uppercase; }
+                .consignee-addr { font-size: 13px; color: #4a4a68; margin-top: 6px; line-height: 1.5; }
+
+                .row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px; }
+                .row .k { color: #6b7280; }
+                .row .v { font-weight: 600; color: #1a1a2e; text-align: right; }
+
+                .table { width: 100%; border-collapse: collapse; margin-bottom: 34px; border-radius: 12px; overflow: hidden; }
+                .table th {
+                  background: #0f2557; color: white; font-size: 12.5px; letter-spacing: 0.5px;
+                  text-align: left; padding: 15px 18px; font-weight: 600;
+                }
+                .table td {
+                  padding: 14px 18px; font-size: 14px; border-bottom: 1px solid #e9ecf5; background: #ffffff;
+                }
+                .table .total-row td {
+                  background: #eef2fb; font-weight: 800; color: #0f2557; border-bottom: none;
+                }
+
+                .footer { display: flex; justify-content: space-between; margin-top: 20px; }
+                .sign-box { width: 46%; text-align: center; }
+                .sign-space { height: 56px; }
+                .sign-line { border-top: 1.5px solid #1a1a2e; margin-bottom: 8px; }
+                .sign-label { font-size: 13px; font-weight: 700; color: #1a1a2e; }
+                .sign-sub { font-size: 11.5px; color: #6b7280; margin-top: 3px; }
+
+                .doc-footer {
+                  margin-top: 40px; padding-top: 16px; border-top: 1px solid #e9ecf5;
+                  font-size: 10.5px; color: #9ca3af; text-align: center;
+                }
               </style>
             </head>
             <body>
-              <div class="header">
-                ${logoHTML}
-                ${companyProfile?.logoUrl ? `<div class="title" style="font-size:20px;">${companyProfile.companyName}</div>` : ''}
-                
-                <div class="sub-title">${companyProfile?.address || ''}</div>
-                <div class="sub-title">
-                    Phone: ${companyProfile?.contactPhone || companyProfile?.phone || '-'} |
-                    Email: ${companyProfile?.contactEmail || companyProfile?.email || '-'}
-                </div>
-                <div class="sub-title">
-                    ${companyProfile?.gstNumber ? `GSTIN: ${companyProfile.gstNumber}` : ''}
+            <div class="topbar">
+                <div class="logo-corner">${logoHTML}</div>
+                <div class="company-meta">
+                  <div style="font-weight:700; font-size:14px; margin-bottom:3px;">${companyProfile?.companyName || ''}</div>
+                  <div>${companyProfile?.address || ''}</div>
+                  <div>${companyProfile?.contactPhone || companyProfile?.phone || '-'} &nbsp;•&nbsp; ${companyProfile?.contactEmail || companyProfile?.email || '-'}</div>
+                  ${companyProfile?.gstNumber ? `<div>GSTIN: ${companyProfile.gstNumber}</div>` : ''}
                 </div>
               </div>
 
-              <h3 style="text-align: center; text-decoration: underline;">DELIVERY CHALLAN</h3>
-
-              <div class="row">
-                <div><span class="label">DC No:</span> ${data.dcNo || '-'}</div>
-                <div><span class="label">Date:</span> ${data.date}</div>
+                            <div class="doc-band" style="flex-direction: row; justify-content: space-between; text-align: left;">
+                <div class="doc-title">DELIVERY CHALLAN</div>
+                <div class="doc-meta" style="text-align: right;">
+                  <div>DC No: <b>${data.dcNo || '-'}</b></div>
+                  <div>Date: <b>${data.date || '-'}</b></div>
+                </div>
               </div>
 
-              <div class="box">
-                <div class="label" style="margin-bottom:5px;">Consignee / Receiver Details:</div>
-                <div style="font-size: 18px; font-weight: bold; text-transform: uppercase;">${receiverName}</div>
-                <div style="font-size: 14px; margin-top: 5px;">${receiverAddr}</div>
-              </div>
+              <div class="sheet">
+                <div class="grid">
+                  <div class="card" style="flex: 1.3;">
+                    <div class="card-label">CONSIGNEE / RECEIVER</div>
+                    <div class="consignee-name">${receiverName}</div>
+                    <div class="consignee-addr">${receiverAddr || '-'}</div>
+                  </div>
+                  <div class="card">
+                    <div class="card-label">DISPATCH DETAILS</div>
+                    <div class="row"><span class="k">Courier</span><span class="v">${data.courierName || '-'}</span></div>
+                    <div class="row"><span class="k">Docket No</span><span class="v">${data.docketNo || '-'}</span></div>
+                    <div class="row"><span class="k">Booking Date</span><span class="v">${data.courierDate || '-'}</span></div>
+                  </div>
+                </div>
 
-              <div class="box">
-                <div class="label">Dispatch Details:</div>
-                <div style="margin-top:5px;">Courier: <b>${data.courierName}</b></div>
-                <div>Docket/Track No: <b>${data.docketNo}</b></div>
-                <div>Booking Date: ${data.courierDate || '-'}</div> 
-              </div>
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th style="width: 10%; text-align:center;">Sr.</th>
+                      <th style="width: 65%;">Description of Material</th>
+                      <th style="width: 25%; text-align:center;">Qty</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${tableRows}
+                    <tr class="total-row">
+                      <td colspan="2" style="text-align: right;">TOTAL QUANTITY</td>
+                      <td style="text-align: center;">${totalQty}</td>
+                    </tr>
+                  </tbody>
+                </table>
 
-              <table class="table">
-                <tr style="background-color: #eee;">
-                  <th style="width: 10%;">Sr.</th>
-                  <th style="width: 70%;">Description of Material</th>
-                  <th style="width: 20%;">Qty</th>
-                </tr>
-                ${tableRows}
-                <tr style="background-color: #f9f9f9; font-weight: bold;">
-                  <td colspan="2" style="text-align: right;">TOTAL QUANTITY</td>
-                  <td style="text-align: center;">${totalQty}</td>
-                </tr>
-              </table>
-
-              <div class="footer">
-                <div class="sign">Receiver's Sign</div>
-                
-                <div class="sign-img-box">
-                    <div style="font-size:10px; margin-bottom:5px;">For, ${companyProfile?.companyName || 'Us'}</div>
+                <div class="footer">
+                  <div class="sign-box">
+                    <div class="sign-space"></div>
+                    <div class="sign-line"></div>
+                    <div class="sign-label">Receiver's Signature</div>
+                  </div>
+                  <div class="sign-box">
+                    <div class="sign-sub" style="margin-bottom:6px;">For, ${companyProfile?.companyName || 'Us'}</div>
                     ${signatureHTML}
-                    <div class="sign">Authorised Signatory</div>
+                    <div class="sign-line"></div>
+                    <div class="sign-label">Authorised Signatory</div>
+                  </div>
+                </div>
+
+                <div class="doc-footer">
+                  This is a system-generated delivery challan from ${companyProfile?.companyName || 'our company'} • Generated on ${genDate}
                 </div>
               </div>
             </body>
@@ -251,6 +350,7 @@ export default function CourierScreen() {
           }
       } catch (error) { Alert.alert("Error", "Could not generate PDF."); }
   };
+
 
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
@@ -275,13 +375,9 @@ export default function CourierScreen() {
   const getFilteredData = () => {
       let data = Array.isArray(courierList) ? [...courierList] : [];
 
-      if (!canManage && currentUser?.uid) {
-          data = data.filter((item: any) => 
-              item.senderId === currentUser.uid || 
-              (item.receiver && item.receiver.toLowerCase().includes(currentUser.name?.toLowerCase())) ||
-              (item.sender && item.sender.toLowerCase().includes(currentUser.name?.toLowerCase()))
-          );
-      }
+      // Date range already applied server-side (see getFetchRange() above);
+      // visibility (self vs all) is also server-enforced now — no client-side self-filter needed.
+      // type/status stay client-side so the tab badges above can see across all of them.
 
       if (activeTab !== 'All') {
           data = data.filter((item: any) => item.type === activeTab);
@@ -357,7 +453,7 @@ export default function CourierScreen() {
     setEditModalVisible(true);
   };
 
-  // 🔥 5. SAAS UPDATE LOGIC (EDIT)
+  // 🔥 5. SAAS UPDATE LOGIC (EDIT) — Phase 8: PATCHes Postgres via updateCourier()
   const handleSaveEdit = async () => {
     if (!editData.id) return;
     if (!editData.docketNo || !editData.courierName) {
@@ -366,22 +462,26 @@ export default function CourierScreen() {
     }
     setIsSavingEdit(true);
     try {
-        const res = await updateSaaSData("couriers", editData.id, {
-            orgId: editData.orgId || '', 
+        // editData.date is a DD/MM/YYYY display string (free-text field in this modal) —
+        // convert to YYYY-MM-DD for the backend, or omit if it doesn't parse cleanly.
+        const dateParts = (editData.date || '').split('/');
+        const isoDate = dateParts.length === 3 ? `${dateParts[2]}-${dateParts[1].padStart(2, '0')}-${dateParts[0].padStart(2, '0')}` : undefined;
+
+        const res = await updateCourier(editData.id, {
+            orgId: editData.orgId || undefined,
             docketNo: editData.docketNo,
             courierName: editData.courierName,
-            date: editData.date,
+            date: isoDate,
             type: editData.type,
             sender: editData.sender,
             receiver: editData.receiver,
-            material: editData.material, 
+            material: editData.material,
             status: editData.status,
             notes: editData.notes,
-            note: editData.notes 
         });
 
         if (res.success) {
-            setCourierList(prev => prev.map(item => item.id === editData.id ? { ...item, ...editData } : item));
+            setCourierList(prev => prev.map(item => item.id === editData.id ? res.record : item));
             Alert.alert("Success", "Courier details updated successfully!");
             setEditModalVisible(false);
         } else {
@@ -394,7 +494,7 @@ export default function CourierScreen() {
     }
   };
 
-  // 🔥 6. SAAS DELETE LOGIC
+  // 🔥 6. SAAS DELETE LOGIC — Phase 8: DELETEs via deleteCourier()
   const handleDelete = async () => {
     if (!selectedCourier) return;
     Alert.alert("Delete Entry?", "Permanently delete this record?", [
@@ -402,7 +502,7 @@ export default function CourierScreen() {
       { text: "Delete", style: 'destructive', onPress: async () => {
           setLoading(true); 
           try {
-            const res = await deleteSaaSData("couriers", selectedCourier.id);
+            const res = await deleteCourier(selectedCourier.id);
             if (res.success) {
                 setCourierList(prev => prev.filter(item => item.id !== selectedCourier.id));
                 setModalVisible(false);
@@ -417,7 +517,7 @@ export default function CourierScreen() {
     ]);
   };
 
-  // 🔥 7. SAAS UPDATE LOGIC (STATUS)
+  // 🔥 7. SAAS UPDATE LOGIC (STATUS) — Phase 8: PATCHes via updateCourierStatus()
   const handleUpdateStatus = (newStatus: string) => {
       if (!selectedCourier) return;
       Alert.alert("Confirm", `Mark as ${newStatus}?`, [
@@ -425,7 +525,7 @@ export default function CourierScreen() {
           { text: "Yes", onPress: async () => {
               setLoading(true); 
               try {
-                  const res = await updateSaaSData("couriers", selectedCourier.id, { status: newStatus, notes: note }); 
+                  const res = await updateCourierStatus(selectedCourier.id, newStatus as any, note);
                   
                   if (res.success) {
                       if (addNotification) {
@@ -438,7 +538,7 @@ export default function CourierScreen() {
                               route: '/courier'
                           });
                       }
-                      setCourierList(prev => prev.map(item => item.id === selectedCourier.id ? { ...item, status: newStatus, notes: note } : item));
+                      setCourierList(prev => prev.map(item => item.id === selectedCourier.id ? res.record : item));
                       setModalVisible(false);
                       Alert.alert("Success", "Status Updated!");
                   } else {

@@ -7,9 +7,34 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import * as XLSX from 'xlsx';
 
-// 🔥 SAAS IMPORTS (Direct Firestore imports removed)
+import { listAdvances } from '../services/api/advances';
+import { fetchCouriers } from '../services/api/couriers';
+import { listDemos } from '../services/api/demos';
+import { listExpenses } from '../services/api/expenses';
+import { listInstallations } from '../services/api/installations';
+import { listLeads } from '../services/api/leads';
+import { listOrders } from '../services/api/orders';
+import { fetchOrganizations } from '../services/api/organizations';
+import { listPaymentCollections } from '../services/api/paymentCollections';
+import { listPaymentDues } from '../services/api/paymentDues';
+import { listPmsReports } from '../services/api/pmsReports';
+import { listProjects } from '../services/api/projects';
+import { listQuotations } from '../services/api/quotations';
+import { listSalesVisits } from '../services/api/salesVisits';
+import { listServiceCalls } from '../services/api/serviceCalls';
+import { fetchTasks } from '../services/api/tasks';
+import { fetchTravelNotes } from '../services/api/travelNotes';
+import { fetchTeamMembers } from '../services/api/users';
+
+// 🔥 SAAS IMPORTS (everything below except attendance/leaves stays on Firestore —
+// couriers/service_calls/orders/demos/installations/payments/tasks/pms/sales/leads/
+// expenses/advances/travel_notes/organizations aren't migrated until later phases)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+
+// 🔥 Phase 7: attendance/leaves now come from Postgres via these adapters
+import { fetchAttendance } from '../services/api/attendance';
+import { fetchLeaves } from '../services/api/leaves';
 
 export default function CombinedActivityScreen() {
   const router = useRouter();
@@ -40,47 +65,107 @@ export default function CombinedActivityScreen() {
   const [leaveList, setLeaveList] = useState<any[]>([]);
   const [travelList, setTravelList] = useState<any[]>([]);
   const [orgList, setOrgList] = useState<any[]>([]);
+  const [dueList, setDueList] = useState<any[]>([]);
 
-  // 🔥 4. LOAD ALL MODULE DATA VIA SAAS
+  // 🔥 4. LOAD OTHER MODULES (unaffected by Phase 7 — still Firestore, still fetched in full
+  // as before; those modules migrate in later phases)
+  // Moved up: needed before loadAllData/loadAttendanceAndLeaves useEffects reference them
+const currentMonthForFY = new Date().getMonth(); 
+const currentYearForFY = new Date().getFullYear();
+const defaultFYStartYear = currentMonthForFY >= 3 ? currentYearForFY : currentYearForFY - 1;
+const [selectedMonth, setSelectedMonth] = useState(-1);
+const [selectedYear, setSelectedYear] = useState(defaultFYStartYear); 
+const [selectedDate, setSelectedDate] = useState(new Date());
+
   const loadAllData = async () => {
       if (currentUser?.companyId) {
-          const [
-              users, attendance, couriers, serviceCalls, orders, demos,
-              installs, payments, tasks, pms, salesVisits, leads,
-              expenses, advances, leaves, travels, orgs
-          ] = await Promise.all([
-              fetchSaaSData("users"),
-              fetchSaaSData("attendance"),
-              fetchSaaSData("couriers"),
-              fetchSaaSData("service_calls"),
-              fetchSaaSData("orders"),
-              fetchSaaSData("demos"),
-              fetchSaaSData("installations"),
-              fetchSaaSData("payment_collections"),
-              fetchSaaSData("payment_dues"),
-              fetchSaaSData("tasks"),
-              fetchSaaSData("pms_reports"),
-              fetchSaaSData("sales_reports"),
-              fetchSaaSData("leads"),
-              fetchSaaSData("expenses"),
-              fetchSaaSData("advances"),
-              fetchSaaSData("leaves"),
-              fetchSaaSData("travel_notes"),
-              fetchSaaSData("organizations")
-          ]);
+          
+    const moduleNames = [
+    'users', 'couriers', 'serviceCalls', 'orders', 'demos',
+    'installs', 'payments', 'dues', 'tasks', 'pms', 'salesVisits', 'leads',
+    'expenses', 'advances', 'travels', 'orgs'
+];
+const results = await Promise.allSettled([
+    fetchTeamMembers(),
+    fetchCouriers({ limit: 1000 }),
+    listServiceCalls(),
+    listOrders(),
+    listDemos(),
+    listInstallations(),
+    listPaymentCollections(),
+    listPaymentDues(),
+    (async () => {
+        // Tasks needs both directions merged — matches employee_timeline's
+        // intent of showing everything a person touched, not just one side.
+        const [given, received] = await Promise.all([
+            fetchTasks({ direction: 'given', userId: 'all', limit: 1000 }),
+            fetchTasks({ direction: 'received', userId: 'all', limit: 1000 }),
+        ]);
+        return Array.from(new Map([...given, ...received].map((t: any) => [t.id, t])).values());
+    })(),
+    listPmsReports(),
+    listSalesVisits(),
+    listLeads(),
+    listExpenses(),
+    listAdvances(),
+    fetchTravelNotes({ userId: 'all', limit: 1000 }),
+    fetchOrganizations({ limit: 500 }),
+]);
 
-          setUserList(users); setAttendanceList(attendance); setCourierList(couriers);
-          setServiceCallList(serviceCalls); setOrderList(orders); setDemoList(demos);
-          setInstallList(installs); setPaymentList(payments); setTaskList(tasks);
-          setPmsList(pms); setSalesVisitList(salesVisits); setLeadsList(leads);
-          setExpenseList(expenses); setAdvanceList(advances); setLeaveList(leaves);
-          setTravelList(travels); setOrgList(orgs);
+// A single failing module (e.g. a permission or validation error) no longer
+// blanks out every other list — it just logs which one failed and falls
+// back to an empty array for that module only.
+const [users, couriers, serviceCalls, orders, demos, installs, payments, dues, tasks, pms, salesVisits, leads, expenses, advances, travels, orgs] = results.map((r, i) => {
+    if (r.status === 'rejected') {
+        console.log(`❌ employee_timeline: ${moduleNames[i]} failed:`, r.reason?.message || r.reason);
+        return [];
+    }
+    return r.value;
+});
+
+setUserList(users); setCourierList(couriers);
+setServiceCallList(serviceCalls); setOrderList(orders); setDemoList(demos);
+setInstallList(installs); setPaymentList(payments); setDueList(dues); setTaskList(tasks);
+setPmsList(pms); setSalesVisitList(salesVisits); setLeadsList(leads);
+setExpenseList(expenses); setAdvanceList(advances);
+setTravelList(travels); setOrgList(orgs);
       }
   };
 
   useEffect(() => {
       loadAllData();
   }, [currentUser]);
+
+  // 🔥 Phase 7: attendance/leaves — bounded fetch instead of "load the entire collection".
+  // Daily Timeline tab only needs the selected day; Employee 360 / Export tabs work off
+  // the selected FY. Re-fetches when the relevant selector changes. This screen is
+  // manager/reports-facing, so it always requests 'all' employees (server enforces the
+  // role check); an individual employee's own attendance/leave screens use Phase 7's
+  // narrower per-user endpoints instead.
+  useEffect(() => {
+      const loadAttendanceAndLeaves = async () => {
+          if (!currentUser?.companyId) return;
+
+          let fromDate: string, toDate: string;
+          if (activeTab === 'timeline') {
+              const d = getStandardDate(selectedDate);
+              fromDate = d; toDate = d;
+          } else {
+              const fyStart = new Date(selectedYear, 3, 1);
+              const fyEnd = new Date(selectedYear + 1, 2, 31);
+              fromDate = getStandardDate(fyStart);
+              toDate = getStandardDate(fyEnd < new Date() ? fyEnd : new Date());
+          }
+
+          const [attendance, leaves] = await Promise.all([
+              fetchAttendance({ userId: 'all', fromDate, toDate, limit: 1000 }),
+              fetchLeaves({ userId: 'all', limit: 500 }),
+          ]);
+          setAttendanceList(attendance);
+          setLeaveList(leaves);
+      };
+      loadAttendanceAndLeaves();
+  }, [currentUser, activeTab, selectedDate, selectedYear]);
 
   const userRole = (currentUser?.role || '').toLowerCase().trim();
   const isFinanceRole = ['admin', 'manager', 'account', 'accountant', 'superadmin'].includes(userRole);
@@ -159,12 +244,6 @@ export default function CombinedActivityScreen() {
       return 'Multiple Items / Attached';
   };
 
-  const currentMonthForFY = new Date().getMonth(); 
-  const currentYearForFY = new Date().getFullYear();
-  const defaultFYStartYear = currentMonthForFY >= 3 ? currentYearForFY : currentYearForFY - 1;
-
-  const [selectedMonth, setSelectedMonth] = useState(-1);
-  const [selectedYear, setSelectedYear] = useState(defaultFYStartYear); 
   const [showYearModal, setShowYearModal] = useState(false);
   const [showMonthModal, setShowMonthModal] = useState(false);
 
@@ -193,7 +272,6 @@ export default function CombinedActivityScreen() {
   // ==========================================
   // 🟢 VIEW 1: DAILY TIMELINE LOGIC
   // ==========================================
-  const [selectedDate, setSelectedDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any>(null); 
   const [userModalVisible, setUserModalVisible] = useState(false);
@@ -502,12 +580,50 @@ export default function CombinedActivityScreen() {
       });
   };
 
+  const MODULE_FETCHERS: Record<string, () => Promise<any[]>> = {
+    orders: () => listOrders(),
+    payment_collections: () => listPaymentCollections(),
+    payment_dues: () => listPaymentDues(),
+    expenses: () => listExpenses(),
+    leads: () => listLeads(),
+    installations: () => listInstallations(),
+    pms_reports: () => listPmsReports(),
+    service_calls: () => listServiceCalls(),
+    demos: () => listDemos(),
+    couriers: () => fetchCouriers({ limit: 1000 }),
+    tasks: async () => {
+        const [given, received] = await Promise.all([
+            fetchTasks({ direction: 'given', userId: 'all', limit: 1000 }),
+            fetchTasks({ direction: 'received', userId: 'all', limit: 1000 }),
+        ]);
+        return Array.from(new Map([...given, ...received].map((t: any) => [t.id, t])).values());
+    },
+    advances: () => listAdvances(),
+    travel_notes: () => fetchTravelNotes({ userId: 'all', limit: 1000 }),
+    projects: () => listProjects(),
+    quotations: () => listQuotations(),
+    organizations: () => fetchOrganizations({ limit: 500 }),
+    users: () => fetchTeamMembers(),
+};
+
   // 🔥 SAAS EXCEL FETCH LOGIC with bypassFilters flag
   const fetchAndAddSheet = async (wb: any, colName: string, sheetName: string, dateField: string, userField: string, isOrg: boolean = false, bypassFilters: boolean = false) => {
       if (!modules[sheetName.toLowerCase() as keyof typeof modules] && !modules[colName as keyof typeof modules]) return false;
       setProgress(`Fetching ${sheetName}...`);
       try {
-          const rawData = await fetchSaaSData(colName);
+          // 🔥 Phase 7: attendance/leaves come from Postgres now — the whole selected
+          // FY, since export can target any past year (not bounded to the small window
+          // the on-screen tabs fetch above).
+          const fyStart = getStandardDate(new Date(selectedYear, 3, 1));
+          const fyEndDate = new Date(selectedYear + 1, 2, 31);
+          const fyEnd = getStandardDate(fyEndDate < new Date() ? fyEndDate : new Date());
+          const rawData = colName === "attendance"
+            ? await fetchAttendance({ userId: 'all', fromDate: fyStart, toDate: fyEnd, limit: 1000 })
+            : colName === "leaves"
+            ? await fetchLeaves({ userId: 'all', limit: 2000 })
+            : MODULE_FETCHERS[colName]
+            ? await MODULE_FETCHERS[colName]()
+            : await fetchSaaSData(colName);
           const cleanRawData = rawData.map((d: any) => {
               const { location, items, history, ...cleanData } = d; 
               return cleanData;
@@ -1035,7 +1151,7 @@ export default function CombinedActivityScreen() {
 const DetailRow = ({label, value}: any) => (
     <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:8, borderBottomWidth:1, borderBottomColor:'#f0f0f0', paddingBottom:5}}>
         <Text style={{color:'gray', fontSize: 12, flex: 0.4}}>{label}</Text>
-        <Text style={{fontWeight:'bold', fontSize: 13, color:'#333', flex: 0.6, textAlign: 'right'}}>{value || '-'}</Text>
+        <Text style={{fontWeight:'bold', fontSize: 13, color:'#333', flex: 0.6, textAlign: 'right'}}>{value} </Text>
     </View>
 );
 

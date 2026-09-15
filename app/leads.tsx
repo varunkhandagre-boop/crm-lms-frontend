@@ -20,6 +20,7 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 1: leads now go through the new backend API
 import { listLeads } from '../services/api/leads';
+import { fetchTeamMembers } from '../services/api/users';
 
 export default function LeadsScreen() {
     const router = useRouter();
@@ -72,7 +73,7 @@ export default function LeadsScreen() {
             if (currentUser?.companyId) {
                 const [leads, users] = await Promise.all([
                     listLeads(), // was: fetchSaaSData("leads")
-                    fetchSaaSData("users")
+                    fetchTeamMembers()
                 ]);
                 setLeadsList(leads);
 

@@ -22,9 +22,12 @@ import {
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: PMS reports & installations now via new backend API
-import { createPmsReport } from '../services/api/pmsReports';
-import { listInstallations } from '../services/api/installations';
 import { completeActivityPlan } from '../services/api/activityPlans';
+import { listInstallations } from '../services/api/installations';
+import { recordLocationLog } from '../services/api/locationLogs';
+import { fetchOrganizations } from '../services/api/organizations';
+import { createPmsReport } from '../services/api/pmsReports';
+import { urlToBase64Image } from '../utils/pdfImageHelper';
 
 // 🔥 PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
@@ -72,7 +75,7 @@ export default function AddPMSScreen() {
       const loadData = async () => {
           if (currentUser?.companyId) {
               const [orgs, installs] = await Promise.all([
-                  fetchSaaSData("organizations"),
+                  fetchOrganizations({ limit: 200 }),
                   listInstallations(), // was: fetchSaaSData("installations")
               ]);
               setOrgList(orgs);
@@ -151,91 +154,159 @@ export default function AddPMSScreen() {
       }
   };
 
-  const generatePMSPDF = async (pmsData: any) => {
+    const generatePMSPDF = async (pmsData: any) => {
     try {
-        const logoHTML = companyProfile?.logoUrl 
-            ? `<img src="${companyProfile.logoUrl}" style="height: 60px; margin-bottom: 10px;" />` 
-            : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
+        const logoBase64 = await urlToBase64Image(companyProfile?.logoUrl);
+        const signatureBase64 = await urlToBase64Image(companyProfile?.signatureUrl);
 
-        const signatureHTML = companyProfile?.signatureUrl 
-            ? `<img src="${companyProfile.signatureUrl}" style="height: 40px; margin-top: 5px; margin-bottom: 2px;" />` 
-            : `<div style="height: 40px;"></div>`;
+        const logoHTML = logoBase64 
+            ? `<img src="${logoBase64}" style="height: 62px; object-fit: contain;" />` 
+            : `<div style="font-size:24px; font-weight:800; color:#0f2557; letter-spacing:0.5px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
+
+        const signatureHTML = signatureBase64 
+            ? `<img src="${signatureBase64}" style="height: 50px; object-fit: contain; margin-bottom: 6px;" />` 
+            : `<div style="height: 50px;"></div>`;
+
+        const genDate = new Date().toLocaleDateString('en-GB');
+        const serviceDate = new Date(pmsData.date).toLocaleDateString('en-GB');
+        const nextDueDate = new Date(pmsData.dueDate).toLocaleDateString('en-GB');
 
         const htmlContent = `
         <html>
           <head>
+            <meta charset="utf-8" />
             <style>
-              body { font-family: 'Helvetica', sans-serif; padding: 30px; border: 2px solid #333; }
-              .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px; }
-              .title { font-size: 22px; font-weight: bold; color: #1a237e; text-transform: uppercase; }
-              .sub-title { font-size: 12px; margin-top: 2px; color: #333; line-height: 1.4; }
-              .box { border: 1px solid #000; padding: 15px; margin-top: 10px; background-color: #fcfcfc; }
-              .row { display: flex; justify-content: space-between; margin-bottom: 5px; }
-              .label { font-weight: bold; color: #444; width: 120px; display: inline-block; }
-              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; }
-              .sign-box { text-align: center; width: 45%; }
-              .sign-line { border-top: 1px solid #000; width: 100%; margin-top: 5px; margin-bottom: 5px; }
+              * { box-sizing: border-box; }
+              body {
+                font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+                color: #1a1a2e;
+                margin: 0;
+                padding: 0;
+              }
+              .sheet { padding: 0 40px 40px; }
+
+              .topbar {
+                display: flex; justify-content: space-between; align-items: center;
+                padding: 28px 40px; background: #0f2557; color: #ffffff;
+              }
+              .topbar .company-meta { text-align: right; font-size: 12px; line-height: 1.7; opacity: 0.92; }
+
+              .doc-band {
+                display: flex; justify-content: space-between; align-items: center;
+                background: #eef2fb; border-bottom: 4px solid #0f2557;
+                padding: 18px 40px; margin-bottom: 28px;
+              }
+              .doc-title { font-size: 19px; font-weight: 800; letter-spacing: 1.4px; color: #0f2557; }
+              .doc-meta { text-align: right; font-size: 12.5px; color: #4a4a68; line-height: 1.7; }
+              .doc-meta b { color: #0f2557; }
+
+              .status-pill {
+                display: inline-block; background: #0891b2; color: white;
+                font-size: 11.5px; font-weight: 700; letter-spacing: 0.6px;
+                padding: 5px 14px; border-radius: 20px; margin-top: 6px;
+              }
+
+              .grid { display: flex; gap: 20px; margin-bottom: 24px; }
+              .card {
+                flex: 1; background: #fafbfe; border: 1px solid #e2e6f0; border-radius: 12px;
+                padding: 20px 22px;
+              }
+              .card-label { font-size: 11px; font-weight: 700; color: #6b7280; letter-spacing: 1px; margin-bottom: 14px; }
+              .row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px; }
+              .row .k { color: #6b7280; }
+              .row .v { font-weight: 600; color: #1a1a2e; text-align: right; }
+
+              .due-banner {
+                display: flex; justify-content: space-between; align-items: center;
+                background: #fef2f2; border: 2px solid #dc2626; border-radius: 12px;
+                padding: 18px 24px; margin-bottom: 26px;
+              }
+              .due-banner .label { font-size: 12px; font-weight: 700; color: #991b1b; letter-spacing: 0.6px; }
+              .due-banner .date { font-size: 22px; font-weight: 800; color: #dc2626; margin-top: 2px; }
+
+              .remarks {
+                background: #ecfeff; border-left: 4px solid #0891b2; border-radius: 8px;
+                padding: 16px 20px; font-size: 13.5px; color: #4a4a68; margin-bottom: 34px; line-height: 1.6;
+              }
+              .remarks b { color: #155e75; }
+
+              .footer { display: flex; justify-content: space-between; margin-top: 20px; }
+              .sign-box { width: 46%; text-align: center; }
+              .sign-space { height: 56px; }
+              .sign-line { border-top: 1.5px solid #1a1a2e; margin-bottom: 8px; }
+              .sign-label { font-size: 13px; font-weight: 700; color: #1a1a2e; }
+              .sign-sub { font-size: 11.5px; color: #6b7280; margin-top: 3px; }
+
+              .doc-footer {
+                margin-top: 40px; padding-top: 16px; border-top: 1px solid #e9ecf5;
+                font-size: 10.5px; color: #9ca3af; text-align: center;
+              }
             </style>
           </head>
           <body>
-            <div class="header">
+            <div class="topbar">
               ${logoHTML}
-              ${companyProfile?.logoUrl ? `<div class="title">${companyProfile.companyName}</div>` : ''}
-              <div class="sub-title">${companyProfile?.address || ''}</div>
-              <div class="sub-title">
-                Phone: ${companyProfile?.contactPhone || companyProfile?.phone || '-'} | 
-                Email: ${companyProfile?.contactEmail || companyProfile?.email || '-'}
+              <div class="company-meta">
+                <div style="font-weight:700; font-size:14px; margin-bottom:3px;">${companyProfile?.companyName || ''}</div>
+                <div>${companyProfile?.address || ''}</div>
+                <div>${companyProfile?.contactPhone || companyProfile?.phone || '-'} &nbsp;•&nbsp; ${companyProfile?.contactEmail || companyProfile?.email || '-'}</div>
               </div>
             </div>
 
-            <h3 style="text-align: center; text-decoration: underline; margin-bottom: 20px;">PREVENTIVE MAINTENANCE REPORT</h3>
-
-            <div class="row">
-                <div><span class="label">Report No:</span> <b style="font-size:16px;">${pmsData.pmsId}</b></div>
-                <div><span class="label">Date:</span> ${new Date(pmsData.date).toLocaleDateString('en-GB')}</div>
+            <div class="doc-band">
+              <div>
+                <div class="doc-title">PREVENTIVE MAINTENANCE REPORT</div>
+                <div class="status-pill">${pmsData.type || 'Preventive'}</div>
+              </div>
+              <div class="doc-meta">
+                <div>Report No: <b>${pmsData.pmsId}</b></div>
+                <div>Service Date: <b>${serviceDate}</b></div>
+              </div>
             </div>
 
-            <div class="box">
-                <div class="row">
-                    <div><span class="label">PMS Type:</span> <b>${pmsData.type}</b></div>
+            <div class="sheet">
+              <div class="grid">
+                <div class="card">
+                  <div class="card-label">CLIENT DETAILS</div>
+                  <div class="row"><span class="k">Hospital / Client</span><span class="v">${pmsData.hospitalName}</span></div>
+                  <div class="row"><span class="k">Address</span><span class="v">${pmsData.address || '-'}${pmsData.city ? ', ' + pmsData.city : ''}</span></div>
+                  <div class="row"><span class="k">Department</span><span class="v">${pmsData.department || '-'}</span></div>
                 </div>
-            </div>
-
-            <div class="box">
-                <div style="font-size:14px; margin-bottom:5px;"><b>Client:</b> ${pmsData.hospitalName}</div>
-                <div style="font-size:14px; margin-bottom:5px;"><b>Address:</b> ${pmsData.address}, ${pmsData.city}</div>
-                <div style="font-size:14px; margin-bottom:5px;"><b>Department:</b> ${pmsData.department || '-'}</div>
-            </div>
-
-            <div class="box">
-                <div class="row"><div><span class="label">Machine:</span> ${pmsData.machine}</div></div>
-                <div class="row"><div><span class="label">Model:</span> ${pmsData.model}</div></div>
-                <div class="row"><div><span class="label">Serial No:</span> <b>${pmsData.serialNo}</b></div></div>
-            </div>
-
-            <div class="box" style="background-color: #e8f5e9;">
-                <div class="row">
-                    <div><span class="label">Next Due Date:</span> <b style="color:#d32f2f; font-size:16px;">${new Date(pmsData.dueDate).toLocaleDateString('en-GB')}</b></div>
+                <div class="card">
+                  <div class="card-label">MACHINE DETAILS</div>
+                  <div class="row"><span class="k">Machine</span><span class="v">${pmsData.machine}</span></div>
+                  <div class="row"><span class="k">Model</span><span class="v">${pmsData.model}</span></div>
+                  <div class="row"><span class="k">Serial No</span><span class="v">${pmsData.serialNo}</span></div>
                 </div>
-            </div>
-
-            <div class="box">
-                <div style="font-weight:bold; text-decoration:underline;">Engineer Checklist / Remarks:</div>
-                <div style="margin-top:10px; min-height: 60px;">${pmsData.remarks || 'Routine checkup done. Machine working fine.'}</div>
-            </div>
-
-            <div class="footer">
-              <div class="sign-box">
-                <div style="height: 60px;"></div> 
-                <div class="sign-line"></div>
-                <div style="font-weight: bold;">Client Signature & Stamp</div>
               </div>
 
-              <div class="sign-box">
-                <div style="font-weight: bold; font-size: 12px;">Engineer: ${pmsData.senderName}</div>
-                ${signatureHTML}
-                <div class="sign-line"></div>
-                <div style="font-weight: bold;">Engineer Signature</div>
+              <div class="due-banner">
+                <div>
+                  <div class="label">⏰ NEXT SERVICE DUE</div>
+                  <div class="date">${nextDueDate}</div>
+                </div>
+              </div>
+
+              <div class="remarks">
+                <b>Engineer Checklist / Remarks:</b> ${pmsData.remarks || 'Routine checkup done. Machine working fine.'}
+              </div>
+
+              <div class="footer">
+                <div class="sign-box">
+                  <div class="sign-space"></div>
+                  <div class="sign-line"></div>
+                  <div class="sign-label">Client Signature & Stamp</div>
+                </div>
+                <div class="sign-box">
+                  <div class="sign-sub" style="margin-bottom:6px;">${pmsData.senderName || ''}</div>
+                  ${signatureHTML}
+                  <div class="sign-line"></div>
+                  <div class="sign-label">Engineer Signature</div>
+                </div>
+              </div>
+
+              <div class="doc-footer">
+                This is a system-generated report from ${companyProfile?.companyName || 'our company'} • Generated on ${genDate}
               </div>
             </div>
           </body>
@@ -315,10 +386,15 @@ export default function AddPMSScreen() {
       setIsSaving(true); 
 
       const locationData = await getCurrentLocation();
-      if (!locationData) {
-          setIsSaving(false);
-          return; 
-      }
+if (!locationData) {
+    setIsSaving(false);
+    return; 
+}
+recordLocationLog({
+    latitude: locationData.lat,
+    longitude: locationData.lng,
+    type: 'PMS',
+}).catch(() => {});
 
       try {
           const saved = await createPmsReport({

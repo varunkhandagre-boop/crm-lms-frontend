@@ -24,6 +24,10 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 // 🔥 INDIAN STATES & DISTRICTS DATA
 import { districtPincodes, indianStatesAndDistricts } from '../constants/indianStatesData';
 
+// 🆕 PHASE 11 — Postgres backend registration (additive, non-blocking —
+// see registerCompanyOnBackend()'s comment in services/api/registration.ts)
+import { registerCompanyOnBackend } from '../services/api/registration';
+
 export default function RegisterCompanyScreen() {
     const router = useRouter();
     const [loading, setLoading] = useState(false);
@@ -142,7 +146,29 @@ export default function RegisterCompanyScreen() {
             };
             await addSaaSData("company_profile", profileData, true);
 
-            // 5. Success aur direct login option
+            // 🆕 5. PHASE 11 — mirror this signup into the Postgres backend too,
+            // so SuperAdmin's panel sees the company and this login can later
+            // bridge over. Non-blocking: a failure here must NOT stop the
+            // person's actual (Firestore) registration from succeeding.
+            try {
+                await registerCompanyOnBackend({
+                    companyName,
+                    ownerName,
+                    email: cleanEmail,
+                    password,
+                    mobile,
+                    address: address || undefined,
+                    state,
+                    city,
+                    pincode: pinCode || undefined,
+                    gstNumber: gstNumber || undefined,
+                    employeeLimit: cleanEmpCount,
+                });
+            } catch (backendErr) {
+                console.warn('Backend registration failed (Firestore signup still succeeded):', backendErr);
+            }
+
+            // 6. Success aur direct login option
             // 🔥 LINKED TO SUBSCRIPTION: User register hote hi direct Subscription page par jayega data lekar
             Alert.alert(
                 "Registration Successful ✅", 

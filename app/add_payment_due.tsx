@@ -17,48 +17,42 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
+// 🔥 SAAS IMPORTS (organizations still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 6: payment dues now via new backend API
+import { fetchOrganizations } from '../services/api/organizations';
+import { createPaymentDue } from '../services/api/paymentDues';
 
 export default function AddPaymentDueScreen() {
     const router = useRouter();
     
-    // 🔥 1. Context se sirf user aur Notification engine
     const { currentUser, addNotification } = useData();
+    const { fetchSaaSData } = useSaaSDB();
 
-    // 🔥 2. Naya SaaS Engine
-    const { fetchSaaSData, addSaaSData } = useSaaSDB();
-
-    // 🔥 3. Lazy Loaded Organization List
     const [orgList, setOrgList] = useState<any[]>([]);
 
-    // --- FORM STATES ---
     const [selectedOrg, setSelectedOrg] = useState<any>(null);
     const [billNo, setBillNo] = useState('');
     const [amount, setAmount] = useState('');
     const [notes, setNotes] = useState('');
     
-    // BILL DATE STATES
     const [billDate, setBillDate] = useState(new Date());
     const [showBillDatePicker, setShowBillDatePicker] = useState(false);
 
-    // DUE DATE STATES
     const [dueDate, setDueDate] = useState(new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
 
     const [loading, setLoading] = useState(false);
 
-    // --- MODAL STATES FOR ORGANIZATION SEARCH ---
     const [modalVisible, setModalVisible] = useState(false);
     const [searchText, setSearchText] = useState('');
     const [filteredOrgs, setFilteredOrgs] = useState<any[]>([]);
 
-    // 🔥 4. LOAD DATA ON MOUNT
     useEffect(() => {
         const loadData = async () => {
             if (currentUser?.companyId) {
-                const orgs = await fetchSaaSData("organizations");
+                const orgs = await fetchOrganizations({ limit: 200 });
                 setOrgList(orgs);
                 setFilteredOrgs(orgs);
             }
@@ -87,7 +81,7 @@ export default function AddPaymentDueScreen() {
         setSearchText('');
     };
 
-    // 🔥 5. SAAS SAVE LOGIC
+    // 🔥 SAVE LOGIC — via new backend API (backend generates displayId now)
     const handleSaveDue = async () => {
         if (!selectedOrg) return Alert.alert("Missing", "Please select a Client/Organization.");
         if (!amount || isNaN(Number(amount))) return Alert.alert("Missing", "Please enter a valid Amount.");
@@ -95,52 +89,30 @@ export default function AddPaymentDueScreen() {
 
         setLoading(true);
 
-        const dueAmount = parseFloat(amount);
-        const formattedDueDate = dueDate.toLocaleDateString('en-GB'); 
-        const formattedBillDate = billDate.toLocaleDateString('en-GB'); 
-
-        // Generate Unique DUE ID
-        const uniqueDueId = `DUE-${Date.now().toString().slice(-6)}`;
-
-        // 🔥 CLEAN PAYLOAD: Engine injects senderId, senderName, companyId & createdAt
-        const newDue = {
-            orgId: selectedOrg.id,                     
-            orgName: selectedOrg.orgName || selectedOrg.name,
-            billNo: billNo,
-            billDate: formattedBillDate,               
-            amount: dueAmount,
-            balance: dueAmount,                        
-            dueDate: formattedDueDate,
-            date: formattedDueDate, // Fallback for older sorting                 
-            notes: notes,
-            status: 'Pending',
-            paymentStatus: 'Unpaid',
-            type: 'Manual',
-            orderId: uniqueDueId,
-            role: currentUser?.role || 'Employee'                             
-        };
-
         try {
-            const result = await addSaaSData("payment_dues", newDue);
-            
-            if (result.success) {
-                // 🔥 REAL PUSH NOTIFICATION
-                if (addNotification) {
-                    await addNotification({
-                        title: "Manual Due Added 📝",
-                        message: `₹${dueAmount} due added for ${newDue.orgName} by ${currentUser?.name}.`,
-                        to: "Accountant", // Admin ya Accountant ko bhejein
-                        route: "/payment_duelist",
-                        type: "warning"
-                    });
-                }
-                Alert.alert("Success", `New Due Added Successfully! ID: ${uniqueDueId}`);
-                router.back();
-            } else {
-                Alert.alert("Error", "Could not save due entry.");
+            const saved = await createPaymentDue({
+                orgId: selectedOrg.id,
+                orgName: selectedOrg.orgName || selectedOrg.name,
+                billNo,
+                billDate: billDate.toLocaleDateString('en-GB'),
+                amount: parseFloat(amount),
+                dueDate: dueDate.toLocaleDateString('en-GB'),
+                notes,
+            });
+
+            if (addNotification) {
+                await addNotification({
+                    title: "Manual Due Added 📝",
+                    message: `₹${amount} due added for ${saved.orgName} by ${currentUser?.name}.`,
+                    to: "Accountant",
+                    route: "/payment_duelist",
+                    type: "warning"
+                });
             }
+            Alert.alert("Success", `New Due Added Successfully! ID: ${saved.orderId}`);
+            router.back();
         } catch (error: any) {
-            Alert.alert("Error", "Something went wrong.");
+            Alert.alert("Error", error?.message || "Something went wrong.");
         } finally {
             setLoading(false);
         }
@@ -148,7 +120,6 @@ export default function AddPaymentDueScreen() {
 
     return (
         <View style={styles.container}>
-            {/* HEADER */}
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
                     <Ionicons name="arrow-back" size={24} color="#333" />
@@ -160,7 +131,6 @@ export default function AddPaymentDueScreen() {
             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
                 <ScrollView contentContainerStyle={styles.formContainer} keyboardShouldPersistTaps="handled">
 
-                    {/* 1. SELECT ORGANIZATION */}
                     <Text style={styles.label}>Select Client / Organization *</Text>
                     <TouchableOpacity style={styles.dropdown} onPress={() => setModalVisible(true)}>
                         <View>
@@ -172,7 +142,6 @@ export default function AddPaymentDueScreen() {
                         <Ionicons name="search" size={20} color="#3b5998" />
                     </TouchableOpacity>
 
-                    {/* 2. BILL / REF NUMBER */}
                     <Text style={styles.label}>Bill No / Invoice No *</Text>
                     <TextInput 
                         style={styles.input}
@@ -181,7 +150,6 @@ export default function AddPaymentDueScreen() {
                         onChangeText={setBillNo}
                     />
 
-                    {/* 3. BILL DATE */}
                     <Text style={styles.label}>Bill Date (Invoice Date) *</Text>
                     <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowBillDatePicker(true)}>
                         <Ionicons name="document-text-outline" size={20} color="#e67e22" />
@@ -199,7 +167,6 @@ export default function AddPaymentDueScreen() {
                         />
                     )}
 
-                    {/* 4. AMOUNT */}
                     <Text style={styles.label}>Due Amount (₹) *</Text>
                     <TextInput 
                         style={styles.inputAmount}
@@ -209,7 +176,6 @@ export default function AddPaymentDueScreen() {
                         onChangeText={setAmount}
                     />
 
-                    {/* 5. DUE DATE */}
                     <Text style={styles.label}>Payment Due Date *</Text>
                     <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowDatePicker(true)}>
                         <Ionicons name="calendar-outline" size={20} color="#3b5998" />
@@ -227,7 +193,6 @@ export default function AddPaymentDueScreen() {
                         />
                     )}
 
-                    {/* 6. NOTES */}
                     <Text style={styles.label}>Remarks / Notes (Optional)</Text>
                     <TextInput 
                         style={[styles.input, { height: 80, textAlignVertical: 'top' }]}
@@ -237,7 +202,6 @@ export default function AddPaymentDueScreen() {
                         onChangeText={setNotes}
                     />
 
-                    {/* SUBMIT BUTTON */}
                     <TouchableOpacity 
                         style={[styles.submitBtn, loading && { opacity: 0.7 }]} 
                         onPress={handleSaveDue}
@@ -256,9 +220,6 @@ export default function AddPaymentDueScreen() {
                 </ScrollView>
             </KeyboardAvoidingView>
 
-            {/* ========================================== */}
-            {/* 🔥 ORGANIZATION SEARCH MODAL 🔥 */}
-            {/* ========================================== */}
             <Modal visible={modalVisible} animationType="slide">
                 <View style={styles.modalContainer}>
                     <View style={styles.modalHeader}>
@@ -325,7 +286,6 @@ const styles = StyleSheet.create({
     submitBtn: { backgroundColor: '#d32f2f', padding: 15, borderRadius: 10, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 30, elevation: 3 },
     submitBtnText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
 
-    // Modal Styles
     modalContainer: { flex: 1, backgroundColor: 'white', paddingTop: 40 },
     modalHeader: { flexDirection: 'row', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#eee', backgroundColor:'#f9f9f9' },
     searchInput: { flex: 1, marginLeft: 10, fontSize: 16, backgroundColor: '#fff', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#ddd' },

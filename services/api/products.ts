@@ -96,3 +96,36 @@ export async function updateProduct(id: string, payload: Partial<CreateProductPa
 export async function deleteProduct(id: string): Promise<void> {
   await apiClient.delete(`/products/${id}`);
 }
+
+export async function bulkDeleteProducts(productIds: string[]): Promise<{ deletedCount: number }> {
+  const res = await apiClient.post<{ data: { deletedCount: number } }>('/products/bulk-delete', { productIds });
+  return res.data;
+}
+
+export interface BulkProductRow {
+  name: string;
+  model?: string;
+  series?: string;
+  description?: string;
+  specifications?: string;
+  price?: number;
+  gstRate?: number;
+  catalogUrl?: string;
+  videoUrl?: string;
+}
+
+export interface BulkImportPreviewItem {
+  row: BulkProductRow;
+  status: 'new' | 'existing';
+  existingId?: string;
+}
+
+export async function previewBulkImport(rows: BulkProductRow[]): Promise<BulkImportPreviewItem[]> {
+  const res = await apiClient.post<{ data: BulkImportPreviewItem[] }>('/products/bulk-import/preview', { rows });
+  return res.data;
+}
+
+export async function commitBulkImport(rows: BulkProductRow[], overwriteIds: string[]): Promise<{ created: number; updated: number; skipped: number }> {
+  const res = await apiClient.post<{ data: { created: number; updated: number; skipped: number } }>('/products/bulk-import/commit', { rows, overwriteIds });
+  return res.data;
+}

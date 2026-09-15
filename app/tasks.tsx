@@ -19,7 +19,11 @@ import {
 
 // 🔥 SAAS IMPORTS (Firebase DB imports removed)
 import { useSaaSDB } from '../hooks/useSaaSDB';
+import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
+
+// 🔥 Phase 8: tasks now come from Postgres via these adapters
+import { completeTask as completeTaskApi, fetchTasks } from '../services/api/tasks';
 
 export default function TaskScreen() {
   const router = useRouter();
@@ -27,8 +31,8 @@ export default function TaskScreen() {
   // 🔥 1. Context se sirf current user nikala gaya hai
   const { currentUser } = useData();
 
-  // 🔥 2. Naya SaaS Engine
-  const { fetchSaaSData, updateSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 2. "users" still Firestore; tasks are Postgres now
+  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
   // 🔥 3. Lazy Loaded States
   const [taskList, setTaskList] = useState<any[]>([]);
@@ -71,21 +75,56 @@ export default function TaskScreen() {
 
   const isAdminOrManager = ['Admin', 'Manager', 'SuperAdmin'].includes(currentUser?.role || '');
 
-  // 🔥 4. LOAD SAAS DATA ON MOUNT
-  const loadData = async () => {
-      if (currentUser?.companyId) {
-          const [tasks, users] = await Promise.all([
-              fetchSaaSData("tasks"),
-              fetchSaaSData("users")
-          ]);
-          setTaskList(tasks);
-          setUserList(users);
+  function getFetchRange(): { fromDate?: string; toDate?: string } {
+      const toIso = (d: Date) => d.toISOString().split('T')[0];
+      if (dateViewMode === 'All') return {};
+      if (dateViewMode === 'Day') return { fromDate: toIso(currentDate), toDate: toIso(currentDate) };
+      if (dateViewMode === 'Month') {
+          const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+          const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+          return { fromDate: toIso(start), toDate: toIso(end) };
       }
+      const m = currentDate.getMonth();
+      const y = currentDate.getFullYear();
+      const fyStartYear = m >= 3 ? y : y - 1;
+      return { fromDate: toIso(new Date(fyStartYear, 3, 1)), toDate: toIso(new Date(fyStartYear + 1, 2, 31)) };
+  }
+
+  // 🔥 4a. Users list — still Firestore, loads once per session
+  useEffect(() => {
+      const loadUsers = async () => {
+          if (currentUser?.companyId) setUserList(await fetchTeamMembers());
+      };
+      loadUsers();
+  }, [currentUser]);
+
+  // 🔥 4b. Tasks — Postgres. Fetches BOTH directions (received + given) so the tab
+  // badges above stay accurate regardless of which tab is currently open, then
+  // merges them (a self-assigned task can appear in both — de-duped by id).
+  const loadData = async () => {
+      if (!currentUser?.companyId) return;
+      const { fromDate, toDate } = getFetchRange();
+      const userId = isAdminOrManager ? (selectedEmployee === 'All' ? 'all' : undefined) : undefined;
+      // For a specific selectedEmployee, "received" wants tasks assigned TO them and
+      // "given" wants tasks created BY them — both keyed by the same employee id, so
+      // we resolve it once userList is available.
+      const targetUserId = isAdminOrManager && selectedEmployee !== 'All'
+          ? userList.find((u: any) => u.name === selectedEmployee)?.id
+          : userId;
+
+      const [received, given] = await Promise.all([
+          fetchTasks({ direction: 'received', userId: targetUserId, fromDate, toDate, limit: 500 }),
+          fetchTasks({ direction: 'given', userId: targetUserId, fromDate, toDate, limit: 500 }),
+      ]);
+      const merged = new Map<string, any>();
+      [...received, ...given].forEach((t) => merged.set(t.id, t));
+      setTaskList(Array.from(merged.values()));
   };
 
   useEffect(() => {
+      if (isAdminOrManager && selectedEmployee !== 'All' && userList.length === 0) return; // wait for users to resolve the picked id
       loadData();
-  }, [currentUser]);
+  }, [currentUser, dateViewMode, currentDate, selectedEmployee, userList]);
 
   const onRefresh = async () => {
       setRefreshing(true);
@@ -260,47 +299,19 @@ export default function TaskScreen() {
       setCompletionNote('');
   };
 
-  // 🔥 5. SAAS COMPLETE TASK LOGIC
+  // 🔥 5. SAAS COMPLETE TASK LOGIC — Phase 8: PATCHes via completeTaskApi().
+  // (Old "notify assigner" push dropped here too, same reasoning as travel.tsx's
+  // settlement notification — re-add via addNotification once notifications move
+  // off Firestore in Phase 9 and the Postgres/Firestore user-id mapping is settled.)
   const handleCompleteTask = async () => {
       if (!completionNote.trim()) return Alert.alert("Note Required", "Please enter what action you took.");
       
       setIsCompleting(true); 
       try {
-          const completedDate = new Date().toISOString();
-          
-          const res = await updateSaaSData("tasks", selectedTask.id, {
-              status: 'Completed',
-              completionNote: completionNote,
-              completedAt: completedDate,
-              completedBy: currentUser?.name || 'Unknown'
-          });
+          const res = await completeTaskApi(selectedTask.id, completionNote);
 
           if (res.success) {
-              setTaskList(prev => prev.map(t => t.id === selectedTask.id ? { 
-                  ...t, 
-                  status: 'Completed', 
-                  completionNote, 
-                  completedAt: completedDate, 
-                  completedBy: currentUser?.name || 'Unknown'
-              } : t));
-
-              if (selectedTask.from && selectedTask.from !== 'Self' && selectedTask.from !== currentUser?.name) {
-                  // Find Target User ID for Notifications
-                  const targetUserObj = userList.find(u => u.name === selectedTask.from);
-                  const targetUserId = targetUserObj ? (targetUserObj.uid || targetUserObj.id) : selectedTask.from;
-                  
-                  await addSaaSData("notifications", {
-                      title: "Task Completed ✅",
-                      message: `${currentUser?.name} has completed: "${selectedTask.task}"`,
-                      type: "success",
-                      to: selectedTask.from,
-                      userId: targetUserId,
-                      screen: '/tasks',
-                      read: false,
-                      createdAt: new Date().toISOString()
-                  });
-              }
-              
+              setTaskList(prev => prev.map(t => t.id === selectedTask.id ? res.record : t));
               Alert.alert("Success", "Task marked as completed!");
               setTaskModalVisible(false);
           } else {

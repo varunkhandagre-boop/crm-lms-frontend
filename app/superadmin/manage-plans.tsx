@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -14,10 +13,19 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { db } from '../../firebaseConfig';
+import {
+    BillingSettings,
+    createPlan,
+    deletePlan,
+    fetchBillingSettings,
+    listPlans,
+    Plan,
+    saveBillingSettings,
+    updatePlan,
+} from '../../services/api/superadminPlans';
 
-type PlanConfig = {
-    id: string;
+type PlanForm = {
+    id: string; // '' for a new plan, real uuid when editing
     label: string;
     durationMonths: string;
     pricePerEmployee: string;
@@ -25,7 +33,7 @@ type PlanConfig = {
     active: boolean;
 };
 
-const EMPTY_FORM: PlanConfig = {
+const EMPTY_FORM: PlanForm = {
     id: '',
     label: '',
     durationMonths: '',
@@ -39,123 +47,84 @@ export default function ManagePlansScreen() {
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [plans, setPlans] = useState<PlanConfig[]>([]);
+    const [plans, setPlans] = useState<Plan[]>([]);
 
-    // UPI settings (same doc, so we manage them here too)
+    // Billing settings (UPI + automation add-on price) — one backend record,
+    // so any save here must send all three fields together (see PUT schema).
     const [upiId, setUpiId] = useState('');
     const [upiPayeeName, setUpiPayeeName] = useState('');
-
-    // 🔥 NAYA: Automation add-on price (same settings/pricing doc me)
     const [automationAddonPrice, setAutomationAddonPrice] = useState('3000');
     const [savingAutomationPrice, setSavingAutomationPrice] = useState(false);
 
     // Modal / form state
     const [modalVisible, setModalVisible] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
-    const [form, setForm] = useState<PlanConfig>(EMPTY_FORM);
+    const [form, setForm] = useState<PlanForm>(EMPTY_FORM);
 
     useEffect(() => {
-        loadPricingDoc();
+        loadAll();
     }, []);
 
-    // 🔥 LOAD FULL PRICING DOC (plans array + upi fields + automation price)
-    const loadPricingDoc = async () => {
+    const loadAll = async () => {
         setLoading(true);
         try {
-            const docRef = doc(db, "settings", "pricing");
-            const docSnap = await getDoc(docRef);
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                const rawPlans = (data.plans || []).map((p: any) => ({
-                    id: String(p.id ?? ''),
-                    label: String(p.label ?? ''),
-                    durationMonths: String(p.durationMonths ?? ''),
-                    pricePerEmployee: String(p.pricePerEmployee ?? ''),
-                    discountPercent: String(p.discountPercent ?? '0'),
-                    active: p.active !== false && p.active !== "false",
-                }));
-                setPlans(rawPlans);
-                setUpiId(data.upiId || '');
-                setUpiPayeeName(data.upiPayeeName || '');
-                setAutomationAddonPrice(String(data.automationAddonPrice ?? '3000')); // 🔥 NAYA
-            } else {
-                // Doc doesn't exist yet — will be created on first save
-                setPlans([]);
+            const [plansRes, billingRes] = await Promise.all([
+                listPlans(),
+                fetchBillingSettings().catch(() => null), // may not exist yet on a fresh DB
+            ]);
+            setPlans(plansRes);
+            if (billingRes) {
+                setUpiId(billingRes.upiId || '');
+                setUpiPayeeName(billingRes.upiPayeeName || '');
+                setAutomationAddonPrice(String(billingRes.automationAddonPrice ?? '3000'));
             }
-        } catch (e) {
-            console.log("Error loading pricing doc:", e);
-            Alert.alert("Error", "Could not load plans. Check your internet connection.");
+        } catch (e: any) {
+            Alert.alert('Error', e.message || 'Could not load plans. Check your connection.');
         } finally {
             setLoading(false);
         }
     };
 
-    // 🔥 SAVE ENTIRE plans ARRAY BACK TO FIRESTORE
-    // (Firestore array fields don't support partial edits, so we always
-    // replace the full array — this is the safe, standard approach)
-    const persistPlans = async (updatedPlans: PlanConfig[]) => {
-        setSaving(true);
-        try {
-            const cleanPlans = updatedPlans.map(p => ({
-                id: p.id,
-                label: p.label,
-                durationMonths: Number(p.durationMonths) || 0,
-                pricePerEmployee: Number(p.pricePerEmployee) || 0,
-                discountPercent: Number(p.discountPercent) || 0,
-                active: p.active,
-            }));
-
-            const docRef = doc(db, "settings", "pricing");
-            await updateDoc(docRef, { plans: cleanPlans });
-
-            setPlans(updatedPlans);
-            return true;
-        } catch (e) {
-            console.log("Error saving plans:", e);
-            Alert.alert("Error", "Could not save changes. Please try again.");
-            return false;
-        } finally {
-            setSaving(false);
-        }
+    // Sends all three billing fields together — the backend PUT replaces the
+    // whole billing-settings record, so a partial save would wipe the rest.
+    const persistBilling = async (overrides: Partial<BillingSettings>) => {
+        const payload: BillingSettings = {
+            upiId,
+            upiPayeeName,
+            automationAddonPrice: Number(automationAddonPrice) || 0,
+            ...overrides,
+        };
+        return saveBillingSettings(payload);
     };
 
-    // 🔥 SAVE UPI DETAILS
     const saveUpiDetails = async () => {
         if (!upiId.trim()) {
-            Alert.alert("Invalid", "UPI ID cannot be empty.");
+            Alert.alert('Invalid', 'UPI ID cannot be empty.');
             return;
         }
         setSaving(true);
         try {
-            const docRef = doc(db, "settings", "pricing");
-            await updateDoc(docRef, {
-                upiId: upiId.trim(),
-                upiPayeeName: upiPayeeName.trim() || 'Company',
-            });
-            Alert.alert("Saved ✅", "UPI details updated.");
-        } catch (e) {
-            Alert.alert("Error", "Could not save UPI details.");
+            await persistBilling({ upiId: upiId.trim(), upiPayeeName: upiPayeeName.trim() || 'Company' });
+            Alert.alert('Saved ✅', 'UPI details updated.');
+        } catch (e: any) {
+            Alert.alert('Error', e.message || 'Could not save UPI details.');
         } finally {
             setSaving(false);
         }
     };
 
-    // 🔥 NAYA: SAVE AUTOMATION ADD-ON PRICE
     const saveAutomationPrice = async () => {
         const priceNum = Number(automationAddonPrice);
         if (!priceNum || priceNum <= 0) {
-            Alert.alert("Invalid", "Automation price must be a positive number.");
+            Alert.alert('Invalid', 'Automation price must be a positive number.');
             return;
         }
         setSavingAutomationPrice(true);
         try {
-            const docRef = doc(db, "settings", "pricing");
-            await updateDoc(docRef, {
-                automationAddonPrice: priceNum,
-            });
-            Alert.alert("Saved ✅", "Automation add-on price updated. The new price will show next time the Subscription screen is opened.");
-        } catch (e) {
-            Alert.alert("Error", "Could not save automation price.");
+            await persistBilling({ automationAddonPrice: priceNum });
+            Alert.alert('Saved ✅', 'Automation add-on price updated. The new price will show next time the Subscription screen is opened.');
+        } catch (e: any) {
+            Alert.alert('Error', e.message || 'Could not save automation price.');
         } finally {
             setSavingAutomationPrice(false);
         }
@@ -167,22 +136,22 @@ export default function ManagePlansScreen() {
         setModalVisible(true);
     };
 
-    const openEditForm = (plan: PlanConfig) => {
-        setForm(plan);
+    const openEditForm = (plan: Plan) => {
+        setForm({
+            id: plan.id,
+            label: plan.label,
+            durationMonths: String(plan.durationMonths),
+            pricePerEmployee: String(plan.pricePerEmployee),
+            discountPercent: String(plan.discountPercent),
+            active: plan.active,
+        });
         setIsEditing(true);
         setModalVisible(true);
     };
 
-    // Auto-generate a safe unique id from the label (slug + short timestamp)
-    const generateId = (label: string) => {
-        const slug = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-        return `${slug || 'plan'}-${Date.now().toString().slice(-5)}`;
-    };
-
-    // 🔥 VALIDATE + SAVE (ADD or EDIT)
     const handleSaveForm = async () => {
         if (!form.label.trim()) {
-            Alert.alert("Missing Info", "Please enter a plan label.");
+            Alert.alert('Missing Info', 'Please enter a plan label.');
             return;
         }
         const duration = Number(form.durationMonths);
@@ -190,56 +159,73 @@ export default function ManagePlansScreen() {
         const discount = Number(form.discountPercent || '0');
 
         if (!duration || duration <= 0) {
-            Alert.alert("Invalid", "Duration (months) must be a positive number.");
+            Alert.alert('Invalid', 'Duration (months) must be a positive number.');
             return;
         }
         if (!price || price <= 0) {
-            Alert.alert("Invalid", "Price per employee must be a positive number.");
+            Alert.alert('Invalid', 'Price per employee must be a positive number.');
             return;
         }
         if (discount < 0 || discount > 100) {
-            Alert.alert("Invalid", "Discount % must be between 0 and 100.");
+            Alert.alert('Invalid', 'Discount % must be between 0 and 100.');
             return;
         }
 
-        let updatedPlans: PlanConfig[];
+        setSaving(true);
+        try {
+            const payload = {
+                label: form.label.trim(),
+                durationMonths: duration,
+                pricePerEmployee: price,
+                discountPercent: discount,
+                active: form.active,
+            };
 
-        if (isEditing) {
-            updatedPlans = plans.map(p => p.id === form.id ? { ...form } : p);
-        } else {
-            const newPlan: PlanConfig = { ...form, id: generateId(form.label) };
-            updatedPlans = [...plans, newPlan];
-        }
+            if (isEditing) {
+                const updated = await updatePlan(form.id, payload);
+                setPlans(prev => prev.map(p => (p.id === updated.id ? updated : p)));
+            } else {
+                const created = await createPlan({ ...payload, sortOrder: plans.length });
+                setPlans(prev => [...prev, created]);
+            }
 
-        const ok = await persistPlans(updatedPlans);
-        if (ok) {
             setModalVisible(false);
-            Alert.alert("Success ✅", isEditing ? "Plan updated." : "New plan added.");
+            Alert.alert('Success ✅', isEditing ? 'Plan updated.' : 'New plan added.');
+        } catch (e: any) {
+            Alert.alert('Error', e.message || 'Could not save changes. Please try again.');
+        } finally {
+            setSaving(false);
         }
     };
 
-    // 🔥 TOGGLE ACTIVE / INACTIVE (from list, no need to open form)
-    const toggleActive = async (planId: string, value: boolean) => {
-        const updatedPlans = plans.map(p => p.id === planId ? { ...p, active: value } : p);
-        await persistPlans(updatedPlans);
+    // Toggle active/inactive directly from the list.
+    const toggleActive = async (plan: Plan, value: boolean) => {
+        try {
+            const updated = await updatePlan(plan.id, { active: value });
+            setPlans(prev => prev.map(p => (p.id === updated.id ? updated : p)));
+        } catch (e: any) {
+            Alert.alert('Error', e.message || 'Could not update plan status.');
+        }
     };
 
-    // 🔥 DELETE — with confirmation. Deactivating is safer for plans that
-    // existing subscribers might reference, so we nudge towards that first.
-    const handleDelete = (plan: PlanConfig) => {
+    // Backend only supports a soft-delete (deactivate) — no hard-delete route
+    // is exposed, so "Delete" here always deactivates rather than removing
+    // the row. This matches the original screen's safer recommended path.
+    const handleDelete = (plan: Plan) => {
         Alert.alert(
-            "Delete Plan",
-            `Delete "${plan.label}" permanently? This cannot be undone.\n\nTip: If old subscribers used this plan, consider just deactivating it instead.`,
+            'Deactivate Plan',
+            `Deactivate "${plan.label}"? It will stop showing to new subscribers, but existing subscribers on this plan are unaffected.`,
             [
-                { text: "Cancel", style: "cancel" },
+                { text: 'Cancel', style: 'cancel' },
                 {
-                    text: "Deactivate Instead", onPress: () => toggleActive(plan.id, false)
-                },
-                {
-                    text: "Delete", style: "destructive", onPress: async () => {
-                        const updatedPlans = plans.filter(p => p.id !== plan.id);
-                        const ok = await persistPlans(updatedPlans);
-                        if (ok) Alert.alert("Deleted", "Plan removed.");
+                    text: 'Deactivate', style: 'destructive', onPress: async () => {
+                        try {
+                            const updated = await deletePlan(plan.id);
+                            setPlans(prev => prev.map(p => (p.id === updated.id ? updated : p)));
+                            Alert.alert('Deactivated', 'Plan is now inactive.');
+                        } catch (e: any) {
+                            Alert.alert('Error', e.message || 'Could not deactivate plan.');
+                        }
                     }
                 }
             ]
@@ -282,7 +268,7 @@ export default function ManagePlansScreen() {
                             <Switch
                                 trackColor={{ false: "#767577", true: "#81b0ff" }}
                                 thumbColor={plan.active ? "#2e7d32" : "#f4f3f4"}
-                                onValueChange={(val) => toggleActive(plan.id, val)}
+                                onValueChange={(val) => toggleActive(plan, val)}
                                 value={plan.active}
                             />
                         </View>
@@ -298,13 +284,13 @@ export default function ManagePlansScreen() {
                             </TouchableOpacity>
                             <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete(plan)}>
                                 <Ionicons name="trash-outline" size={16} color="#d32f2f" />
-                                <Text style={styles.deleteBtnText}>Delete</Text>
+                                <Text style={styles.deleteBtnText}>Deactivate</Text>
                             </TouchableOpacity>
                         </View>
                     </View>
                 ))}
 
-                {/* 🔥 NAYA: AUTOMATION ADD-ON PRICE SECTION */}
+                {/* AUTOMATION ADD-ON PRICE SECTION */}
                 <View style={styles.automationCard}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
                         <Ionicons name="chatbubbles" size={18} color="#2e7d32" />
@@ -452,7 +438,6 @@ const styles = StyleSheet.create({
     deleteBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     deleteBtnText: { color: '#d32f2f', fontWeight: 'bold', fontSize: 13 },
 
-    // 🔥 NAYA
     automationCard: { backgroundColor: '#fff', borderRadius: 10, padding: 15, marginTop: 10, marginBottom: 15, elevation: 2, borderWidth: 1, borderColor: '#c8e6c9' },
     helperText: { fontSize: 12, color: '#888', marginBottom: 5, lineHeight: 17 },
 

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -21,9 +21,11 @@ import {
 } from 'react-native';
 
 import { statesList as allStatesList, districtPincodes, indianStatesAndDistricts } from '../constants/indianStatesData';
-import { storage } from '../firebaseConfig';
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+
+// 🔥 Phase 10: company profile now lives on the Company row in Postgres via
+// this adapter — replaces the Firestore "company_profile" + "companies" collections.
+import { fetchCompanyProfile, updateCompanyProfile } from '../services/api/companies';
 
 const USE_STORAGE_BUCKET = false; 
 
@@ -31,13 +33,11 @@ export default function CompanyProfileScreen() {
     const router = useRouter();
     
     const { companyProfile, setCompanyProfile, currentUser } = useData();
-    const { updateSaaSData, fetchSaaSData, addSaaSData } = useSaaSDB();
 
     const [loading, setLoading] = useState(true); 
     const [saving, setSaving] = useState(false);
     const [uploading, setUploading] = useState(false);
     
-    const [profileDocId, setProfileDocId] = useState<string | null>(null);
 
     // Modal States
     const [stateModalVisible, setStateModalVisible] = useState(false);
@@ -59,49 +59,40 @@ export default function CompanyProfileScreen() {
         gstNumber: '', email: '', phone: '', landline: '', website: '',  
         logoUrl: '', signatureUrl: '', qrCodeUrl: '', upiId: '',
         bank1_name: '', bank1_acc: '', bank1_ifsc: '', bank1_branch: '',
-        bank2_name: '', bank2_acc: '', bank2_ifsc: '', bank2_branch: ''
+        bank2_name: '', bank2_acc: '', bank2_ifsc: '', bank2_branch: '',
+        officeLatitude: null as number | null, officeLongitude: null as number | null,
     });
 
     useEffect(() => {
         const loadProfileAndSubscription = async () => {
             setLoading(true);
-            
-            const profiles = await fetchSaaSData("company_profile");
-            if (profiles && profiles.length > 0) {
-                const cp: any = profiles[0]; 
-                setProfileDocId(cp.id); 
-                const addr = cp.fullAddress || {};
+            try {
+                const cp: any = await fetchCompanyProfile();
                 setProfile(prev => ({
                     ...prev,
                     companyName: cp.companyName || '', shortName: cp.shortName || '', tagline: cp.tagline || '',
-                    addressLine: addr.line || cp.address || '', city: cp.city || addr.city || '', state: cp.state || addr.state || '', pincode: addr.pincode || '',
-                    email: cp.contactEmail || cp.email || '', phone: cp.contactPhone || cp.phone || '', landline: cp.landline || '', website: cp.website || '', gstNumber: cp.gstNumber || '',
+                    addressLine: cp.addressLine || '', city: cp.city || '', state: cp.state || '', pincode: cp.pincode || '',
+                    email: cp.contactEmail || '', phone: cp.contactPhone || '', landline: cp.landline || '', website: cp.website || '', gstNumber: cp.gstNumber || '',
                     logoUrl: cp.logoUrl || '', signatureUrl: cp.signatureUrl || '', qrCodeUrl: cp.qrCodeUrl || '', upiId: cp.upiId || '',
                     bank1_name: cp.bankDetails1?.bankName || '', bank1_acc: cp.bankDetails1?.accountNo || '', bank1_ifsc: cp.bankDetails1?.ifsc || '', bank1_branch: cp.bankDetails1?.branch || '',
                     bank2_name: cp.bankDetails2?.bankName || '', bank2_acc: cp.bankDetails2?.accountNo || '', bank2_ifsc: cp.bankDetails2?.ifsc || '', bank2_branch: cp.bankDetails2?.branch || '',
+                    officeLatitude: cp.officeLatitude ?? null, officeLongitude: cp.officeLongitude ?? null,
                 }));
-            }
 
-            const myCompany = await fetchSaaSData("companies");
-            const myUsers = await fetchSaaSData("users");
-
-            if (myCompany && myCompany.length > 0) {
-                const comp: any = myCompany[0];
                 let formattedExpiry = 'Unknown';
-                if (comp.expiryDate) {
-                    const dateObj = new Date(comp.expiryDate);
-                    formattedExpiry = dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+                if (cp.expiryDate) {
+                    formattedExpiry = new Date(cp.expiryDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
                 }
                 setSubscriptionInfo({
-                    planName: comp.plan || 'Free Trial',
+                    planName: cp.plan || 'Free Trial',
                     expiryDate: formattedExpiry,
-                    maxEmployees: comp.maxEmployees || 10,
-                    currentEmployees: myUsers.length || 0,
-                    isActive: comp.isActive
+                    maxEmployees: cp.maxEmployees || 10,
+                    currentEmployees: cp.currentEmployees || 0,
+                    isActive: cp.isActive
                 });
+            } finally {
+                setLoading(false);
             }
-
-            setLoading(false);
         };
         
         loadProfileAndSubscription();
@@ -140,14 +131,9 @@ export default function CompanyProfileScreen() {
     };
 
     const uploadToFirebaseStorage = async (uri: string, path: string) => {
-        if (!uri || !uri.startsWith('file://')) return uri;
-        try {
-            const response = await fetch(uri);
-            const blob = await response.blob();
-            const storageRef = ref(storage, path);
-            await uploadBytes(storageRef, blob);
-            return await getDownloadURL(storageRef);
-        } catch (error) { return uri; }
+        // Dead path (USE_STORAGE_BUCKET is always false — base64 data-URIs are stored
+        // directly, matching the Postgres logoUrl/signatureUrl/qrCodeUrl columns).
+        return uri;
     };
 
     const handleSave = async () => {
@@ -156,103 +142,65 @@ export default function CompanyProfileScreen() {
 
         setSaving(true);
         try {
-            let finalLogo = profile.logoUrl;
-            let finalSign = profile.signatureUrl;
-            let finalQr = profile.qrCodeUrl;
-
-            if (USE_STORAGE_BUCKET) {
-                setUploading(true);
-                const basePath = `companies/${currentUser.companyId}`;
-                if (profile.logoUrl?.startsWith('file://')) finalLogo = await uploadToFirebaseStorage(profile.logoUrl, `${basePath}/logo_${Date.now()}.jpg`);
-                if (profile.signatureUrl?.startsWith('file://')) finalSign = await uploadToFirebaseStorage(profile.signatureUrl, `${basePath}/sign_${Date.now()}.jpg`);
-                if (profile.qrCodeUrl?.startsWith('file://')) finalQr = await uploadToFirebaseStorage(profile.qrCodeUrl, `${basePath}/qr_${Date.now()}.jpg`);
-                setUploading(false);
-            }
-
-            const dataToSave = {
-    // ✅ Flat fields (Register wale format ke saath compatible)
-    companyName: profile.companyName,
-    shortName: profile.shortName.toUpperCase(),
-    tagline: profile.tagline,
-    
-    address: `${profile.addressLine}, ${profile.city}, ${profile.state} - ${profile.pincode}`,
-    addressLine: profile.addressLine,   // ✅ extra alias
-    city: profile.city,                 // ✅ flat city
-    state: profile.state,               // ✅ flat state
-    pincode: profile.pincode,           // ✅ flat pincode
-    
-    email: profile.email,               // ✅ flat email
-    phone: profile.phone,               // ✅ flat phone
-    mobile: profile.phone,              // ✅ alias for mobile
-    landline: profile.landline,
-    website: profile.website,
-    gstNumber: profile.gstNumber,
-    
-    // ✅ Nested fields (CompanyProfile wale format)
-    fullAddress: {
-        line: profile.addressLine,
-        city: profile.city,
-        state: profile.state,
-        pincode: profile.pincode
-    },
-    contactEmail: profile.email,
-    contactPhone: profile.phone,
-    
-    // ✅ Images
-    logoUrl: finalLogo,
-    signatureUrl: finalSign,
-    qrCodeUrl: finalQr,
-    upiId: profile.upiId,
-    
-    // ✅ Bank nested (for PDF)
-    bankDetails1: {
-        bankName: profile.bank1_name,
-        accountNo: profile.bank1_acc,
-        ifsc: profile.bank1_ifsc,
-        branch: profile.bank1_branch
-    },
-    bankDetails2: {
-        bankName: profile.bank2_name,
-        accountNo: profile.bank2_acc,
-        ifsc: profile.bank2_ifsc,
-        branch: profile.bank2_branch
-    },
-    
-    // ✅ Flat bank fields bhi (agar koi directly access kare)
-    bank1_name: profile.bank1_name,
-    bank1_acc: profile.bank1_acc,
-    bank1_ifsc: profile.bank1_ifsc,
-    bank1_branch: profile.bank1_branch,
-    bank2_name: profile.bank2_name,
-    bank2_acc: profile.bank2_acc,
-    bank2_ifsc: profile.bank2_ifsc,
-    bank2_branch: profile.bank2_branch,
-};
-
-            let res;
-            if (profileDocId) {
-                res = await updateSaaSData("company_profile", profileDocId, dataToSave);
-            } else {
-                res = await addSaaSData("company_profile", dataToSave);
-            }
+            // 🔥 Phase 10: PATCHes /companies/me — server owns the Company row directly,
+            // no more "create doc if none exists, else update" branching.
+            const res = await updateCompanyProfile({
+                companyName: profile.companyName,
+                shortName: profile.shortName.toUpperCase(),
+                tagline: profile.tagline,
+                addressLine: profile.addressLine,
+                city: profile.city,
+                state: profile.state,
+                pincode: profile.pincode,
+                gstNumber: profile.gstNumber,
+                officeLatitude: profile.officeLatitude ?? undefined,
+                officeLongitude: profile.officeLongitude ?? undefined,
+                contactEmail: profile.email,
+                contactPhone: profile.phone,
+                landline: profile.landline,
+                website: profile.website,
+                logoUrl: profile.logoUrl,
+                signatureUrl: profile.signatureUrl,
+                qrCodeUrl: profile.qrCodeUrl,
+                upiId: profile.upiId,
+                bank1Name: profile.bank1_name, bank1Acc: profile.bank1_acc, bank1Ifsc: profile.bank1_ifsc, bank1Branch: profile.bank1_branch,
+                bank2Name: profile.bank2_name, bank2Acc: profile.bank2_acc, bank2Ifsc: profile.bank2_ifsc, bank2Branch: profile.bank2_branch,
+            });
             
             if (res.success) {
-                if(setCompanyProfile) setCompanyProfile({ ...companyProfile, ...dataToSave });
-                if(!profileDocId && (res as any).id) setProfileDocId((res as any).id);
+                if (setCompanyProfile) setCompanyProfile({ ...companyProfile, ...res.record });
                 Alert.alert("Success ✅", "Company Profile Updated Successfully!");
             } else {
                 Alert.alert("Error", "Could not save company profile.");
             }
         } catch (error: any) {
-            Alert.alert("Error", "Could not save: " + error.message);
+            Alert.alert("Error", "Could not save: " + (error?.message || 'Unknown error'));
         } finally {
             setSaving(false);
-            setUploading(false);
         }
     };
 
     const updateField = (field: string, value: string) => {
         setProfile(prev => ({ ...prev, [field]: value }));
+    };
+
+        const captureOfficeLocation = async () => {
+        try {
+            const { status } = await Location.requestForegroundPermissionsAsync();
+            if (status !== 'granted') {
+                Alert.alert('Permission Denied', 'Location access is required to set the office location.');
+                return;
+            }
+            const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+            setProfile((prev: any) => ({
+                ...prev,
+                officeLatitude: location.coords.latitude,
+                officeLongitude: location.coords.longitude,
+            }));
+            Alert.alert('Success ✅', 'Office location captured! Remember to save your profile.');
+        } catch (error) {
+            Alert.alert('Error', 'Could not get current location. Make sure GPS is turned on.');
+        }
     };
 
     if (loading) return <View style={styles.center}><ActivityIndicator size="large" color="#3b5998" /></View>;
@@ -310,7 +258,7 @@ export default function CompanyProfileScreen() {
                                 <Text style={{fontSize: 10, color: '#d32f2f', marginTop: 5, textAlign: 'right'}}>Limit reached. Contact Admin to upgrade.</Text>
                             )}
                         </View>
-                        {currentUser?.role === 'Admin' && (
+                        {currentUser?.role === 'ADMIN' && (
                             <TouchableOpacity 
                                 style={{ backgroundColor: '#2e7d32', padding: 12, borderRadius: 8, marginTop: 15, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', elevation: 2 }}
                                 onPress={() => router.push({ pathname: '/SubscriptionScreen' as any, params: { companyId: currentUser?.companyId } })}
@@ -332,10 +280,21 @@ export default function CompanyProfileScreen() {
                                 <TextInput style={styles.input} value={profile.shortName} onChangeText={t => updateField('shortName', t)} placeholder="CLEON" autoCapitalize="characters" />
                             </View>
                             <View style={{flex:1}}>
-                                <InputLabel label="GST Number" />
-                                <TextInput style={styles.input} value={profile.gstNumber} onChangeText={t => updateField('gstNumber', t)} placeholder="GSTIN..." autoCapitalize="characters" />
-                            </View>
+                            <InputLabel label="GST Number" />
+                            <TextInput style={styles.input} value={profile.gstNumber} onChangeText={t => updateField('gstNumber', t)} placeholder="GSTIN..." autoCapitalize="characters" />
                         </View>
+                    </View>
+
+                    <InputLabel label="Office Location (for Office/Field attendance tagging)" />
+                    <TouchableOpacity 
+                        style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#e3f2fd', padding: 12, borderRadius: 8, marginBottom: 10 }}
+                        onPress={captureOfficeLocation}
+                    >
+                        <Ionicons name="location" size={18} color="#1565c0" />
+                        <Text style={{ marginLeft: 8, color: '#1565c0', fontWeight: 'bold' }}>
+                            {profile.officeLatitude ? 'Update Office Location (Set)' : 'Set Office Location (Stand at office & tap)'}
+                        </Text>
+                    </TouchableOpacity>
                         <InputLabel label="Tagline / Slogan" />
                         <TextInput style={styles.input} value={profile.tagline} onChangeText={t => updateField('tagline', t)} placeholder="e.g. Innovating Healthcare" />
                     </View>

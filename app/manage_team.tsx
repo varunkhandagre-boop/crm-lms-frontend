@@ -1,10 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
-
-// 🔥 Auth Imports (Sirf Background Account Creation ke liye, Database ke liye nahi)
-import { initializeApp } from "firebase/app";
-import { createUserWithEmailAndPassword, getAuth, signOut } from "firebase/auth";
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -23,21 +19,28 @@ import {
     View
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import { bulkSetTeamMemberStatus } from '../services/api/users';
 
-// 🔥 SAAS IMPORTS (No direct Firestore DB calls!)
-import { firebaseConfig } from '../firebaseConfig';
-import { useSaaSDB } from '../hooks/useSaaSDB';
+// 🔥 SAAS IMPORTS (Tracking tab still Firestore — its own turn later)
 import { useData } from './context/DataContext';
+
+// 🔥 Phase 10: team members now live in Postgres via these adapters
+import { createTeamMember, fetchTeamMembers, LegacyTeamMember, setTeamMemberStatus, updateTeamMember } from '../services/api/users';
+// 🔥 Phase 10: Holidays tab reuses the Phase 7 holidays API
+import { addHoliday as addHolidayApi, deleteHoliday as deleteHolidayApi, fetchHolidays } from '../services/api/holidays';
+// 🔥 Permissions tab — new Postgres adapter, replaces Firestore settings_permissions
+import { fetchPermissions, PermissionsBlob, savePermissions } from '../services/api/permissions';
+// 🔥 Tracking tab — new Postgres adapter, replaces Firestore location_logs
+import { fetchLocationLogs, LocationLog } from '../services/api/locationLogs';
 
 export default function ManageTeamScreen() {
     const router = useRouter();
-    const [activeTab, setActiveTab] = useState<'Users' | 'Permissions' | 'Holidays' | 'Tracking'>('Users'); 
+    const [activeTab, setActiveTab] = useState<'Users' | 'Permissions' | 'Holidays' | 'Tracking' | 'History'>('Users'); 
     
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" backgroundColor="#2c3e50" />
             
-            {/* HEADER */}
             <View style={styles.header}>
                 <TouchableOpacity 
                     onPress={() => {
@@ -52,11 +55,10 @@ export default function ManageTeamScreen() {
                 <View style={{width:30}}/>
             </View>
 
-            {/* TABS */}
             <View>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{flexGrow: 1}}>
                     <View style={styles.tabContainer}>
-                        {['Users', 'Permissions', 'Holidays', 'Tracking'].map((tab) => (
+                        {['Users', 'Permissions', 'Holidays', 'Tracking', 'History'].map((tab) => (
                             <TouchableOpacity 
                                 key={tab} 
                                 style={[styles.tabBtn, activeTab === tab && styles.activeTabBtn]} 
@@ -71,26 +73,33 @@ export default function ManageTeamScreen() {
                 </ScrollView>
             </View>
 
-            {/* CONTENT AREA */}
             <View style={{flex:1, padding:10, backgroundColor: '#f4f6f8'}}>
                 {activeTab === 'Users' && <UsersTab />}
                 {activeTab === 'Permissions' && <PermissionsTab />}
                 {activeTab === 'Holidays' && <HolidaysTab />}
                 {activeTab === 'Tracking' && <TrackingTab />}
+                {activeTab === 'History' && <HistoryTab />}
             </View>
         </View>
     );
 }
 
-// ====================================================================
-// 1️⃣ USERS TAB (100% SAAS ARCHITECTURE)
-// ====================================================================
+const ROLE_OPTIONS = [
+    { label: "Admin", value: "ADMIN" },
+    { label: "Manager", value: "MANAGER" },
+    { label: "Account", value: "ACCOUNT" },
+    { label: "HR", value: "HR" },
+    { label: "Store", value: "STORE" },
+    { label: "Field User (Sales/Service)", value: "FIELD_USER" },
+];
+
 const UsersTab = () => {
     const router = useRouter();
     const { currentUser } = useData();
-    const { fetchSaaSData, updateSaaSData, addSaaSData } = useSaaSDB();
+    const [selectedForBulk, setSelectedForBulk] = useState<Set<string>>(new Set());
+    const [bulkMode, setBulkMode] = useState(false);
     
-    const [users, setUsers] = useState<any[]>([]);
+    const [users, setUsers] = useState<LegacyTeamMember[]>([]);
     const [loading, setLoading] = useState(true);
     const [modalVisible, setModalVisible] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
@@ -99,8 +108,8 @@ const UsersTab = () => {
     const [visibleCount, setVisibleCount] = useState(15);
 
     const [formData, setFormData] = useState({
-        name: "", email: "", mobile: "", role: "Sales Executive",
-        empId: "", joiningDate: "", monthlyTarget: "0", yearlyLeaves: "18", 
+        name: "", email: "", mobile: "", role: "FIELD_USER",
+        empId: "", joiningDate: "", monthlyTarget: "0", baseSalary: "0", yearlyLeaves: "18",
         password: "",
         personalEmail: "", personalMobile: "", bloodGroup: "",
         address: "", city: "", state: "", permanentAddress: "",
@@ -109,20 +118,13 @@ const UsersTab = () => {
         assetNotes: ""
     });
 
-    useEffect(() => { fetchUsers(); }, [currentUser]);
+    useEffect(() => { loadUsers(); }, [currentUser]);
 
-    const fetchUsers = async () => {
+    const loadUsers = async () => {
         if (!currentUser?.companyId) return;
         setLoading(true);
         try {
-            let data = await fetchSaaSData("users");
-            
-            data.sort((a: any, b: any) => {
-                if (a.status === 'Disabled' && b.status !== 'Disabled') return 1;
-                if (a.status !== 'Disabled' && b.status === 'Disabled') return -1;
-                return 0; 
-            });
-
+            const data = await fetchTeamMembers();
             setUsers(data);
         } catch (e) { Alert.alert("Error", "Could not load users"); }
         setLoading(false);
@@ -136,73 +138,71 @@ const UsersTab = () => {
 
         setIsProcessing(true);
         try {
-            const bankDetailsString = `${formData.bankName} - ${formData.accountNo} (${formData.ifscCode})`;
-            const payload: any = { 
-                ...formData, 
-                bankDetails: bankDetailsString,
-                monthlyTarget: Number(formData.monthlyTarget),
-                yearlyLeaves: Number(formData.yearlyLeaves),
-                companyId: currentUser?.companyId 
-            };
-
-            if (formData.password) {
-                payload.password = formData.password; 
-            } else {
-                delete payload.password;
-            }
-
             if (editData) {
-                // EDIT EXISTING EMPLOYEE
-                await updateSaaSData("users", editData.id, payload);
+                const res = await updateTeamMember(editData.id, {
+                    name: formData.name,
+                    mobile: formData.mobile,
+                    empId: formData.empId,
+                    joiningDate: formData.joiningDate || undefined,
+                    monthlyTarget: Number(formData.monthlyTarget) || undefined,
+                    baseSalary: Number(formData.baseSalary) || undefined,
+                    yearlyLeaves: Number(formData.yearlyLeaves) || undefined,
+                    personalEmail: formData.personalEmail,
+                    personalMobile: formData.personalMobile,
+                    bloodGroup: formData.bloodGroup,
+                    address: formData.address,
+                    city: formData.city,
+                    state: formData.state,
+                    permanentAddress: formData.permanentAddress,
+                    bankName: formData.bankName,
+                    bankAccountNo: formData.accountNo,
+                    bankIfsc: formData.ifscCode,
+                    aadhar: formData.aadhar,
+                    pan: formData.pan,
+                    assetNotes: formData.assetNotes,
+                    password: formData.password || undefined,
+                });
+                if (!res.success) throw new Error("Could not update user.");
                 Alert.alert("Success", "User Details Updated!");
             } else {
-                // 🔥 NAYA EMPLOYEE ADD KARNA: 100% SAAS LIMIT CHECK
-                const currentEmployees = await fetchSaaSData("users");
-                const activeEmployees = currentEmployees.filter((u: any) => u.status !== 'Disabled');
-                const myCompanyData = await fetchSaaSData("companies"); 
-                
-                let maxLimit = 10; // Default limit
-                if (myCompanyData && myCompanyData.length > 0) {
-                    maxLimit = (myCompanyData[0] as any).maxEmployees || 10;
-                }
-
-                if (activeEmployees.length >= maxLimit) {
-    Alert.alert(
-        "Plan Limit Reached 🛑",
-        `Your current plan allows only ${maxLimit} active employees.\n\nActive: ${activeEmployees.length}/${maxLimit}\n\nPlease upgrade your plan to add more team members.`,
-        [
-            { text: "Upgrade Plan", onPress: () => router.push('/subscription' as any) },
-            { text: "OK", style: "cancel" }
-        ]
-    );
-    setIsProcessing(false);
-    return;
-}
-
-                // 🔥 SAFE USER CREATION: Secondary App Trick (For Firebase Auth Only)
-                const secondaryApp = initializeApp(firebaseConfig, "Secondary");
-                const secondaryAuth = getAuth(secondaryApp);
-                await createUserWithEmailAndPassword(secondaryAuth, formData.email.toLowerCase(), formData.password);
-                await signOut(secondaryAuth); // Sign out background user
-
-                // Save to Firestore via SaaS Hook
-                payload.id = formData.email.toLowerCase();
-                payload.status = "Active";
-                await addSaaSData("users", payload); 
-                
+                const res = await createTeamMember({
+                    name: formData.name,
+                    email: formData.email.toLowerCase(),
+                    password: formData.password,
+                    mobile: formData.mobile,
+                    role: formData.role,
+                    empId: formData.empId,
+                    joiningDate: formData.joiningDate || undefined,
+                    monthlyTarget: Number(formData.monthlyTarget) || undefined,
+                    baseSalary: Number(formData.baseSalary) || undefined,
+                    yearlyLeaves: Number(formData.yearlyLeaves) || undefined,
+                    personalEmail: formData.personalEmail,
+                    personalMobile: formData.personalMobile,
+                    bloodGroup: formData.bloodGroup,
+                    address: formData.address,
+                    city: formData.city,
+                    state: formData.state,
+                    permanentAddress: formData.permanentAddress,
+                    bankName: formData.bankName,
+                    bankAccountNo: formData.accountNo,
+                    bankIfsc: formData.ifscCode,
+                    aadhar: formData.aadhar,
+                    pan: formData.pan,
+                    assetNotes: formData.assetNotes,
+                });
+                if (!res.success) throw new Error("Could not create user.");
                 Alert.alert("Success ✅", `User Created: ${formData.empId}`);
             }
             setModalVisible(false);
-            fetchUsers();
+            loadUsers();
         } catch (e: any) {
-            let msg = e.message;
-            if (msg.includes("email-already-in-use")) msg = "This email is already registered.";
+            let msg = e?.message || "Something went wrong.";
             Alert.alert("Error", msg);
         }
         setIsProcessing(false);
     };
 
-    const handleDisable = async (user: any) => {
+    const handleDisable = async (user: LegacyTeamMember) => {
         const isDisabled = user.status === 'Disabled';
         const action = isDisabled ? "Activate" : "Disable";
         Alert.alert(
@@ -214,8 +214,12 @@ const UsersTab = () => {
                     text: isDisabled ? "Activate" : "Disable User", 
                     style: isDisabled ? "default" : "destructive", 
                     onPress: async () => {
-                        await updateSaaSData("users", user.id, { status: isDisabled ? "Active" : "Disabled" });
-                        fetchUsers();
+                        try {
+                            await setTeamMemberStatus(user.id, isDisabled);
+                            loadUsers();
+                        } catch (e: any) {
+                            Alert.alert("Error", e?.message || "Could not update status.");
+                        }
                     }
                 }
             ]
@@ -228,17 +232,48 @@ const UsersTab = () => {
             ...user,
             password: "",
             monthlyTarget: String(user.monthlyTarget || 0),
+            baseSalary: String(user.baseSalary || 0),
             yearlyLeaves: String(user.yearlyLeaves || 18)
         });
         setModalVisible(true);
     };
 
+    const toggleBulkSelect = (id: string) => {
+    setSelectedForBulk((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        return next;
+    });
+};
+
+const handleBulkDeactivate = () => {
+    if (selectedForBulk.size === 0) return;
+    Alert.alert(
+        'Deactivate Selected',
+        `Deactivate ${selectedForBulk.size} selected employee(s)?`,
+        [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Deactivate', style: 'destructive', onPress: async () => {
+                try {
+                    await bulkSetTeamMemberStatus(Array.from(selectedForBulk), false);
+                    setSelectedForBulk(new Set());
+                    setBulkMode(false);
+                    loadUsers();
+                    Alert.alert('Success ✅', 'Selected employees deactivated.');
+                } catch (e: any) {
+                    Alert.alert('Error', e?.message || 'Could not deactivate employees.');
+                }
+            }}
+        ]
+    );
+};
+
     const openAdd = () => {
         setEditData(null);
         const randomId = `EMP-${new Date().getFullYear()}-${Math.floor(Math.random()*1000)}`;
         setFormData({
-            name: "", email: "", mobile: "", role: "Sales Executive", empId: randomId, joiningDate: new Date().toISOString().split('T')[0],
-            password: "", city: "", monthlyTarget: "0", yearlyLeaves: "18",
+            name: "", email: "", mobile: "", role: "FIELD_USER", empId: randomId, joiningDate: new Date().toISOString().split('T')[0],
+            password: "", city: "", monthlyTarget: "0", baseSalary: "0", yearlyLeaves: "18",
             personalEmail: "", personalMobile: "", bloodGroup: "", address: "", state: "", permanentAddress: "",
             bankName: "", accountNo: "", ifscCode: "", aadhar: "", pan: "", assetNotes: ""
         });
@@ -249,6 +284,17 @@ const UsersTab = () => {
 
     return (
         <View style={{flex:1}}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 15, paddingVertical: 8 }}>
+                <TouchableOpacity onPress={() => { setBulkMode(!bulkMode); setSelectedForBulk(new Set()); }}>
+                    <Text style={{ color: '#3b5998', fontWeight: 'bold', fontSize: 12 }}>{bulkMode ? 'Cancel Select' : 'Select Multiple'}</Text>
+                </TouchableOpacity>
+                {bulkMode && selectedForBulk.size > 0 && (
+                    <TouchableOpacity onPress={handleBulkDeactivate} style={{ backgroundColor: '#e74c3c', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 }}>
+                        <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 12 }}>Deactivate ({selectedForBulk.size})</Text>
+                    </TouchableOpacity>
+                )}
+            </View>
+
             <FlatList 
                 data={renderedUsers}
                 keyExtractor={item => item.id}
@@ -256,15 +302,28 @@ const UsersTab = () => {
                 renderItem={({item}) => {
                     const isDisabled = item.status === 'Disabled';
                     return (
-                        <TouchableOpacity style={[styles.card, isDisabled && {opacity: 0.6, backgroundColor: '#f0f0f0'}]} onPress={() => openEdit(item)}>
+                        <TouchableOpacity 
+                            style={[styles.card, isDisabled && {opacity: 0.6, backgroundColor: '#f0f0f0'}]}
+                            onPress={() => bulkMode ? toggleBulkSelect(item.id) : openEdit(item)}
+                        >
                             <View style={{flexDirection:'row', justifyContent:'space-between'}}>
-                                <View>
-                                    <Text style={[styles.cardTitle, isDisabled && {color: 'gray', textDecorationLine: 'line-through'}]}>
-                                        {item.name} {isDisabled && "(Disabled)"}
-                                    </Text>
-                                    <Text style={styles.cardSubtitle}>{item.role} • {item.empId}</Text>
+                                <View style={{flexDirection: 'row', alignItems: 'center', flex: 1}}>
+                                    {bulkMode && (
+                                        <Ionicons
+                                            name={selectedForBulk.has(item.id) ? 'checkbox' : 'square-outline'}
+                                            size={22}
+                                            color="#3b5998"
+                                            style={{ marginRight: 10 }}
+                                        />
+                                    )}
+                                    <View>
+                                        <Text style={[styles.cardTitle, isDisabled && {color: 'gray', textDecorationLine: 'line-through'}]}>
+                                            {item.name} {isDisabled && "(Disabled)"}
+                                        </Text>
+                                        <Text style={styles.cardSubtitle}>{item.role} • {item.empId}</Text>
+                                    </View>
                                 </View>
-                                <Ionicons name="create-outline" size={20} color="#3b5998" />
+                                {!bulkMode && <Ionicons name="create-outline" size={20} color="#3b5998" />}
                             </View>
                             <View style={{marginTop:8, flexDirection:'row', justifyContent:'space-between', alignItems:'center'}}>
                                 <Text style={{fontSize:12, color:'#555'}}>{item.mobile} | {item.city}</Text>
@@ -311,10 +370,17 @@ const UsersTab = () => {
 }}>
     <Ionicons name="people" size={14} color="#2c3e50" />
     <Text style={{ fontSize: 12, color: '#2c3e50', fontWeight: 'bold', marginLeft: 5 }}>
-        {users.filter((u:any) => u.status !== 'Disabled').length} / 10 Seats Used
+        {users.filter((u:any) => u.status !== 'Disabled').length} Active Employees
     </Text>
 </View>
             
+                        <TouchableOpacity 
+                style={[styles.fab, { bottom: 90, backgroundColor: '#2e7d32' }]} 
+                onPress={() => router.push('/bulk_import_users' as any)}
+            >
+                <Ionicons name="cloud-upload" size={24} color="white" />
+            </TouchableOpacity>
+
             <TouchableOpacity style={styles.fab} onPress={openAdd}>
                 <Ionicons name="add" size={30} color="white" />
             </TouchableOpacity>
@@ -329,11 +395,11 @@ const UsersTab = () => {
                         
                         <ScrollView showsVerticalScrollIndicator={false}>
                             <Text style={styles.sectionHeader}>🏢 Official Info</Text>
-                            <Text style={styles.label}>Role</Text>
+                            <Text style={styles.label}>Role {editData && <Text style={{fontSize:10, color:'#999'}}>(cannot be changed after creation)</Text>}</Text>
                             <View style={styles.pickerRow}>
-                                {["Admin", "Sales Executive", "Service Engineer", "Accountant", "Store Keeper", "Hr", "Manager"].map(r => (
-                                    <TouchableOpacity key={r} onPress={() => setFormData({...formData, role: r})} style={[styles.roleChip, formData.role === r && styles.activeRoleChip]}>
-                                        <Text style={{fontSize:10, color: formData.role === r ? 'white' : '#333'}}>{r}</Text>
+                                {ROLE_OPTIONS.map(r => (
+                                    <TouchableOpacity key={r.value} disabled={!!editData} onPress={() => setFormData({...formData, role: r.value})} style={[styles.roleChip, formData.role === r.value && styles.activeRoleChip, editData && {opacity: 0.5}]}>
+                                        <Text style={{fontSize:10, color: formData.role === r.value ? 'white' : '#333'}}>{r.label}</Text>
                                     </TouchableOpacity>
                                 ))}
                             </View>
@@ -357,6 +423,9 @@ const UsersTab = () => {
                             </View>
                             <View style={styles.inputRow}>
                                 <View style={{flex:1}}><Text style={styles.label}>Target</Text><TextInput style={styles.input} value={String(formData.monthlyTarget)} onChangeText={t=>setFormData({...formData, monthlyTarget:t})} keyboardType="numeric" /></View>
+                                <View style={{flex:1}}><Text style={styles.label}>Base Salary</Text><TextInput style={styles.input} value={String(formData.baseSalary)} onChangeText={t=>setFormData({...formData, baseSalary:t})} keyboardType="numeric" /></View>
+                            </View>
+                            <View style={styles.inputRow}>
                                 <View style={{flex:1}}><Text style={styles.label}>Leaves</Text><TextInput style={styles.input} value={String(formData.yearlyLeaves)} onChangeText={t=>setFormData({...formData, yearlyLeaves:t})} keyboardType="numeric" /></View>
                             </View>
 
@@ -408,27 +477,25 @@ const UsersTab = () => {
 };
 
 // ====================================================================
-// 2️⃣ PERMISSIONS TAB
+// 2️⃣ PERMISSIONS TAB — migrated to Postgres via permissions.ts adapter
 // ====================================================================
 const PermissionsTab = () => {
-    const router = useRouter();
     const { currentUser } = useData();
-    const { fetchSaaSData, updateSaaSData, addSaaSData } = useSaaSDB();
-    
-    const [autoEnabled, setAutoEnabled] = useState(true); 
+
+    const [loading, setLoading] = useState(true);
     const [editMode, setEditMode] = useState<'Role' | 'User'>('Role');
-    const [roles, setRoles] = useState(["Admin", "Sales Executive", "Service Engineer", "Manager", "Accountant", "Store Keeper", "Hr"]);
-    const [users, setUsers] = useState<any[]>([]);
+    const [roles] = useState(["Admin", "Sales Executive", "Service Engineer", "Manager", "Accountant", "Store Keeper", "Hr"]);
+    const [users, setUsers] = useState<LegacyTeamMember[]>([]);
     
     const [selectedTarget, setSelectedTarget] = useState("Sales Executive"); 
-    const [permissions, setPermissions] = useState<any>({});
+    const [permissions, setPermissions] = useState<PermissionsBlob>({});
     
     const allModules = [
         { category: "📊 DASHBOARD & BASICS", items: [{ key: "dashboard", label: "Main Dashboard" }, { key: "calendar", label: "Calendar" }, { key: "map_view", label: "Live Map" }] },
         { category: "📞 SALES & LEADS", items: [{ key: "leads", label: "Leads Master" }, { key: "quotations", label: "Quotations / Estimates" }, { key: "orders", label: "Order Booking" }, { key: "visits", label: "Visits" }, { key: "demos", label: "Demos" }, { key: "sales_analysis", label: "Analysis" }, { key: "catalogs", label: "Catalogs" }, { key: "sales_team_report", label: "Sales Calc" }] },
         { category: "🛠️ SERVICE & SUPPORT", items: [{ key: "tickets", label: "Service Tickets" }, { key: "service_reports", label: "Service Analysis" }, { key: "pms", label: "PMS Schedule" }, { key: "installation", label: "Installation" }, { key: "amc_cmc", label: "AMC / CMC" }, { key: "spares", label: "Spare Parts" }] },
         { category: "📦 OPERATIONS", items: [{ key: "courier", label: "Courier" }, { key: "organizations", label: "Projects" }, { key: "asset_history", label: "Machine/OrgName Details" }, { key: "company_profile", label: "Company Profile" }] },
-        { category: "💰 FINANCE", items: [{ key: "payment_due", label: "Payment Dues" }, { key: "payment_coll", label: "Collections" }, { key: "expenses", label: "Expense Claims" }, { key: "advance", label: "Advance" }] },
+        { category: "💰 FINANCE", items: [{ key: "payment_due", label: "Payment Dues" }, { key: "payment_coll", label: "Collections" }, { key: "expenses", label: "Expense Claims" }, { key: "advance", label: "Advance" }, { key: "payroll", label: "Payroll" }] },
         { category: "📝 HR & TEAM", items: [{ key: "attendance", label: "Attendance" }, { key: "leave", label: "Leaves" }, { key: "travel", label: "Travel Logs" }] },
         { category: "⚙️ ADMIN CONTROL", items: [{ key: "users", label: "Manage Users" }, { key: "settings", label: "App Settings" }] }
     ];
@@ -437,15 +504,19 @@ const PermissionsTab = () => {
         if (!currentUser?.companyId) return;
 
         const loadData = async () => {
-            const usersData = await fetchSaaSData("users");
-            setUsers(usersData);
-
+            setLoading(true);
             try {
-               const permData: any[] = await fetchSaaSData("settings_permissions");
-               if (permData && permData.length > 0) {
-                   setPermissions(permData[0].data || permData[0]); 
-               }
-            } catch(e) {}
+                const [usersData, permData] = await Promise.all([
+                    fetchTeamMembers(),
+                    fetchPermissions(),
+                ]);
+                setUsers(usersData);
+                setPermissions(permData || {});
+            } catch (e: any) {
+                Alert.alert("Error", e.message || "Could not load permissions.");
+            } finally {
+                setLoading(false);
+            }
         };
         loadData();
     }, [currentUser]);
@@ -469,7 +540,7 @@ const PermissionsTab = () => {
 
     const togglePerm = (key: string) => {
         const currentValue = getSwitchValue(key); 
-        setPermissions((prev: any) => {
+        setPermissions((prev) => {
             const newPerms = { ...prev };
             if (!newPerms[selectedTarget]) {
                 newPerms[selectedTarget] = {};
@@ -481,12 +552,14 @@ const PermissionsTab = () => {
 
     const savePerms = async () => {
         try {
-            await addSaaSData("settings_permissions", { data: permissions, id: 'main' });
+            await savePermissions(permissions);
             Alert.alert("Success ✅", `Permissions updated for ${selectedTarget}!`);
         } catch (e: any) {
-            Alert.alert("Error", "Could not save permissions.");
+            Alert.alert("Error", e.message || "Could not save permissions.");
         }
     };
+
+    if (loading) return <ActivityIndicator size="large" color="#2c3e50" style={{ marginTop: 50 }} />;
 
     return (
         <View style={{flex:1}}>
@@ -570,38 +643,38 @@ const PermissionsTab = () => {
 };
 
 // ====================================================================
-// 3️⃣ HOLIDAYS TAB
+// 3️⃣ HOLIDAYS TAB — unchanged, already migrated
 // ====================================================================
 const HolidaysTab = () => {
+    const router = useRouter();
     const { currentUser } = useData();
-    const { fetchSaaSData, addSaaSData, deleteSaaSData } = useSaaSDB();
 
     const [holidays, setHolidays] = useState<any[]>([]);
     const [modalVisible, setModalVisible] = useState(false);
     const [newHoliday, setNewHoliday] = useState({ date: new Date(), name: "", type: "Holiday" });
     const [showPicker, setShowPicker] = useState(false);
 
-    useEffect(() => { fetchHolidays(); }, [currentUser]);
+    useEffect(() => { loadHolidays(); }, [currentUser]);
 
-    const fetchHolidays = async () => {
+    const loadHolidays = async () => {
         if (!currentUser?.companyId) return;
-        const data = await fetchSaaSData("holidays");
+        const data = await fetchHolidays();
         data.sort((a:any, b:any) => new Date(a.date).getTime() - new Date(b.date).getTime());
         setHolidays(data);
     };
 
-    const addHoliday = async () => {
+    const handleAddHoliday = async () => {
         if (!newHoliday.name) return Alert.alert("Error", "Enter Occasion Name");
         const dateStr = newHoliday.date.toISOString().split('T')[0];
-        await addSaaSData("holidays", { ...newHoliday, date: dateStr, dateIso: dateStr });
+        await addHolidayApi(newHoliday.name, dateStr);
         setModalVisible(false);
         setNewHoliday({ date: new Date(), name: "", type: "Holiday" });
-        fetchHolidays();
+        loadHolidays();
     };
 
-    const deleteHoliday = async (id: string) => {
-        await deleteSaaSData("holidays", id);
-        fetchHolidays();
+    const handleDeleteHoliday = async (id: string) => {
+        await deleteHolidayApi(id);
+        loadHolidays();
     };
 
     const onDateChange = (event: any, selectedDate?: Date) => {
@@ -626,12 +699,19 @@ const HolidaysTab = () => {
                                 <Text style={styles.cardTitle}>{item.name}</Text>
                                 <Text style={{fontSize:12, color:'gray'}}>{item.type}</Text>
                             </View>
-                            <TouchableOpacity onPress={() => deleteHoliday(item.id)}><Ionicons name="trash-outline" size={20} color="#e74c3c"/></TouchableOpacity>
+                            <TouchableOpacity onPress={() => handleDeleteHoliday(item.id)}><Ionicons name="trash-outline" size={20} color="#e74c3c"/></TouchableOpacity>
                         </View>
                     </View>
                 )}
             />
-            <TouchableOpacity style={styles.fab} onPress={() => setModalVisible(true)}><Ionicons name="add" size={30} color="white" /></TouchableOpacity>
+                            <TouchableOpacity 
+                    style={[styles.fab, { bottom: 90, backgroundColor: '#2e7d32' }]} 
+                    onPress={() => router.push('/bulk_import_holidays' as any)}
+                >
+                    <Ionicons name="cloud-upload" size={24} color="white" />
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.fab} onPress={() => setModalVisible(true)}><Ionicons name="add" size={30} color="white" /></TouchableOpacity>
 
             <Modal visible={modalVisible} transparent animationType="fade">
                 <View style={styles.modalOverlay}>
@@ -652,7 +732,7 @@ const HolidaysTab = () => {
                         </View>
                         <View style={{flexDirection:'row', gap:10, marginTop:15}}>
                             <TouchableOpacity style={[styles.btn, {backgroundColor:'gray'}]} onPress={()=>setModalVisible(false)}><Text style={{color:'white'}}>Cancel</Text></TouchableOpacity>
-                            <TouchableOpacity style={[styles.btn, {backgroundColor:'#27ae60'}]} onPress={addHoliday}><Text style={{color:'white'}}>Add</Text></TouchableOpacity>
+                            <TouchableOpacity style={[styles.btn, {backgroundColor:'#27ae60'}]} onPress={handleAddHoliday}><Text style={{color:'white'}}>Add</Text></TouchableOpacity>
                         </View>
                     </View>
                 </View>
@@ -661,16 +741,18 @@ const HolidaysTab = () => {
     );
 };
 
+import { AuditLogEntry, fetchAuditLogs } from '../services/api/auditLogs';
+
 // ====================================================================
-// 4️⃣ TRACKING TAB
+// 4️⃣ TRACKING TAB — migrated to Postgres via locationLogs.ts adapter
 // ====================================================================
 const TrackingTab = () => {
     const { currentUser } = useData();
-    const { fetchSaaSData } = useSaaSDB();
 
-    const [locations, setLocations] = useState<any[]>([]);
-    const [users, setUsers] = useState<any[]>([]);
-    const [selectedUser, setSelectedUser] = useState("All");
+    const [locations, setLocations] = useState<LocationLog[]>([]);
+    const [users, setUsers] = useState<LegacyTeamMember[]>([]);
+    const [selectedUserId, setSelectedUserId] = useState("all");
+    const [selectedUserName, setSelectedUserName] = useState("All Staff");
     const [loading, setLoading] = useState(false);
     
     const [mapDate, setMapDate] = useState(new Date());
@@ -679,8 +761,10 @@ const TrackingTab = () => {
     useEffect(() => {
         const loadUsers = async () => {
             if (currentUser?.companyId) {
-                const uData = await fetchSaaSData("users");
-                setUsers(uData.map((d:any) => d.name));
+                try {
+                    const uData = await fetchTeamMembers();
+                    setUsers(uData);
+                } catch (e) {}
             }
         };
         loadUsers();
@@ -688,7 +772,7 @@ const TrackingTab = () => {
 
     useEffect(() => {
         fetchLocations();
-    }, [mapDate, selectedUser]); 
+    }, [mapDate, selectedUserId]); 
 
     const fetchLocations = async () => {
         if (!currentUser?.companyId) return;
@@ -699,18 +783,10 @@ const TrackingTab = () => {
             const day = String(mapDate.getDate()).padStart(2, '0');
             const dateQuery = `${year}-${month}-${day}`; 
 
-            let data = await fetchSaaSData("location_logs");
-            data = data.filter((d:any) => d.date === dateQuery || d.dateIso === dateQuery);
-
-            if (selectedUser !== "All") {
-                data = data.filter((d:any) => d.userName === selectedUser || d.name === selectedUser);
-            }
-
-            data.sort((a:any, b:any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+            const data = await fetchLocationLogs(dateQuery, selectedUserId);
             setLocations(data);
-            
         } catch (e: any) {
-            Alert.alert("Error", "Could not fetch location logs.");
+            Alert.alert("Error", e.message || "Could not fetch location logs.");
         }
         setLoading(false);
     };
@@ -747,12 +823,12 @@ const TrackingTab = () => {
 
                 <Text style={{fontSize: 10, color: 'gray', fontWeight:'bold', marginBottom:5}}>SELECT EMPLOYEE</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom: 5}}>
-                    <TouchableOpacity onPress={() => setSelectedUser("All")} style={[styles.roleChip, selectedUser === "All" && styles.activeRoleChip, {marginRight: 5}]}>
-                        <Text style={{color: selectedUser === "All" ? 'white' : '#333', fontSize: 11}}>All Staff</Text>
+                    <TouchableOpacity onPress={() => { setSelectedUserId("all"); setSelectedUserName("All Staff"); }} style={[styles.roleChip, selectedUserId === "all" && styles.activeRoleChip, {marginRight: 5}]}>
+                        <Text style={{color: selectedUserId === "all" ? 'white' : '#333', fontSize: 11}}>All Staff</Text>
                     </TouchableOpacity>
-                    {users.map((u, i) => (
-                        <TouchableOpacity key={i} onPress={() => setSelectedUser(u)} style={[styles.roleChip, selectedUser === u && styles.activeRoleChip, {marginRight: 5}]}>
-                            <Text style={{color: selectedUser === u ? 'white' : '#333', fontSize: 11}}>{u}</Text>
+                    {users.map((u) => (
+                        <TouchableOpacity key={u.id} onPress={() => { setSelectedUserId(u.id); setSelectedUserName(u.name); }} style={[styles.roleChip, selectedUserId === u.id && styles.activeRoleChip, {marginRight: 5}]}>
+                            <Text style={{color: selectedUserId === u.id ? 'white' : '#333', fontSize: 11}}>{u.name}</Text>
                         </TouchableOpacity>
                     ))}
                 </ScrollView>
@@ -802,7 +878,7 @@ const TrackingTab = () => {
 
                         return (
                             <Marker
-                                key={index}
+                                key={loc.id || index}
                                 coordinate={{ latitude: loc.latitude, longitude: loc.longitude }}
                                 title={`${title}: ${loc.userName}`}
                                 description={new Date(loc.timestamp).toLocaleTimeString()}
@@ -824,15 +900,60 @@ const TrackingTab = () => {
                 <Text style={{fontSize: 10, color: 'green', fontWeight:'bold'}}>● START</Text>
                 <Text style={{fontSize: 10, color: 'cyan', fontWeight:'bold'}}>● PATH</Text>
                 <Text style={{fontSize: 10, color: 'red', fontWeight:'bold'}}>● END</Text>
-                <Text style={{fontSize: 10, color: 'orange', fontWeight:'bold'}}>● VISITS</Text>
+                                <Text style={{fontSize: 10, color: 'orange', fontWeight:'bold'}}>● VISITS</Text>
             </View>
         </View>
     );
 };
 
 // ====================================================================
-// 🎨 STYLES
+// HISTORY TAB — audit log of sensitive actions (salary changes, password
+// resets, cheque bounces, etc.)
 // ====================================================================
+const HistoryTab = () => {
+    const [logs, setLogs] = useState<AuditLogEntry[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        fetchAuditLogs(1)
+            .then((res) => setLogs(res.data))
+            .catch((e) => console.log('Failed to load audit logs:', e))
+            .finally(() => setLoading(false));
+    }, []);
+
+    const formatAction = (action: string) => action.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+    if (loading) {
+        return <View style={{flex:1, justifyContent:'center', alignItems:'center'}}><ActivityIndicator size="large" color="#3b5998" /></View>;
+    }
+
+    if (logs.length === 0) {
+        return (
+            <View style={{flex:1, justifyContent:'center', alignItems:'center', padding: 30}}>
+                <Ionicons name="document-text-outline" size={48} color="#ccc" />
+                <Text style={{color:'#999', marginTop:10}}>No activity recorded yet.</Text>
+            </View>
+        );
+    }
+
+    return (
+        <FlatList
+            data={logs}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={{ padding: 15 }}
+            renderItem={({ item }) => (
+                <View style={{backgroundColor:'white', borderRadius:10, padding:14, marginBottom:10, elevation:1}}>
+                    <Text style={{fontSize:14, fontWeight:'bold', color:'#333'}}>{formatAction(item.action)}</Text>
+                    {item.details && <Text style={{fontSize:13, color:'#555', marginTop:4}}>{item.details}</Text>}
+                    <Text style={{fontSize:11, color:'#999', marginTop:8}}>
+                        {item.performedBy?.name || 'Unknown'} • {new Date(item.createdAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    </Text>
+                </View>
+            )}
+        />
+    );
+};
+
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
     header: { backgroundColor: '#2c3e50', padding: 15, paddingTop: 50, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

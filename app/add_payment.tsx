@@ -17,29 +17,30 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (No direct Firebase DB calls)
+// 🔥 SAAS IMPORTS (organizations still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Phase 6: orders (Phase 3), payment dues, payment collections now via new backend API
+import { listOrders } from '../services/api/orders';
+import { createPaymentCollection } from '../services/api/paymentCollections';
+import { listPaymentDues } from '../services/api/paymentDues';
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { fetchOrganizations } from '../services/api/organizations';
+import { urlToBase64Image } from '../utils/pdfImageHelper';
 
 export default function AddPaymentScreen() {
     const router = useRouter();
     const params = useLocalSearchParams(); 
     
-    // 🔥 1. Context se sirf Core User, Profile, aur Notification
     const { currentUser, companyProfile, addNotification } = useData();
+    const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-    // 🔥 2. Naya SaaS Engine
-    const { fetchSaaSData, addSaaSData, updateSaaSData, isDbLoading } = useSaaSDB();
-
-    // 🔥 3. SaaS Local States
     const [orgList, setOrgList] = useState<any[]>([]);
     const [orderList, setOrderList] = useState<any[]>([]);
     const [dueList, setDueList] = useState<any[]>([]);
-    const [paymentList, setPaymentList] = useState<any[]>([]);
 
     const [loading, setLoading] = useState(false);
     
@@ -66,30 +67,35 @@ export default function AddPaymentScreen() {
     const [notes, setNotes] = useState('');
 
     const [filteredOrgs, setFilteredOrgs] = useState<any[]>([]);
+    const hasPrefilledFromParams = React.useRef(false);
 
-    // 🔥 4. LOAD SAAS DATA ON MOUNT
+    // 🔥 LOAD DATA — orders + payment dues via new API; organizations via Firestore
     useEffect(() => {
         const loadData = async () => {
             if (currentUser?.companyId) {
-                const [orgs, orders, dues, payments] = await Promise.all([
-                    fetchSaaSData("organizations"),
-                    fetchSaaSData("orders"),
-                    fetchSaaSData("payment_dues"),
-                    fetchSaaSData("payment_collections") // To check existing payments/receipt no
+                const [orgs, orders, dues] = await Promise.all([
+                    fetchOrganizations({ limit: 200 }),
+                    listOrders(),          // was: fetchSaaSData("orders")
+                    listPaymentDues(),      // was: fetchSaaSData("payment_dues")
                 ]);
                 setOrgList(orgs);
                 setOrderList(orders);
                 setDueList(dues);
-                setPaymentList(payments);
                 setFilteredOrgs(orgs);
             }
         };
         loadData();
     }, [currentUser]);
 
-    // 🔥 PRE-FILL FROM PARAMS
+    // PRE-FILL FROM PARAMS — runs only once. `params` from useLocalSearchParams
+    // is a new object identity on every render, so depending on it directly
+    // would re-run this effect (and stomp the user's typed amount) on every
+    // keystroke elsewhere on the screen. A ref-guard runs it exactly once,
+    // as soon as orgList/orderList are ready.
     useEffect(() => {
+        if (hasPrefilledFromParams.current) return;
         if (params.orgName && orgList.length > 0) {
+            hasPrefilledFromParams.current = true;
             const org = orgList.find((o: any) => o.name === params.orgName || o.orgName === params.orgName);
             if (org) setSelectedOrg(org);
             else setSelectedOrg({ name: params.orgName });
@@ -118,14 +124,11 @@ export default function AddPaymentScreen() {
         }
     }, [params, orgList, orderList]);
 
-    // ==========================================
-    // 🔥 BULLETPROOF ORDER & MANUAL DUE MATCHER
-    // ==========================================
+    // BULLETPROOF ORDER & MANUAL DUE MATCHER (unchanged logic, now fed by API data)
     useEffect(() => {
         if (selectedOrg && orderList.length > 0) {
             const targetOrgName = (selectedOrg.name || selectedOrg.orgName || "").trim().toLowerCase();
             
-            // 1. Get SYSTEM ORDERS
             const validOrders = orderList.filter((o: any) => {
                 const orderOrgId = o.orgId || '';
                 const selectedId = selectedOrg.id || '';
@@ -145,15 +148,12 @@ export default function AddPaymentScreen() {
                 const payMode = (o.paymentMode || '').trim().toLowerCase();
 
                 if (oStatus === 'collected' || payStatus === 'paid') return false;
-                
                 if (!['approved', 'dispatched', 'billed'].includes(oStatus)) return false;
-                
                 if (payMode === 'cash') return false; 
 
                 return true;
             }).map((o:any) => ({...o, collectionName: 'orders'}));
 
-            // 2. Get MANUAL DUES
             const validManualDues = (dueList || []).filter((d: any) => {
                 if (d.type !== 'Manual') return false;
 
@@ -176,7 +176,6 @@ export default function AddPaymentScreen() {
                 return true;
             }).map((d:any) => ({...d, collectionName: 'payment_dues'})); 
 
-            // 3. MERGE BOTH LISTS
             const combinedList = [...validOrders, ...validManualDues];
 
             combinedList.sort((a: any, b: any) => {
@@ -240,7 +239,6 @@ export default function AddPaymentScreen() {
         return `${day}/${month}/${year}`;
     };
 
-    // 🔥 GENERATE PDF RECEIPT
     const generateAndShareReceipt = async (paymentData: any) => {
         try {
             let orgAddr = paymentData.orgAddress || '';
@@ -260,12 +258,15 @@ export default function AddPaymentScreen() {
                 }
             }
 
-            const logoHTML = companyProfile?.logoUrl 
-                ? `<img src="${companyProfile.logoUrl}" style="height: 60px; margin-bottom: 10px;" />` 
+                        const logoBase64 = await urlToBase64Image(companyProfile?.logoUrl);
+            const signatureBase64 = await urlToBase64Image(companyProfile?.signatureUrl);
+
+            const logoHTML = logoBase64 
+                ? `<img src="${logoBase64}" style="height: 60px; margin-bottom: 10px;" />` 
                 : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
 
-            const signatureHTML = companyProfile?.signatureUrl 
-                ? `<img src="${companyProfile.signatureUrl}" style="height: 50px; margin-top: 10px;" />` 
+            const signatureHTML = signatureBase64 
+                ? `<img src="${signatureBase64}" style="height: 50px; margin-top: 10px;" />` 
                 : `<div style="font-weight: bold; margin-top: 30px;">Authorized Signatory</div>`;
 
             const companyBankHTML = companyProfile?.bankDetails1?.accountNo 
@@ -281,7 +282,9 @@ export default function AddPaymentScreen() {
               <head>
                 <style>
                   body { font-family: 'Helvetica', sans-serif; padding: 30px; border: 2px solid #333; }
-                  .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px; }
+                  .header { display: flex; align-items: flex-start; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px; }
+                  .header-logo { flex: 0 0 auto; width: 100px; }
+                  .header-details { flex: 1; text-align: center; }
                   .title { font-size: 22px; font-weight: bold; color: #1a237e; text-transform: uppercase; }
                   .sub-title { font-size: 12px; margin-top: 2px; color: #333; line-height: 1.4; }
                   .row { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 14px; }
@@ -297,20 +300,18 @@ export default function AddPaymentScreen() {
                 </style>
               </head>
               <body>
-                <div class="header">
-                  ${logoHTML}
-                  ${companyProfile?.logoUrl ? `<div class="title">${companyProfile.companyName}</div>` : ''}
-                  
-                  <div class="sub-title">${companyProfile?.address || ''}</div>
-                  
-                  <div class="sub-title">
-                    Phone: ${companyProfile?.contactPhone || companyProfile?.phone || '-'} | 
-                    Email: ${companyProfile?.contactEmail || companyProfile?.email || companyProfile?.companyEmail || '-'}
+                                <div class="header">
+                  <div class="header-logo">${logoHTML}</div>
+                  <div class="header-details">
+                    <div class="title">${companyProfile?.companyName || 'MY COMPANY'}</div>
+                    <div class="sub-title">${companyProfile?.address || ''}</div>
+                    <div class="sub-title">
+                      Phone: ${companyProfile?.contactPhone || companyProfile?.phone || '-'} | 
+                      Email: ${companyProfile?.contactEmail || companyProfile?.email || companyProfile?.companyEmail || '-'}
+                    </div>
+                    ${companyProfile?.gstNumber ? `<div class="sub-title">GSTIN: ${companyProfile.gstNumber}</div>` : ''}
                   </div>
-
-                  <div class="sub-title">
-                    ${companyProfile?.gstNumber ? `GSTIN: ${companyProfile.gstNumber}` : ''}
-                  </div>
+                  <div style="flex: 0 0 auto; width: 100px;"></div>
                 </div>
 
                 <h3 style="text-align: center; text-decoration: underline; margin-bottom: 20px;">PAYMENT RECEIPT</h3>
@@ -377,7 +378,10 @@ export default function AddPaymentScreen() {
 
     const remainingAmount = getRemainingBalance();
 
-    // 🔥 5. SAAS ISOLATED SAVE & SYNC LOGIC
+    // 🔥 SAVE LOGIC — via new backend API. Backend now atomically updates the
+    // linked order/due balance inside the same transaction as the payment
+    // insert, so the old client-side "3. CASCADING DUES UPDATE" block and
+    // manual receiptNo generation are both gone — the backend handles them.
     const handleSubmit = async () => {
         if (!selectedOrg || !amount) {
             Alert.alert("Missing Fields", "Please Select Customer and Amount.");
@@ -389,113 +393,48 @@ export default function AddPaymentScreen() {
         const finalOrgName = selectedOrg.name || selectedOrg.orgName || "";
         const finalOrgAddress = selectedOrg.address || selectedOrg.city || ""; 
 
-        // SMART FINANCIAL YEAR LOGIC FOR RECEIPT NUMBER
-        const targetMonth = date.getMonth(); 
-        const targetYear = date.getFullYear();
-        const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-        const fyString = `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`; 
-        const fyStartDateStr = `${fyStartYear}-04-01`;
-        const fyEndDateStr = `${fyStartYear + 1}-03-31`;
-
-        const count = paymentList ? paymentList.filter((p: any) => {
-            const pDate = p.date || (p.createdAt ? p.createdAt.split('T')[0] : '');
-            if (!pDate) return false;
-            return pDate >= fyStartDateStr && pDate <= fyEndDateStr;
-        }).length + 1 : 1;
-
-        const prefix = companyProfile?.shortName ? companyProfile.shortName.toUpperCase() : 'LMS';
-        const receiptNo = `${prefix}-PR-${fyString}-${String(count).padStart(3, '0')}`;
-
-        const linkedOrderId = selectedOrder ? selectedOrder.id : null;
-        const linkedOrderRef = selectedOrder ? (selectedOrder.orderId || selectedOrder.billNo) : null;
-
-        const paymentData = {
-            date: date.toISOString().split('T')[0],
-            dateIso: date.toISOString().split('T')[0],
-            orgId: selectedOrg.id || '',
-            orgName: finalOrgName,
-            orgAddress: finalOrgAddress,
-            orderId: linkedOrderId,
-            orderRef: linkedOrderRef,
-            billRef: billRef, 
-            totalDueSnapshot: parseFloat(totalDue || '0'), 
-            amount: parseFloat(amount),                    
-            remainingBalance: (totalDue && parseFloat(totalDue) > 0) ? parseFloat(remainingAmount as string) : 0, 
-            mode,
-            bankName: (mode !== 'Cash') ? bankName : "",
-            refNumber: (mode !== 'Cash') ? refNumber : "",
-            pdcDate: (mode !== 'Cash') ? formatDate(pdcDate) : "", 
-            notes, receiptNo,
-            status: 'Collected',
-            senderId: currentUser?.uid || currentUser?.id || 'guest', 
-            userName: currentUser?.name || 'Unknown', 
-            role: currentUser?.role || 'Employee', 
-            timestamp: Date.now()
-        };
+        let linkedOrderId: string | undefined;
+        let linkedDueId: string | undefined;
+        if (selectedOrder && selectedOrder.id) {
+            const collectionName = selectedOrder.collectionName || (selectedOrder.orderId === 'Manual Due' ? 'payment_dues' : 'orders');
+            if (collectionName === 'orders') linkedOrderId = selectedOrder.id;
+            else linkedDueId = selectedOrder.id;
+        }
 
         try {
-            // 1. ADD PAYMENT RECORD VIA SAAS
-            const paymentResult = await addSaaSData('payment_collections', paymentData);
-            
-            if (paymentResult.success) {
-                const payAmount = parseFloat(amount);
+            const saved = await createPaymentCollection({
+                date: date.toISOString(),
+                orgId: selectedOrg.id || undefined,
+                orgName: finalOrgName,
+                orgAddress: finalOrgAddress,
+                linkedOrderId,
+                linkedDueId,
+                billRef,
+                totalDueSnapshot: parseFloat(totalDue || '0'),
+                amount: parseFloat(amount),
+                mode: mode as any,
+                bankName: mode !== 'Cash' ? bankName : undefined,
+                refNumber: mode !== 'Cash' ? refNumber : undefined,
+                pdcDate: mode !== 'Cash' ? formatDate(pdcDate) : undefined,
+                notes,
+            });
 
-                // 2. UPDATE ORDER/DUE BALANCE VIA SAAS
-                if (selectedOrder && selectedOrder.id) {
-                    let collectionName = 'orders'; 
-                    if (selectedOrder.collectionName) collectionName = selectedOrder.collectionName;
-                    else if (selectedOrder.orderId === 'Manual Due') collectionName = 'payment_dues';
-
-                    // Fetch fresh target document directly through the hook isn't strictly necessary if we rely on state, 
-                    // but since SaaS updates are isolated, we use the passed data
-                    const currentBalance = selectedOrder.balance !== undefined ? parseFloat(selectedOrder.balance) : parseFloat(selectedOrder.amount);
-                    const newBalance = currentBalance - payAmount;
-                    const finalStatus = newBalance <= 0 ? 'Paid' : 'Partial';
-
-                    // Update main collection (Order or Due)
-                    await updateSaaSData(collectionName, selectedOrder.id, {
-                        balance: newBalance,
-                        paymentStatus: finalStatus,
-                        status: collectionName === 'orders' ? selectedOrder.status : (newBalance <= 0 ? 'Collected' : 'Partial'),
-                        lastPaymentDate: new Date().toISOString()
-                    });
-
-                    // 3. CASCADING DUES UPDATE (If linked to an order)
-                    if (collectionName === 'orders' && selectedOrder.orderId) {
-                        try {
-                            const relatedDues = dueList.filter((d:any) => d.orderId === selectedOrder.orderId);
-                            const duePromises = relatedDues.map((d:any) => {
-                                return updateSaaSData('payment_dues', d.id, {
-                                    balance: newBalance,
-                                    status: newBalance <= 0 ? 'Collected' : 'Pending',
-                                    lastPaymentDate: new Date().toISOString()
-                                });
-                            });
-                            await Promise.all(duePromises);
-                        } catch (e) { console.log("Sync Error:", e); }
-                    }
-                }
-
-                // 4. NOTIFICATION
-                if (addNotification) {
-                    await addNotification({
-                        title: "Payment Received 💰",
-                        message: `₹${paymentData.amount} received from ${paymentData.orgName}. Receipt: ${receiptNo}`,
-                        to: "Admin",
-                        type: "success",
-                        route: "/payment_collections"
-                    });
-                }
-
-                Alert.alert("Success ✅", "Payment Saved & Linked! Share Receipt?", [
-                    { text: "No", onPress: () => router.back(), style: 'cancel' },
-                    { text: "Yes, Share PDF", onPress: async () => { await generateAndShareReceipt(paymentData); router.back(); }}
-                ]);
-            } else {
-                 Alert.alert("Error", "Failed to save payment data.");
+            if (addNotification) {
+                await addNotification({
+                    title: "Payment Received 💰",
+                    message: `₹${saved.amount} received from ${saved.orgName}. Receipt: ${saved.receiptNo}`,
+                    to: "Admin",
+                    type: "success",
+                    route: "/payment_collections"
+                });
             }
+
+            Alert.alert("Success ✅", "Payment Saved & Linked! Share Receipt?", [
+                { text: "No", onPress: () => router.back(), style: 'cancel' },
+                { text: "Yes, Share PDF", onPress: async () => { await generateAndShareReceipt(saved); router.back(); }}
+            ]);
         } catch (error: any) { 
-            Alert.alert("Error", "Failed: " + error.message); 
+            Alert.alert("Error", "Failed: " + (error?.message || 'Unknown error')); 
         } finally { 
             setLoading(false); 
         }
@@ -639,7 +578,6 @@ export default function AddPaymentScreen() {
                 </ScrollView>
             </KeyboardAvoidingView>
 
-            {/* ORGANIZATION MODAL */}
             <Modal visible={showOrgModal} animationType="slide">
                 <View style={styles.modalContainer}>
                     <View style={styles.modalHeader}>
@@ -669,7 +607,6 @@ export default function AddPaymentScreen() {
                 </View>
             </Modal>
 
-            {/* ORDER SELECTION MODAL */}
             <Modal visible={showOrderModal} transparent animationType="fade">
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContentSmall}>

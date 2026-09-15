@@ -25,6 +25,8 @@ import { listSalesVisits } from '../services/api/salesVisits';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { fetchOrganizations } from '../services/api/organizations';
+import { fetchTeamMembers } from '../services/api/users';
 
 export default function DemoScreen() {
   const router = useRouter();
@@ -71,10 +73,9 @@ export default function DemoScreen() {
               const [demos, sales, orgs, users] = await Promise.all([
                   listDemos(),         // was: fetchSaaSData("demos")
                   listSalesVisits(),   // was: fetchSaaSData("sales_reports")
-                  fetchSaaSData("organizations"),
-                  fetchSaaSData("users")
+                  fetchOrganizations({ limit: 200 }),
+                  fetchTeamMembers()
               ]);
-
               setDemoList(demos);
               setSalesVisitList(sales);
               setOrgList(orgs);
@@ -122,90 +123,174 @@ export default function DemoScreen() {
       return "All Time";
   };
 
-  const generateDemoPDF = async (demoData: any) => {
+    const generateDemoPDF = async (demoData: any) => {
     setGeneratingPdf(true);
     try {
         const logoHTML = companyProfile?.logoUrl 
-            ? `<img src="${companyProfile.logoUrl}" style="height: 60px; margin-bottom: 10px;" />` 
-            : `<div class="title" style="font-size:24px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
+            ? `<img src="${companyProfile.logoUrl}" style="height: 62px; object-fit: contain;" />` 
+            : `<div style="font-size:24px; font-weight:800; color:#0f2557; letter-spacing:0.5px;">${companyProfile?.companyName || 'MY COMPANY'}</div>`;
 
         const signatureHTML = companyProfile?.signatureUrl 
-            ? `<img src="${companyProfile.signatureUrl}" style="height: 40px; margin-top: 5px; margin-bottom: 2px;" />` 
-            : `<div style="height: 40px;"></div>`;
+            ? `<img src="${companyProfile.signatureUrl}" style="height: 50px; object-fit: contain; margin-bottom: 6px;" />` 
+            : `<div style="height: 50px;"></div>`;
+
+        const genDate = new Date().toLocaleDateString('en-GB');
 
         const htmlContent = `
         <html>
           <head>
+            <meta charset="utf-8" />
             <style>
-              body { font-family: 'Helvetica', sans-serif; padding: 30px; border: 2px solid #333; }
-              .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px; }
-              .title { font-size: 22px; font-weight: bold; color: #1a237e; text-transform: uppercase; }
-              .sub-title { font-size: 12px; margin-top: 2px; color: #333; line-height: 1.4; }
-              .box { border: 1px solid #000; padding: 15px; margin-top: 10px; background-color: #fcfcfc; }
-              .row { display: flex; justify-content: space-between; margin-bottom: 5px; }
-              .label { font-weight: bold; color: #444; width: 130px; display: inline-block; }
-              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; }
-              .sign-box { text-align: center; width: 45%; }
-              .sign-line { border-top: 1px solid #000; width: 100%; margin-top: 5px; margin-bottom: 5px; }
+              * { box-sizing: border-box; }
+              body {
+                font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+                color: #1a1a2e;
+                margin: 0;
+                padding: 0;
+              }
+              .sheet { padding: 0 40px 40px; }
+
+              .topbar {
+                display: flex; justify-content: space-between; align-items: center;
+                padding: 28px 40px; background: #0f2557; color: #ffffff;
+              }
+              .topbar .company-meta { text-align: right; font-size: 12px; line-height: 1.7; opacity: 0.92; }
+
+              .doc-band {
+                display: flex; justify-content: space-between; align-items: center;
+                background: #eef2fb; border-bottom: 4px solid #0f2557;
+                padding: 18px 40px; margin-bottom: 28px;
+              }
+              .doc-title { font-size: 19px; font-weight: 800; letter-spacing: 1.4px; color: #0f2557; }
+              .doc-meta { text-align: right; font-size: 12.5px; color: #4a4a68; line-height: 1.7; }
+              .doc-meta b { color: #0f2557; }
+
+              .status-pill {
+                display: inline-block; background: #7c3aed; color: white;
+                font-size: 11.5px; font-weight: 700; letter-spacing: 0.6px;
+                padding: 5px 14px; border-radius: 20px; margin-top: 6px;
+              }
+
+              .grid { display: flex; gap: 20px; margin-bottom: 24px; }
+              .card {
+                flex: 1; background: #fafbfe; border: 1px solid #e2e6f0; border-radius: 12px;
+                padding: 20px 22px;
+              }
+              .card-label { font-size: 11px; font-weight: 700; color: #6b7280; letter-spacing: 1px; margin-bottom: 14px; }
+              .row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px; }
+              .row .k { color: #6b7280; }
+              .row .v { font-weight: 600; color: #1a1a2e; text-align: right; }
+
+              .table { width: 100%; border-collapse: collapse; margin-bottom: 26px; border-radius: 12px; overflow: hidden; }
+              .table th {
+                background: #0f2557; color: white; font-size: 12.5px; letter-spacing: 0.5px;
+                text-align: left; padding: 15px 18px; font-weight: 600;
+              }
+              .table td {
+                padding: 16px 18px; font-size: 14px; border-bottom: 1px solid #e9ecf5; background: #ffffff;
+              }
+              .table .model-sub { color: #6b7280; font-size: 12px; margin-top: 4px; }
+
+              .remarks {
+                background: #f5f3ff; border-left: 4px solid #7c3aed; border-radius: 8px;
+                padding: 16px 20px; font-size: 13.5px; color: #4a4a68; margin-bottom: 20px; line-height: 1.6;
+              }
+              .remarks b { color: #5b21b6; }
+
+              .note {
+                font-size: 11.5px; color: #6b7280; font-style: italic; margin-bottom: 34px; padding: 0 4px;
+              }
+
+              .footer { display: flex; justify-content: space-between; margin-top: 20px; }
+              .sign-box { width: 46%; text-align: center; }
+              .sign-space { height: 56px; }
+              .sign-line { border-top: 1.5px solid #1a1a2e; margin-bottom: 8px; }
+              .sign-label { font-size: 13px; font-weight: 700; color: #1a1a2e; }
+              .sign-sub { font-size: 11.5px; color: #6b7280; margin-top: 3px; }
+
+              .doc-footer {
+                margin-top: 40px; padding-top: 16px; border-top: 1px solid #e9ecf5;
+                font-size: 10.5px; color: #9ca3af; text-align: center;
+              }
             </style>
           </head>
           <body>
-            <div class="header">
+            <div class="topbar">
               ${logoHTML}
-              ${companyProfile?.logoUrl ? `<div class="title">${companyProfile.companyName}</div>` : ''}
-              <div class="sub-title">${companyProfile?.address || ''}</div>
-              <div class="sub-title">
-                Phone: ${companyProfile?.contactPhone || companyProfile?.phone || '-'} | 
-                Email: ${companyProfile?.contactEmail || companyProfile?.email || '-'}
+              <div class="company-meta">
+                <div style="font-weight:700; font-size:14px; margin-bottom:3px;">${companyProfile?.companyName || ''}</div>
+                <div>${companyProfile?.address || ''}</div>
+                <div>${companyProfile?.contactPhone || companyProfile?.phone || '-'} &nbsp;•&nbsp; ${companyProfile?.contactEmail || companyProfile?.email || '-'}</div>
               </div>
             </div>
 
-            <h3 style="text-align: center; text-decoration: underline;">PRODUCT DEMO REPORT</h3>
+            <div class="doc-band">
+              <div>
+                <div class="doc-title">PRODUCT DEMO REPORT</div>
+                <div class="status-pill">✓ DEMO COMPLETED</div>
+              </div>
+              <div class="doc-meta">
+                <div>Date: <b>${demoData.date || '-'}</b></div>
+                <div>Duration: <b>${demoData.duration || '1'} Day${(demoData.duration || 1) > 1 ? 's' : ''}</b></div>
+              </div>
+            </div>
 
-            <div class="box">
-                <div class="row">
-                    <div><span class="label">Date:</span> ${demoData.date}</div>
-                    <div><span class="label">Duration:</span> ${demoData.duration || '1'} Days</div>
+            <div class="sheet">
+              <div class="grid">
+                <div class="card">
+                  <div class="card-label">CLIENT DETAILS</div>
+                  <div class="row"><span class="k">Hospital / Client</span><span class="v">${demoData.hospital || '-'}</span></div>
+                  <div class="row"><span class="k">Address</span><span class="v">${demoData.address || demoData.city || '-'}</span></div>
+                  <div class="row"><span class="k">Department</span><span class="v">${demoData.department || '-'}</span></div>
                 </div>
-            </div>
-
-            <div class="box">
-                <div style="font-size:14px; margin-bottom:5px;"><b>Client:</b> ${demoData.hospital}</div>
-                <div style="font-size:14px; margin-bottom:5px;"><b>Address:</b> ${demoData.address || demoData.city || ''}</div>
-                <div style="font-size:14px;"><b>Department:</b> ${demoData.department || '-'}</div>
-            </div>
-
-            <div class="box">
-                <div class="row"><div><span class="label">Contact Person:</span> <b>${demoData.contactPerson || '-'}</b></div></div>
-                <div class="row"><div><span class="label">Designation:</span> ${demoData.designation || '-'}</div></div>
-                <div class="row"><div><span class="label">Mobile:</span> ${demoData.contactNumber || '-'}</div></div>
-            </div>
-
-            <div class="box">
-                <div style="font-weight:bold; margin-bottom:10px; text-decoration:underline;">Product Details</div>
-                <div class="row"><div><span class="label">Product Name:</span> <b>${demoData.product}</b></div></div>
-                <div class="row"><div><span class="label">Model:</span> ${demoData.model}</div></div>
-                <div class="row"><div><span class="label">Serial No:</span> ${demoData.serialNo || 'N/A'}</div></div>
-            </div>
-
-            <div class="box">
-                <div style="font-weight:bold; margin-bottom:5px; text-decoration:underline;">Demo Outcome / Remarks:</div>
-                <div style="margin-top:5px; min-height: 50px;">${demoData.result || demoData.outcome || 'Demo completed successfully.'}</div>
-                ${demoData.notes ? `<div style="margin-top:10px; font-style:italic; font-size:12px;">Internal Note: ${demoData.notes}</div>` : ''}
-            </div>
-
-            <div class="footer">
-              <div class="sign-box">
-                <div style="height: 60px;"></div> 
-                <div class="sign-line"></div>
-                <div style="font-weight: bold;">Client Signature & Stamp</div>
+                <div class="card">
+                  <div class="card-label">CONTACT PERSON</div>
+                  <div class="row"><span class="k">Name</span><span class="v">${demoData.contactPerson || '-'}</span></div>
+                  <div class="row"><span class="k">Designation</span><span class="v">${demoData.designation || '-'}</span></div>
+                  <div class="row"><span class="k">Mobile</span><span class="v">${demoData.contactNumber || '-'}</span></div>
+                </div>
               </div>
 
-              <div class="sign-box">
-                <div style="font-weight: bold; font-size: 12px;">Given By: ${demoData.senderName}</div>
-                ${signatureHTML}
-                <div class="sign-line"></div>
-                <div style="font-weight: bold;">Engineer Signature</div>
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 55%;">Product</th>
+                    <th style="width: 45%;">Serial No.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      <b>${demoData.product || '-'}</b>
+                      <div class="model-sub">Model: ${demoData.model || '-'}</div>
+                    </td>
+                    <td><b>${demoData.serialNo || 'N/A'}</b></td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div class="remarks">
+                <b>Demo Outcome / Remarks:</b> ${demoData.result || demoData.outcome || 'Demo completed successfully.'}
+              </div>
+
+              ${demoData.notes ? `<div class="note">Internal Note: ${demoData.notes}</div>` : ''}
+
+              <div class="footer">
+                <div class="sign-box">
+                  <div class="sign-space"></div>
+                  <div class="sign-line"></div>
+                  <div class="sign-label">Client Signature & Stamp</div>
+                </div>
+                <div class="sign-box">
+                  <div class="sign-sub" style="margin-bottom:6px;">${demoData.senderName || ''}</div>
+                  ${signatureHTML}
+                  <div class="sign-line"></div>
+                  <div class="sign-label">Engineer Signature</div>
+                </div>
+              </div>
+
+              <div class="doc-footer">
+                This is a system-generated report from ${companyProfile?.companyName || 'our company'} • Generated on ${genDate}
               </div>
             </div>
           </body>
@@ -552,7 +637,7 @@ export default function DemoScreen() {
                               <DetailRow label="Entry By" value={selectedItem.senderName} icon="person-circle" />
                           </View>
 
-                          <TouchableOpacity 
+                                                    <TouchableOpacity 
                               style={[styles.pdfBtn, generatingPdf && { opacity: 0.6 }]}
                               onPress={() => generateDemoPDF(selectedItem)}
                               disabled={generatingPdf}
@@ -566,6 +651,40 @@ export default function DemoScreen() {
                                   </>
                               )}
                           </TouchableOpacity>
+
+                          {!selectedItem.isFromSales && (
+                              <TouchableOpacity 
+                                  style={styles.editBtn}
+                                  onPress={() => {
+                                      setModalVisible(false);
+                                      router.push({
+                                          pathname: '/add_demo' as any,
+                                          params: {
+                                              editId: selectedItem.id,
+                                              hospital: selectedItem.hospital || '',
+                                              orgId: selectedItem.orgId || '',
+                                              address: selectedItem.address || '',
+                                              city: selectedItem.city || '',
+                                              department: selectedItem.department || '',
+                                              product: selectedItem.product || '',
+                                              model: selectedItem.model || '',
+                                              serialNo: selectedItem.serialNo || '',
+                                              contactPerson: selectedItem.contactPerson || '',
+                                              designation: selectedItem.designation || '',
+                                              contactNumber: selectedItem.contactNumber || '',
+                                              email: selectedItem.email || '',
+                                              date: selectedItem.dateIso || selectedItem.date || '',
+                                              duration: String(selectedItem.duration || ''),
+                                              result: selectedItem.result || '',
+                                              notes: selectedItem.notes || '',
+                                          },
+                                      });
+                                  }}
+                              >
+                                  <Ionicons name="create-outline" size={20} color="#3b5998" />
+                                  <Text style={styles.editBtnText}>Edit Demo</Text>
+                              </TouchableOpacity>
+                          )}
 
                           <View style={{height:20}} />
                       </ScrollView>
@@ -659,6 +778,8 @@ const styles = StyleSheet.create({
 
   pdfBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#e3f2fd', padding: 12, borderRadius: 8, marginTop: 15, borderWidth: 1, borderColor: '#2196f3' },
   pdfBtnText: { color: '#1565c0', fontWeight: 'bold', marginLeft: 8 },
+  editBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#e8eaf6', padding: 12, borderRadius: 8, marginTop: 10, borderWidth: 1, borderColor: '#3b5998' },
+  editBtnText: { color: '#3b5998', fontWeight: 'bold', marginLeft: 8 },
 
   pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
   pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation:10 },

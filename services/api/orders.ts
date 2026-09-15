@@ -24,6 +24,8 @@ export interface ApiOrder {
   status: string;
   finalBillAmount: string | number | null;
   billedDate: string | null;
+  reminderHistory: { date: string; sentBy: string }[] | null;
+  lastReminderDate: string | null;
   date: string;
   location: { latitude: number; longitude: number } | null;
   leadId: string | null;
@@ -72,6 +74,8 @@ export function toLegacyOrder(o: ApiOrder): any {
     status: o.status,
     finalBillAmount: o.finalBillAmount != null ? Number(o.finalBillAmount) : undefined,
     billedDate: o.billedDate,
+    reminderHistory: o.reminderHistory || [],
+    lastReminderDate: o.lastReminderDate || '',
     date: dateOnly,
     dateIso: dateOnly,
     location: o.location,
@@ -155,4 +159,10 @@ export async function billOrder(id: string, finalBillAmount: number): Promise<an
 
 export async function deleteOrder(id: string): Promise<void> {
   await apiClient.delete(`/orders/${id}`);
+}
+
+// Phase 6: WhatsApp payment-reminder tracking (records intent only).
+export async function remindOrder(id: string): Promise<any> {
+  const res = await apiClient.post<OneResponse>(`/orders/${id}/remind`, {});
+  return toLegacyOrder(res.data);
 }

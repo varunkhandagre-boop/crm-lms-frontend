@@ -17,23 +17,22 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+
+// 🔥 Phase 8: tasks now go to Postgres via this adapter
+import { createTask } from '../services/api/tasks';
+// 🔥 User list now comes from Postgres too — Firestore's "id" was never a
+// valid backend UUID, which is why assignedToId kept failing validation.
+import { fetchTeamMembers, LegacyTeamMember } from '../services/api/users';
 
 export default function AddTaskScreen() {
   const router = useRouter();
   
-  // 🔥 1. Context se User & Notification engine
   const { currentUser, addNotification } = useData(); 
 
-  // 🔥 2. Naya SaaS Engine
-  const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
+  const [userList, setUserList] = useState<LegacyTeamMember[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
 
-  // 🔥 3. Lazy Loaded States
-  const [userList, setUserList] = useState<any[]>([]);
-
-  // --- STATES ---
   const [taskTitle, setTaskTitle] = useState('');
   const [assignedTo, setAssignedTo] = useState('');
   const [assignedToId, setAssignedToId] = useState(''); 
@@ -43,32 +42,35 @@ export default function AddTaskScreen() {
   const [remark, setRemark] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // DATES
   const [dueDate, setDueDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
 
-  // --- MODAL STATES ---
   const [modalVisible, setModalVisible] = useState(false);
   const [currentModalType, setCurrentModalType] = useState('');
   const [filteredData, setFilteredData] = useState<any[]>([]); 
   const [searchText, setSearchText] = useState('');
 
-  // --- OPTIONS ---
   const priorityOptions = ['Most Urgent', 'High', 'Medium', 'Low'];
   const deptOptions = ['Sales', 'Service', 'Account', 'HR', 'Admin', 'Store', 'Office', 'Other'];
 
-  // 🔥 4. LOAD USERS ON MOUNT
+  // 🔥 Load users from Postgres (real UUIDs) instead of Firestore
   useEffect(() => {
       const loadUsers = async () => {
           if (currentUser?.companyId) {
-              const users = await fetchSaaSData("users");
-              setUserList(users);
+              setLoadingUsers(true);
+              try {
+                  const users = await fetchTeamMembers();
+                  setUserList(users);
+              } catch (e) {
+                  console.log('Error loading users:', e);
+              } finally {
+                  setLoadingUsers(false);
+              }
           }
       };
       loadUsers();
   }, [currentUser]);
 
-  // DATE FORMATTER
   const formatDate = (rawDate: Date) => {
     let day = rawDate.getDate().toString().padStart(2, '0');
     let month = (rawDate.getMonth() + 1).toString().padStart(2, '0');
@@ -76,7 +78,6 @@ export default function AddTaskScreen() {
     return `${day}/${month}/${year}`;
   };
 
-  // --- MODAL LOGIC ---
   const openModal = (type: string) => {
       setCurrentModalType(type);
       setSearchText('');
@@ -114,7 +115,9 @@ export default function AddTaskScreen() {
   const handleSelect = (item: any) => {
       if (currentModalType === 'Assign To') {
           setAssignedTo(item.name);
-          setAssignedToId(item.uid || item.id); 
+          // Real Postgres UUID now, since userList itself comes from
+          // fetchTeamMembers() — no more Firestore-id mismatch.
+          setAssignedToId(item.id);
       }
       else if (currentModalType === 'Priority') setPriority(item);
       else if (currentModalType === 'Department') setDepartment(item);
@@ -122,38 +125,29 @@ export default function AddTaskScreen() {
       setModalVisible(false);
   };
 
-  // 🔥 5. SAAS SAVE & SYNC LOGIC
   const handleSave = async () => {
       if(!taskTitle) return Alert.alert("Required", "Please enter task title.");
       if(!assignedTo) return Alert.alert("Required", "Please select a user.");
 
       setLoading(true);
       try {
-          // Engine handles ID, SenderId, CompanyId, CreatedAt automatically
-          const newTask = {
-              task: taskTitle,
-              to: assignedTo,
-              toUid: assignedToId, 
-              priority: priority,
-              department: department, 
-              department_lower: department.toLowerCase(), 
-              dueDate: formatDate(dueDate), 
-              dateIso: dueDate.toISOString().split('T')[0], 
-              status: 'Pending',
-              remark: remark || ''
-          };
-
-          const res = await addSaaSData("tasks", newTask);
+          const res = await createTask({
+              title: taskTitle,
+              assignedToId,
+              priority,
+              department,
+              dueDate: dueDate.toISOString().split('T')[0],
+              remark: remark || undefined,
+          });
 
           if (res.success) {
-              // REAL PUSH NOTIFICATION
               if (addNotification) {
                   await addNotification({
                       title: "New Task Assigned 📋",
                       message: `${currentUser?.name} assigned you a task: ${taskTitle}.`,
-                      userId: assignedToId, // Target User ID (Sirf usko dikhega aur Push Notification jayegi)
+                      to: assignedToId,
                       route: "/tasks",
-                      type: "warning" // Priority task color
+                      type: "warning"
                   });
               }
 
@@ -190,7 +184,6 @@ export default function AddTaskScreen() {
             keyboardShouldPersistTaps="handled"
         >
             
-            {/* SENDER INFO (Read Only) */}
             <Text style={styles.label}>Assigning From</Text>
             <View style={[styles.input, {backgroundColor:'#eee'}]}>
                 <Text style={{color:'#555'}}>{currentUser?.name || 'Loading...'}</Text>
@@ -211,7 +204,7 @@ export default function AddTaskScreen() {
                         <View style={{flexDirection: 'row', alignItems: 'center', flex: 1}}>
                             <Text style={{color: assignedTo ? '#333' : 'gray'}} numberOfLines={1}>{assignedTo || 'Select User'}</Text>
                         </View>
-                        {isDbLoading && currentModalType === 'Assign To' ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="caret-down" size={14} color="gray" />}
+                        {loadingUsers && currentModalType === 'Assign To' ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="caret-down" size={14} color="gray" />}
                     </TouchableOpacity>
                 </View>
                 <View style={styles.col}>
@@ -263,13 +256,11 @@ export default function AddTaskScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* SEARCHABLE MODAL */}
       <Modal visible={modalVisible} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
                 <Text style={styles.modalTitle}>Select {currentModalType}</Text>
                 
-                {/* Search Bar (Only for User List) */}
                 {currentModalType === 'Assign To' && (
                     <View style={styles.modalSearchBox}>
                         <Ionicons name="search" size={20} color="gray" />
@@ -327,7 +318,6 @@ const styles = StyleSheet.create({
   saveBtn: { backgroundColor: '#3b5998', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 30 },
   saveBtnText: { color: 'white', fontWeight: 'bold', fontSize: 18 },
   
-  // Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { width: '90%', backgroundColor: 'white', borderRadius: 10, padding: 20, maxHeight: '60%' },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center', color: '#3b5998' },

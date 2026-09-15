@@ -17,6 +17,8 @@ import {
 
 // 🔥 SAAS IMPORTS (organizations/users still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
+import { fetchOrganizations } from '../services/api/organizations';
+import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: sales visits now go through the new backend API
 import { deleteSalesVisit as apiDeleteSalesVisit, listSalesVisits } from '../services/api/salesVisits';
@@ -73,8 +75,8 @@ export default function SalesReportScreen() {
       if (currentUser?.companyId) {
           const [visits, orgs, users] = await Promise.all([
               listSalesVisits(), // was: fetchSaaSData("sales_reports")
-              fetchSaaSData("organizations"),
-              fetchSaaSData("users")
+              fetchOrganizations({ limit: 200 }),
+              fetchTeamMembers()
           ]);
           setSalesVisitList(visits);
           setOrgList(orgs);

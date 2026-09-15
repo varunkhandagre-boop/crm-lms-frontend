@@ -17,18 +17,16 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+
+// 🔥 Phase 7: leaves now go to Postgres via this adapter instead of addSaaSData("leaves", ...)
+import { applyLeave } from '../services/api/leaves';
 
 export default function AddLeaveScreen() {
   const router = useRouter();
   
   // 🔥 1. Context se Current User aur Notification Engine nikala
   const { currentUser, addNotification } = useData();
-  
-  // 🔥 2. Naya SaaS Engine connect kiya
-  const { addSaaSData } = useSaaSDB();
 
   // States
   const [fromDate, setFromDate] = useState(new Date());
@@ -78,7 +76,7 @@ export default function AddLeaveScreen() {
     }
   }, [fromDate, toDate]);
 
-  // 🔥 3. SAAS SAVE LOGIC
+  // 🔥 3. SAAS SAVE LOGIC (Phase 7: now calls the Postgres API adapter directly)
   const handleSave = async () => {
       if (type === 'Select Leave Type' || !reason) {
           Alert.alert("Missing Fields", "Please select Type and enter Reason.");
@@ -91,19 +89,15 @@ export default function AddLeaveScreen() {
 
       setLoading(true);
       try {
-          // 🔥 4. CLEAN PAYLOAD: Engine will auto-add ID, CompanyID, SenderID & CreatedAt
-          const newEntry = {
-              fromDate: formatDate(fromDate),
-              toDate: formatDate(toDate),
-              fromDateIso: fromDate.toISOString().split('T')[0],
-              days: days,
+          // 🔥 Phase 7: applyLeave() posts to /api/v1/leaves — server derives company_id,
+          // user_id and role from the authenticated request; it also recalculates `days`
+          // server-side, so this is treated as a display-only echo of the local calc.
+          const result = await applyLeave({
+              fromDate: fromDate.toISOString().split('T')[0],
+              toDate: toDate.toISOString().split('T')[0],
               type: type,
               reason: reason,
-              status: 'Pending', // Manager Approval Needed
-              role: currentUser?.role || 'Employee',
-          };
-
-          const result = await addSaaSData("leaves", newEntry);
+          });
           
           if (result.success) {
               // 🔥 5. REAL PUSH NOTIFICATION
