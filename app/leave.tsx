@@ -6,6 +6,7 @@ import {
     Alert,
     FlatList,
     Modal,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
@@ -23,6 +24,9 @@ import { fetchAttendance } from '../services/api/attendance';
 import { fetchHolidays } from '../services/api/holidays';
 import { fetchLeaves, fetchLeaveSummary, updateLeaveStatus as updateLeaveStatusApi } from '../services/api/leaves';
 import { fetchTeamMembers } from '../services/api/users';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function LeaveApplicationScreen() {
   const router = useRouter();
@@ -31,12 +35,11 @@ export default function LeaveApplicationScreen() {
   const { currentUser, addNotification } = useData();
 
   // 🔥 2. "users" abhi bhi Firestore se (Phase 10 tak) — baaki sab Postgres se
-  const { fetchSaaSData, isDbLoading: isUsersLoading } = useSaaSDB();
-  const [isLeaveDataLoading, setIsLeaveDataLoading] = useState(true);
-  const isDbLoading = isUsersLoading || isLeaveDataLoading;
+  const { isDbLoading: isUsersLoading } = useSaaSDB();
+  // isDbLoading (leave-specific) is computed below, once leaveLoading is available from useCachedList
 
   // 🔥 3. Lazy Loaded Master States
-  const [leaveList, setLeaveList] = useState<any[]>([]);
+  // leaveList now comes from useCachedList below (cache-first)
   const [attendanceList, setAttendanceList] = useState<any[]>([]);
   const [holidayList, setHolidayList] = useState<any[]>([]);
   const [userList, setUserList] = useState<any[]>([]);
@@ -86,41 +89,52 @@ export default function LeaveApplicationScreen() {
       fyEnd: new Date(fyStartYear + 1, 2, 31),
   });
 
-  // 🔥 4. LOAD DATA — leaves/attendance/holidays from Postgres, users still from Firestore.
-  // Attendance/holidays are bounded to the current FY (not "since joining") to keep the
-  // autoRecords feed (Earned/Absent/Half-Day rows) cheap regardless of company size.
-  const loadAllData = async () => {
-      if (!currentUser?.companyId) return;
-      if (canManage && selectedEmployeeName !== 'All' && employees.length === 0) return; // wait for employees to resolve the picked id
-
-      const fyStartYear = currentFyStartYear();
-      const { fyStart, fyEnd } = fyBounds(fyStartYear);
-      const fromDate = fyStart.toISOString().split('T')[0];
-      const toDate = (fyEnd < new Date() ? fyEnd : new Date()).toISOString().split('T')[0];
-
-      let targetUserId: string | undefined;
-      if (canManage) {
-          if (selectedEmployeeName === 'All') {
-              targetUserId = 'all';
-          } else {
-              targetUserId = employees.find(e => e.name === selectedEmployeeName)?.id;
-          }
-      } // else undefined => self, enforced server-side regardless
-
-      setIsLeaveDataLoading(true);
-      try {
-          const [leaves, attendance, holidays] = await Promise.all([
-              fetchLeaves({ userId: targetUserId, limit: 200 }),
-              fetchAttendance({ userId: targetUserId, fromDate, toDate, limit: 500 }),
-              fetchHolidays(fromDate, toDate),
-          ]);
-          setLeaveList(leaves);
-          setAttendanceList(attendance);
-          setHolidayList(holidays);
-      } finally {
-          setIsLeaveDataLoading(false);
-      }
+  // 🔥 4a. LEAVES — cache-first, parameterized by FY + employee filter (same
+  // pattern as attendance.tsx/travel.tsx). See hooks/useCachedList.ts.
+  const usersReady = !(canManage && selectedEmployeeName !== 'All' && employees.length === 0);
+  const fyStartYear = currentFyStartYear();
+  const { fyStart, fyEnd } = fyBounds(fyStartYear);
+  const fromDate = fyStart.toISOString().split('T')[0];
+  const toDate = (fyEnd < new Date() ? fyEnd : new Date()).toISOString().split('T')[0];
+  const resolveTargetUserId = (): string | undefined => {
+      if (!canManage) return undefined; // self, enforced server-side
+      if (selectedEmployeeName === 'All') return 'all';
+      return employees.find(e => e.name === selectedEmployeeName)?.id;
   };
+  const targetUserId = resolveTargetUserId();
+  const leaveCacheKey = buildCacheKey(`leaves:${fyStartYear}:${targetUserId || 'self'}`, currentUser?.companyId);
+  const {
+      data: leaveList,
+      setData: setLeaveList,
+      loading: leaveLoading,
+      refreshing: leaveRefreshing,
+      refresh: refreshLeaves,
+  } = useCachedList<any>({
+      cacheKey: leaveCacheKey,
+      enabled: !!currentUser?.companyId && usersReady,
+      fetcher: () => fetchLeaves({ userId: targetUserId, limit: 200 }),
+  });
+  const isDbLoading = isUsersLoading || leaveLoading;
+
+  // 🔥 4b. Attendance/holidays — same FY + employee dependency, feeds the
+  // Earned/Absent/Half-Day autoRecords card. Left as a plain (uncached)
+  // fetch for now, same as leave/holiday secondary data on other screens.
+  useEffect(() => {
+      const loadAttendanceAndHolidays = async () => {
+          if (!currentUser?.companyId || !usersReady) return;
+          try {
+              const [attendance, holidays] = await Promise.all([
+                  fetchAttendance({ userId: targetUserId, fromDate, toDate, limit: 500 }),
+                  fetchHolidays(fromDate, toDate),
+              ]);
+              setAttendanceList(attendance);
+              setHolidayList(holidays);
+          } catch (e) {
+              // keep showing last-known attendance/holidays on a transient error
+          }
+      };
+      loadAttendanceAndHolidays();
+  }, [currentUser, selectedEmployeeName, employees]);
 
   // 🔥 Users list (+ derived employee picker options) loads once per session — separate
   // from the leaves/attendance fetch above so switching the employee filter doesn't
@@ -149,10 +163,6 @@ export default function LeaveApplicationScreen() {
       };
       loadUsers();
   }, [currentUser]);
-
-  useEffect(() => {
-      loadAllData();
-  }, [currentUser, selectedEmployeeName, employees]);
 
   // 🔥 Phase 7: fetch the server-computed balance summary whenever the target employee
   // or the visible FY (driven by currentDate) changes.
@@ -590,9 +600,12 @@ export default function LeaveApplicationScreen() {
         keyExtractor={(item, index) => item.id || index.toString()} 
         renderItem={renderItem}
         contentContainerStyle={{padding: 15}}
+        refreshControl={
+            <RefreshControl refreshing={leaveRefreshing} onRefresh={refreshLeaves} colors={['#3b5998']} tintColor="#3b5998" />
+        }
         ListEmptyComponent={
             <View style={{alignItems: 'center', marginTop: 50}}>
-                {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{color:'gray'}}>No leave records found.</Text>}
+                {leaveLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{color:'gray'}}>No leave records found.</Text>}
             </View>
         }
         
