@@ -9,6 +9,7 @@ import {
     KeyboardAvoidingView,
     Modal,
     Platform,
+    RefreshControl,
     ScrollView,
     Share,
     StyleSheet,
@@ -18,6 +19,9 @@ import {
     View
 } from 'react-native';
 import { urlToBase64Image } from '../utils/pdfImageHelper';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 // 🔥 SAAS IMPORTS (organizations/users still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
@@ -35,9 +39,9 @@ export default function PaymentCollection() {
     const router = useRouter();
 
     const { currentUser, companyProfile } = useData();
-    const { fetchSaaSData, isDbLoading } = useSaaSDB();
+    const { isDbLoading } = useSaaSDB();
 
-    const [paymentList, setPaymentList] = useState<any[]>([]);
+    // paymentList now comes from useCachedList below (cache-first)
     const [orgList, setOrgList] = useState<any[]>([]);
     const [userList, setUserList] = useState<any[]>([]);
 
@@ -72,22 +76,35 @@ export default function PaymentCollection() {
         else setVisibleCount(20); 
     }, [viewMode, historyDate, historySearch, selectedEmployee]);
 
-    // 🔥 LOAD DATA — payment collections via new API; organizations/users via Firestore
-    const loadData = async () => {
-        if (currentUser?.companyId) {
-            const [payments, orgs, users] = await Promise.all([
-                listPaymentCollections(), // was: fetchSaaSData("payment_collections")
-                fetchOrganizations({ limit: 200 }),
-                fetchTeamMembers()
-            ]);
-            setPaymentList(payments);
-            setOrgList(orgs);
-            setUserList(users);
-        }
-    };
+    // 🔥 PAYMENT COLLECTIONS — cache-first (instant from AsyncStorage, then
+    // background refresh). See hooks/useCachedList.ts.
+    const paymentsCacheKey = buildCacheKey('payment_collections', currentUser?.companyId);
+    const {
+        data: paymentList,
+        setData: setPaymentList,
+        loading: paymentsLoading,
+        refreshing: paymentsRefreshing,
+        refresh: refreshPayments,
+    } = useCachedList({
+        cacheKey: paymentsCacheKey,
+        enabled: !!currentUser?.companyId,
+        fetcher: listPaymentCollections, // was: fetchSaaSData("payment_collections")
+    });
 
+    // Organizations/users — unchanged plain fetch-on-mount (out of scope
+    // for this pass).
     useEffect(() => {
-        loadData();
+        const loadRest = async () => {
+            if (currentUser?.companyId) {
+                const [orgs, users] = await Promise.all([
+                    fetchOrganizations({ limit: 200 }),
+                    fetchTeamMembers()
+                ]);
+                setOrgList(orgs);
+                setUserList(users);
+            }
+        };
+        loadRest();
     }, [currentUser]);
 
     const qrImageSource = companyProfile?.qrCodeUrl 
@@ -577,7 +594,10 @@ export default function PaymentCollection() {
                 keyExtractor={item => item.id} 
                 contentContainerStyle={{padding: 5, paddingBottom: 100}} 
                 renderItem={renderItem} 
-                ListEmptyComponent={<View style={{alignItems:'center', marginTop:50}}><Ionicons name="documents-outline" size={50} color="#ccc" /><Text style={{color:'gray', marginTop:10}}>{isDbLoading ? 'Loading payments...' : 'No Collections Found'}</Text></View>} 
+                refreshControl={
+                    <RefreshControl refreshing={paymentsRefreshing} onRefresh={refreshPayments} colors={['#3b5998']} tintColor="#3b5998" />
+                }
+                ListEmptyComponent={<View style={{alignItems:'center', marginTop:50}}><Ionicons name="documents-outline" size={50} color="#ccc" /><Text style={{color:'gray', marginTop:10}}>{paymentsLoading ? 'Loading payments...' : 'No Collections Found'}</Text></View>} 
                 
                 ListFooterComponent={
                     <View style={{ paddingBottom: 80 }}>
