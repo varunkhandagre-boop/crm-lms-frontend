@@ -20,6 +20,9 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: PMS reports now via new backend API
 import { listPmsReports } from '../services/api/pmsReports';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 // 🔥 PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
@@ -32,9 +35,9 @@ export default function PMSScheduleScreen() {
   const router = useRouter();
   
   const { currentUser, companyProfile } = useData(); 
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+  const { isDbLoading } = useSaaSDB();
 
-  const [pmsList, setPmsList] = useState<any[]>([]);
+  // pmsList now comes from useCachedList below (cache-first)
   const [orgList, setOrgList] = useState<any[]>([]);
   const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
 
@@ -65,40 +68,56 @@ export default function PMSScheduleScreen() {
       }
   }, [viewMode, currentDate, searchText, filter, selectedEmployee]);
 
-  // 🔥 LOAD DATA — PMS reports via new API; organizations/users via Firestore
-  const loadData = async () => {
-      if (currentUser?.companyId) {
-          const [pms, orgs, users] = await Promise.all([
-             listPmsReports(), // was: fetchSaaSData("pms_reports")
-             fetchOrganizations({ limit: 200 }),
-             fetchTeamMembers()
-          ]);
-          setPmsList(pms);
-          setOrgList(orgs);
+  // 🔥 PMS REPORTS — cache-first (instant from AsyncStorage, then
+  // background refresh). See hooks/useCachedList.ts.
+  const pmsCacheKey = buildCacheKey('pms_reports', currentUser?.companyId);
+  const {
+      data: pmsList,
+      loading: pmsLoading,
+      refreshing: pmsRefreshing,
+      refresh: refreshPms,
+  } = useCachedList({
+      cacheKey: pmsCacheKey,
+      enabled: !!currentUser?.companyId,
+      fetcher: listPmsReports, // was: fetchSaaSData("pms_reports")
+  });
 
-          if (isAdmin) {
-              const mappedUsers = users.map((u: any) => ({
-                  id: u.id,
-                  name: u.name || 'Unknown User'
-              }));
-              setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
-          }
-      }
-  };
-
+  // Organizations/users — unchanged plain fetch-on-mount (out of scope for
+  // this pass).
   useEffect(() => {
-      loadData();
+      const loadRest = async () => {
+          if (currentUser?.companyId) {
+              const [orgs, users] = await Promise.all([
+                  fetchOrganizations({ limit: 200 }),
+                  fetchTeamMembers()
+              ]);
+              setOrgList(orgs);
+
+              if (isAdmin) {
+                  const mappedUsers = users.map((u: any) => ({
+                      id: u.id,
+                      name: u.name || 'Unknown User'
+                  }));
+                  setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
+              }
+          }
+      };
+      loadRest();
   }, [currentUser]);
 
+  // Refresh PMS reports (background, cache already shows something instant)
+  // whenever the screen regains focus — same intent as the original
+  // useFocusEffect + loadData(), now routed through the hook's refresh().
   useFocusEffect(
-      useCallback(() => { 
-          loadData(); 
-      }, [])
+      useCallback(() => {
+          refreshPms();
+          // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [pmsCacheKey])
   );
 
   const onRefresh = async () => {
       setRefreshing(true);
-      await loadData();
+      await refreshPms();
       setRefreshing(false);
   };
 
@@ -636,7 +655,7 @@ export default function PMSScheduleScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListEmptyComponent={
             <View style={{ alignItems: 'center', marginTop: 50 }}>
-                {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{ color: 'gray' }}>No Data Found</Text>}
+                {pmsLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{ color: 'gray' }}>No Data Found</Text>}
             </View>
         }
         ListFooterComponent={
