@@ -24,6 +24,9 @@ import { useData } from './context/DataContext';
 
 // 🔥 Phase 8: visiting card requests now come from Postgres via these adapters
 import { dispatchVisitingCardRequest, fetchVisitingCards, receiveVisitingCardRequest } from '../services/api/visitingCards';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function VisitingCardScreen() {
   const router = useRouter();
@@ -33,12 +36,11 @@ export default function VisitingCardScreen() {
 
   // 🔥 2. "users" still Firestore; visiting card requests are Postgres now.
   // addSaaSData kept only for "notifications" — that collection isn't migrated until Phase 9.
-  const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
+  const { addSaaSData } = useSaaSDB();
 
   // 🔥 3. Local States for independent loading
-  const [cardRequestList, setCardRequestList] = useState<any[]>([]);
+  // cardRequestList now comes from useCachedList below (cache-first)
   const [userList, setUserList] = useState<any[]>([]);
-  const [isFetching, setIsFetching] = useState(true);
 
   // --- STATES ---
   const [searchText, setSearchText] = useState('');
@@ -103,42 +105,42 @@ export default function VisitingCardScreen() {
       loadUsers();
   }, [currentUser]);
 
-  // 🔥 4b. Requests — Postgres, bounded by view window + employee/status filter
-  const loadData = async () => {
-      if (!currentUser?.companyId) return;
-      if (canViewAll && selectedEmployeeName !== 'All' && employees.length === 0) return; // wait for employees to resolve the picked id
-
-      setIsFetching(true);
-      try {
-          const { fromDate, toDate } = getFetchRange();
-          let targetUserId: string | undefined;
-          if (canViewAll) {
-              if (selectedEmployeeName === 'All') targetUserId = 'all';
-              else targetUserId = employees.find(e => e.name === selectedEmployeeName)?.id;
-          }
-
-          const cards = await fetchVisitingCards({
-              userId: targetUserId,
-              status: activeStatus !== 'All' ? (activeStatus as any) : undefined,
-              fromDate, toDate,
-              limit: 500,
-          });
-          setCardRequestList(cards);
-      } catch (error) {
-          console.log("Error loading visiting cards:", error);
-      } finally {
-          setIsFetching(false);
-      }
+  // 🔥 VISITING CARD REQUESTS — cache-first, parameterized by date-range +
+  // employee filter + status (same pattern as attendance.tsx/travel.tsx —
+  // a repeat visit to the same view/date/filter/status is instant; a
+  // genuinely new combination still goes to the network). See
+  // hooks/useCachedList.ts.
+  const usersReady = !(canViewAll && selectedEmployeeName !== 'All' && employees.length === 0);
+  const { fromDate, toDate } = getFetchRange();
+  const resolveTargetUserId = (): string | undefined => {
+      if (!canViewAll) return undefined; // self, enforced server-side
+      if (selectedEmployeeName === 'All') return 'all';
+      return employees.find(e => e.name === selectedEmployeeName)?.id;
   };
-
-  useEffect(() => {
-      loadData();
-  }, [currentUser, viewMode, currentDate, selectedEmployeeName, activeStatus, employees]);
+  const targetUserId = resolveTargetUserId();
+  const cardsCacheKey = buildCacheKey(
+      `visiting_cards:${viewMode}:${fromDate || 'none'}:${toDate || 'none'}:${targetUserId || 'self'}:${activeStatus}`,
+      currentUser?.companyId
+  );
+  const {
+      data: cardRequestList,
+      loading: cardsLoading,
+      refresh: refreshCards,
+  } = useCachedList({
+      cacheKey: cardsCacheKey,
+      enabled: !!currentUser?.companyId && usersReady,
+      fetcher: () => fetchVisitingCards({
+          userId: targetUserId,
+          status: activeStatus !== 'All' ? (activeStatus as any) : undefined,
+          fromDate, toDate,
+          limit: 500,
+      }),
+  });
 
   // Pull to Refresh
   const onRefresh = async () => {
       setRefreshing(true);
-      await loadData();
+      await refreshCards();
       setRefreshing(false);
   };
 
@@ -189,7 +191,7 @@ export default function VisitingCardScreen() {
   const getFilteredData = () => {
       let data = Array.isArray(cardRequestList) ? [...cardRequestList] : [];
 
-      // employee/status/date-range already applied server-side (see loadData above);
+      // employee/status/date-range already applied server-side (see the useCachedList fetcher above);
       // search stays client-side over the bounded fetched set.
 
       if (searchText) {
@@ -263,7 +265,7 @@ export default function VisitingCardScreen() {
                   });
               }
               setModalVisible(false);
-              await loadData(); // Data reload manually
+              await refreshCards(); // Data reload manually
               Alert.alert("Success", "Request Dispatched Successfully! 🚀");
           } else {
               Alert.alert("Error", "Could not dispatch request.");
@@ -285,7 +287,7 @@ export default function VisitingCardScreen() {
                   const res = await receiveVisitingCardRequest(selectedRequest.id);
                   if (res.success) {
                       setModalVisible(false);
-                      await loadData(); // Data reload manually
+                      await refreshCards(); // Data reload manually
                       Alert.alert("Success", "Marked as Received! ✅");
                   } else {
                       Alert.alert("Error", "Could not update receipt status.");
@@ -378,7 +380,7 @@ export default function VisitingCardScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListEmptyComponent={
             <View style={styles.emptyBox}>
-                {isFetching || isDbLoading ? (
+                {cardsLoading ? (
                     <ActivityIndicator size="large" color="#3B5998" />
                 ) : (
                     <>

@@ -22,6 +22,9 @@ import { useData } from './context/DataContext';
 
 // 🔥 Phase 8: travel notes now come from Postgres via these adapters
 import { fetchTravelNotes, settleTravelNotesForUser } from '../services/api/travelNotes';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function TravelNoteScreen() {
   const router = useRouter();
@@ -29,11 +32,11 @@ export default function TravelNoteScreen() {
   // 🔥 1. Context se current user nikala
   const { currentUser } = useData(); 
 
-  // 🔥 2. "users" still Firestore; travel notes are Postgres now
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 2. SaaS Engine kept only for isDbLoading (search-icon spinner); travel notes no longer go through this
+  const { isDbLoading } = useSaaSDB();
 
   // 🔥 3. Lazy Loaded States for DB
-  const [travelList, setTravelList] = useState<any[]>([]);
+  // travelList now comes from useCachedList below (cache-first)
   const [userList, setUserList] = useState<any[]>([]);
 
   // --- STATES ---
@@ -96,29 +99,37 @@ export default function TravelNoteScreen() {
       loadUsers();
   }, [currentUser]);
 
-  // 🔥 4b. Travel notes — Postgres, bounded by view window + employee filter
-  const loadData = async () => {
-      if (!currentUser?.companyId) return;
-      if (canManage && selectedEmployeeName !== 'All' && employees.length === 0) return; // wait for employees to resolve the picked id
-
-      const { fromDate, toDate } = getFetchRange();
-      let targetUserId: string | undefined;
-      if (canManage) {
-          if (selectedEmployeeName === 'All') targetUserId = 'all';
-          else targetUserId = employees.find(e => e.name === selectedEmployeeName)?.id;
-      }
-
-      const travels = await fetchTravelNotes({ userId: targetUserId, fromDate, toDate, limit: 500 });
-      setTravelList(travels);
+  // 🔥 TRAVEL NOTES — cache-first, but like attendance.tsx this screen's data
+  // is parameterized by date-range + employee filter, not a flat "whole
+  // company" list — so the cache key includes those params. A repeat visit
+  // to the same view/date/filter (the common case) is instant; a genuinely
+  // new range still goes to the network. See hooks/useCachedList.ts.
+  const usersReady = !(canManage && selectedEmployeeName !== 'All' && employees.length === 0);
+  const { fromDate, toDate } = getFetchRange();
+  const resolveTargetUserId = (): string | undefined => {
+      if (!canManage) return undefined; // self, enforced server-side
+      if (selectedEmployeeName === 'All') return 'all';
+      return employees.find(e => e.name === selectedEmployeeName)?.id;
   };
-
-  useEffect(() => {
-      loadData();
-  }, [currentUser, viewMode, currentDate, selectedEmployeeName, employees]);
+  const targetUserId = resolveTargetUserId();
+  const travelCacheKey = buildCacheKey(
+      `travel:${viewMode}:${fromDate || 'none'}:${toDate || 'none'}:${targetUserId || 'self'}`,
+      currentUser?.companyId
+  );
+  const {
+      data: travelList,
+      loading: travelLoading,
+      refreshing: travelRefreshing,
+      refresh: refreshTravel,
+  } = useCachedList({
+      cacheKey: travelCacheKey,
+      enabled: !!currentUser?.companyId && usersReady,
+      fetcher: () => fetchTravelNotes({ userId: targetUserId, fromDate, toDate, limit: 500 }),
+  });
 
   const onRefresh = async () => {
       setRefreshing(true);
-      await loadData();
+      await refreshTravel();
       setRefreshing(false);
   };
 
@@ -159,7 +170,7 @@ export default function TravelNoteScreen() {
   const getFilteredData = () => {
       let data = Array.isArray(travelList) ? [...travelList] : [];
 
-      // employee + date-range already applied server-side (see loadData above);
+      // employee + date-range already applied server-side (see the useCachedList fetcher above);
       // search stays client-side over the bounded fetched set.
 
       if (searchText) {
@@ -260,7 +271,7 @@ export default function TravelNoteScreen() {
               return;
           }
 
-          await loadData(); 
+          await refreshTravel(); 
           Alert.alert("Success", "Travel Expenses Settled!");
       } catch (error) {
           Alert.alert("Error", "Settlement failed. Check console.");
@@ -442,7 +453,7 @@ export default function TravelNoteScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListEmptyComponent={
               <View style={{alignItems: 'center', marginTop: 50}}>
-                {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{textAlign:'center', color:'gray'}}>No travel records found.</Text>}
+                {travelLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{textAlign:'center', color:'gray'}}>No travel records found.</Text>}
               </View>
           }
           ListFooterComponent={

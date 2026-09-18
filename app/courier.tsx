@@ -8,6 +8,7 @@ import {
     KeyboardAvoidingView,
     Modal,
     Platform,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
@@ -22,6 +23,9 @@ import { useData } from './context/DataContext';
 
 // 🔥 Phase 8: couriers now come from Postgres via these adapters
 import { deleteCourier, fetchCouriers, updateCourier, updateCourierStatus } from '../services/api/couriers';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
@@ -35,12 +39,11 @@ export default function CourierScreen() {
   const { currentUser, addNotification, companyProfile } = useData(); 
 
   // 🔥 2. "organizations" still Firestore; couriers are Postgres now
-  const { fetchSaaSData, isDbLoading: isOrgsLoading } = useSaaSDB();
-  const [isCourierLoading, setIsCourierLoading] = useState(true);
-  const isDbLoading = isOrgsLoading || isCourierLoading;
+  const { isDbLoading: isOrgsLoading } = useSaaSDB();
+  // isDbLoading (courier-specific) is computed below, once courierLoading is available
 
   // 🔥 3. Lazy Loaded Lists
-  const [courierList, setCourierList] = useState<any[]>([]);
+  // courierList now comes from useCachedList below (cache-first)
   const [orgList, setOrgList] = useState<any[]>([]);
 
   // --- STATES ---
@@ -94,24 +97,27 @@ export default function CourierScreen() {
       loadOrgs();
   }, [currentUser]);
 
-  useEffect(() => {
-      const loadCouriers = async () => {
-          if (!currentUser?.companyId) return;
-          setIsCourierLoading(true);
-          try {
-              const { fromDate, toDate } = getFetchRange();
-              // type/status intentionally NOT filtered server-side here — the tab
-              // badges (inwardPending/outwardPending below) need visibility across
-              // every type+status within the current date window, not just the
-              // currently-selected tab.
-              const couriers = await fetchCouriers({ fromDate, toDate, limit: 500 });
-              setCourierList(couriers);
-          } finally {
-              setIsCourierLoading(false);
-          }
-      };
-      loadCouriers();
-  }, [currentUser, viewMode, currentDate]);
+  // 🔥 COURIERS — cache-first, parameterized by date-range (server
+  // auto-scopes by role, no employee filter param exists for this list).
+  // See hooks/useCachedList.ts.
+  const { fromDate, toDate } = getFetchRange();
+  const courierCacheKey = buildCacheKey(`couriers:${viewMode}:${fromDate || 'none'}:${toDate || 'none'}`, currentUser?.companyId);
+  const {
+      data: courierList,
+      setData: setCourierList,
+      loading: courierLoading,
+      refreshing: courierRefreshing,
+      refresh: refreshCouriers,
+  } = useCachedList({
+      cacheKey: courierCacheKey,
+      enabled: !!currentUser?.companyId,
+      // type/status intentionally NOT filtered server-side here — the tab
+      // badges (inwardPending/outwardPending below) need visibility across
+      // every type+status within the current date window, not just the
+      // currently-selected tab.
+      fetcher: () => fetchCouriers({ fromDate, toDate, limit: 500 }),
+  });
+  const isDbLoading = isOrgsLoading || courierLoading;
 
   // POWER USER CHECK
   const role = currentUser?.role || ''; 
@@ -692,7 +698,10 @@ export default function CourierScreen() {
         data={renderedList} 
         keyExtractor={item => item.id} 
         contentContainerStyle={styles.contentContainer} 
-        ListEmptyComponent={<Text style={{textAlign:'center', marginTop:50, color:'gray'}}>{isDbLoading ? 'Loading data...' : 'No Couriers Found'}</Text>} 
+        refreshControl={
+            <RefreshControl refreshing={courierRefreshing} onRefresh={refreshCouriers} colors={['#3b5998']} tintColor="#3b5998" />
+        }
+        ListEmptyComponent={<Text style={{textAlign:'center', marginTop:50, color:'gray'}}>{courierLoading ? 'Loading data...' : 'No Couriers Found'}</Text>} 
         renderItem={renderItem} 
         ListFooterComponent={
             <View style={{ paddingBottom: 100 }}>
