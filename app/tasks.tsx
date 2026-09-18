@@ -24,6 +24,9 @@ import { useData } from './context/DataContext';
 
 // 🔥 Phase 8: tasks now come from Postgres via these adapters
 import { completeTask as completeTaskApi, fetchTasks } from '../services/api/tasks';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function TaskScreen() {
   const router = useRouter();
@@ -32,10 +35,10 @@ export default function TaskScreen() {
   const { currentUser } = useData();
 
   // 🔥 2. "users" still Firestore; tasks are Postgres now
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+  const { isDbLoading } = useSaaSDB();
 
   // 🔥 3. Lazy Loaded States
-  const [taskList, setTaskList] = useState<any[]>([]);
+  // taskList now comes from useCachedList below (cache-first)
   const [userList, setUserList] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -98,37 +101,43 @@ export default function TaskScreen() {
       loadUsers();
   }, [currentUser]);
 
-  // 🔥 4b. Tasks — Postgres. Fetches BOTH directions (received + given) so the tab
-  // badges above stay accurate regardless of which tab is currently open, then
-  // merges them (a self-assigned task can appear in both — de-duped by id).
-  const loadData = async () => {
-      if (!currentUser?.companyId) return;
-      const { fromDate, toDate } = getFetchRange();
-      const userId = isAdminOrManager ? (selectedEmployee === 'All' ? 'all' : undefined) : undefined;
-      // For a specific selectedEmployee, "received" wants tasks assigned TO them and
-      // "given" wants tasks created BY them — both keyed by the same employee id, so
-      // we resolve it once userList is available.
-      const targetUserId = isAdminOrManager && selectedEmployee !== 'All'
-          ? userList.find((u: any) => u.name === selectedEmployee)?.id
-          : userId;
-
-      const [received, given] = await Promise.all([
-          fetchTasks({ direction: 'received', userId: targetUserId, fromDate, toDate, limit: 500 }),
-          fetchTasks({ direction: 'given', userId: targetUserId, fromDate, toDate, limit: 500 }),
-      ]);
-      const merged = new Map<string, any>();
-      [...received, ...given].forEach((t) => merged.set(t.id, t));
-      setTaskList(Array.from(merged.values()));
+  // 🔥 TASKS — cache-first, parameterized by date-range + employee filter
+  // (same pattern as attendance.tsx/travel.tsx). Fetches both directions
+  // (received + given) and merges inside the fetcher, same as before —
+  // the hook only cares that the fetcher resolves to one array.
+  const usersReady = !(isAdminOrManager && selectedEmployee !== 'All' && userList.length === 0);
+  const { fromDate, toDate } = getFetchRange();
+  const resolveTargetUserId = (): string | undefined => {
+      if (isAdminOrManager && selectedEmployee !== 'All') {
+          return userList.find((u: any) => u.name === selectedEmployee)?.id;
+      }
+      return isAdminOrManager ? 'all' : undefined;
   };
-
-  useEffect(() => {
-      if (isAdminOrManager && selectedEmployee !== 'All' && userList.length === 0) return; // wait for users to resolve the picked id
-      loadData();
-  }, [currentUser, dateViewMode, currentDate, selectedEmployee, userList]);
+  const targetUserId = resolveTargetUserId();
+  const tasksCacheKey = buildCacheKey(`tasks:${dateViewMode}:${fromDate || 'none'}:${toDate || 'none'}:${targetUserId || 'self'}`, currentUser?.companyId);
+  const {
+      data: taskList,
+      setData: setTaskList,
+      loading: tasksLoading,
+      refreshing: tasksRefreshing,
+      refresh: refreshTasks,
+  } = useCachedList({
+      cacheKey: tasksCacheKey,
+      enabled: !!currentUser?.companyId && usersReady,
+      fetcher: async () => {
+          const [received, given] = await Promise.all([
+              fetchTasks({ direction: 'received', userId: targetUserId, fromDate, toDate, limit: 500 }),
+              fetchTasks({ direction: 'given', userId: targetUserId, fromDate, toDate, limit: 500 }),
+          ]);
+          const merged = new Map<string, any>();
+          [...received, ...given].forEach((t) => merged.set(t.id, t));
+          return Array.from(merged.values());
+      },
+  });
 
   const onRefresh = async () => {
       setRefreshing(true);
-      await loadData();
+      await refreshTasks();
       setRefreshing(false);
   };
 
@@ -428,7 +437,7 @@ export default function TaskScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListEmptyComponent={
             <View style={{alignItems:'center', marginTop:2}}>
-                {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                {tasksLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
                     <>
                         <Ionicons name="checkbox-outline" size={60} color="#ccc" />
                         <Text style={{color:'gray', marginTop:10}}>No Tasks Found</Text>
