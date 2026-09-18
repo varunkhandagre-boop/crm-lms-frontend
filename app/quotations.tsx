@@ -12,6 +12,9 @@ import { useData } from './context/DataContext';
 // 🔥 Phase 2: quotations now go through the new backend API
 import { listQuotations } from '../services/api/quotations';
 import { fetchTeamMembers } from '../services/api/users';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 
 export default function QuotationsListScreen() {
@@ -21,12 +24,11 @@ export default function QuotationsListScreen() {
     const { companyProfile, currentUser } = useData(); 
     
     // 🔥 SaaS Engine kept only for users
-    const { fetchSaaSData, isDbLoading } = useSaaSDB();
+    const { isDbLoading } = useSaaSDB();
 
-    const [quotations, setQuotations] = useState<any[]>([]);
+    // quotations now comes from useCachedList below (cache-first)
     const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
 
-    const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
 
     const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('Month'); 
@@ -47,38 +49,41 @@ export default function QuotationsListScreen() {
         else setVisibleCount(20); 
     }, [viewMode, currentDate, selectedEmployeeName, searchText]);
 
-    // 🔥 LOAD DATA — quotations via new API; users via Firestore
-    const loadData = async () => {
-        if (!currentUser?.companyId) return;
-        setLoading(true);
-        try {
-            const [quotes, users] = await Promise.all([
-                listQuotations(), // was: fetchSaaSData("quotations")
-                fetchTeamMembers()
-            ]);
-            
+    // 🔥 QUOTATIONS — cache-first (instant from AsyncStorage, then
+    // background refresh). See hooks/useCachedList.ts.
+    const quotationsCacheKey = buildCacheKey('quotations', currentUser?.companyId);
+    const {
+        data: quotations,
+        loading,
+        refreshing: quotationsRefreshing,
+        refresh: refreshQuotations,
+    } = useCachedList({
+        cacheKey: quotationsCacheKey,
+        enabled: !!currentUser?.companyId,
+        fetcher: async () => {
+            const quotes = await listQuotations(); // was: fetchSaaSData("quotations")
             quotes.sort((a: any, b: any) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
-            setQuotations(quotes);
+            return quotes;
+        },
+    });
 
+    // Users — unchanged plain fetch-on-mount (out of scope for this pass).
+    useEffect(() => {
+        const loadUsers = async () => {
+            if (!currentUser?.companyId) return;
+            const users = await fetchTeamMembers();
             if (canManage) {
                 const uniqueUsers = Array.from(new Set(users.map((u:any) => u.name)))
                     .map(name => users.find((u:any) => u.name === name));
                 setEmployees([{ id: 'All', name: 'All' }, ...uniqueUsers as any]);
             }
-        } catch (error) {
-            console.log(error);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        loadData();
+        };
+        loadUsers();
     }, [currentUser]);
 
     const onRefresh = async () => {
         setRefreshing(true);
-        await loadData();
+        await refreshQuotations();
         setRefreshing(false);
     };
 
