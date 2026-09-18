@@ -22,7 +22,7 @@ import {
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 3: product catalog now goes through the new backend API
-import { createProduct, deleteProduct, listProducts, updateProduct } from '../services/api/products';
+import { bulkDeleteProducts, createProduct, deleteProduct, listProducts, updateProduct } from '../services/api/products';
 
 export default function ProductMasterScreen() {
     const router = useRouter();
@@ -55,6 +55,8 @@ export default function ProductMasterScreen() {
     const [modalVisible, setModalVisible] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [expandedId, setExpandedId] = useState<string | null>(null);
+    const [selectedForBulk, setSelectedForBulk] = useState<Set<string>>(new Set());
+    const [bulkMode, setBulkMode] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null); 
 
     const [visibleCount, setVisibleCount] = useState(20);
@@ -177,6 +179,36 @@ export default function ProductMasterScreen() {
             }}
         ]);
     };
+    
+    const toggleBulkSelect = (id: string) => {
+    setSelectedForBulk((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        return next;
+    });
+};
+
+const handleBulkDelete = () => {
+    if (selectedForBulk.size === 0) return;
+    Alert.alert(
+        'Delete Selected',
+        `Delete ${selectedForBulk.size} selected product(s)? This cannot be undone.`,
+        [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Delete', style: 'destructive', onPress: async () => {
+                try {
+                    await bulkDeleteProducts(Array.from(selectedForBulk));
+                    setSelectedForBulk(new Set());
+                    setBulkMode(false);
+                    loadProducts();
+                    Alert.alert('Success ✅', 'Selected products deleted.');
+                } catch (e: any) {
+                    Alert.alert('Error', e?.message || 'Could not delete products.');
+                }
+            }}
+        ]
+    );
+};
 
     const renderItem = ({ item }: any) => {
         const isExpanded = expandedId === item.id;
@@ -184,9 +216,21 @@ export default function ProductMasterScreen() {
         const displayVideos = item.videos || [];
 
         return (
-            <TouchableOpacity style={styles.card} activeOpacity={0.9} onPress={() => setExpandedId(isExpanded ? null : item.id)}>
+            <TouchableOpacity 
+                style={styles.card} 
+                activeOpacity={0.9} 
+                onPress={() => bulkMode ? toggleBulkSelect(item.id) : setExpandedId(isExpanded ? null : item.id)}
+            >
                 <View style={styles.cardHeader}>
                     <View style={{flexDirection:'row', alignItems:'center', flex:1}}>
+                        {bulkMode && (
+                            <Ionicons
+                                name={selectedForBulk.has(item.id) ? 'checkbox' : 'square-outline'}
+                                size={22}
+                                color="#3b5998"
+                                style={{ marginRight: 10 }}
+                            />
+                        )}
                         <View style={styles.iconBg}><Ionicons name="cube" size={24} color="#3b5998" /></View>
                         <View>
                             <Text style={styles.prodName}>{item.name}</Text>
@@ -308,6 +352,17 @@ export default function ProductMasterScreen() {
             <Text style={{textAlign:'right', fontSize:12, color:'gray', paddingRight:15, marginBottom:5}}>
                 Total: <Text style={{fontWeight:'bold', color:'#3b5998'}}>{filteredList.length}</Text>
             </Text>
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 15, paddingVertical: 8 }}>
+                <TouchableOpacity onPress={() => { setBulkMode(!bulkMode); setSelectedForBulk(new Set()); }}>
+                    <Text style={{ color: '#3b5998', fontWeight: 'bold', fontSize: 12 }}>{bulkMode ? 'Cancel Select' : 'Select Multiple'}</Text>
+                </TouchableOpacity>
+                {bulkMode && selectedForBulk.size > 0 && (
+                    <TouchableOpacity onPress={handleBulkDelete} style={{ backgroundColor: '#e74c3c', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 }}>
+                        <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 12 }}>Delete ({selectedForBulk.size})</Text>
+                    </TouchableOpacity>
+                )}
+            </View>
 
             <FlatList 
                 data={renderedList}

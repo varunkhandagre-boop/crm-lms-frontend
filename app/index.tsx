@@ -28,6 +28,7 @@ import { useData } from './context/DataContext';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { doc, setDoc } from 'firebase/firestore';
+import { fetchNotifications } from '../services/api/notifications';
 import { savePushTokenToBackend } from '../services/api/users';
 import { auth, db } from './../firebaseConfig';
 
@@ -84,11 +85,26 @@ export default function HomeScreen() {
                 }
             } catch (e) {}
 
+            // Unread notification badge — refreshed whenever the home screen
+            // regains focus (app open, tab switch back, nav back), instead of
+            // a background setInterval poll.
+             if (currentUser?.companyId) {
+                try {
+                   const unread = await fetchNotifications({ filter: 'unread' });
+                   setUnreadCount(unread.length);
+                } catch (e) {
+                   // Badge staying at its last-known value on a transient
+                 // error beats crashing the home screen.
+                }
+            }
+
             if (shouldOpenSidebar) { setSidebarVisible(true); setShouldOpenSidebar(false); }
         };
         loadData();
     }, [currentUser, shouldOpenSidebar])
 );
+
+const [unreadCount, setUnreadCount] = useState(0);
 
 const [branding, setBranding] = useState({
       name: 'LMS',
@@ -361,6 +377,11 @@ const saveTokenToDatabase = async (token: string) => {
               <View style={{flexDirection:'row', alignItems:'center'}}>
                   <TouchableOpacity style={styles.bellBtn} onPress={() => router.push('/notifications' as any)}>
                       <Ionicons name="notifications-outline" size={26} color="#333" />
+                        {unreadCount > 0 && (
+                            <View style={{ position: 'absolute', top: -4, right: -4, backgroundColor: '#e74c3c', borderRadius: 10, minWidth: 18, height: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 }}>
+                                <Text style={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+                            </View>
+                        )}
                       {notificationCount > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{notificationCount}</Text></View>}
                   </TouchableOpacity>
                   

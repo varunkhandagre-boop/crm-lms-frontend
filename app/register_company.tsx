@@ -20,6 +20,7 @@ import { auth } from '../firebaseConfig';
 
 // 🔥 SAAS IMPORTS
 import { useSaaSDB } from '../hooks/useSaaSDB';
+import { useData } from './context/DataContext';
 
 // 🔥 INDIAN STATES & DISTRICTS DATA
 import { districtPincodes, indianStatesAndDistricts } from '../constants/indianStatesData';
@@ -30,6 +31,7 @@ import { registerCompanyOnBackend } from '../services/api/registration';
 
 export default function RegisterCompanyScreen() {
     const router = useRouter();
+    const { login } = useData();
     const [loading, setLoading] = useState(false);
 
     // 🔥 Naya SaaS Engine
@@ -188,7 +190,14 @@ export default function RegisterCompanyScreen() {
                 { cancelable: false } 
             );
             // Automatically sign out to force fresh context login
-            await auth.signOut();
+            // Establish a proper Postgres session (JWT) so SubscriptionScreen's
+            // API calls (plans list, gateway config) are authenticated — the
+            // Firestore signup alone doesn't give apiClient a token to use.
+            try {
+                await login(email, password);
+            } catch (loginErr) {
+                console.warn('Post-registration auto-login failed:', loginErr);
+            }
 
         } catch (error: any) {
             let msg = error.message;
@@ -279,6 +288,7 @@ export default function RegisterCompanyScreen() {
 
             {/* STATE SELECTION MODAL */}
             <Modal visible={stateModalVisible} animationType="slide" transparent={true}>
+                <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
                         <View style={styles.modalHeader}>
@@ -315,10 +325,12 @@ export default function RegisterCompanyScreen() {
                         />
                     </View>
                 </View>
+            </KeyboardAvoidingView>
             </Modal>
 
             {/* DISTRICT SELECTION MODAL */}
             <Modal visible={districtModalVisible} animationType="slide" transparent={true}>
+                <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
                         <View style={styles.modalHeader}>
@@ -355,6 +367,7 @@ export default function RegisterCompanyScreen() {
                         />
                     </View>
                 </View>
+            </KeyboardAvoidingView>
             </Modal>
 
         </KeyboardAvoidingView>

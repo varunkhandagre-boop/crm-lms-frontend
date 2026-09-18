@@ -424,35 +424,37 @@ export default function EmployeeAdvanceScreen() {
                         </View>
 
                         {canManage && selectedItem.status === 'Pending' && (
-                            <View style={styles.actionContainer}>
-                                <TouchableOpacity 
-                                    style={[styles.rejectBtn, updatingStatus !== null && { opacity: 0.6 }]} 
-                                    onPress={() => handleStatusUpdate('Rejected')}
-                                    disabled={updatingStatus !== null}
-                                >
-                                    {updatingStatus === 'Rejected' ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.btnText}>Reject</Text>}
-                                </TouchableOpacity>
+    <>
+        <View style={{ marginTop: 20, marginBottom: 10 }}>
+            <Text style={{ fontSize: 12, color: '#777', marginBottom: 5 }}>Monthly Installment (₹) — optional, leave blank to deduct as salary allows</Text>
+            <TextInput
+                style={{ borderWidth: 1, borderColor: '#eee', borderRadius: 8, padding: 10, backgroundColor: '#fafafa', height: 44 }}
+                placeholder="e.g. 3000"
+                keyboardType="numeric"
+                value={installmentAmount}
+                onChangeText={setInstallmentAmount}
+            />
+        </View>
 
-                                <View style={{ marginBottom: 10, flexShrink: 0 }}>
-                                    <Text style={{ fontSize: 12, color: '#777', marginBottom: 5 }}>Monthly Installment (₹) — optional, leave blank to deduct as salary allows</Text>
-                                    <TextInput
-                                        style={{ borderWidth: 1, borderColor: '#eee', borderRadius: 8, padding: 10, backgroundColor: '#fafafa', height: 44 }}
-                                        placeholder="e.g. 3000"
-                                        keyboardType="numeric"
-                                        value={installmentAmount}
-                                        onChangeText={setInstallmentAmount}
-                                    />
-                                </View>
+        <View style={styles.actionContainer}>
+            <TouchableOpacity 
+                style={[styles.rejectBtn, updatingStatus !== null && { opacity: 0.6 }]} 
+                onPress={() => handleStatusUpdate('Rejected')}
+                disabled={updatingStatus !== null}
+            >
+                {updatingStatus === 'Rejected' ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.btnText}>Reject</Text>}
+            </TouchableOpacity>
 
-                                <TouchableOpacity 
-                                    style={[styles.approveBtn, updatingStatus !== null && { opacity: 0.6 }]} 
-                                    onPress={() => handleStatusUpdate('Approved')}
-                                    disabled={updatingStatus !== null}
-                                >
-                                    {updatingStatus === 'Approved' ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.btnText}>Approve</Text>}
-                                </TouchableOpacity>
-                            </View>
-                        )}
+            <TouchableOpacity 
+                style={[styles.approveBtn, updatingStatus !== null && { opacity: 0.6 }]} 
+                onPress={() => handleStatusUpdate('Approved')}
+                disabled={updatingStatus !== null}
+            >
+                {updatingStatus === 'Approved' ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.btnText}>Approve</Text>}
+            </TouchableOpacity>
+        </View>
+    </>
+)}
                     </ScrollView>
                 )}
             </View>

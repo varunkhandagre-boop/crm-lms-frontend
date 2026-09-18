@@ -258,7 +258,7 @@ export default function CompanyProfileScreen() {
                                 <Text style={{fontSize: 10, color: '#d32f2f', marginTop: 5, textAlign: 'right'}}>Limit reached. Contact Admin to upgrade.</Text>
                             )}
                         </View>
-                        {currentUser?.role === 'ADMIN' && (
+                        {currentUser?.role?.toLowerCase() === 'admin' && (
                             <TouchableOpacity 
                                 style={{ backgroundColor: '#2e7d32', padding: 12, borderRadius: 8, marginTop: 15, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', elevation: 2 }}
                                 onPress={() => router.push({ pathname: '/SubscriptionScreen' as any, params: { companyId: currentUser?.companyId } })}

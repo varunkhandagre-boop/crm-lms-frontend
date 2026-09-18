@@ -283,8 +283,10 @@ const GUIDE_SECTIONS = [
         title: 'Admin Control (Overview)',
         steps: [
             'Go to Sidebar → "Admin Control" — only visible to Admins.',
-            'Users Tab: Add, edit, or disable employee accounts.',
+            'Users Tab: Add, edit, or disable employee accounts. Tap "Select Multiple" to deactivate several employees at once.',
             'Permissions Tab: Control what each role or employee can see in the app.',
+            'Holidays Tab: Manage the company holiday list.',
+            'History Tab: See a log of who made sensitive changes (salary edits, deletions, permission changes) and when.',
             'From here you can also change an employee\'s role, target, leave balance, and password.',
             'Changes take effect immediately — employee may need to reopen the app.',
         ],
@@ -321,6 +323,56 @@ const GUIDE_SECTIONS = [
             'Scan the UPI QR code to pay, then tap "I Have Paid".',
             'Your plan activates once the payment is verified (usually within 1 hour).',
             'A warning badge appears in the sidebar showing days remaining when plan is within 30 days of expiry. Tap it to go directly to renewal.',
+        ],
+    },
+
+    {
+        icon: 'cash',
+        color: '#2e7d32',
+        title: 'Payroll',
+        steps: [
+            'Go to Sidebar → "Payroll".',
+            'Admins/Managers/Accounts: use the "Salary Rules" tab to set incentive commission %, late-coming cutoff time, minimum working hours, and leave-quota penalty — set this up once.',
+            'On the "Generate" tab, pick the Month and Year, then select an employee (or "Calculate All Employees") and tap "Calculate Preview" to see the full breakdown before saving.',
+            'Tap "Generate Payslip" to save it permanently — this also settles any outstanding advances that were deducted.',
+            'Tap any payslip in "Previously Generated" to see its detail and download it as a PDF.',
+            'Select multiple payslips using the checkboxes and tap "Export Excel" to download them as a spreadsheet.',
+            'Employees: open Payroll to see "This Month\'s Attendance" summary and "My Payslips" — only your own records. You also get a push notification when a new payslip is generated for you.',
+        ],
+    },
+    {
+        icon: 'cloud-upload',
+        color: '#00897b',
+        title: 'Bulk Import (Products / Employees / Holidays)',
+        steps: [
+            'Products: open Product Master, tap the green cloud-upload icon in the header.',
+            'Employees: open Admin Control → Users tab, tap the green floating cloud-upload button.',
+            'Holidays: open Admin Control → Holidays tab, tap the green floating cloud-upload button.',
+            'Tap "Download Template" to get a ready-made Excel sheet with the correct columns, fill it in, then tap "Choose Excel File" to upload it back.',
+            'Review the preview screen before confirming — it shows which rows are new and which already exist.',
+            'New employees created this way get the same default starting password, shown on screen after import.',
+        ],
+    },
+    {
+        icon: 'location',
+        color: '#c62828',
+        title: 'Office / Field Attendance Tagging',
+        steps: [
+            'Admin: go to Company Profile and tap "Set Office Location" while standing at your office — this is a one-time setup.',
+            'After that, every Day In is automatically tagged "Office" (green) or "Field" (orange) based on distance from that location.',
+            'The tag appears next to each attendance entry and is included when exporting Attendance to Excel.',
+        ],
+    },
+    {
+        icon: 'chatbubbles',
+        color: '#5e35b1',
+        title: 'Messaging Center (Templates & Broadcast)',
+        steps: [
+            'Go to Sidebar → "Messaging Center".',
+            'Templates Tab: create and manage reusable WhatsApp/Email message templates.',
+            'Pending Tab: see messages waiting to be approved or sent.',
+            'History Tab: view previously sent messages and their delivery status.',
+            'Broadcast Tab: send a message to a group of contacts at once.',
         ],
     },
 ];

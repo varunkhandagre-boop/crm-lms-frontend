@@ -227,7 +227,7 @@ export default function SubscriptionScreen() {
     return (
         <View style={styles.container}>
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={{ position: 'absolute', left: 20, bottom: 15 }}>
+                <TouchableOpacity onPress={() => router.replace('/' as any)} style={{ position: 'absolute', left: 20, bottom: 15 }}>
                     <Ionicons name="arrow-back" size={24} color="#3b5998" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Subscription & Renewal</Text>
