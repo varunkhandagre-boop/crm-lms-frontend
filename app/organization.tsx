@@ -7,6 +7,7 @@ import {
     FlatList,
     Linking,
     Modal,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
@@ -20,6 +21,9 @@ import { useData } from './context/DataContext';
 
 // 🔥 Phase 10: organizations now come from Postgres via these adapters
 import { fetchOrganizations, deleteOrganization } from '../services/api/organizations';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function OrganizationScreen() {
   const router = useRouter();
@@ -28,9 +32,7 @@ export default function OrganizationScreen() {
   const { currentUser, user } = useData(); 
   const activeUser = currentUser || user;
 
-  // 🔥 Local loading state (no more useSaaSDB here)
-  const [isDbLoading, setIsDbLoading] = useState(true);
-  const [orgList, setOrgList] = useState<any[]>([]);
+  // orgList now comes from useCachedList below (cache-first)
 
   // --- STATES ---
   const [searchText, setSearchText] = useState('');
@@ -48,21 +50,20 @@ export default function OrganizationScreen() {
       setVisibleCount(20);
   }, [searchText]);
 
-  // 🔥 Phase 10: loads from Postgres via fetchOrganizations()
-  const loadData = async () => {
-      if (!activeUser?.companyId) return;
-      setIsDbLoading(true);
-      try {
-          const orgs = await fetchOrganizations();
-          setOrgList(orgs);
-      } finally {
-          setIsDbLoading(false);
-      }
-  };
-
-  useEffect(() => {
-      loadData();
-  }, [activeUser]);
+  // 🔥 ORGANIZATIONS — cache-first (instant from AsyncStorage, then
+  // background refresh). See hooks/useCachedList.ts.
+  const orgsCacheKey = buildCacheKey('organizations', activeUser?.companyId);
+  const {
+      data: orgList,
+      setData: setOrgList,
+      loading: isDbLoading,
+      refreshing: orgsRefreshing,
+      refresh: refreshOrgs,
+  } = useCachedList({
+      cacheKey: orgsCacheKey,
+      enabled: !!activeUser?.companyId,
+      fetcher: fetchOrganizations, // Phase 10
+  });
 
   const getFilteredData = () => {
     let data = orgList ? [...orgList] : [];
@@ -235,6 +236,9 @@ export default function OrganizationScreen() {
         keyExtractor={item => item.id}
         renderItem={renderItem}
         contentContainerStyle={styles.contentContainer}
+        refreshControl={
+            <RefreshControl refreshing={orgsRefreshing} onRefresh={refreshOrgs} colors={['#3b5998']} tintColor="#3b5998" />
+        }
         ListEmptyComponent={
             <View style={{alignItems:'center', marginTop:50}}>
                 {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
