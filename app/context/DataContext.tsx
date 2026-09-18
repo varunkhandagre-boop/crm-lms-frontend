@@ -30,6 +30,7 @@ import { auth, db } from '../../firebaseConfig';
 import { bridgeLogin, bridgeLogout, getStoredPostgresUser } from '../../services/api/authBridge';
 import { listLeads } from '../../services/api/leads';
 import { listSalesVisits } from '../../services/api/salesVisits';
+import { clearAllListCaches } from '../../utils/listCache';
 import { registerForPushNotificationsAsync, sendExpoPushNotification } from '../../utils/notificationHelper';
 
 // --- DATA TYPES (🔥 SaaS Variables Added) ---
@@ -1316,6 +1317,10 @@ const notifQuery = currentUser.role === 'SuperAdmin'
       staticDataLoaded.current = false;
       isPostgresSession.current = false;
       await bridgeLogout();
+      // Wipe cached list screens (see utils/listCache.ts) so a different
+      // company logging in on this same device never briefly sees this
+      // company's cached data before the network refresh replaces it.
+      await clearAllListCaches();
   };
   
   const markNotificationRead = async (id: string) => {

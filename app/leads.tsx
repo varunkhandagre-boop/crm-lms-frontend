@@ -7,6 +7,7 @@ import {
     FlatList,
     Linking,
     Modal,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
@@ -21,6 +22,9 @@ import { useData } from './context/DataContext';
 // 🔥 Phase 1: leads now go through the new backend API
 import { listLeads } from '../services/api/leads';
 import { fetchTeamMembers } from '../services/api/users';
+// 🔥 Cache-first list loading pilot (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function LeadsScreen() {
     const router = useRouter();
@@ -28,11 +32,12 @@ export default function LeadsScreen() {
     // 🔥 1. Context se sirf user
     const { currentUser } = useData();
 
-    // 🔥 2. SaaS Engine ab sirf users ke liye
-    const { fetchSaaSData, isDbLoading } = useSaaSDB();
+    // 🔥 2. SaaS Engine — only isDbLoading (search-icon spinner) still used here;
+    // leads no longer go through this (see useCachedList below)
+    const { isDbLoading } = useSaaSDB();
 
     // 🔥 3. Lazy Loaded States
-    const [leadsList, setLeadsList] = useState<any[]>([]);
+    // leadsList now comes from useCachedList below (cache-first pilot)
     const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
 
     // --- STATES ---
@@ -67,26 +72,35 @@ export default function LeadsScreen() {
     const leadStatuses = ['All', 'Interested', 'Follow Up', 'Demo Planned', 'Order Expected', 'Converted (Win)', 'Lost'];
     const leadStages = ['All', 'New', 'Introduction', 'Technical Review', 'Quotation', 'Negotiation', 'Order Closed'];
 
-    // 🔥 4. LEADS LOAD ON MOUNT — via new backend API; users via Firestore
-    useEffect(() => {
-        const loadData = async () => {
-            if (currentUser?.companyId) {
-                const [leads, users] = await Promise.all([
-                    listLeads(), // was: fetchSaaSData("leads")
-                    fetchTeamMembers()
-                ]);
-                setLeadsList(leads);
+    // 🔥 4. LEADS — cache-first (instant from AsyncStorage, then background
+    // refresh from the API). See hooks/useCachedList.ts for how this works
+    // and why the cache key must include companyId.
+    const leadsCacheKey = buildCacheKey('leads', currentUser?.companyId);
+    const {
+        data: leadsList,
+        loading: leadsLoading,
+        refreshing: leadsRefreshing,
+        refresh: refreshLeads,
+    } = useCachedList({
+        cacheKey: leadsCacheKey,
+        enabled: !!currentUser?.companyId,
+        fetcher: listLeads, // was: fetchSaaSData("leads")
+    });
 
-                if (canViewEmployeeFilter) {
-                    const mappedUsers = users.map((u: any) => ({
-                        id: u.id,
-                        name: u.name || 'Unknown User'
-                    }));
-                    setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
-                }
+    // Team members (still Firestore, unrelated to the leads cache pilot) —
+    // unchanged plain fetch-on-mount.
+    useEffect(() => {
+        const loadTeam = async () => {
+            if (currentUser?.companyId && canViewEmployeeFilter) {
+                const users = await fetchTeamMembers();
+                const mappedUsers = users.map((u: any) => ({
+                    id: u.id,
+                    name: u.name || 'Unknown User'
+                }));
+                setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
             }
         };
-        loadData();
+        loadTeam();
     }, [currentUser]);
 
     const parseDate = (dateStr: any) => {
@@ -363,9 +377,12 @@ export default function LeadsScreen() {
                 data={renderedList}
                 keyExtractor={item => item.id}
                 contentContainerStyle={styles.contentContainer}
+                refreshControl={
+                    <RefreshControl refreshing={leadsRefreshing} onRefresh={refreshLeads} colors={['#3b5998']} tintColor="#3b5998" />
+                }
                 ListEmptyComponent={
                     <View style={{ alignItems: 'center', marginTop: 50 }}>
-                        {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                        {leadsLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
                             <Text style={{ textAlign: 'center', color: 'gray' }}>No Leads Found</Text>
                         )}
                     </View>
