@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -27,6 +28,9 @@ import {
   listInstallations,
   sendAmcReminder,
 } from '../services/api/installations';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
@@ -38,9 +42,9 @@ export default function InstallationListScreen() {
   const router = useRouter();
   
   const { currentUser, companyProfile } = useData(); 
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+  const { isDbLoading } = useSaaSDB();
 
-  const [installList, setInstallList] = useState<any[]>([]);
+  // installList now comes from useCachedList below (cache-first)
   const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
 
   const [searchText, setSearchText] = useState('');
@@ -75,27 +79,36 @@ export default function InstallationListScreen() {
       else setVisibleCount(20); 
   }, [viewMode, currentDate, searchText, selectedEmployee]);
 
-  // 🔥 LOAD DATA — installations via new API; users via Firestore
-  const loadData = async () => {
-      if (currentUser?.companyId) {
-          const [installs, users] = await Promise.all([
-              listInstallations(), // was: fetchSaaSData("installations")
-              fetchTeamMembers()
-          ]);
-          setInstallList(installs);
+  // 🔥 INSTALLATIONS — cache-first (instant from AsyncStorage, then
+  // background refresh). See hooks/useCachedList.ts.
+  const installsCacheKey = buildCacheKey('installations', currentUser?.companyId);
+  const {
+      data: installList,
+      setData: setInstallList,
+      loading: installsLoading,
+      refreshing: installsRefreshing,
+      refresh: refreshInstalls,
+  } = useCachedList({
+      cacheKey: installsCacheKey,
+      enabled: !!currentUser?.companyId,
+      fetcher: listInstallations, // was: fetchSaaSData("installations")
+  });
 
-          if (isAdmin) {
-              const mappedUsers = users.map((u: any) => ({
-                  id: u.id,
-                  name: u.name || 'Unknown User'
-              }));
-              setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
-          }
-      }
-  };
-
+  // Users — unchanged plain fetch-on-mount (out of scope for this pass).
   useEffect(() => {
-      loadData();
+      const loadUsers = async () => {
+          if (currentUser?.companyId) {
+              const users = await fetchTeamMembers();
+              if (isAdmin) {
+                  const mappedUsers = users.map((u: any) => ({
+                      id: u.id,
+                      name: u.name || 'Unknown User'
+                  }));
+                  setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
+              }
+          }
+      };
+      loadUsers();
   }, [currentUser]);
 
   const parseDate = (dateStr: any) => {
@@ -677,9 +690,12 @@ export default function InstallationListScreen() {
         keyExtractor={item => item.id}
         renderItem={renderItem}
         contentContainerStyle={{ padding: 5, paddingBottom: 50 }}
+        refreshControl={
+            <RefreshControl refreshing={installsRefreshing} onRefresh={refreshInstalls} colors={['#3b5998']} tintColor="#3b5998" />
+        }
         ListEmptyComponent={
           <View style={{ alignItems: 'center', marginTop: 50 }}>
-            {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+            {installsLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
                 <>
                     <Ionicons name="cube-outline" size={60} color="#ddd" />
                     <Text style={{ textAlign: 'center', marginTop: 10, color: 'gray' }}>No Installations Found</Text>
