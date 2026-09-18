@@ -7,6 +7,7 @@ import {
     FlatList,
     Image,
     Modal,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
@@ -21,15 +22,20 @@ import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: expenses now via new backend API
 import { listExpenses, settleExpensesForEmployee, updateExpenseStatus } from '../services/api/expenses';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function ExpenseScreen() {
   const router = useRouter();
   
   const { currentUser, addNotification } = useData();
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); expenses no longer go through this
+  const { isDbLoading } = useSaaSDB();
 
-  const [expenseList, setExpenseList] = useState<any[]>([]);
+  // expenseList now comes from useCachedList below (cache-first, raw — senderName enrichment happens at filter time)
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
+  const [senderNameMap, setSenderNameMap] = useState<Map<string, string>>(new Map());
 
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All');
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -54,31 +60,44 @@ export default function ExpenseScreen() {
       else setVisibleCount(20); 
   }, [viewMode, currentDate, selectedEmployeeName, searchText]);
 
-  // 🔥 LOAD DATA — expenses via new API; users via Firestore (for name lookup)
-  const loadData = async () => {
-      if (currentUser?.companyId) {
-          const [expenses, users] = await Promise.all([
-              listExpenses(), // was: fetchSaaSData("expenses")
-              fetchTeamMembers()
-          ]);
+  // 🔥 EXPENSES — cache-first (instant from AsyncStorage, then background
+  // refresh from the API). Cached raw (no senderName enrichment baked in —
+  // that's computed at filter time from senderNameMap below, since the
+  // team-members lookup itself isn't cached). See hooks/useCachedList.ts.
+  const expensesCacheKey = buildCacheKey('expenses', currentUser?.companyId);
+  const {
+      data: expenseList,
+      setData: setExpenseList,
+      loading: expensesLoading,
+      refreshing: expensesRefreshing,
+      refresh: refreshExpenses,
+  } = useCachedList({
+      cacheKey: expensesCacheKey,
+      enabled: !!currentUser?.companyId,
+      fetcher: listExpenses, // was: fetchSaaSData("expenses")
+  });
 
-          const userMap = new Map(users.map((u: any) => [u.id, u.name]));
-          setExpenseList(expenses.map((e: any) => ({ ...e, senderName: userMap.get(e.senderId) || 'Unknown' })));
-
-          if (canManage) {
-              const uniqueMap = new Map();
-              users.forEach((u: any) => {
-                  if (u.name && !uniqueMap.has(u.name)) {
-                      uniqueMap.set(u.name, { id: u.id || '0', name: u.name });
-                  }
-              });
-              setEmployees([{ id: 'All', name: 'All' }, ...Array.from(uniqueMap.values())]);
-          }
-      }
-  };
-
+  // Team members — unchanged plain fetch-on-mount (out of scope for this
+  // pass); builds both the employee-picker list and the senderId→name map
+  // used to enrich expense rows at filter time.
   useEffect(() => {
-      loadData();
+      const loadTeam = async () => {
+          if (currentUser?.companyId) {
+              const users = await fetchTeamMembers();
+              setSenderNameMap(new Map(users.map((u: any) => [u.id, u.name])));
+
+              if (canManage) {
+                  const uniqueMap = new Map();
+                  users.forEach((u: any) => {
+                      if (u.name && !uniqueMap.has(u.name)) {
+                          uniqueMap.set(u.name, { id: u.id || '0', name: u.name });
+                      }
+                  });
+                  setEmployees([{ id: 'All', name: 'All' }, ...Array.from(uniqueMap.values())]);
+              }
+          }
+      };
+      loadTeam();
   }, [currentUser]);
 
   const parseDate = (dateStr: any) => {
@@ -115,7 +134,9 @@ export default function ExpenseScreen() {
 
   // --- FILTER LOGIC — filters by senderId now, not senderName ---
   const getFilteredData = () => {
-    let data = Array.isArray(expenseList) ? [...expenseList] : [];
+    let data = Array.isArray(expenseList)
+        ? expenseList.map((e: any) => ({ ...e, senderName: senderNameMap.get(e.senderId) || 'Unknown' }))
+        : [];
 
     if (canManage) {
         if(selectedEmployeeId !== 'All') {
@@ -197,7 +218,7 @@ export default function ExpenseScreen() {
       setIsSettling(true);
       try {
           await settleExpensesForEmployee(selectedEmployeeId);
-          await loadData(); // Silent Reload
+          await refreshExpenses(); // Silent Reload
           Alert.alert("Success", "Expenses Settled! Balance is now 0.");
       } catch (error) {
           Alert.alert("Error", "Settlement failed.");
@@ -367,10 +388,13 @@ export default function ExpenseScreen() {
         keyExtractor={item => item.id}
         renderItem={renderItem}
         contentContainerStyle={{padding: 15}}
+        refreshControl={
+            <RefreshControl refreshing={expensesRefreshing} onRefresh={refreshExpenses} colors={['#3b5998']} tintColor="#3b5998" />
+        }
         ListEmptyComponent={
             <View style={{alignItems:'center', marginTop:50}}>
                 <Ionicons name="receipt-outline" size={60} color="#ddd" />
-                <Text style={{textAlign:'center', marginTop:10, color:'gray'}}>{isDbLoading ? 'Loading expenses...' : 'No expense records found.'}</Text>
+                <Text style={{textAlign:'center', marginTop:10, color:'gray'}}>{expensesLoading ? 'Loading expenses...' : 'No expense records found.'}</Text>
             </View>
         }
         ListFooterComponent={

@@ -6,6 +6,7 @@ import {
     Alert,
     FlatList,
     Modal,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
@@ -20,15 +21,20 @@ import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: advances now via new backend API
 import { listAdvances, settleAdvancesForEmployee, updateAdvanceStatus } from '../services/api/advances';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function EmployeeAdvanceScreen() {
   const router = useRouter();
   
   const { currentUser, addNotification } = useData();
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); advances no longer go through this
+  const { isDbLoading } = useSaaSDB();
 
-  const [advanceList, setAdvanceList] = useState<any[]>([]);
+  // advanceList now comes from useCachedList below (cache-first, raw — senderName enrichment happens at filter time)
   const [usersList, setUsersList] = useState<any[]>([]);
+  const [senderNameMap, setSenderNameMap] = useState<Map<string, string>>(new Map());
 
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All'); 
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -54,33 +60,43 @@ export default function EmployeeAdvanceScreen() {
       else setVisibleCount(20); 
   }, [viewMode, currentDate, selectedEmployeeName, searchText]);
 
-  // 🔥 LOAD DATA — advances via new API; users via Firestore (for name lookup)
-  const loadData = async () => {
-      if (currentUser?.companyId) {
-          const [advances, users] = await Promise.all([
-              listAdvances(), // was: fetchSaaSData("advances")
-              fetchTeamMembers()
-          ]);
-          
-          setUsersList(users);
-          // resolve senderName for display, since the API only returns senderId
-          const userMap = new Map(users.map((u: any) => [u.id, u.name]));
-          setAdvanceList(advances.map((a: any) => ({ ...a, senderName: userMap.get(a.senderId) || 'Unknown' })));
-          
-          if (canManage) {
-              const uniqueMap = new Map();
-              users.forEach((u: any) => {
-                  if (u.name && !uniqueMap.has(u.name)) {
-                      uniqueMap.set(u.name, { id: u.id || '0', name: u.name });
-                  }
-              });
-              setEmployees([{ id: 'All', name: 'All' }, ...Array.from(uniqueMap.values())]);
-          }
-      }
-  };
+  // 🔥 ADVANCES — cache-first (instant from AsyncStorage, then background
+  // refresh from the API). Cached raw — senderName enrichment happens at
+  // filter time from senderNameMap below, same pattern as expense.tsx.
+  const advancesCacheKey = buildCacheKey('advances', currentUser?.companyId);
+  const {
+      data: advanceList,
+      setData: setAdvanceList,
+      loading: advancesLoading,
+      refreshing: advancesRefreshing,
+      refresh: refreshAdvances,
+  } = useCachedList({
+      cacheKey: advancesCacheKey,
+      enabled: !!currentUser?.companyId,
+      fetcher: listAdvances, // was: fetchSaaSData("advances")
+  });
 
+  // Team members — unchanged plain fetch-on-mount (out of scope for this
+  // pass); builds the employee-picker list and the senderId→name map.
   useEffect(() => {
-      loadData();
+      const loadTeam = async () => {
+          if (currentUser?.companyId) {
+              const users = await fetchTeamMembers();
+              setUsersList(users);
+              setSenderNameMap(new Map(users.map((u: any) => [u.id, u.name])));
+
+              if (canManage) {
+                  const uniqueMap = new Map();
+                  users.forEach((u: any) => {
+                      if (u.name && !uniqueMap.has(u.name)) {
+                          uniqueMap.set(u.name, { id: u.id || '0', name: u.name });
+                      }
+                  });
+                  setEmployees([{ id: 'All', name: 'All' }, ...Array.from(uniqueMap.values())]);
+              }
+          }
+      };
+      loadTeam();
   }, [currentUser]);
 
   const parseDate = (dateStr: any) => {
@@ -117,7 +133,9 @@ export default function EmployeeAdvanceScreen() {
 
   // --- FILTER LOGIC — filters by senderId now, not senderName ---
   const getFilteredData = () => {
-    let data = Array.isArray(advanceList) ? [...advanceList] : [];
+    let data = Array.isArray(advanceList)
+        ? advanceList.map((a: any) => ({ ...a, senderName: senderNameMap.get(a.senderId) || 'Unknown' }))
+        : [];
 
     if (canManage) {
         if(selectedEmployeeId !== 'All') {
@@ -199,7 +217,7 @@ export default function EmployeeAdvanceScreen() {
       setIsSettling(true);
       try {
           await settleAdvancesForEmployee(selectedEmployeeId);
-          await loadData(); // Silent reload
+          await refreshAdvances(); // Silent reload
           Alert.alert("Success", "Account Settled! Balance is now 0.");
       } catch (error) {
           Alert.alert("Error", "Settlement failed.");
@@ -363,8 +381,11 @@ export default function EmployeeAdvanceScreen() {
         keyExtractor={item => item.id}
         renderItem={renderItem}
         contentContainerStyle={{padding: 15, paddingBottom: 50}} 
+        refreshControl={
+            <RefreshControl refreshing={advancesRefreshing} onRefresh={refreshAdvances} colors={['#3b5998']} tintColor="#3b5998" />
+        }
         ListEmptyComponent={
-            <Text style={{textAlign:'center', marginTop:50, color:'gray'}}>{isDbLoading ? 'Loading data...' : 'No advance records found.'}</Text>
+            <Text style={{textAlign:'center', marginTop:50, color:'gray'}}>{advancesLoading ? 'Loading data...' : 'No advance records found.'}</Text>
         }
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
