@@ -6,6 +6,7 @@ import {
     Alert,
     FlatList,
     Modal,
+    RefreshControl,
     ScrollView,
     Share,
     StyleSheet,
@@ -22,6 +23,9 @@ import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: sales visits now go through the new backend API
 import { deleteSalesVisit as apiDeleteSalesVisit, listSalesVisits } from '../services/api/salesVisits';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function SalesReportScreen() {
   const router = useRouter();
@@ -29,12 +33,13 @@ export default function SalesReportScreen() {
   const { currentUser, markAllNotificationsRead } = useData();
 
   // 🔥 SaaS Engine kept for organizations/users only
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+  const { isDbLoading } = useSaaSDB();
 
-  const [salesVisitList, setSalesVisitList] = useState<any[]>([]);
+  // salesVisitList now comes from useCachedList below (cache-first)
   const [orgList, setOrgList] = useState<any[]>([]);
   const [userList, setUserList] = useState<any[]>([]);
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
       if (markAllNotificationsRead) {
@@ -70,31 +75,48 @@ export default function SalesReportScreen() {
       }
   }, [viewMode, currentDate, visitTypeFilter, searchText, selectedEmployee]);
 
-  // 🔥 LOAD DATA ON MOUNT — visits via new API; orgs/users via Firestore
-  const loadData = async () => {
-      if (currentUser?.companyId) {
-          const [visits, orgs, users] = await Promise.all([
-              listSalesVisits(), // was: fetchSaaSData("sales_reports")
-              fetchOrganizations({ limit: 200 }),
-              fetchTeamMembers()
-          ]);
-          setSalesVisitList(visits);
-          setOrgList(orgs);
-          setUserList(users);
+  // 🔥 SALES VISITS (DSR) — cache-first (instant from AsyncStorage, then
+  // background refresh). See hooks/useCachedList.ts.
+  const salesVisitsCacheKey = buildCacheKey('sales_visits', currentUser?.companyId);
+  const {
+      data: salesVisitList,
+      loading: salesVisitsLoading,
+      refresh: refreshSalesVisits,
+  } = useCachedList({
+      cacheKey: salesVisitsCacheKey,
+      enabled: !!currentUser?.companyId,
+      fetcher: listSalesVisits, // was: fetchSaaSData("sales_reports")
+  });
 
-          if (isAdmin) {
-              const mappedUsers = users.map((u: any) => ({
-                  id: u.id,
-                  name: u.name || 'Unknown User'
-              }));
-              setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
-          }
-      }
-  };
-
+  // Organizations/users — unchanged plain fetch-on-mount (out of scope for
+  // this pass).
   useEffect(() => {
-      loadData();
+      const loadRest = async () => {
+          if (currentUser?.companyId) {
+              const [orgs, users] = await Promise.all([
+                  fetchOrganizations({ limit: 200 }),
+                  fetchTeamMembers()
+              ]);
+              setOrgList(orgs);
+              setUserList(users);
+
+              if (isAdmin) {
+                  const mappedUsers = users.map((u: any) => ({
+                      id: u.id,
+                      name: u.name || 'Unknown User'
+                  }));
+                  setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
+              }
+          }
+      };
+      loadRest();
   }, [currentUser]);
+
+  const onRefresh = async () => {
+      setRefreshing(true);
+      await refreshSalesVisits();
+      setRefreshing(false);
+  };
 
   const getCity = (item: any) => {
       if (item.city) return item.city;
@@ -285,7 +307,7 @@ export default function SalesReportScreen() {
                           await apiDeleteSalesVisit(selectedItem.id);
                           setModalVisible(false);
                           Alert.alert("Deleted", "Visit record has been deleted successfully.");
-                          loadData();
+                          refreshSalesVisits();
                       } catch (error: any) {
                           Alert.alert("Error", error.message);
                       } finally {
@@ -434,9 +456,12 @@ export default function SalesReportScreen() {
           keyExtractor={item => item.id}
           contentContainerStyle={styles.listContent}
           renderItem={renderItem}
+          refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#1565c0']} tintColor="#1565c0" />
+          }
           ListEmptyComponent={
               <View style={{alignItems:'center', marginTop:50}}>
-                  {isDbLoading ? <ActivityIndicator size="large" color="#1565c0"/> : (
+                  {salesVisitsLoading ? <ActivityIndicator size="large" color="#1565c0"/> : (
                       <>
                         <Ionicons name="folder-open-outline" size={60} color="#ddd" />
                         <Text style={{color:'gray', marginTop:0}}>No Visits Found.</Text>
