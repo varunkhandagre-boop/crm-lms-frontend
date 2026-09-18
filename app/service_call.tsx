@@ -23,6 +23,9 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: service calls now via new backend API
 import { closeServiceCall as apiCloseServiceCall, listServiceCalls } from '../services/api/serviceCalls';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 // 🔥 PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
@@ -38,10 +41,10 @@ export default function ServiceCallScreen() {
   
   const { currentUser, companyProfile } = useData(); 
 
-  // 🔥 SaaS Engine kept for organizations/users only
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); service calls no longer go through this
+  const { isDbLoading } = useSaaSDB();
 
-  const [serviceCallList, setServiceCallList] = useState<any[]>([]);
+  // serviceCallList now comes from useCachedList below (cache-first)
   const [orgList, setOrgList] = useState<any[]>([]);
   const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
   const [installList, setInstallList] = useState<any[]>([]);
@@ -79,18 +82,31 @@ export default function ServiceCallScreen() {
   }, [viewMode, currentDate, statusFilter, searchText, selectedEmployee]);
 
   const isAdmin = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
+
+  // 🔥 SERVICE CALLS — cache-first (instant from AsyncStorage, then
+  // background refresh). See hooks/useCachedList.ts.
+  const serviceCallsCacheKey = buildCacheKey('service_calls', currentUser?.companyId);
+  const {
+      data: serviceCallList,
+      setData: setServiceCallList,
+      loading: serviceCallsLoading,
+      refresh: refreshServiceCalls,
+  } = useCachedList({
+      cacheKey: serviceCallsCacheKey,
+      enabled: !!currentUser?.companyId,
+      fetcher: listServiceCalls, // was: fetchSaaSData("service_calls")
+  });
   const openCount = serviceCallList.filter((i: any) => i.status === 'Open' || i.status === 'Assigned').length;
 
-  // 🔥 LOAD DATA — service calls via new API; organizations/users via Firestore
-    const loadData = async () => {
+  // 🔥 Organizations/users/installations — unchanged plain fetch-on-mount
+  // (not part of the cache pilot; out of scope for this pass).
+  const loadRest = async () => {
       if (currentUser?.companyId) {
-          const [services, orgs, users, installs] = await Promise.all([
-              listServiceCalls(), // was: fetchSaaSData("service_calls")
+          const [orgs, users, installs] = await Promise.all([
               fetchOrganizations({ limit: 200 }),
               fetchTeamMembers(),
               listInstallations()
           ]);
-          setServiceCallList(services);
           setOrgList(orgs);
           setInstallList(installs);
 
@@ -105,12 +121,12 @@ export default function ServiceCallScreen() {
   };
 
   useEffect(() => {
-      loadData();
+      loadRest();
   }, [currentUser]);
 
   const onRefresh = async () => {
       setRefreshing(true);
-      await loadData();
+      await Promise.all([refreshServiceCalls(), loadRest()]);
       setRefreshing(false);
   };
 
@@ -592,7 +608,7 @@ export default function ServiceCallScreen() {
         contentContainerStyle={styles.contentContainer}
         ListEmptyComponent={
           <View style={{ alignItems: 'center', marginTop: 50 }}>
-            {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+            {serviceCallsLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
                 <>
                     <Ionicons name="construct-outline" size={60} color="#ddd" />
                     <Text style={{ textAlign: 'center', marginTop: 10, color: 'gray' }}>No Data Found</Text>

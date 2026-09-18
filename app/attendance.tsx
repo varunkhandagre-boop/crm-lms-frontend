@@ -1,11 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Modal, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 // 🔥 SAAS IMPORTS ("users" stays on Firestore until Phase 10)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -22,13 +25,17 @@ export default function AttendanceScreen() {
   // 🔥 1. Context se sirf logged in User
   const { currentUser } = useData();
   
-  // 🔥 2. "users" still Firestore; attendance/leaves/holidays are Postgres now
-  const { fetchSaaSData, isDbLoading: isUsersLoading } = useSaaSDB();
-  const [isAttendanceLoading, setIsAttendanceLoading] = useState(true);
-  const isDbLoading = isUsersLoading || isAttendanceLoading;
+  // 🔥 2. "users" still Firestore. isDbLoading previously gated ALL content here
+  // (attendance + leave-quota + summary), which meant this screen looked slow
+  // every time regardless of the attendance cache, since it was also waiting
+  // on the (uncached) Firestore team-members fetch below. The visible
+  // content only actually depends on attendance data, so the loading gate
+  // now uses attendanceLoading alone (see below) — useSaaSDB() is kept only
+  // in case other code in this file relies on it being called.
+  useSaaSDB();
 
   // 🔥 3. Lazy Loaded Lists
-  const [attendanceList, setAttendanceList] = useState<any[]>([]);
+  // attendanceList now comes from useCachedList below (cache-first)
   const [leaveList, setLeaveList] = useState<any[]>([]);
   const [holidayList, setHolidayList] = useState<any[]>([]);
   const [userList, setUserList] = useState<any[]>([]);
@@ -105,6 +112,39 @@ export default function AttendanceScreen() {
       return "";
   }
 
+  // 🔥 Resolved target-user-id — shared by the cache key below and the
+  // fetch itself, so the cache key always matches what's actually fetched.
+  const resolveTargetUserId = (): string | undefined => {
+      if (!canManage) return undefined; // self, enforced server-side
+      if (filterUser === 'All') return 'all';
+      const match = userList.find((u: any) => u.name === filterUser);
+      return match?.id; // if not found, adapter/route falls back to self — acceptable edge case
+  };
+  const usersReady = !(canManage && filterUser !== 'All' && userList.length === 0);
+  const { fromDate, toDate } = getFetchRange();
+  const targetUserId = resolveTargetUserId();
+
+  // 🔥 ATTENDANCE — cache-first, but unlike Leads/Orders this screen's data
+  // is parameterized by date-range + employee filter, not a flat "whole
+  // company" list — so the cache key includes those params. This means a
+  // *repeat* visit to the same day/view/filter (the common case — e.g.
+  // reopening the screen, which defaults back to "today") is instant; a
+  // genuinely new range still goes to the network like before.
+  const attendanceCacheKey = buildCacheKey(
+      `attendance:${viewMode}:${fromDate}:${toDate}:${targetUserId || 'self'}`,
+      currentUser?.companyId
+  );
+  const {
+      data: attendanceList,
+      loading: attendanceLoading,
+      refreshing: attendanceRefreshing,
+      refresh: refreshAttendance,
+  } = useCachedList({
+      cacheKey: attendanceCacheKey,
+      enabled: !!currentUser?.companyId && usersReady,
+      fetcher: () => fetchAttendance({ userId: targetUserId, fromDate, toDate, limit: 500 }),
+  });
+
   // 🔥 Users list loads once per session (still Firestore, unrelated to date-range paging)
   useEffect(() => {
       const loadUsers = async () => {
@@ -117,41 +157,24 @@ export default function AttendanceScreen() {
       loadUsers();
   }, [currentUser]);
 
-  // 🔥 Bounded date-range fetch for attendance/leaves/holidays — replaces the old
-  // "fetch the entire collection" pattern. Re-runs when the view window or the
-  // selected employee changes. Waits for userList so a manager's employee filter
-  // resolves to the correct userId instead of silently falling back to "self".
+  // 🔥 Leaves/holidays — same date-range dependency as attendance above, but
+  // left as a plain (uncached) fetch for now; smaller payloads, lower value
+  // from caching. Re-runs whenever the range/filter changes.
   useEffect(() => {
-      const loadAttendanceData = async () => {
-          if (!currentUser?.companyId) return;
-          if (canManage && filterUser !== 'All' && userList.length === 0) return; // wait for users to resolve the id
-
-          const { fromDate, toDate } = getFetchRange();
-          let targetUserId: string | undefined;
-          if (canManage) {
-              if (filterUser === 'All') {
-                  targetUserId = 'all';
-              } else {
-                  const match = userList.find((u: any) => u.name === filterUser);
-                  targetUserId = match?.id; // if not found, adapter/route falls back to self — acceptable edge case
-              }
-          } // else undefined => self, enforced server-side regardless
-
-          setIsAttendanceLoading(true);
+      const loadLeavesAndHolidays = async () => {
+          if (!currentUser?.companyId || !usersReady) return;
           try {
-              const [attendance, leaves, holidays] = await Promise.all([
-                  fetchAttendance({ userId: targetUserId, fromDate, toDate, limit: 500 }),
+              const [leaves, holidays] = await Promise.all([
                   fetchLeaves({ userId: targetUserId, limit: 200 }),
                   fetchHolidays(fromDate, toDate),
               ]);
-              setAttendanceList(attendance);
               setLeaveList(leaves);
               setHolidayList(holidays);
-          } finally {
-              setIsAttendanceLoading(false);
+          } catch (e) {
+              // keep showing last-known leaves/holidays on a transient error
           }
       };
-      loadAttendanceData();
+      loadLeavesAndHolidays();
   }, [currentUser, viewMode, currentDate, filterUser, userList]);
 
   const targetName = (filterUser === 'All' || !canManage) ? currentUser?.name : filterUser;
@@ -571,8 +594,13 @@ export default function AttendanceScreen() {
           {viewMode === 'Month' && filterUser !== 'All' && <TouchableOpacity onPress={() => setIsCalendarView(!isCalendarView)} style={{marginLeft:15}}><Ionicons name={isCalendarView ? "list" : "grid"} size={22} color="#3b5998" /></TouchableOpacity>}
       </View>
 
-      <ScrollView contentContainerStyle={{paddingBottom:20}}>
-        {isDbLoading ? (
+      <ScrollView
+          contentContainerStyle={{paddingBottom:20}}
+          refreshControl={
+              <RefreshControl refreshing={attendanceRefreshing} onRefresh={refreshAttendance} colors={['#3b5998']} tintColor="#3b5998" />
+          }
+      >
+        {attendanceLoading ? (
             <ActivityIndicator size="large" color="#3b5998" style={{marginTop: 50}} />
         ) : (
             <>

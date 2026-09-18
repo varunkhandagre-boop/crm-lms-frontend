@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 // ---------------------------------------------------------------------------
 // Cache-first list loading.
@@ -39,6 +39,12 @@ interface UseCachedListOptions<T> {
 
 interface UseCachedListResult<T> {
   data: T[];
+  /** Direct setter for optimistic local updates after an action (e.g. status
+   *  change, edit, delete) — same pattern screens already used with plain
+   *  useState. This does NOT immediately rewrite the AsyncStorage cache;
+   *  the next successful background/pull-to-refresh fetch reconciles it,
+   *  same as how these screens behaved before caching existed. */
+  setData: React.Dispatch<React.SetStateAction<T[]>>;
   /** True only until the *first* data (cache or network) has been shown.
    *  Once cache hydrates instantly this is usually true for a single frame. */
   loading: boolean;
@@ -105,5 +111,5 @@ export function useCachedList<T>({
 
   const refresh = useCallback(() => fetchFresh(true), [fetchFresh]);
 
-  return { data, loading, refreshing, error, refresh };
+  return { data, setData, loading, refreshing, error, refresh };
 }

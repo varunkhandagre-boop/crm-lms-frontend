@@ -12,6 +12,7 @@ import {
     Linking,
     Modal,
     Platform,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
@@ -26,6 +27,9 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { listPaymentCollections } from '../services/api/paymentCollections';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 // 🔥 Phase 3: orders now go through the new backend API
 import {
     billOrder as apiBillOrder,
@@ -40,10 +44,10 @@ export default function OrderListScreen() {
 
   const { currentUser, addNotification, companyProfile } = useData();
 
-  // 🔥 SaaS Engine kept for payments/users only
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); orders/payments/users no longer go through this
+  const { isDbLoading } = useSaaSDB();
 
-  const [orderList, setOrderList] = useState<any[]>([]);
+  // orderList now comes from useCachedList below (cache-first)
   const [paymentList, setPaymentList] = useState<any[]>([]);
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
 
@@ -81,30 +85,42 @@ export default function OrderListScreen() {
       else setVisibleCount(20); 
   }, [viewMode, currentDate, searchText, statusFilter, selectedEmployee]);
 
-  // 🔥 LOAD DATA — orders via new API; payments/users via Firestore
-  const loadData = async () => {
-      if (currentUser?.companyId) {
-          const [orders, payments, users] = await Promise.all([
-              listOrders(), // was: fetchSaaSData("orders")
-              listPaymentCollections(), // was: fetchSaaSData("payments")
-              fetchTeamMembers()
-          ]);
-          
-          setOrderList(orders);
-          setPaymentList(payments);
+  // 🔥 ORDERS — cache-first (instant from AsyncStorage, then background
+  // refresh from the API). See hooks/useCachedList.ts.
+  const ordersCacheKey = buildCacheKey('orders', currentUser?.companyId);
+  const {
+      data: orderList,
+      setData: setOrderList,
+      loading: ordersLoading,
+      refreshing: ordersRefreshing,
+      refresh: refreshOrders,
+  } = useCachedList({
+      cacheKey: ordersCacheKey,
+      enabled: !!currentUser?.companyId,
+      fetcher: listOrders, // was: fetchSaaSData("orders")
+  });
 
-          if (isAdmin) {
-              const mappedUsers = users.map((u: any) => ({
-                  id: u.id,
-                  name: u.name || 'Unknown User'
-              }));
-              setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
-          }
-      }
-  };
-
+  // Payments/users — unchanged plain fetch-on-mount (payments list is
+  // currently unused downstream; left as-is, out of scope for this pass).
   useEffect(() => {
-      loadData();
+      const loadRest = async () => {
+          if (currentUser?.companyId) {
+              const [payments, users] = await Promise.all([
+                  listPaymentCollections(), // was: fetchSaaSData("payments")
+                  fetchTeamMembers()
+              ]);
+              setPaymentList(payments);
+
+              if (isAdmin) {
+                  const mappedUsers = users.map((u: any) => ({
+                      id: u.id,
+                      name: u.name || 'Unknown User'
+                  }));
+                  setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
+              }
+          }
+      };
+      loadRest();
   }, [currentUser]);
 
   const parseDate = (dateStr: any) => {
@@ -767,9 +783,12 @@ export default function OrderListScreen() {
           keyExtractor={item => item.id}
           renderItem={renderItem}
           contentContainerStyle={{padding: 5, paddingBottom: 100}} 
+          refreshControl={
+              <RefreshControl refreshing={ordersRefreshing} onRefresh={refreshOrders} colors={['#3b5998']} tintColor="#3b5998" />
+          }
           ListEmptyComponent={
               <View style={{alignItems:'center', marginTop:50}}>
-                  {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{color:'gray'}}>No Orders Found</Text>}
+                  {ordersLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{color:'gray'}}>No Orders Found</Text>}
               </View>
           }
           ListFooterComponent={

@@ -6,6 +6,7 @@ import {
     FlatList,
     Linking,
     Modal,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
@@ -20,6 +21,9 @@ import { useData } from './context/DataContext';
 // 🔥 Phase 2: demos & sales visits now go through the new backend API
 import { listDemos } from '../services/api/demos';
 import { listSalesVisits } from '../services/api/salesVisits';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 // 🔥 PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
@@ -33,10 +37,10 @@ export default function DemoScreen() {
   
   const { currentUser, companyProfile } = useData(); 
 
-  // 🔥 SaaS Engine kept for organizations/users
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+  // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); demos no longer go through this
+  const { isDbLoading } = useSaaSDB();
 
-  const [demoList, setDemoList] = useState<any[]>([]);
+  // demoList now comes from useCachedList below (cache-first)
   const [salesVisitList, setSalesVisitList] = useState<any[]>([]);
   const [orgList, setOrgList] = useState<any[]>([]);
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
@@ -66,17 +70,30 @@ export default function DemoScreen() {
       }
   }, [viewMode, currentDate, selectedEmployee, searchText]);
 
-  // 🔥 LOAD DATA — demos & sales visits via new API; orgs/users via Firestore
+  // 🔥 DEMOS — cache-first (instant from AsyncStorage, then background
+  // refresh from the API). See hooks/useCachedList.ts.
+  const demosCacheKey = buildCacheKey('demos', currentUser?.companyId);
+  const {
+      data: demoList,
+      loading: demosLoading,
+      refreshing: demosRefreshing,
+      refresh: refreshDemos,
+  } = useCachedList({
+      cacheKey: demosCacheKey,
+      enabled: !!currentUser?.companyId,
+      fetcher: listDemos, // was: fetchSaaSData("demos")
+  });
+
+  // Sales visits/orgs/users — unchanged plain fetch-on-mount (out of scope
+  // for this pass).
   useEffect(() => {
-      const loadData = async () => {
+      const loadRest = async () => {
           if (currentUser?.companyId) {
-              const [demos, sales, orgs, users] = await Promise.all([
-                  listDemos(),         // was: fetchSaaSData("demos")
+              const [sales, orgs, users] = await Promise.all([
                   listSalesVisits(),   // was: fetchSaaSData("sales_reports")
                   fetchOrganizations({ limit: 200 }),
                   fetchTeamMembers()
               ]);
-              setDemoList(demos);
               setSalesVisitList(sales);
               setOrgList(orgs);
 
@@ -89,7 +106,7 @@ export default function DemoScreen() {
               }
           }
       };
-      loadData();
+      loadRest();
   }, [currentUser]);
 
   const parseDate = (dateStr: string) => {
@@ -536,10 +553,13 @@ export default function DemoScreen() {
         keyExtractor={(item, index) => (item.id || index.toString()) + index} 
         renderItem={renderItem}
         contentContainerStyle={{padding: 15}}
+        refreshControl={
+            <RefreshControl refreshing={demosRefreshing} onRefresh={refreshDemos} colors={['#3b5998']} tintColor="#3b5998" />
+        }
         ListEmptyComponent={
             <View style={{alignItems:'center', marginTop:50}}>
                 <Ionicons name="flask-outline" size={60} color="#ccc" />
-                <Text style={{color:'gray', marginTop:10}}>{isDbLoading ? 'Loading Demos...' : 'No Demo Records Found'}</Text>
+                <Text style={{color:'gray', marginTop:10}}>{demosLoading ? 'Loading Demos...' : 'No Demo Records Found'}</Text>
             </View>
         }
         ListFooterComponent={

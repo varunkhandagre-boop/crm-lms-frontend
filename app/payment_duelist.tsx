@@ -6,6 +6,7 @@ import {
     Alert,
     FlatList,
     Modal,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
@@ -22,15 +23,19 @@ import { listOrders, remindOrder } from '../services/api/orders';
 import { fetchOrganizations } from '../services/api/organizations';
 import { listPaymentCollections } from '../services/api/paymentCollections';
 import { listPaymentDues, remindPaymentDue } from '../services/api/paymentDues';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function PaymentDueList() {
     const router = useRouter();
     
     const { currentUser, companyProfile } = useData(); 
-    const { fetchSaaSData, isDbLoading } = useSaaSDB();
+    // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); dues/orders/payments no longer go through this
+    const { isDbLoading } = useSaaSDB();
 
-    const [dueList, setDueList] = useState<any[]>([]);
-    const [orderList, setOrderList] = useState<any[]>([]);
+    // dueList now comes from useCachedList below (cache-first)
+    // orderList now comes from useCachedList below (cache-first, shares key with orders.tsx)
     const [paymentList, setPaymentList] = useState<any[]>([]);
     const [orgList, setOrgList] = useState<any[]>([]);
 
@@ -47,24 +52,53 @@ export default function PaymentDueList() {
         else setVisibleCount(20); 
     }, [viewMode, currentDate, searchTerm]);
 
-    // 🔥 LOAD DATA — dues, orders, payment collections via new API; organizations via Firestore
-    const loadData = async () => {
-        if (currentUser?.companyId) {
-            const [dues, orders, payments, orgs] = await Promise.all([
-                  listPaymentDues(),          // was: fetchSaaSData("payment_dues")
-                  listOrders(),                // was: fetchSaaSData("orders")
-                  listPaymentCollections(),    // was: fetchSaaSData("payment_collections")
-                 fetchOrganizations({ limit: 200 })
-            ]);
-            setDueList(dues);
-            setOrderList(orders);
-            setPaymentList(payments);
-            setOrgList(orgs);
-        }
-    };
+    // 🔥 PAYMENT DUES — cache-first (instant from AsyncStorage, then
+    // background refresh). See hooks/useCachedList.ts.
+    const duesCacheKey = buildCacheKey('payment_dues', currentUser?.companyId);
+    const {
+        data: dueList,
+        setData: setDueList,
+        loading: duesLoading,
+        refreshing: duesRefreshing,
+        refresh: refreshDues,
+    } = useCachedList({
+        cacheKey: duesCacheKey,
+        enabled: !!currentUser?.companyId,
+        fetcher: listPaymentDues, // was: fetchSaaSData("payment_dues")
+    });
 
+    // 🔥 ORDERS — the visible "dues" list on this screen is actually a merge
+    // of dueList + unpaid orderList (see getData() below), so orderList also
+    // needs to be cache-first or the merged list stays visibly incomplete
+    // until orders finish a fresh network fetch, even with dues cached.
+    // Deliberately reuses the SAME cache key as app/orders.tsx ('orders',
+    // companyId) — visiting either screen warms the other's cache too.
+    const ordersCacheKey = buildCacheKey('orders', currentUser?.companyId);
+    const {
+        data: orderList,
+        setData: setOrderList,
+        loading: ordersLoading,
+        refresh: refreshOrdersForDues,
+    } = useCachedList({
+        cacheKey: ordersCacheKey,
+        enabled: !!currentUser?.companyId,
+        fetcher: listOrders, // was: fetchSaaSData("orders")
+    });
+
+    // Payment collections/organizations — unchanged plain fetch-on-mount
+    // (not part of the merged dues view; out of scope for this pass).
     useEffect(() => {
-        loadData();
+        const loadRest = async () => {
+            if (currentUser?.companyId) {
+                const [payments, orgs] = await Promise.all([
+                    listPaymentCollections(),    // was: fetchSaaSData("payment_collections")
+                    fetchOrganizations({ limit: 200 })
+                ]);
+                setPaymentList(payments);
+                setOrgList(orgs);
+            }
+        };
+        loadRest();
     }, [currentUser]);
 
     const roleToCheck = currentUser?.role || 'employee';
@@ -412,9 +446,17 @@ export default function PaymentDueList() {
                 keyExtractor={item => item.id}
                 renderItem={renderItem}
                 contentContainerStyle={{padding: 15, paddingBottom: 100}}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={duesRefreshing}
+                        onRefresh={() => { refreshDues(); refreshOrdersForDues(); }}
+                        colors={['#3b5998']}
+                        tintColor="#3b5998"
+                    />
+                }
                 ListEmptyComponent={
                     <View style={styles.empty}>
-                        {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                        {(duesLoading || ordersLoading) ? <ActivityIndicator size="large" color="#3b5998" /> : (
                             <>
                                 <Ionicons name="checkmark-circle-outline" size={60} color="#4caf50" />
                                 <Text style={{color:'gray', marginTop:10, fontSize:16}}>No Pending Dues!</Text>
