@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -8,6 +8,7 @@ import {
     KeyboardAvoidingView,
     Modal,
     Platform,
+    RefreshControl,
     Share,
     StyleSheet,
     Text,
@@ -15,6 +16,11 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+
+import { useData } from './context/DataContext';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 import {
     createPersonalNote,
@@ -29,13 +35,17 @@ const NOTE_COLORS = ['#fff9c4', '#bbdefb', '#c8e6c9', '#f8bbd0', '#ffecb3', '#e1
 export default function PersonalNotesScreen() {
     const router = useRouter();
 
-    const [notes, setNotes] = useState<PersonalNote[]>([]);
-    const [loading, setLoading] = useState(true);
+    const { currentUser } = useData();
+
+    // notes now comes from useCachedList below (cache-first). Search stays
+    // debounced (350ms) — the debounced value feeds the cache key, so
+    // typing doesn't create a new cache entry on every keystroke, and the
+    // common case (empty search, not archived) still gets instant reloads.
+    const [debouncedQuery, setDebouncedQuery] = useState('');
     const [isGridView, setIsGridView] = useState(true);
 
     const [searchQuery, setSearchQuery] = useState('');
     const [showArchived, setShowArchived] = useState(false);
-    const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const [modalVisible, setModalVisible] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
@@ -47,24 +57,31 @@ export default function PersonalNotesScreen() {
     const [isPinned, setIsPinned] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
 
-    const loadNotes = useCallback(async () => {
-        setLoading(true);
-        try {
-            const data = await listPersonalNotes(showArchived, searchQuery.trim() || undefined);
-            setNotes(data);
-        } catch (e: any) {
-            Alert.alert('Error', e.message || 'Could not load notes.');
-        } finally {
-            setLoading(false);
-        }
-    }, [showArchived, searchQuery]);
-
+    // Debounce: update debouncedQuery 350ms after typing settles (0ms when
+    // clearing/toggling), same timing the original code used before the
+    // network call itself.
     useEffect(() => {
-        if (searchDebounce.current) clearTimeout(searchDebounce.current);
-        searchDebounce.current = setTimeout(loadNotes, searchQuery ? 350 : 0);
-        return () => { if (searchDebounce.current) clearTimeout(searchDebounce.current); };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [showArchived, searchQuery]);
+        const t = setTimeout(() => setDebouncedQuery(searchQuery.trim()), searchQuery ? 350 : 0);
+        return () => clearTimeout(t);
+    }, [searchQuery]);
+
+    // 🔥 PERSONAL NOTES — cache-first, keyed by company + user (these are
+    // per-user, not shared across the company) + the settled search state.
+    // See hooks/useCachedList.ts.
+    const notesCacheKey = buildCacheKey(
+        `personal_notes:${currentUser?.id || 'self'}:${showArchived}:${debouncedQuery || 'none'}`,
+        currentUser?.companyId
+    );
+    const {
+        data: notes,
+        loading,
+        refreshing: notesRefreshing,
+        refresh: refreshNotes,
+    } = useCachedList({
+        cacheKey: notesCacheKey,
+        enabled: !!currentUser?.companyId,
+        fetcher: () => listPersonalNotes(showArchived, debouncedQuery || undefined),
+    });
 
     const toggleRecording = () => {
         Alert.alert('Coming Soon 🎤', 'Voice-to-Text feature will be available in the next update!');
@@ -94,7 +111,7 @@ export default function PersonalNotesScreen() {
                 await createPersonalNote(payload);
             }
             setModalVisible(false);
-            await loadNotes();
+            await refreshNotes();
         } catch (e: any) {
             Alert.alert('Error', e.message || 'Could not save note.');
         } finally {
@@ -109,7 +126,7 @@ export default function PersonalNotesScreen() {
                 text: 'Delete', style: 'destructive', onPress: async () => {
                     try {
                         await deletePersonalNote(id);
-                        await loadNotes();
+                        await refreshNotes();
                     } catch (e: any) {
                         Alert.alert('Error', e.message || 'Could not delete note.');
                     }
@@ -121,7 +138,7 @@ export default function PersonalNotesScreen() {
     const toggleArchive = async (note: PersonalNote) => {
         try {
             await updatePersonalNote(note.id, { isArchived: !note.isArchived, isPinned: false });
-            await loadNotes();
+            await refreshNotes();
         } catch (e: any) {
             Alert.alert('Error', e.message || 'Could not update note.');
         }
@@ -209,6 +226,9 @@ export default function PersonalNotesScreen() {
                     contentContainerStyle={{ padding: 15, paddingBottom: 100 }}
                     numColumns={isGridView ? 2 : 1}
                     columnWrapperStyle={isGridView ? { justifyContent: 'space-between' } : undefined}
+                    refreshControl={
+                        <RefreshControl refreshing={notesRefreshing} onRefresh={refreshNotes} colors={['#3b5998']} tintColor="#3b5998" />
+                    }
                     ListEmptyComponent={
                         <View style={{ alignItems: 'center', marginTop: 100 }}>
                             <Ionicons name={showArchived ? 'archive-outline' : 'search-outline'} size={60} color="#ccc" />
