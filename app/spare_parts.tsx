@@ -6,6 +6,7 @@ import {
     Alert,
     FlatList,
     Modal,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
@@ -21,6 +22,9 @@ import { useData } from './context/DataContext';
 // 🔥 Phase 3: spare parts catalog + stock now go through the new backend API
 import { issueStock as apiIssueStock, listSpareParts } from '../services/api/spareParts';
 import { fetchTeamMembers } from '../services/api/users';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function SparePartsScreen() {
   const router = useRouter();
@@ -30,7 +34,7 @@ export default function SparePartsScreen() {
   // 🔥 SaaS Engine kept for users + office_machines only
   const { fetchSaaSData, addSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
 
-  const [sparePartsList, setSparePartsList] = useState<any[]>([]);
+  // sparePartsList now comes from useCachedList below (cache-first)
   const [userList, setUserList] = useState<any[]>([]);
 
   const [activeTab, setActiveTab] = useState<'Parts' | 'StockList'>('Parts'); 
@@ -63,23 +67,40 @@ export default function SparePartsScreen() {
   const userRole = (currentUser?.role || '').toLowerCase();
   const isAdmin = userRole.includes('admin') || userRole.includes('manager') || userRole.includes('store') || userRole.includes('superadmin');
 
-  // 🔥 LOAD DATA — spare parts via new API; users/office_machines via Firestore
-  const loadCoreData = async () => {
+  // 🔥 SPARE PARTS — cache-first (instant from AsyncStorage, then
+  // background refresh). See hooks/useCachedList.ts.
+  const sparePartsCacheKey = buildCacheKey('spare_parts', currentUser?.companyId);
+  const {
+      data: sparePartsList,
+      loading: sparePartsLoading,
+      refreshing: sparePartsRefreshing,
+      refresh: refreshSpareParts,
+  } = useCachedList({
+      cacheKey: sparePartsCacheKey,
+      enabled: !!currentUser?.companyId,
+      fetcher: listSpareParts, // was: fetchSaaSData("spare_parts")
+  });
+
+  // Users/office_machines — unchanged plain fetch-on-mount (office_machines
+  // stays Firestore CRUD, out of scope for this pass).
+  const loadRest = async () => {
       if (currentUser?.companyId) {
-          const [spares, users, machines] = await Promise.all([
-              listSpareParts(), // was: fetchSaaSData("spare_parts")
+          const [users, machines] = await Promise.all([
               fetchTeamMembers(),
               fetchSaaSData("office_machines")
           ]);
-          setSparePartsList(spares);
           setUserList(users);
           setMachinesList(machines);
       }
   };
 
   useEffect(() => {
-      loadCoreData();
+      loadRest();
   }, [currentUser]);
+
+  const onRefresh = async () => {
+      await Promise.all([refreshSpareParts(), loadRest()]);
+  };
 
 
   const getCatalogList = () => {
@@ -155,7 +176,7 @@ export default function SparePartsScreen() {
               setModalVisible(false);
               setNewMachineName('');
               setNewQuantity('');
-              await loadCoreData();
+              await loadRest();
               Alert.alert("Success", "Machine Added to Office Stock List");
           } else {
               Alert.alert("Error", "Failed to add machine.");
@@ -196,7 +217,7 @@ export default function SparePartsScreen() {
           await apiIssueStock(selectedPart.id, selectedEmpId, qty);
           setIssueModalVisible(false);
           setDetailsModalVisible(false);
-          await loadCoreData();
+          await refreshSpareParts();
           Alert.alert("Success", "Stock Issued to Employee!");
       } catch (e: any) {
           Alert.alert("Error", e?.message || "Failed to issue stock.");
@@ -331,9 +352,12 @@ export default function SparePartsScreen() {
             data={renderedList}
             keyExtractor={(item, index) => item.uniqueId || item.id || index.toString()}
             contentContainerStyle={{padding:15, paddingBottom: 100}}
+            refreshControl={
+                <RefreshControl refreshing={sparePartsRefreshing} onRefresh={onRefresh} colors={['#3b5998']} tintColor="#3b5998" />
+            }
             ListEmptyComponent={
                 <View style={{alignItems: 'center', marginTop: 50}}>
-                    {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={styles.emptyText}>No Items Found.</Text>}
+                    {sparePartsLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={styles.emptyText}>No Items Found.</Text>}
                 </View>
             }
             renderItem={
