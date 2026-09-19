@@ -24,6 +24,9 @@ import { listServiceCalls } from '../services/api/serviceCalls';
 import { listPmsReports } from '../services/api/pmsReports';
 import { listDemos } from '../services/api/demos';
 import { listInstallations } from '../services/api/installations';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 const parseDateOnly = (dateStr: any) => {
     if (!dateStr) return 0;
@@ -53,10 +56,9 @@ export default function AnalysisScreen() {
     const { currentUser } = useData(); 
     const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-    const [serviceList, setServiceList] = useState<any[]>([]);
-    const [pmsList, setPmsList] = useState<any[]>([]);
-    const [demoList, setDemoList] = useState<any[]>([]);
-    const [installationList, setInstallationList] = useState<any[]>([]);
+    // serviceList/pmsList/demoList/installationList now come from useCachedList
+    // below, sharing cache keys with service_call.tsx / pms_schedule.tsx /
+    // demo.tsx / installation.tsx respectively.
     const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
     const [refreshing, setRefreshing] = useState(false);
 
@@ -83,39 +85,70 @@ export default function AnalysisScreen() {
         else setVisibleCount(20);
     }, [reportType, viewMode, selectedDate, searchText, selectedEmployee]);
 
-    // 🔥 LOAD DATA — service calls, PMS, demos, installations all via new API; users via Firestore
-    const loadAllData = async () => {
-        if (currentUser?.companyId) {
-            const [services, pms, demos, installs, users] = await Promise.all([
-                listServiceCalls(),   // was: fetchSaaSData("service_calls")
-                listPmsReports(),     // was: fetchSaaSData("pms_reports")
-                listDemos(),          // was: fetchSaaSData("demos")
-                listInstallations(),  // was: fetchSaaSData("installations")
-                fetchSaaSData("users")
-            ]);
-            
-            setServiceList(services);
-            setPmsList(pms);
-            setDemoList(demos);
-            setInstallationList(installs);
+    // 🔥 SERVICE CALLS + PMS + DEMOS + INSTALLATIONS — cache-first, each
+    // deliberately sharing the SAME cache key as its primary screen
+    // (service_call.tsx / pms_schedule.tsx / demo.tsx / installation.tsx),
+    // so visiting any of those warms this screen's cache too (and vice
+    // versa). See hooks/useCachedList.ts.
+    const {
+        data: serviceList,
+        loading: serviceLoading,
+        refresh: refreshService,
+    } = useCachedList({
+        cacheKey: buildCacheKey('service_calls', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: listServiceCalls,
+    });
+    const {
+        data: pmsList,
+        loading: pmsLoading,
+        refresh: refreshPms,
+    } = useCachedList({
+        cacheKey: buildCacheKey('pms_reports', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: listPmsReports,
+    });
+    const {
+        data: demoList,
+        loading: demosLoading,
+        refresh: refreshDemos,
+    } = useCachedList({
+        cacheKey: buildCacheKey('demos', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: listDemos,
+    });
+    const {
+        data: installationList,
+        loading: installsLoading,
+        refresh: refreshInstalls,
+    } = useCachedList({
+        cacheKey: buildCacheKey('installations', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: listInstallations,
+    });
+    const isAnalysisLoading = serviceLoading || pmsLoading || demosLoading || installsLoading;
 
-            if (isAdmin) {
-                const mappedUsers = users.map((u: any) => ({
-                    id: u.id,
-                    name: u.name || 'Unknown User'
-                }));
-                setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
-            }
-        }
-    };
-
+    // Users — unchanged plain fetch-on-mount (still Firestore, out of scope
+    // for this pass).
     useEffect(() => {
-        loadAllData();
+        const loadUsers = async () => {
+            if (currentUser?.companyId) {
+                const users = await fetchSaaSData("users");
+                if (isAdmin) {
+                    const mappedUsers = users.map((u: any) => ({
+                        id: u.id,
+                        name: u.name || 'Unknown User'
+                    }));
+                    setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
+                }
+            }
+        };
+        loadUsers();
     }, [currentUser]);
 
     const onRefresh = async () => {
         setRefreshing(true);
-        await loadAllData();
+        await Promise.all([refreshService(), refreshPms(), refreshDemos(), refreshInstalls()]);
         setRefreshing(false);
     };
 
@@ -410,7 +443,7 @@ export default function AnalysisScreen() {
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                     ListEmptyComponent={
                         <View style={{ alignItems: 'center', marginTop: 50 }}>
-                            {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                            {isAnalysisLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
                                 <>
                                     <Ionicons name="folder-open-outline" size={40} color="#ccc" />
                                     <Text style={{ color: 'gray', marginTop: 10 }}>No reports found.</Text>

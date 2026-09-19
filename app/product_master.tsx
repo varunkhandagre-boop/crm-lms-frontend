@@ -9,6 +9,7 @@ import {
     Linking,
     Modal,
     Platform,
+    RefreshControl,
     ScrollView,
     Share,
     StyleSheet,
@@ -18,21 +19,21 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (kept for anything not yet migrated — none needed here now)
-import { useSaaSDB } from '../hooks/useSaaSDB';
+// 🔥 SAAS IMPORTS (nothing left to migrate here — product catalog fully on Postgres)
 import { useData } from './context/DataContext';
 // 🔥 Phase 3: product catalog now goes through the new backend API
 import { bulkDeleteProducts, createProduct, deleteProduct, listProducts, updateProduct } from '../services/api/products';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function ProductMasterScreen() {
     const router = useRouter();
     
     const { currentUser } = useData();
     
-    // 🔥 isDbLoading kept for consistent loading-spinner UX; catalog itself is API-backed now
-    const { isDbLoading } = useSaaSDB();
 
-    const [productList, setProductList] = useState<any[]>([]);
+    // productList now comes from useCachedList below (cache-first)
 
     // --- FORM STATES ---
     const [name, setName] = useState('');
@@ -67,17 +68,20 @@ export default function ProductMasterScreen() {
         setVisibleCount(20);
     }, [searchText]);
 
-    // 🔥 LOAD DATA — via new backend API
-    const loadProducts = async () => {
-        if (currentUser?.companyId) {
-            const data = await listProducts();
-            setProductList(data);
-        }
-    };
-
-    useEffect(() => {
-        loadProducts();
-    }, [currentUser]);
+    // 🔥 PRODUCTS — cache-first (instant from AsyncStorage, then background
+    // refresh). See hooks/useCachedList.ts.
+    const productsCacheKey = buildCacheKey('products', currentUser?.companyId);
+    const {
+        data: productList,
+        setData: setProductList,
+        loading: productsLoading,
+        refreshing: productsRefreshing,
+        refresh: refreshProducts,
+    } = useCachedList({
+        cacheKey: productsCacheKey,
+        enabled: !!currentUser?.companyId,
+        fetcher: listProducts,
+    });
 
     const addLinkToList = () => {
         if(!linkTitle.trim() || !linkUrl.trim()) return Alert.alert("Required", "Enter both Title and Link.");
@@ -200,7 +204,7 @@ const handleBulkDelete = () => {
                     await bulkDeleteProducts(Array.from(selectedForBulk));
                     setSelectedForBulk(new Set());
                     setBulkMode(false);
-                    loadProducts();
+                    refreshProducts();
                     Alert.alert('Success ✅', 'Selected products deleted.');
                 } catch (e: any) {
                     Alert.alert('Error', e?.message || 'Could not delete products.');
@@ -345,7 +349,7 @@ const handleBulkDelete = () => {
             </View>
 
             <View style={styles.searchBar}>
-                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={22} color="gray" />}
+                {productsLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={22} color="gray" />}
                 <TextInput style={styles.searchInput} placeholder="Search Name or Model..." value={searchText} onChangeText={setSearchText} />
             </View>
                         
@@ -369,9 +373,12 @@ const handleBulkDelete = () => {
                 keyExtractor={item => item.id}
                 renderItem={renderItem}
                 contentContainerStyle={{padding: 15, paddingBottom: 100}}
+                refreshControl={
+                    <RefreshControl refreshing={productsRefreshing} onRefresh={refreshProducts} colors={['#3b5998']} tintColor="#3b5998" />
+                }
                 ListEmptyComponent={
                     <View style={{alignItems: 'center', marginTop: 50}}>
-                        {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{textAlign:'center', color:'gray'}}>No products found.</Text>}
+                        {productsLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{textAlign:'center', color:'gray'}}>No products found.</Text>}
                     </View>
                 }
                 
