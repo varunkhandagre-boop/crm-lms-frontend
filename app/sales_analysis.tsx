@@ -9,6 +9,7 @@ import {
     Alert,
     FlatList,
     Modal,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
@@ -24,6 +25,9 @@ import { fetchOrganizations } from '../services/api/organizations';
 import { listPaymentCollections } from '../services/api/paymentCollections';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 
 export default function SalesAnalysisScreen() {
@@ -33,11 +37,11 @@ export default function SalesAnalysisScreen() {
   const { currentUser } = useData();
 
   // 🔥 SaaS Engine
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+  const { isDbLoading } = useSaaSDB();
 
   // STATES FOR DATA
-  const [orderList, setOrderList] = useState<any[]>([]);
-  const [paymentList, setPaymentList] = useState<any[]>([]);
+  // orderList/paymentList now come from useCachedList below (cache-first,
+  // sharing keys with orders.tsx / payment_collection.tsx)
   const [orgList, setOrgList] = useState<any[]>([]);
   const [userList, setUserList] = useState<any[]>([]);
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
@@ -84,32 +88,60 @@ export default function SalesAnalysisScreen() {
       setSaleTypeFilter('All');
   }, [viewMode, currentDate, selectedEmployee, searchText]);
 
-  // 🔥 LOAD SAAS DATA ON MOUNT
-  const loadData = async () => {
-      if (currentUser?.companyId) {
-          const [orders, payments, orgs, users] = await Promise.all([
-    listOrders(),
-    listPaymentCollections(),
-    fetchOrganizations({ limit: 200 }),
-    fetchTeamMembers(),
-]);
-setOrderList(orders);
-setPaymentList(payments);
-setOrgList(orgs);
-setUserList(users);
-
-          if (isAdmin) {
-              const mappedUsers = users.map((u: any) => ({
-                  id: u.id,
-                  name: u.name || 'Unknown User'
-              }));
-              setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
-          }
-      }
+  // 🔥 ORDERS + PAYMENT COLLECTIONS — cache-first, deliberately sharing the
+  // SAME cache keys as app/orders.tsx and app/payment_collection.tsx, so
+  // visiting any one of these three screens warms the cache for the others.
+  // See hooks/useCachedList.ts.
+  const ordersCacheKey = buildCacheKey('orders', currentUser?.companyId);
+  const {
+      data: orderList,
+      loading: ordersLoading,
+      refresh: refreshOrders,
+  } = useCachedList({
+      cacheKey: ordersCacheKey,
+      enabled: !!currentUser?.companyId,
+      fetcher: listOrders,
+  });
+  const paymentsCacheKey = buildCacheKey('payment_collections', currentUser?.companyId);
+  const {
+      data: paymentList,
+      loading: paymentsLoading,
+      refresh: refreshPayments,
+  } = useCachedList({
+      cacheKey: paymentsCacheKey,
+      enabled: !!currentUser?.companyId,
+      fetcher: listPaymentCollections,
+  });
+  const isAnalysisLoading = ordersLoading || paymentsLoading;
+  const [analysisRefreshing, setAnalysisRefreshing] = useState(false);
+  const onRefresh = async () => {
+      setAnalysisRefreshing(true);
+      await Promise.all([refreshOrders(), refreshPayments()]);
+      setAnalysisRefreshing(false);
   };
 
+  // Organizations/users — unchanged plain fetch-on-mount (out of scope for
+  // this pass).
   useEffect(() => {
-      loadData();
+      const loadRest = async () => {
+          if (currentUser?.companyId) {
+              const [orgs, users] = await Promise.all([
+                  fetchOrganizations({ limit: 200 }),
+                  fetchTeamMembers()
+              ]);
+              setOrgList(orgs);
+              setUserList(users);
+
+              if (isAdmin) {
+                  const mappedUsers = users.map((u: any) => ({
+                      id: u.id,
+                      name: u.name || 'Unknown User'
+                  }));
+                  setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
+              }
+          }
+      };
+      loadRest();
   }, [currentUser]);
 
   const getValidDateStr = (obj: any) => {
@@ -665,7 +697,12 @@ setUserList(users);
           </View>
       </View>
 
-      <ScrollView contentContainerStyle={{paddingBottom: 20}}>
+      <ScrollView
+          contentContainerStyle={{paddingBottom: 20}}
+          refreshControl={
+              <RefreshControl refreshing={analysisRefreshing} onRefresh={onRefresh} colors={['#1565c0']} tintColor="#1565c0" />
+          }
+      >
         
         {/* SUMMARY CARD WITH CASH/CREDIT FILTERS */}
         <View style={styles.cardsContainer}>

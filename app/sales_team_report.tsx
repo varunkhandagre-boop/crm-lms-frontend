@@ -5,6 +5,7 @@ import {
     ActivityIndicator,
     FlatList,
     Modal,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
@@ -20,6 +21,9 @@ import { useData } from './context/DataContext';
 import { listOrders } from '../services/api/orders';
 import { listPaymentCollections } from '../services/api/paymentCollections';
 import { fetchTeamMembers } from '../services/api/users';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function SalesTeamReport() {
     const router = useRouter();
@@ -27,12 +31,12 @@ export default function SalesTeamReport() {
     const { currentUser, user } = useData();
     const activeUser = currentUser || user;
 
-    const { fetchSaaSData, isDbLoading } = useSaaSDB();
+    const { isDbLoading } = useSaaSDB();
 
+    // orderList/paymentList now come from useCachedList below (cache-first,
+    // sharing keys with orders.tsx / payment_collection.tsx)
     const [userList, setUserList] = useState<any[]>([]);
-    const [orderList, setOrderList] = useState<any[]>([]);
-    const [paymentList, setPaymentList] = useState<any[]>([]);
-    const [loadingData, setLoadingData] = useState(true);
+    const [usersLoading, setUsersLoading] = useState(true);
 
     const [viewMode, setViewMode] = useState<'Month' | 'FY'>('Month');
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -65,25 +69,52 @@ export default function SalesTeamReport() {
         setVisibleCount(20);
     }, [viewMode, currentDate, selectedUserId]);
 
-    // 🔥 orders/payments via new API, users still via Firestore
+    // 🔥 ORDERS + PAYMENT COLLECTIONS — cache-first, deliberately sharing the
+    // SAME cache keys as app/orders.tsx and app/payment_collection.tsx (and
+    // app/sales_analysis.tsx), so visiting any of these screens warms the
+    // cache for the others. See hooks/useCachedList.ts.
+    const ordersCacheKey = buildCacheKey('orders', activeUser?.companyId);
+    const {
+        data: orderList,
+        loading: ordersLoading,
+        refresh: refreshOrders,
+    } = useCachedList({
+        cacheKey: ordersCacheKey,
+        enabled: !!activeUser?.companyId,
+        fetcher: listOrders,
+    });
+    const paymentsCacheKey = buildCacheKey('payment_collections', activeUser?.companyId);
+    const {
+        data: paymentList,
+        loading: paymentsLoading,
+        refresh: refreshPayments,
+    } = useCachedList({
+        cacheKey: paymentsCacheKey,
+        enabled: !!activeUser?.companyId,
+        fetcher: listPaymentCollections,
+    });
+    const loadingData = ordersLoading || paymentsLoading || usersLoading;
+    const [reportRefreshing, setReportRefreshing] = useState(false);
+    const onRefresh = async () => {
+        setReportRefreshing(true);
+        await Promise.all([refreshOrders(), refreshPayments()]);
+        setReportRefreshing(false);
+    };
+
+    // Users — unchanged plain fetch-on-mount (still Firestore, out of scope
+    // for this pass).
     useEffect(() => {
-        const loadData = async () => {
+        const loadUsers = async () => {
             if (!activeUser?.companyId) return;
-            setLoadingData(true);
+            setUsersLoading(true);
             try {
-                const [users, orders, payments] = await Promise.all([
-                    fetchTeamMembers(),
-                    listOrders(),
-                    listPaymentCollections(),
-                ]);
+                const users = await fetchTeamMembers();
                 setUserList(users);
-                setOrderList(orders);
-                setPaymentList(payments);
             } finally {
-                setLoadingData(false);
+                setUsersLoading(false);
             }
         };
-        loadData();
+        loadUsers();
     }, [activeUser]);
 
     const changeDate = (dir: number) => {
@@ -375,6 +406,9 @@ export default function SalesTeamReport() {
                 data={renderedList}
                 keyExtractor={item => item.id}
                 contentContainerStyle={{ padding: 15, paddingBottom: 20 }}
+                refreshControl={
+                    <RefreshControl refreshing={reportRefreshing} onRefresh={onRefresh} colors={['#3b5998']} tintColor="#3b5998" />
+                }
                 ListEmptyComponent={<Text style={{ textAlign: 'center', marginTop: 20, color: 'gray' }}>{isLoading ? 'Loading Analytics...' : 'No Data Found.'}</Text>}
                 renderItem={({ item, index }) => (
                     <TouchableOpacity style={styles.card} onPress={() => handleCardClick(item)} activeOpacity={0.7}>
