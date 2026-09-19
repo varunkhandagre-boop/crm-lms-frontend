@@ -8,6 +8,7 @@ import {
     KeyboardAvoidingView,
     Linking,
     Platform,
+    RefreshControl,
     ScrollView,
     StatusBar,
     StyleSheet,
@@ -17,6 +18,7 @@ import {
     View
 } from 'react-native';
 
+import { useData } from './context/DataContext';
 import { listLeads } from '../services/api/leads';
 import {
     fetchTemplates,
@@ -31,6 +33,9 @@ import {
     OutboundMessage,
     sendBroadcast,
 } from '../services/api/outboundMessages';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 import { TemplatesTab } from './TemplatesTab';
 
@@ -84,31 +89,39 @@ export default function MessagingCenterScreen() {
 // PENDING EMAILS TAB
 // ====================================================================
 const PendingEmailsTab = () => {
-    const [pendingList, setPendingList] = useState<OutboundMessage[]>([]);
-    const [templates, setTemplates] = useState<MessageTemplate[]>([]);
-    const [loading, setLoading] = useState(true);
+    const { currentUser } = useData();
     const [processingId, setProcessingId] = useState<string | null>(null);
 
-    useEffect(() => {
-        loadData();
-    }, []);
-
-    const loadData = async () => {
-        setLoading(true);
-        try {
-            const [messages, emailTemplates] = await Promise.all([
-                fetchOutboundMessages({ channel: 'email', status: 'PENDING' }),
-                fetchTemplates('email'),
-            ]);
+    // 🔥 PENDING EMAILS + TEMPLATES — cache-first. See hooks/useCachedList.ts.
+    const pendingCacheKey = buildCacheKey('pending_emails', currentUser?.companyId);
+    const {
+        data: pendingList,
+        setData: setPendingList,
+        loading,
+        refreshing: pendingRefreshing,
+        refresh: refreshPending,
+    } = useCachedList({
+        cacheKey: pendingCacheKey,
+        enabled: !!currentUser?.companyId,
+        fetcher: async () => {
+            const messages = await fetchOutboundMessages({ channel: 'email', status: 'PENDING' });
             const now = Date.now();
-            const due = messages.filter((m) => !m.scheduledFor || new Date(m.scheduledFor).getTime() <= now);
-            setPendingList(due);
-            setTemplates(emailTemplates);
-        } catch (e: any) {
-            Alert.alert('Error', e.message || 'Could not load pending emails.');
-        } finally {
-            setLoading(false);
-        }
+            return messages.filter((m) => !m.scheduledFor || new Date(m.scheduledFor).getTime() <= now);
+        },
+    });
+    const templatesCacheKey = buildCacheKey('email_templates', currentUser?.companyId);
+    const {
+        data: templates,
+        loading: templatesLoading,
+        refresh: refreshTemplates,
+    } = useCachedList({
+        cacheKey: templatesCacheKey,
+        enabled: !!currentUser?.companyId,
+        fetcher: () => fetchTemplates('email'),
+    });
+
+    const onRefresh = async () => {
+        await Promise.all([refreshPending(), refreshTemplates()]);
     };
 
     const buildMailto = (msg: OutboundMessage): string | null => {
@@ -176,6 +189,9 @@ const PendingEmailsTab = () => {
                 data={pendingList}
                 keyExtractor={(item) => item.id}
                 contentContainerStyle={{ paddingBottom: 20 }}
+                refreshControl={
+                    <RefreshControl refreshing={pendingRefreshing} onRefresh={onRefresh} colors={['#1565c0']} tintColor="#1565c0" />
+                }
                 ListEmptyComponent={
                     <View style={{ alignItems: 'center', marginTop: 50 }}>
                         <Ionicons name="checkmark-done-circle" size={60} color="#ccc" />
@@ -220,29 +236,26 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const SentHistoryTab = () => {
-    const [messages, setMessages] = useState<OutboundMessage[]>([]);
-    const [loading, setLoading] = useState(true);
+    const { currentUser } = useData();
     const [channelFilter, setChannelFilter] = useState<'all' | 'whatsapp' | 'email'>('all');
     const [statusFilter, setStatusFilter] = useState<'all' | MessageStatus>('all');
 
-    useEffect(() => {
-        loadHistory();
-    }, [channelFilter, statusFilter]);
-
-    const loadHistory = async () => {
-        setLoading(true);
-        try {
-            const data = await fetchOutboundMessages({
-                channel: channelFilter === 'all' ? undefined : channelFilter,
-                status: statusFilter === 'all' ? undefined : statusFilter,
-            });
-            setMessages(data);
-        } catch (e: any) {
-            Alert.alert('Error', e.message || 'Could not load message history.');
-        } finally {
-            setLoading(false);
-        }
-    };
+    // 🔥 SENT HISTORY — cache-first, parameterized by channel+status filter
+    // (same pattern as attendance.tsx/travel.tsx). See hooks/useCachedList.ts.
+    const historyCacheKey = buildCacheKey(`message_history:${channelFilter}:${statusFilter}`, currentUser?.companyId);
+    const {
+        data: messages,
+        loading,
+        refreshing: historyRefreshing,
+        refresh: refreshHistory,
+    } = useCachedList({
+        cacheKey: historyCacheKey,
+        enabled: !!currentUser?.companyId,
+        fetcher: () => fetchOutboundMessages({
+            channel: channelFilter === 'all' ? undefined : channelFilter,
+            status: statusFilter === 'all' ? undefined : statusFilter,
+        }),
+    });
 
     return (
         <View style={{ flex: 1 }}>
@@ -267,6 +280,9 @@ const SentHistoryTab = () => {
                 <FlatList
                     data={messages}
                     keyExtractor={(item) => item.id}
+                    refreshControl={
+                        <RefreshControl refreshing={historyRefreshing} onRefresh={refreshHistory} colors={['#3b5998']} tintColor="#3b5998" />
+                    }
                     ListEmptyComponent={<Text style={{ textAlign: 'center', color: 'gray', marginTop: 30 }}>No messages found.</Text>}
                     renderItem={({ item }) => (
                         <View style={styles.historyCard}>
@@ -306,14 +322,11 @@ interface Target {
 }
 
 const BroadcastTab = () => {
+    const { currentUser } = useData();
     const [audience, setAudience] = useState<Audience>('Customers');
     const [channel, setChannel] = useState<Channel>('Both');
     const [subject, setSubject] = useState('');
     const [messageBody, setMessageBody] = useState('');
-
-    const [loadingContacts, setLoadingContacts] = useState(true);
-    const [orgList, setOrgList] = useState<any[]>([]);
-    const [leadsList, setLeadsList] = useState<any[]>([]);
 
     const [searchText, setSearchText] = useState('');
     const [selectedType, setSelectedType] = useState('All');
@@ -322,22 +335,32 @@ const BroadcastTab = () => {
     const [isSending, setIsSending] = useState(false);
     const [testContact, setTestContact] = useState('');
 
-    useEffect(() => {
-        loadContacts();
-    }, []);
-
-    const loadContacts = async () => {
-        setLoadingContacts(true);
-        try {
-            const [orgs, leads] = await Promise.all([fetchOrganizations({ limit: 500 }), listLeads()]);
-            setOrgList(orgs);
-            setLeadsList(leads);
-        } catch (e: any) {
-            Alert.alert('Error', e.message || 'Could not load contacts.');
-        } finally {
-            setLoadingContacts(false);
-        }
-    };
+    // 🔥 ORGANIZATIONS + LEADS — cache-first, deliberately sharing the SAME
+    // cache keys as app/organization.tsx and app/leads.tsx. See
+    // hooks/useCachedList.ts.
+    const {
+        data: orgList,
+        loading: orgsLoading,
+        refreshing: orgsRefreshing,
+        refresh: refreshOrgs,
+    } = useCachedList({
+        cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: () => fetchOrganizations({ limit: 500 }),
+    });
+    const {
+        data: leadsList,
+        loading: leadsLoading,
+        refreshing: leadsRefreshing,
+        refresh: refreshLeads,
+    } = useCachedList({
+        cacheKey: buildCacheKey('leads', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: listLeads,
+    });
+    const loadingContacts = orgsLoading || leadsLoading;
+    const contactsRefreshing = orgsRefreshing || leadsRefreshing;
+    const onRefreshContacts = () => Promise.all([refreshOrgs(), refreshLeads()]);
 
     const availableTypes = ['All', ...Array.from(new Set(orgList.map((o: any) => o.type).filter(Boolean)))];
 
@@ -444,7 +467,13 @@ const BroadcastTab = () => {
 
     return (
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-            <ScrollView contentContainerStyle={{ paddingBottom: 30 }} keyboardShouldPersistTaps="handled">
+            <ScrollView
+                contentContainerStyle={{ paddingBottom: 30 }}
+                keyboardShouldPersistTaps="handled"
+                refreshControl={
+                    <RefreshControl refreshing={contactsRefreshing} onRefresh={onRefreshContacts} colors={['#3b5998']} tintColor="#3b5998" />
+                }
+            >
                 <View style={styles.infoBanner}>
                     <Text style={styles.infoBannerText}>Uses the "bulk_broadcast" template (create both email + whatsapp types in the Templates tab first).</Text>
                 </View>
