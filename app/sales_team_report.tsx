@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     FlatList,
@@ -35,8 +35,7 @@ export default function SalesTeamReport() {
 
     // orderList/paymentList now come from useCachedList below (cache-first,
     // sharing keys with orders.tsx / payment_collection.tsx)
-    const [userList, setUserList] = useState<any[]>([]);
-    const [usersLoading, setUsersLoading] = useState(true);
+    // userList/usersLoading now come from useCachedList below (cache-first, shared 'team_members' key)
 
     const [viewMode, setViewMode] = useState<'Month' | 'FY'>('Month');
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -51,7 +50,7 @@ export default function SalesTeamReport() {
         tier2Percent: '2'
     });
 
-    const [incentiveData, setIncentiveData] = useState<any[]>([]);
+    // incentiveData now computed via useMemo below (see the performance-fix comment there)
 
     const [detailModalVisible, setDetailModalVisible] = useState(false);
     const [selectedStaff, setSelectedStaff] = useState<any>(null);
@@ -93,6 +92,14 @@ export default function SalesTeamReport() {
         enabled: !!activeUser?.companyId,
         fetcher: listPaymentCollections,
     });
+    // 🔥 Users — cache-first, shares the SAME 'team_members' cache key as
+    // manage_team.tsx/employee_timeline.tsx. Declared before loadingData
+    // below, which reads usersLoading.
+    const { data: userList, loading: usersLoading } = useCachedList({
+        cacheKey: buildCacheKey('team_members', activeUser?.companyId),
+        enabled: !!activeUser?.companyId,
+        fetcher: fetchTeamMembers,
+    });
     const loadingData = ordersLoading || paymentsLoading || usersLoading;
     const [reportRefreshing, setReportRefreshing] = useState(false);
     const onRefresh = async () => {
@@ -100,22 +107,6 @@ export default function SalesTeamReport() {
         await Promise.all([refreshOrders(), refreshPayments()]);
         setReportRefreshing(false);
     };
-
-    // Users — unchanged plain fetch-on-mount (still Firestore, out of scope
-    // for this pass).
-    useEffect(() => {
-        const loadUsers = async () => {
-            if (!activeUser?.companyId) return;
-            setUsersLoading(true);
-            try {
-                const users = await fetchTeamMembers();
-                setUserList(users);
-            } finally {
-                setUsersLoading(false);
-            }
-        };
-        loadUsers();
-    }, [activeUser]);
 
     const changeDate = (dir: number) => {
         const d = new Date(currentDate);
@@ -144,14 +135,38 @@ export default function SalesTeamReport() {
     // format-guessing across dateIso/createdAt/dd-mm-yyyy strings.
     const getValidDateStr = (obj: any) => obj.dateIso || "1970-01-01";
 
-    useEffect(() => {
-        if (!loadingData && userList.length > 0) {
-            calculateIncentives();
+    // getIncentiveAmount moved here (was further below) so it's defined
+    // before the useMemo below reads it — a useMemo body runs synchronously
+    // during render, unlike the old useEffect+setState version which only
+    // ever ran after the whole component had already finished evaluating
+    // once, so the ordering didn't matter there.
+    const getIncentiveAmount = (amount: number, target: number, tier2Limit: number) => {
+        if (amount < target) return 0;
+        const t1Per = Number(rules.tier1Percent);
+        const t2Per = Number(rules.tier2Percent);
+        let incentive = 0;
+        if (amount <= tier2Limit) incentive = (amount - target) * (t1Per / 100);
+        else {
+            const slab1Inc = (tier2Limit - target) * (t1Per / 100);
+            const slab2Inc = (amount - tier2Limit) * (t2Per / 100);
+            incentive = slab1Inc + slab2Inc;
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [rules, orderList, paymentList, userList, viewMode, currentDate, selectedUserId, loadingData]);
+        return Math.floor(incentive);
+    };
 
-    const calculateIncentives = () => {
+    // 🔥 PERFORMANCE FIX: the previous version re-scanned the *entire*
+    // orderList/paymentList once per eligible staff member (O(staff ×
+    // orders) — e.g. 20 staff × 5,000 orders = 100,000 date-parses+compares,
+    // every time this ran). This version walks orders/payments exactly once
+    // each, grouping them into per-staff buckets first (O(orders +
+    // payments)), then each staff member does an O(1) map lookup instead of
+    // a fresh full-list scan. Also moved off a useEffect+setState pair and
+    // onto useMemo, so React skips recomputing entirely when none of the
+    // dependencies actually changed (e.g. a re-render triggered by something
+    // unrelated).
+    const incentiveData = useMemo(() => {
+        if (loadingData || userList.length === 0) return [] as any[];
+
         const targetMonth = currentDate.getMonth();
         const targetYear = currentDate.getFullYear();
 
@@ -159,17 +174,51 @@ export default function SalesTeamReport() {
         const fyStartDateStr = `${fyStartYear}-04-01`;
         const fyEndDateStr = `${fyStartYear + 1}-03-31`;
 
-        let eligibleStaff = [];
+        const inRange = (dateStr: string) => {
+            if (!dateStr || dateStr === "1970-01-01") return false;
+            if (viewMode === 'Month') {
+                const d = new Date(dateStr);
+                return d.getMonth() === targetMonth && d.getFullYear() === targetYear;
+            }
+            return dateStr >= fyStartDateStr && dateStr <= fyEndDateStr;
+        };
+        const isCountedOrderStatus = (status: string) =>
+            status === 'Approved' || status === 'Completed' || status === 'Dispatched' || status === 'Billed';
 
+        // Single pass over orders/payments — bucket by senderId once.
+        const ordersByStaff = new Map<string, any[]>();
+        for (const order of orderList) {
+            if (!inRange(getValidDateStr(order)) || !isCountedOrderStatus(order.status)) continue;
+            const key = order.senderId;
+            if (!key) continue;
+            if (!ordersByStaff.has(key)) ordersByStaff.set(key, []);
+            ordersByStaff.get(key)!.push(order);
+        }
+        const paymentsByStaff = new Map<string, any[]>();
+        for (const payment of paymentList) {
+            if (!inRange(getValidDateStr(payment))) continue;
+            const key = payment.senderId;
+            if (!key) continue;
+            if (!paymentsByStaff.has(key)) paymentsByStaff.set(key, []);
+            paymentsByStaff.get(key)!.push(payment);
+        }
+
+        let eligibleStaff = [];
         if (isAdmin) {
+            // Anyone with a management-style role (for visibility even at
+            // zero sales) OR anyone who actually has qualifying orders/
+            // payments in range — covers FIELD_USER staff (e.g. Sales
+            // Executives, Service Engineers) who the coarse Postgres role
+            // enum can't distinguish by title, but who clearly made sales.
             eligibleStaff = userList.filter((u: any) => {
                 const r = (u.role || '').toLowerCase();
-                return r.includes('sales') || r.includes('manager') || r.includes('admin') || r.includes('account');
+                const hasManagementRole = r.includes('manager') || r.includes('admin') || r.includes('account') || r.includes('hr');
+                const hasSalesActivity = ordersByStaff.has(u.id) || paymentsByStaff.has(u.id);
+                return hasManagementRole || hasSalesActivity;
             });
         } else {
             eligibleStaff = userList.filter((u: any) => u.id === activeUser?.id || u.uid === activeUser?.uid);
         }
-
         if (selectedUserId !== 'All') {
             eligibleStaff = eligibleStaff.filter((u: any) => (u.id === selectedUserId || u.uid === selectedUserId));
         }
@@ -186,52 +235,28 @@ export default function SalesTeamReport() {
             let effectiveTarget = viewMode === 'FY' ? monthlyTarget * 12 : monthlyTarget;
             let effectiveTier2 = viewMode === 'FY' ? monthlyTier2 * 12 : monthlyTier2;
 
-            const userOrders = orderList.filter((order: any) => {
-                const orderDateStr = getValidDateStr(order);
-                if (!orderDateStr || orderDateStr === "1970-01-01") return false;
-
-                const d = new Date(orderDateStr);
-
-                let dateMatch = false;
-                if (viewMode === 'Month') {
-                    dateMatch = d.getMonth() === targetMonth && d.getFullYear() === targetYear;
-                } else {
-                    dateMatch = orderDateStr >= fyStartDateStr && orderDateStr <= fyEndDateStr;
-                }
-
-                const userMatch = (order.senderId === u.id || order.senderId === u.uid);
-                const statusMatch = order.status === 'Approved' || order.status === 'Completed' || order.status === 'Dispatched' || order.status === 'Billed';
-
-                return dateMatch && userMatch && statusMatch;
-            });
-
-            const userPayments = paymentList.filter((payment: any) => {
-                const payDateStr = getValidDateStr(payment);
-                if (!payDateStr || payDateStr === "1970-01-01") return false;
-
-                const d = new Date(payDateStr);
-
-                let dateMatch = false;
-                if (viewMode === 'Month') {
-                    dateMatch = d.getMonth() === targetMonth && d.getFullYear() === targetYear;
-                } else {
-                    dateMatch = payDateStr >= fyStartDateStr && payDateStr <= fyEndDateStr;
-                }
-
-                const userMatch = (payment.senderId === u.id || payment.senderId === u.uid);
-                return dateMatch && userMatch;
-            });
+            const staffKey = u.id || u.uid;
+            // Orders/payments are bucketed by senderId only — a user with both
+            // .id and .uid populated (legacy dual-id records) needs both
+            // buckets merged, matching the original filter's `senderId === u.id
+            // || senderId === u.uid` behavior exactly.
+            const userOrders = [
+                ...(ordersByStaff.get(u.id) || []),
+                ...(u.uid && u.uid !== u.id ? (ordersByStaff.get(u.uid) || []) : []),
+            ];
+            const userPayments = [
+                ...(paymentsByStaff.get(u.id) || []),
+                ...(u.uid && u.uid !== u.id ? (paymentsByStaff.get(u.uid) || []) : []),
+            ];
 
             const totalSales = userOrders.reduce((sum: number, o: any) => sum + Number(o.amount || 0), 0);
-
             const cashSales = userOrders.filter((o: any) => o.saleType === 'Cash').reduce((sum: number, o: any) => sum + Number(o.amount || 0), 0);
             const creditSales = totalSales - cashSales;
-
             const totalCollected = userPayments.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
             const incentive = getIncentiveAmount(totalSales, effectiveTarget, effectiveTier2);
 
             return {
-                id: u.id || u.uid,
+                id: staffKey,
                 name: u.name,
                 role: u.role,
                 target: effectiveTarget,
@@ -247,22 +272,8 @@ export default function SalesTeamReport() {
             };
         });
 
-        setIncentiveData(processedData.sort((a: any, b: any) => b.totalSales - a.totalSales));
-    };
-
-    const getIncentiveAmount = (amount: number, target: number, tier2Limit: number) => {
-        if (amount < target) return 0;
-        const t1Per = Number(rules.tier1Percent);
-        const t2Per = Number(rules.tier2Percent);
-        let incentive = 0;
-        if (amount <= tier2Limit) incentive = (amount - target) * (t1Per / 100);
-        else {
-            const slab1Inc = (tier2Limit - target) * (t1Per / 100);
-            const slab2Inc = (amount - tier2Limit) * (t2Per / 100);
-            incentive = slab1Inc + slab2Inc;
-        }
-        return Math.floor(incentive);
-    };
+        return processedData.sort((a: any, b: any) => b.totalSales - a.totalSales);
+    }, [rules, orderList, paymentList, userList, viewMode, currentDate, selectedUserId, loadingData, isAdmin, activeUser]);
 
     const generateMonthlyStats = (u: any) => {
         const fyMonths = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
