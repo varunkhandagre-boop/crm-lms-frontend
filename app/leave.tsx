@@ -42,7 +42,7 @@ export default function LeaveApplicationScreen() {
   // leaveList now comes from useCachedList below (cache-first)
   const [attendanceList, setAttendanceList] = useState<any[]>([]);
   const [holidayList, setHolidayList] = useState<any[]>([]);
-  const [userList, setUserList] = useState<any[]>([]);
+  // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
 
   // STATES
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All'); 
@@ -136,33 +136,30 @@ export default function LeaveApplicationScreen() {
       loadAttendanceAndHolidays();
   }, [currentUser, selectedEmployeeName, employees]);
 
-  // 🔥 Users list (+ derived employee picker options) loads once per session — separate
-  // from the leaves/attendance fetch above so switching the employee filter doesn't
-  // re-fetch the whole users list every time.
+  // 🔥 Users list (+ derived employee picker options) — cache-first, shares
+  // the SAME 'team_members' cache key as manage_team.tsx/employee_timeline.tsx.
+  const { data: userList } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: fetchTeamMembers,
+  });
   useEffect(() => {
-      const loadUsers = async () => {
-          if (!currentUser?.companyId) return;
-          const users = await fetchTeamMembers();
-          setUserList(users);
-
-          if (canManage) {
-              const uniqueUsersMap = new Map();
-              users.forEach((u: any) => {
-                  if (u.name && !uniqueUsersMap.has(u.name)) {
-                      uniqueUsersMap.set(u.name, {
-                          name: u.name,
-                          id: u.id,
-                          yearlyLeaves: u.yearlyLeaves || 18,
-                          joiningDate: u.joiningDate || null,
-                          createdAt: u.createdAt || null
-                      });
-                  }
-              });
-              setEmployees([{ name: 'All', yearlyLeaves: 0, joiningDate: null, createdAt: null }, ...Array.from(uniqueUsersMap.values())]);
-          }
-      };
-      loadUsers();
-  }, [currentUser]);
+      if (canManage) {
+          const uniqueUsersMap = new Map();
+          userList.forEach((u: any) => {
+              if (u.name && !uniqueUsersMap.has(u.name)) {
+                  uniqueUsersMap.set(u.name, {
+                      name: u.name,
+                      id: u.id,
+                      yearlyLeaves: u.yearlyLeaves || 18,
+                      joiningDate: u.joiningDate || null,
+                      createdAt: u.createdAt || null
+                  });
+              }
+          });
+          setEmployees([{ name: 'All', yearlyLeaves: 0, joiningDate: null, createdAt: null }, ...Array.from(uniqueUsersMap.values())]);
+      }
+  }, [userList, canManage]);
 
   // 🔥 Phase 7: fetch the server-computed balance summary whenever the target employee
   // or the visible FY (driven by currentDate) changes.

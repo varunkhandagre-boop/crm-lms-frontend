@@ -77,28 +77,27 @@ export default function ExpenseScreen() {
       fetcher: listExpenses, // was: fetchSaaSData("expenses")
   });
 
-  // Team members — unchanged plain fetch-on-mount (out of scope for this
-  // pass); builds both the employee-picker list and the senderId→name map
-  // used to enrich expense rows at filter time.
+  // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
+  // as manage_team.tsx/employee_timeline.tsx; builds both the
+  // employee-picker list and the senderId→name map used to enrich expense
+  // rows at filter time.
+  const { data: teamMembersForExpense } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: fetchTeamMembers,
+  });
   useEffect(() => {
-      const loadTeam = async () => {
-          if (currentUser?.companyId) {
-              const users = await fetchTeamMembers();
-              setSenderNameMap(new Map(users.map((u: any) => [u.id, u.name])));
-
-              if (canManage) {
-                  const uniqueMap = new Map();
-                  users.forEach((u: any) => {
-                      if (u.name && !uniqueMap.has(u.name)) {
-                          uniqueMap.set(u.name, { id: u.id || '0', name: u.name });
-                      }
-                  });
-                  setEmployees([{ id: 'All', name: 'All' }, ...Array.from(uniqueMap.values())]);
+      setSenderNameMap(new Map(teamMembersForExpense.map((u: any) => [u.id, u.name])));
+      if (canManage) {
+          const uniqueMap = new Map();
+          teamMembersForExpense.forEach((u: any) => {
+              if (u.name && !uniqueMap.has(u.name)) {
+                  uniqueMap.set(u.name, { id: u.id || '0', name: u.name });
               }
-          }
-      };
-      loadTeam();
-  }, [currentUser]);
+          });
+          setEmployees([{ id: 'All', name: 'All' }, ...Array.from(uniqueMap.values())]);
+      }
+  }, [teamMembersForExpense, canManage]);
 
   const parseDate = (dateStr: any) => {
       if (!dateStr) return new Date();

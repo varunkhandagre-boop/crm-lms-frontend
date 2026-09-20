@@ -40,7 +40,7 @@ export default function VisitingCardScreen() {
 
   // 🔥 3. Local States for independent loading
   // cardRequestList now comes from useCachedList below (cache-first)
-  const [userList, setUserList] = useState<any[]>([]);
+  // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
 
   // --- STATES ---
   const [searchText, setSearchText] = useState('');
@@ -87,23 +87,21 @@ export default function VisitingCardScreen() {
       return { fromDate: toIso(new Date(fyStartYear, 3, 1)), toDate: toIso(new Date(fyStartYear + 1, 2, 31)) };
   }
 
-  // 🔥 4a. Users list — still Firestore, loads once per session
-  const loadUsers = async () => {
-      if (!currentUser?.companyId) return;
-      const users = await fetchTeamMembers();
-      const validUsers = Array.isArray(users) ? users : [];
-      setUserList(validUsers);
-      
+  // 🔥 4a. Users list — cache-first, shares the SAME 'team_members' cache
+  // key as manage_team.tsx/employee_timeline.tsx.
+  const { data: userList } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: fetchTeamMembers,
+  });
+  useEffect(() => {
+      const validUsers = Array.isArray(userList) ? userList : [];
       if (canViewAll) {
           const uniqueUsers = Array.from(new Set(validUsers.map((a:any) => a?.name).filter(Boolean)))
               .map(name => validUsers.find((a:any) => a?.name === name));
           setEmployees([{ id: 'All', name: 'All' }, ...uniqueUsers as any]);
       }
-  };
-
-  useEffect(() => {
-      loadUsers();
-  }, [currentUser]);
+  }, [userList, canViewAll]);
 
   // 🔥 VISITING CARD REQUESTS — cache-first, parameterized by date-range +
   // employee filter + status (same pattern as attendance.tsx/travel.tsx —

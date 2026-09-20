@@ -98,25 +98,33 @@ export default function ServiceCallScreen() {
   });
   const openCount = serviceCallList.filter((i: any) => i.status === 'Open' || i.status === 'Assigned').length;
 
-  // 🔥 Organizations/users/installations — unchanged plain fetch-on-mount
-  // (not part of the cache pilot; out of scope for this pass).
+  // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
+  // as manage_team.tsx/employee_timeline.tsx.
+  const { data: teamMembersForServiceCall, refresh: refreshTeamMembersForServiceCall } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: fetchTeamMembers,
+  });
+  useEffect(() => {
+      if (isAdmin) {
+          const mappedUsers = teamMembersForServiceCall.map((u: any) => ({
+              id: u.id,
+              name: u.name || 'Unknown User'
+          }));
+          setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
+      }
+  }, [teamMembersForServiceCall, isAdmin]);
+
+  // 🔥 Organizations/installations — unchanged plain fetch-on-mount (not
+  // part of the cache pilot; out of scope for this pass).
   const loadRest = async () => {
       if (currentUser?.companyId) {
-          const [orgs, users, installs] = await Promise.all([
+          const [orgs, installs] = await Promise.all([
               fetchOrganizations({ limit: 200 }),
-              fetchTeamMembers(),
               listInstallations()
           ]);
           setOrgList(orgs);
           setInstallList(installs);
-
-          if (isAdmin) {
-              const mappedUsers = users.map((u: any) => ({
-                  id: u.id,
-                  name: u.name || 'Unknown User'
-              }));
-              setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
-          }
       }
   };
 
@@ -126,7 +134,7 @@ export default function ServiceCallScreen() {
 
   const onRefresh = async () => {
       setRefreshing(true);
-      await Promise.all([refreshServiceCalls(), loadRest()]);
+      await Promise.all([refreshServiceCalls(), loadRest(), refreshTeamMembersForServiceCall()]);
       setRefreshing(false);
   };
 

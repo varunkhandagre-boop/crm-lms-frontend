@@ -87,21 +87,22 @@ export default function LeadsScreen() {
         fetcher: listLeads, // was: fetchSaaSData("leads")
     });
 
-    // Team members (still Firestore, unrelated to the leads cache pilot) —
-    // unchanged plain fetch-on-mount.
+    // 🔥 Team members — cache-first, shares the SAME 'team_members' cache
+    // key as manage_team.tsx/employee_timeline.tsx.
+    const { data: teamMembersForLeads } = useCachedList({
+        cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+        enabled: !!currentUser?.companyId && canViewEmployeeFilter,
+        fetcher: fetchTeamMembers,
+    });
     useEffect(() => {
-        const loadTeam = async () => {
-            if (currentUser?.companyId && canViewEmployeeFilter) {
-                const users = await fetchTeamMembers();
-                const mappedUsers = users.map((u: any) => ({
-                    id: u.id,
-                    name: u.name || 'Unknown User'
-                }));
-                setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
-            }
-        };
-        loadTeam();
-    }, [currentUser]);
+        if (canViewEmployeeFilter) {
+            const mappedUsers = teamMembersForLeads.map((u: any) => ({
+                id: u.id,
+                name: u.name || 'Unknown User'
+            }));
+            setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
+        }
+    }, [teamMembersForLeads, canViewEmployeeFilter]);
 
     const parseDate = (dateStr: any) => {
         if (!dateStr) return new Date(0);

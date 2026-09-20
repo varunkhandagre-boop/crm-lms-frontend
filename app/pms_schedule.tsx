@@ -82,24 +82,30 @@ export default function PMSScheduleScreen() {
       fetcher: listPmsReports, // was: fetchSaaSData("pms_reports")
   });
 
-  // Organizations/users — unchanged plain fetch-on-mount (out of scope for
-  // this pass).
+  // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
+  // as manage_team.tsx/employee_timeline.tsx.
+  const { data: teamMembersForPms } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: fetchTeamMembers,
+  });
+  useEffect(() => {
+      if (isAdmin) {
+          const mappedUsers = teamMembersForPms.map((u: any) => ({
+              id: u.id,
+              name: u.name || 'Unknown User'
+          }));
+          setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
+      }
+  }, [teamMembersForPms, isAdmin]);
+
+  // Organizations — unchanged plain fetch-on-mount (out of scope for this
+  // pass).
   useEffect(() => {
       const loadRest = async () => {
           if (currentUser?.companyId) {
-              const [orgs, users] = await Promise.all([
-                  fetchOrganizations({ limit: 200 }),
-                  fetchTeamMembers()
-              ]);
+              const orgs = await fetchOrganizations({ limit: 200 });
               setOrgList(orgs);
-
-              if (isAdmin) {
-                  const mappedUsers = users.map((u: any) => ({
-                      id: u.id,
-                      name: u.name || 'Unknown User'
-                  }));
-                  setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
-              }
           }
       };
       loadRest();

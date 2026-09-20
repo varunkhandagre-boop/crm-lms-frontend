@@ -94,22 +94,22 @@ export default function InstallationListScreen() {
       fetcher: listInstallations, // was: fetchSaaSData("installations")
   });
 
-  // Users — unchanged plain fetch-on-mount (out of scope for this pass).
+  // 🔥 Users — cache-first, shares the SAME 'team_members' cache key as
+  // manage_team.tsx/employee_timeline.tsx.
+  const { data: teamMembersForInstall } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: fetchTeamMembers,
+  });
   useEffect(() => {
-      const loadUsers = async () => {
-          if (currentUser?.companyId) {
-              const users = await fetchTeamMembers();
-              if (isAdmin) {
-                  const mappedUsers = users.map((u: any) => ({
-                      id: u.id,
-                      name: u.name || 'Unknown User'
-                  }));
-                  setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
-              }
-          }
-      };
-      loadUsers();
-  }, [currentUser]);
+      if (isAdmin) {
+          const mappedUsers = teamMembersForInstall.map((u: any) => ({
+              id: u.id,
+              name: u.name || 'Unknown User'
+          }));
+          setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
+      }
+  }, [teamMembersForInstall, isAdmin]);
 
   const parseDate = (dateStr: any) => {
     if (!dateStr) return 0;

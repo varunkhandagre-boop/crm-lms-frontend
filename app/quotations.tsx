@@ -67,19 +67,20 @@ export default function QuotationsListScreen() {
         },
     });
 
-    // Users — unchanged plain fetch-on-mount (out of scope for this pass).
+    // 🔥 Users — cache-first, shares the SAME 'team_members' cache key as
+    // manage_team.tsx/employee_timeline.tsx.
+    const { data: teamMembersForQuotes } = useCachedList({
+        cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: fetchTeamMembers,
+    });
     useEffect(() => {
-        const loadUsers = async () => {
-            if (!currentUser?.companyId) return;
-            const users = await fetchTeamMembers();
-            if (canManage) {
-                const uniqueUsers = Array.from(new Set(users.map((u:any) => u.name)))
-                    .map(name => users.find((u:any) => u.name === name));
-                setEmployees([{ id: 'All', name: 'All' }, ...uniqueUsers as any]);
-            }
-        };
-        loadUsers();
-    }, [currentUser]);
+        if (canManage) {
+            const uniqueUsers = Array.from(new Set(teamMembersForQuotes.map((u:any) => u.name)))
+                .map(name => teamMembersForQuotes.find((u:any) => u.name === name));
+            setEmployees([{ id: 'All', name: 'All' }, ...uniqueUsers as any]);
+        }
+    }, [teamMembersForQuotes, canManage]);
 
     const onRefresh = async () => {
         setRefreshing(true);

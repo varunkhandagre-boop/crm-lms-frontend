@@ -9,6 +9,7 @@ import {
     Alert,
     KeyboardAvoidingView,
     Platform,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Switch,
@@ -33,6 +34,9 @@ import {
 import { fetchTeamMembers } from '../services/api/users';
 import { urlToBase64Image } from '../utils/pdfImageHelper';
 import { useData } from './context/DataContext';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -47,13 +51,13 @@ export default function PayrollScreen() {
     const [saving, setSaving] = useState(false);
 
     const [settings, setSettings] = useState<PayrollSettings | null>(null);
-    const [userList, setUserList] = useState<any[]>([]);
+    // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
     const [selectedUserId, setSelectedUserId] = useState<string>('');
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
     const [preview, setPreview] = useState<Payslip | null>(null);
     const [previewLoading, setPreviewLoading] = useState(false);
-    const [payslips, setPayslips] = useState<Payslip[]>([]);
+    // payslips now comes from useCachedList above (cache-first)
 
     const [allPreview, setAllPreview] = useState<PayslipCalc[] | null>(null);
     const [allPreviewLoading, setAllPreviewLoading] = useState(false);
@@ -61,28 +65,47 @@ export default function PayrollScreen() {
     const [selectedForExport, setSelectedForExport] = useState<Set<string>>(new Set());
     const [myCurrentMonthSummary, setMyCurrentMonthSummary] = useState<Payslip | null>(null);
 
+    // 🔥 PAYSLIPS — cache-first (instant from AsyncStorage, then background
+    // refresh). Both the manager and self-view branches call
+    // fetchPayslips({}) with identical (no) params — the server scopes the
+    // result by role via the JWT — so this one hook covers both.
+    const payslipsCacheKey = buildCacheKey('payslips', currentUser?.companyId);
+    const {
+        data: payslips,
+        loading: payslipsLoading,
+        refreshing: payslipsRefreshing,
+        refresh: refreshPayslips,
+    } = useCachedList({
+        cacheKey: payslipsCacheKey,
+        enabled: !!currentUser?.companyId,
+        fetcher: () => fetchPayslips({}),
+    });
+
+    // 🔥 Team members — cache-first, shares the SAME 'team_members' cache
+    // key as manage_team.tsx/employee_timeline.tsx.
+    const { data: userList } = useCachedList({
+        cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+        enabled: !!currentUser?.companyId && isManager,
+        fetcher: fetchTeamMembers,
+    });
+    useEffect(() => {
+        if (isManager && userList.length > 0 && !selectedUserId) {
+            setSelectedUserId(userList[0].id);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [userList, isManager]);
+
     useEffect(() => {
         (async () => {
             try {
                 if (isManager) {
-                    const [s, users, slips] = await Promise.all([
-                        fetchPayrollSettings(),
-                        fetchTeamMembers(),
-                        fetchPayslips({}),
-                    ]);
+                    const s = await fetchPayrollSettings();
                     setSettings(s);
-                    setUserList(users);
-                    setPayslips(slips);
-                    if (users.length > 0) setSelectedUserId(users[0].id);
                 } else {
-                    // Self-view: backend's listPayslips() already scopes
-                    // non-manager roles to their own records only.
+                    // Self-view summary card — payslips list itself comes
+                    // from the cache-first hook above.
                     const now = new Date();
-                    const [slips, summary] = await Promise.all([
-                        fetchPayslips({}),
-                        previewPayslip(undefined, now.getMonth() + 1, now.getFullYear()).catch(() => null),
-                    ]);
-                    setPayslips(slips);
+                    const summary = await previewPayslip(undefined, now.getMonth() + 1, now.getFullYear()).catch(() => null);
                     setMyCurrentMonthSummary(summary);
                 }
             } catch (e) {
@@ -130,8 +153,7 @@ export default function PayrollScreen() {
         setSaving(true);
         try {
             await generatePayslip(selectedUserId, selectedMonth, selectedYear);
-            const slips = await fetchPayslips({});
-            setPayslips(slips);
+            await refreshPayslips();
             setPreview(null);
             Alert.alert('Success ✅', 'Payslip generated!');
         } catch (e: any) {
@@ -164,8 +186,7 @@ export default function PayrollScreen() {
                     setSaving(true);
                     try {
                         const result = await generateAllPayslips(selectedMonth, selectedYear);
-                        const slips = await fetchPayslips({});
-                        setPayslips(slips);
+                        await refreshPayslips();
                         setAllPreview(null);
                         Alert.alert('Done ✅', `Generated: ${result.created}, Skipped: ${result.skipped} (already existed)`);
                     } catch (e: any) {
@@ -369,7 +390,7 @@ const generatePayslipPDF = async (slip: Payslip) => {
 };
 
 
-    if (loading) {
+    if (loading || payslipsLoading) {
         return <View style={styles.centerLoading}><ActivityIndicator size="large" color="#3b5998" /></View>;
     }
 
@@ -383,7 +404,12 @@ const generatePayslipPDF = async (slip: Payslip) => {
             </View>
 
             {!isManager && (
-                <ScrollView contentContainerStyle={styles.content}>
+                <ScrollView
+                    contentContainerStyle={styles.content}
+                    refreshControl={
+                        <RefreshControl refreshing={payslipsRefreshing} onRefresh={refreshPayslips} colors={['#3b5998']} tintColor="#3b5998" />
+                    }
+                >
                     {myCurrentMonthSummary && (
                         <>
                             <Text style={styles.sectionTitle}>This Month's Attendance</Text>
@@ -484,7 +510,12 @@ const generatePayslipPDF = async (slip: Payslip) => {
             )}
 
             {activeTab === 'Generate' && (
-                <ScrollView contentContainerStyle={styles.content}>
+                <ScrollView
+                    contentContainerStyle={styles.content}
+                    refreshControl={
+                        <RefreshControl refreshing={payslipsRefreshing} onRefresh={refreshPayslips} colors={['#3b5998']} tintColor="#3b5998" />
+                    }
+                >
                     <Text style={styles.sectionTitle}>Period</Text>
                     <View style={styles.card}>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 44, marginBottom: 10 }}>

@@ -37,7 +37,7 @@ export default function SalesReportScreen() {
 
   // salesVisitList now comes from useCachedList below (cache-first)
   const [orgList, setOrgList] = useState<any[]>([]);
-  const [userList, setUserList] = useState<any[]>([]);
+  // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -88,25 +88,30 @@ export default function SalesReportScreen() {
       fetcher: listSalesVisits, // was: fetchSaaSData("sales_reports")
   });
 
-  // Organizations/users — unchanged plain fetch-on-mount (out of scope for
-  // this pass).
+  // 🔥 Users — cache-first, shares the SAME 'team_members' cache key as
+  // manage_team.tsx/employee_timeline.tsx.
+  const { data: userList } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: fetchTeamMembers,
+  });
+  useEffect(() => {
+      if (isAdmin) {
+          const mappedUsers = userList.map((u: any) => ({
+              id: u.id,
+              name: u.name || 'Unknown User'
+          }));
+          setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
+      }
+  }, [userList, isAdmin]);
+
+  // Organizations — unchanged plain fetch-on-mount (out of scope for this
+  // pass).
   useEffect(() => {
       const loadRest = async () => {
           if (currentUser?.companyId) {
-              const [orgs, users] = await Promise.all([
-                  fetchOrganizations({ limit: 200 }),
-                  fetchTeamMembers()
-              ]);
+              const orgs = await fetchOrganizations({ limit: 200 });
               setOrgList(orgs);
-              setUserList(users);
-
-              if (isAdmin) {
-                  const mappedUsers = users.map((u: any) => ({
-                      id: u.id,
-                      name: u.name || 'Unknown User'
-                  }));
-                  setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
-              }
           }
       };
       loadRest();

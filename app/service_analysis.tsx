@@ -14,7 +14,8 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (users still Firestore)
+// 🔥 SAAS IMPORTS (kept for isDbLoading UX only — everything else, including
+// team members, is on Postgres now)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: this screen is now FULLY migrated — all four data sources
@@ -23,6 +24,7 @@ import { useData } from './context/DataContext';
 import { listServiceCalls } from '../services/api/serviceCalls';
 import { listPmsReports } from '../services/api/pmsReports';
 import { listDemos } from '../services/api/demos';
+import { fetchTeamMembers } from '../services/api/users';
 import { listInstallations } from '../services/api/installations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -54,7 +56,7 @@ export default function AnalysisScreen() {
     const router = useRouter();
     
     const { currentUser } = useData(); 
-    const { fetchSaaSData, isDbLoading } = useSaaSDB();
+    const { isDbLoading } = useSaaSDB();
 
     // serviceList/pmsList/demoList/installationList now come from useCachedList
     // below, sharing cache keys with service_call.tsx / pms_schedule.tsx /
@@ -128,23 +130,25 @@ export default function AnalysisScreen() {
     });
     const isAnalysisLoading = serviceLoading || pmsLoading || demosLoading || installsLoading;
 
-    // Users — unchanged plain fetch-on-mount (still Firestore, out of scope
-    // for this pass).
+    // 🔥 Team members — cache-first, shares the SAME 'team_members' cache
+    // key as manage_team.tsx/employee_timeline.tsx. Was previously calling
+    // fetchSaaSData("users") — a stale Firestore collection reference from
+    // before this project migrated users to Postgres — which is why this
+    // screen's employee picker was coming back empty.
+    const { data: teamMembersForServiceAnalysis } = useCachedList({
+        cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: fetchTeamMembers,
+    });
     useEffect(() => {
-        const loadUsers = async () => {
-            if (currentUser?.companyId) {
-                const users = await fetchSaaSData("users");
-                if (isAdmin) {
-                    const mappedUsers = users.map((u: any) => ({
-                        id: u.id,
-                        name: u.name || 'Unknown User'
-                    }));
-                    setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
-                }
-            }
-        };
-        loadUsers();
-    }, [currentUser]);
+        if (isAdmin) {
+            const mappedUsers = teamMembersForServiceAnalysis.map((u: any) => ({
+                id: u.id,
+                name: u.name || 'Unknown User'
+            }));
+            setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
+        }
+    }, [teamMembersForServiceAnalysis, isAdmin]);
 
     const onRefresh = async () => {
         setRefreshing(true);

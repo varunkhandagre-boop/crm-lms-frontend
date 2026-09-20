@@ -37,7 +37,7 @@ export default function TravelNoteScreen() {
 
   // 🔥 3. Lazy Loaded States for DB
   // travelList now comes from useCachedList below (cache-first)
-  const [userList, setUserList] = useState<any[]>([]);
+  // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
 
   // --- STATES ---
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All'); 
@@ -83,21 +83,20 @@ export default function TravelNoteScreen() {
       return { fromDate: toIso(new Date(fyStartYear, 3, 1)), toDate: toIso(new Date(fyStartYear + 1, 2, 31)) };
   }
 
-  // 🔥 4a. Users list — still Firestore, loads once per session
-  const loadUsers = async () => {
-      if (!currentUser?.companyId) return;
-      const users = await fetchTeamMembers();
-      setUserList(users);
+  // 🔥 4a. Users list — cache-first, shares the SAME 'team_members' cache
+  // key as manage_team.tsx/employee_timeline.tsx.
+  const { data: userList } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: fetchTeamMembers,
+  });
+  useEffect(() => {
       if (canManage) {
-          const uniqueUsers = Array.from(new Set(users.map((a:any) => a.name)))
-              .map(name => users.find((a:any) => a.name === name));
+          const uniqueUsers = Array.from(new Set(userList.map((a:any) => a.name)))
+              .map(name => userList.find((a:any) => a.name === name));
           setEmployees([{ id: 'All', name: 'All' }, ...uniqueUsers as any]);
       }
-  };
-
-  useEffect(() => {
-      loadUsers();
-  }, [currentUser]);
+  }, [userList, canManage]);
 
   // 🔥 TRAVEL NOTES — cache-first, but like attendance.tsx this screen's data
   // is parameterized by date-range + employee filter, not a flat "whole

@@ -39,7 +39,7 @@ export default function TaskScreen() {
 
   // 🔥 3. Lazy Loaded States
   // taskList now comes from useCachedList below (cache-first)
-  const [userList, setUserList] = useState<any[]>([]);
+  // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
   const [refreshing, setRefreshing] = useState(false);
 
   // --- STATES ---
@@ -93,13 +93,13 @@ export default function TaskScreen() {
       return { fromDate: toIso(new Date(fyStartYear, 3, 1)), toDate: toIso(new Date(fyStartYear + 1, 2, 31)) };
   }
 
-  // 🔥 4a. Users list — still Firestore, loads once per session
-  useEffect(() => {
-      const loadUsers = async () => {
-          if (currentUser?.companyId) setUserList(await fetchTeamMembers());
-      };
-      loadUsers();
-  }, [currentUser]);
+  // 🔥 4a. Users list — cache-first, shares the SAME 'team_members' cache
+  // key as manage_team.tsx/employee_timeline.tsx.
+  const { data: userList } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: fetchTeamMembers,
+  });
 
   // 🔥 TASKS — cache-first, parameterized by date-range + employee filter
   // (same pattern as attendance.tsx/travel.tsx). Fetches both directions

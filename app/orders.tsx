@@ -100,24 +100,30 @@ export default function OrderListScreen() {
       fetcher: listOrders, // was: fetchSaaSData("orders")
   });
 
-  // Payments/users — unchanged plain fetch-on-mount (payments list is
-  // currently unused downstream; left as-is, out of scope for this pass).
+  // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
+  // as manage_team.tsx/employee_timeline.tsx.
+  const { data: teamMembersForOrders } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: fetchTeamMembers,
+  });
+  useEffect(() => {
+      if (isAdmin) {
+          const mappedUsers = teamMembersForOrders.map((u: any) => ({
+              id: u.id,
+              name: u.name || 'Unknown User'
+          }));
+          setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
+      }
+  }, [teamMembersForOrders, isAdmin]);
+
+  // Payments — unchanged plain fetch-on-mount (payments list is currently
+  // unused downstream; left as-is, out of scope for this pass).
   useEffect(() => {
       const loadRest = async () => {
           if (currentUser?.companyId) {
-              const [payments, users] = await Promise.all([
-                  listPaymentCollections(), // was: fetchSaaSData("payments")
-                  fetchTeamMembers()
-              ]);
+              const payments = await listPaymentCollections(); // was: fetchSaaSData("payments")
               setPaymentList(payments);
-
-              if (isAdmin) {
-                  const mappedUsers = users.map((u: any) => ({
-                      id: u.id,
-                      name: u.name || 'Unknown User'
-                  }));
-                  setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
-              }
           }
       };
       loadRest();

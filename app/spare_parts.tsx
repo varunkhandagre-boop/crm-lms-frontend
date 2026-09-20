@@ -35,7 +35,7 @@ export default function SparePartsScreen() {
   const { fetchSaaSData, addSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
 
   // sparePartsList now comes from useCachedList below (cache-first)
-  const [userList, setUserList] = useState<any[]>([]);
+  // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
 
   const [activeTab, setActiveTab] = useState<'Parts' | 'StockList'>('Parts'); 
   const [stockSubTab, setStockSubTab] = useState<'OfficeStock' | 'SpareList'>('OfficeStock'); 
@@ -81,15 +81,19 @@ export default function SparePartsScreen() {
       fetcher: listSpareParts, // was: fetchSaaSData("spare_parts")
   });
 
-  // Users/office_machines — unchanged plain fetch-on-mount (office_machines
-  // stays Firestore CRUD, out of scope for this pass).
+  // 🔥 Users — cache-first, shares the SAME 'team_members' cache key as
+  // manage_team.tsx/employee_timeline.tsx.
+  const { data: userList, refresh: refreshUsersForSpareParts } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: fetchTeamMembers,
+  });
+
+  // office_machines — unchanged plain fetch-on-mount (stays Firestore CRUD,
+  // out of scope for this pass).
   const loadRest = async () => {
       if (currentUser?.companyId) {
-          const [users, machines] = await Promise.all([
-              fetchTeamMembers(),
-              fetchSaaSData("office_machines")
-          ]);
-          setUserList(users);
+          const machines = await fetchSaaSData("office_machines");
           setMachinesList(machines);
       }
   };
@@ -99,7 +103,7 @@ export default function SparePartsScreen() {
   }, [currentUser]);
 
   const onRefresh = async () => {
-      await Promise.all([refreshSpareParts(), loadRest()]);
+      await Promise.all([refreshSpareParts(), loadRest(), refreshUsersForSpareParts()]);
   };
 
 

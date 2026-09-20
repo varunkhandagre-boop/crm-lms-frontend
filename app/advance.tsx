@@ -33,7 +33,7 @@ export default function EmployeeAdvanceScreen() {
   const { isDbLoading } = useSaaSDB();
 
   // advanceList now comes from useCachedList below (cache-first, raw — senderName enrichment happens at filter time)
-  const [usersList, setUsersList] = useState<any[]>([]);
+  // usersList now comes from useCachedList too (see the team-members hook further below)
   const [senderNameMap, setSenderNameMap] = useState<Map<string, string>>(new Map());
 
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All'); 
@@ -76,28 +76,26 @@ export default function EmployeeAdvanceScreen() {
       fetcher: listAdvances, // was: fetchSaaSData("advances")
   });
 
-  // Team members — unchanged plain fetch-on-mount (out of scope for this
-  // pass); builds the employee-picker list and the senderId→name map.
+  // 🔥 TEAM MEMBERS — cache-first, shares the SAME 'team_members' cache key
+  // as manage_team.tsx/employee_timeline.tsx (visiting any of those screens
+  // warms this one's cache too). See hooks/useCachedList.ts.
+  const { data: usersList } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: fetchTeamMembers,
+  });
   useEffect(() => {
-      const loadTeam = async () => {
-          if (currentUser?.companyId) {
-              const users = await fetchTeamMembers();
-              setUsersList(users);
-              setSenderNameMap(new Map(users.map((u: any) => [u.id, u.name])));
-
-              if (canManage) {
-                  const uniqueMap = new Map();
-                  users.forEach((u: any) => {
-                      if (u.name && !uniqueMap.has(u.name)) {
-                          uniqueMap.set(u.name, { id: u.id || '0', name: u.name });
-                      }
-                  });
-                  setEmployees([{ id: 'All', name: 'All' }, ...Array.from(uniqueMap.values())]);
+      setSenderNameMap(new Map(usersList.map((u: any) => [u.id, u.name])));
+      if (canManage) {
+          const uniqueMap = new Map();
+          usersList.forEach((u: any) => {
+              if (u.name && !uniqueMap.has(u.name)) {
+                  uniqueMap.set(u.name, { id: u.id || '0', name: u.name });
               }
-          }
-      };
-      loadTeam();
-  }, [currentUser]);
+          });
+          setEmployees([{ id: 'All', name: 'All' }, ...Array.from(uniqueMap.values())]);
+      }
+  }, [usersList, canManage]);
 
   const parseDate = (dateStr: any) => {
       if (!dateStr) return new Date();

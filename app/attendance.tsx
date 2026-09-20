@@ -38,7 +38,14 @@ export default function AttendanceScreen() {
   // attendanceList now comes from useCachedList below (cache-first)
   const [leaveList, setLeaveList] = useState<any[]>([]);
   const [holidayList, setHolidayList] = useState<any[]>([]);
-  const [userList, setUserList] = useState<any[]>([]);
+  // 🔥 Users list — cache-first, shares the SAME 'team_members' cache key
+  // as manage_team.tsx/employee_timeline.tsx. Declared early since
+  // usersReady below reads userList.length.
+  const { data: userList } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: fetchTeamMembers,
+  });
 
   // States
   const [currentDate, setCurrentDate] = useState(new Date()); 
@@ -144,18 +151,6 @@ export default function AttendanceScreen() {
       enabled: !!currentUser?.companyId && usersReady,
       fetcher: () => fetchAttendance({ userId: targetUserId, fromDate, toDate, limit: 500 }),
   });
-
-  // 🔥 Users list loads once per session (still Firestore, unrelated to date-range paging)
-  useEffect(() => {
-      const loadUsers = async () => {
-          if (currentUser?.companyId) {
-              const users = await fetchTeamMembers();
-              setUserList(users);
-
-          }
-      };
-      loadUsers();
-  }, [currentUser]);
 
   // 🔥 Leaves/holidays — same date-range dependency as attendance above, but
   // left as a plain (uncached) fetch for now; smaller payloads, lower value

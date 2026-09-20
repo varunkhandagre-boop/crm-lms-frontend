@@ -16,9 +16,11 @@ import {
 } from 'react-native';
 import * as XLSX from 'xlsx';
 
-// 🔥 SAAS IMPORT (users list still Firestore — Manage Team not yet migrated)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+import { fetchTeamMembers } from '../services/api/users';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 // 🔥 New Postgres backend adapters replacing fetchSaaSData() per module
 import { listAdvances } from '../services/api/advances';
@@ -41,12 +43,11 @@ export default function DownloadDetailsScreen() {
     const router = useRouter();
 
     const { currentUser } = useData();
-    const { fetchSaaSData } = useSaaSDB();
 
     const [loading, setLoading] = useState(false);
     const [progress, setProgress] = useState('');
 
-    const [userList, setUserList] = useState<any[]>([]);
+    // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
 
     const [selectedMonth, setSelectedMonth] = useState(-1); // -1 = All Months
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
@@ -82,15 +83,15 @@ export default function DownloadDetailsScreen() {
     const userRole = (currentUser?.role || '').toLowerCase();
     const isAdmin = userRole.includes('admin') || userRole.includes('manager') || userRole.includes('superadmin');
 
-    useEffect(() => {
-        const loadUsers = async () => {
-            if (currentUser?.companyId) {
-                const users = await fetchSaaSData("users");
-                setUserList(users);
-            }
-        };
-        loadUsers();
-    }, [currentUser]);
+    // 🔥 Team members — cache-first, shares the SAME 'team_members' cache
+    // key as manage_team.tsx/employee_timeline.tsx. Was previously calling
+    // fetchSaaSData("users") — a stale Firestore reference from before this
+    // project migrated users to Postgres.
+    const { data: userList } = useCachedList({
+        cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: fetchTeamMembers,
+    });
 
     // Native date-range params for the adapters that support them
     // (attendance/couriers/tasks/travel/leaves) — the rest filter client-side
