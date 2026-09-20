@@ -23,6 +23,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchCompanyProfile } from '../services/api/companies';
 import { fetchHomeSummary, HomeSummary } from '../services/api/homeSummary';
 import { useData } from './context/DataContext';
+// 🔥 Cache-first dashboard summary (see hooks/useCachedObject.ts)
+import { useCachedObject } from '../hooks/useCachedObject';
+import { buildCacheKey } from '../utils/listCache';
 
 // NOTIFICATION IMPORTS
 import * as Device from 'expo-device';
@@ -57,7 +60,16 @@ export default function HomeScreen() {
     loading
 } = useData();
 
-  const [summary, setSummary] = useState<HomeSummary | null>(null);
+  // 🔥 DASHBOARD SUMMARY — cache-first (instant from AsyncStorage, then
+  // background refresh). See hooks/useCachedObject.ts.
+  const {
+      data: summary,
+      refresh: refreshSummary,
+  } = useCachedObject({
+      cacheKey: buildCacheKey('home_summary', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: fetchHomeSummary,
+  });
   const [planDaysLeft, setPlanDaysLeft] = useState<number | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(false); 
   const [expoPushToken, setExpoPushToken] = useState('');
@@ -66,15 +78,10 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
         const loadData = async () => {
-            if (currentUser?.companyId) {
-                try {
-                    const data = await fetchHomeSummary();
-                    setSummary(data);
-                } catch (e) {
-                    // Badge counts staying at their last-known values on a
-                    // transient error beats crashing the home screen.
-                }
-            }
+            // Dashboard summary — cache already shows the last-known
+            // snapshot instantly; this just triggers a background refresh
+            // whenever the home screen regains focus.
+            refreshSummary();
 
             try {
                 const profile = await fetchCompanyProfile();
@@ -88,13 +95,13 @@ export default function HomeScreen() {
             // Unread notification badge — refreshed whenever the home screen
             // regains focus (app open, tab switch back, nav back), instead of
             // a background setInterval poll.
-             if (currentUser?.companyId) {
+            if (currentUser?.companyId) {
                 try {
-                   const unread = await fetchNotifications({ filter: 'unread' });
-                   setUnreadCount(unread.length);
+                    const unread = await fetchNotifications({ filter: 'unread' });
+                    setUnreadCount(unread.length);
                 } catch (e) {
-                   // Badge staying at its last-known value on a transient
-                 // error beats crashing the home screen.
+                    // Badge staying at its last-known value on a transient
+                    // error beats crashing the home screen.
                 }
             }
 
