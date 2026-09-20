@@ -35,6 +35,9 @@ import { recordLocationLog } from '../services/api/locationLogs';
 import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTeamMembers } from '../services/api/users';
 import { urlToBase64Image } from '../utils/pdfImageHelper';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function AddOrderScreen() {
   const router = useRouter();
@@ -48,7 +51,7 @@ export default function AddOrderScreen() {
 
   const [orgList, setOrgList] = useState<any[]>([]);
   const [productList, setProductList] = useState<any[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
+  // users now comes from useCachedList below (cache-first, shared 'team_members' key)
 
   const [hospitalName, setHospitalName] = useState('');
   const [orgId, setOrgId] = useState(''); 
@@ -94,21 +97,28 @@ export default function AddOrderScreen() {
 
   const canSelectSalesPerson = ['Admin', 'Manager', 'Account', 'Accountant', 'SuperAdmin'].includes(currentUser?.role || '');
 
-  // 🔥 LOAD DATA — products via new API; organizations/users via Firestore
+  // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
+  // as manage_team.tsx/employee_timeline.tsx.
+  const { data: users } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId && canSelectSalesPerson,
+      fetcher: fetchTeamMembers,
+  });
+
+  // 🔥 Organizations/products — unchanged plain fetch-on-mount (out of
+  // scope for this pass).
   useEffect(() => {
-      const loadData = async () => {
+      const loadRest = async () => {
           if (currentUser?.companyId) {
-              const [orgs, prods, usrs] = await Promise.all([
+              const [orgs, prods] = await Promise.all([
                   fetchOrganizations({ limit: 200 }),
                   listProducts(), // was: fetchSaaSData("products")
-                  fetchTeamMembers(),
               ]);
               setOrgList(orgs);
               setProductList(prods);
-              if (canSelectSalesPerson) setUsers(usrs);
           }
       };
-      loadData();
+      loadRest();
   }, [currentUser]);
 
   useEffect(() => {

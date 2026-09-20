@@ -30,6 +30,9 @@ import { dayIn as dayInApi, dayOut as dayOutApi, fetchAttendance, fetchTodayAtte
 import { fetchHolidays } from '../services/api/holidays';
 import { fetchLeaves } from '../services/api/leaves';
 import { fetchTeamMembers } from '../services/api/users';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function DayInScreen() {
     useKeepAwake();
@@ -47,7 +50,14 @@ export default function DayInScreen() {
     const [attendanceList, setAttendanceList] = useState<any[]>([]);
     const [holidayList, setHolidayList] = useState<any[]>([]);
     const [leaveList, setLeaveList] = useState<any[]>([]);
-    const [userList, setUserList] = useState<any[]>([]);
+    // 🔥 Users list — cache-first, shares the SAME 'team_members' cache key
+    // as manage_team.tsx/employee_timeline.tsx. Declared early since
+    // userList.length is read further below (loadAllData's guard).
+    const { data: userList } = useCachedList({
+        cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: fetchTeamMembers,
+    });
 
     // --- STATES ---
     const [location, setLocation] = useState<Location.LocationObject | null>(null);
@@ -97,17 +107,6 @@ export default function DayInScreen() {
         const end = new Date(currentDate.getFullYear(), 11, 31);
         return { fromDate: start.toISOString().split('T')[0], toDate: end.toISOString().split('T')[0] };
     };
-
-    // 🔥 4a. Users list loads once per session (still Firestore)
-    useEffect(() => {
-        const loadUsers = async () => {
-            if (currentUser?.companyId) {
-                const users = await fetchTeamMembers();
-                setUserList(users);
-            }
-        };
-        loadUsers();
-    }, [currentUser]);
 
     // 🔥 4b. Attendance/leaves/holidays — bounded date-range fetch, re-run when the
     // view window or selected employee changes. Waits for userList so a manager's

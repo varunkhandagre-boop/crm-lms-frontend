@@ -33,6 +33,9 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { recordLocationLog } from '../services/api/locationLogs';
 import { fetchTeamMembers } from '../services/api/users';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 // 🔥 OCR & CAMERA IMPORT
 import * as ImagePicker from 'expo-image-picker';
@@ -46,7 +49,7 @@ export default function AddInstallationScreen() {
 
   const [orgList, setOrgList] = useState<any[]>([]);
   const [productList, setProductList] = useState<any[]>([]);
-  const [userList, setUserList] = useState<any[]>([]);
+  // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
 
   const [hospital, setHospital] = useState('');
   const [orgId, setOrgId] = useState('');
@@ -86,21 +89,28 @@ export default function AddInstallationScreen() {
   
   const warrantyOptions = ['6 Months', '1 Year', '2 Years', '3 Years', '5 Years', 'Other'];
 
-  // 🔥 LOAD DATA — products via new API; organizations/users via Firestore
+  // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
+  // as manage_team.tsx/employee_timeline.tsx.
+  const { data: userList } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: fetchTeamMembers,
+  });
+
+  // 🔥 Organizations/products — unchanged plain fetch-on-mount (out of
+  // scope for this pass).
   useEffect(() => {
-      const loadData = async () => {
+      const loadRest = async () => {
           if (currentUser?.companyId) {
-              const [orgs, prods, users] = await Promise.all([
+              const [orgs, prods] = await Promise.all([
                   fetchOrganizations({ limit: 200 }),
                   listProducts(), // was: fetchSaaSData("products")
-                  fetchTeamMembers(),
               ]);
               setOrgList(orgs);
               setProductList(prods);
-              setUserList(users);
           }
       };
-      loadData();
+      loadRest();
   }, [currentUser]);
 
   const getEngineerOptions = () => {

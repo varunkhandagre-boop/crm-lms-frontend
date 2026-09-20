@@ -26,6 +26,9 @@ import { updateLead as apiUpdateLead, createLead, listLeads } from '../services/
 import { fetchOrganizations } from '../services/api/organizations';
 import { listProducts } from '../services/api/products';
 import { fetchTeamMembers } from '../services/api/users';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function AddLeadScreen() {
   const router = useRouter();
@@ -38,9 +41,8 @@ export default function AddLeadScreen() {
 
   // 🔥 3. Lazy Loaded States
   const [orgList, setOrgList] = useState<any[]>([]);
-  const [userList, setUserList] = useState<any[]>([]);
+  // userList/leadsList now come from useCachedList below (cache-first, shared keys)
   const [productList, setProductList] = useState<any[]>([]);
-  const [leadsList, setLeadsList] = useState<any[]>([]); // For duplicate checking
 
   // --- FORM STATES ---
   const [org, setOrg] = useState(''); 
@@ -81,23 +83,33 @@ export default function AddLeadScreen() {
   const [filteredData, setFilteredData] = useState<any[]>([]);
   const [currentModalType, setCurrentModalType] = useState('');
 
-  // 🔥 4. LOAD DATA ON MOUNT (leads via new API, rest via SaaS/Firestore)
+  // 🔥 Team members + Leads — cache-first, sharing the SAME cache keys as
+  // manage_team.tsx ('team_members') and leads.tsx ('leads') respectively.
+  const { data: userList } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: fetchTeamMembers,
+  });
+  const { data: leadsList } = useCachedList({
+      cacheKey: buildCacheKey('leads', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: listLeads, // For duplicate checking — was: fetchSaaSData("leads")
+  });
+
+  // 🔥 Organizations/products — unchanged plain fetch-on-mount (out of
+  // scope for this pass).
   useEffect(() => {
-      const loadData = async () => {
+      const loadRest = async () => {
           if (currentUser?.companyId) {
-              const [orgs, users, prods, leads] = await Promise.all([
+              const [orgs, prods] = await Promise.all([
                   fetchOrganizations({ limit: 200 }),
-                  fetchTeamMembers(),
                   listProducts(), // was: fetchSaaSData("products")
-                  listLeads() // was: fetchSaaSData("leads")
               ]);
               setOrgList(orgs);
-              setUserList(users);
               setProductList(prods);
-              setLeadsList(leads);
           }
       };
-      loadData();
+      loadRest();
   }, [currentUser]);
 
   const employees = (userList && userList.length > 0) ? userList.map((u: any) => u.name || 'Unknown') : ['Loading...']; 

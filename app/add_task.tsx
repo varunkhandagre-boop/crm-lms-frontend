@@ -24,14 +24,16 @@ import { createTask } from '../services/api/tasks';
 // 🔥 User list now comes from Postgres too — Firestore's "id" was never a
 // valid backend UUID, which is why assignedToId kept failing validation.
 import { fetchTeamMembers, LegacyTeamMember } from '../services/api/users';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function AddTaskScreen() {
   const router = useRouter();
   
   const { currentUser, addNotification } = useData(); 
 
-  const [userList, setUserList] = useState<LegacyTeamMember[]>([]);
-  const [loadingUsers, setLoadingUsers] = useState(false);
+  // userList/loadingUsers now come from useCachedList below (cache-first, shared 'team_members' key)
 
   const [taskTitle, setTaskTitle] = useState('');
   const [assignedTo, setAssignedTo] = useState('');
@@ -53,23 +55,14 @@ export default function AddTaskScreen() {
   const priorityOptions = ['Most Urgent', 'High', 'Medium', 'Low'];
   const deptOptions = ['Sales', 'Service', 'Account', 'HR', 'Admin', 'Store', 'Office', 'Other'];
 
-  // 🔥 Load users from Postgres (real UUIDs) instead of Firestore
-  useEffect(() => {
-      const loadUsers = async () => {
-          if (currentUser?.companyId) {
-              setLoadingUsers(true);
-              try {
-                  const users = await fetchTeamMembers();
-                  setUserList(users);
-              } catch (e) {
-                  console.log('Error loading users:', e);
-              } finally {
-                  setLoadingUsers(false);
-              }
-          }
-      };
-      loadUsers();
-  }, [currentUser]);
+  // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
+  // as manage_team.tsx/employee_timeline.tsx. Loading from Postgres (real
+  // UUIDs) instead of Firestore.
+  const { data: userList, loading: loadingUsers } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: fetchTeamMembers,
+  });
 
   const formatDate = (rawDate: Date) => {
     let day = rawDate.getDate().toString().padStart(2, '0');
