@@ -4,7 +4,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Modal, RefreshControl, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import * as XLSX from 'xlsx';
 
 import { listAdvances } from '../services/api/advances';
@@ -25,10 +25,16 @@ import { listServiceCalls } from '../services/api/serviceCalls';
 import { fetchTasks } from '../services/api/tasks';
 import { fetchTravelNotes } from '../services/api/travelNotes';
 import { fetchTeamMembers } from '../services/api/users';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
-// 🔥 SAAS IMPORTS (everything below except attendance/leaves stays on Firestore —
-// couriers/service_calls/orders/demos/installations/payments/tasks/pms/sales/leads/
-// expenses/advances/travel_notes/organizations aren't migrated until later phases)
+// 🔥 Note: the comment below (everything stays on Firestore) is stale — every
+// module fetcher imported above (couriers/service_calls/orders/demos/
+// installations/payments/tasks/pms/sales/leads/expenses/advances/
+// travel_notes/organizations) already calls the Postgres backend, same as
+// attendance/leaves. Kept fetchSaaSData only for one export-flow fallback
+// further down (a module type outside MODULE_FETCHERS).
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
@@ -45,31 +51,13 @@ export default function CombinedActivityScreen() {
   const { currentUser, companyProfile } = useData();
 
   // 🔥 2. SaaS Engine connect kiya
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+  const { fetchSaaSData } = useSaaSDB();
 
-  // 🔥 3. Lazy Loaded Master States
-  const [userList, setUserList] = useState<any[]>([]);
-  const [attendanceList, setAttendanceList] = useState<any[]>([]);
-  const [courierList, setCourierList] = useState<any[]>([]);
-  const [serviceCallList, setServiceCallList] = useState<any[]>([]);
-  const [orderList, setOrderList] = useState<any[]>([]);
-  const [demoList, setDemoList] = useState<any[]>([]);
-  const [installList, setInstallList] = useState<any[]>([]);
-  const [paymentList, setPaymentList] = useState<any[]>([]);
-  const [taskList, setTaskList] = useState<any[]>([]);
-  const [pmsList, setPmsList] = useState<any[]>([]);
-  const [salesVisitList, setSalesVisitList] = useState<any[]>([]);
-  const [leadsList, setLeadsList] = useState<any[]>([]);
-  const [expenseList, setExpenseList] = useState<any[]>([]);
-  const [advanceList, setAdvanceList] = useState<any[]>([]);
-  const [leaveList, setLeaveList] = useState<any[]>([]);
-  const [travelList, setTravelList] = useState<any[]>([]);
-  const [orgList, setOrgList] = useState<any[]>([]);
-  const [dueList, setDueList] = useState<any[]>([]);
+  // 🔥 3. Lazy Loaded Master States — now come from useCachedList below
+  // (cache-first). Read-only screen (confirmed no optimistic mutations
+  // anywhere in this file), so none need setData exposed.
 
-  // 🔥 4. LOAD OTHER MODULES (unaffected by Phase 7 — still Firestore, still fetched in full
-  // as before; those modules migrate in later phases)
-  // Moved up: needed before loadAllData/loadAttendanceAndLeaves useEffects reference them
+  // 🔥 4. All 16 modules below are cache-first via useCachedList (see below).
 const currentMonthForFY = new Date().getMonth(); 
 const currentYearForFY = new Date().getFullYear();
 const defaultFYStartYear = currentMonthForFY >= 3 ? currentYearForFY : currentYearForFY - 1;
@@ -77,95 +65,41 @@ const [selectedMonth, setSelectedMonth] = useState(-1);
 const [selectedYear, setSelectedYear] = useState(defaultFYStartYear); 
 const [selectedDate, setSelectedDate] = useState(new Date());
 
-  const loadAllData = async () => {
-      if (currentUser?.companyId) {
-          
-    const moduleNames = [
-    'users', 'couriers', 'serviceCalls', 'orders', 'demos',
-    'installs', 'payments', 'dues', 'tasks', 'pms', 'salesVisits', 'leads',
-    'expenses', 'advances', 'travels', 'orgs'
-];
-const results = await Promise.allSettled([
-    fetchTeamMembers(),
-    fetchCouriers({ limit: 1000 }),
-    listServiceCalls(),
-    listOrders(),
-    listDemos(),
-    listInstallations(),
-    listPaymentCollections(),
-    listPaymentDues(),
-    (async () => {
-        // Tasks needs both directions merged — matches employee_timeline's
-        // intent of showing everything a person touched, not just one side.
-        const [given, received] = await Promise.all([
-            fetchTasks({ direction: 'given', userId: 'all', limit: 1000 }),
-            fetchTasks({ direction: 'received', userId: 'all', limit: 1000 }),
-        ]);
-        return Array.from(new Map([...given, ...received].map((t: any) => [t.id, t])).values());
-    })(),
-    listPmsReports(),
-    listSalesVisits(),
-    listLeads(),
-    listExpenses(),
-    listAdvances(),
-    fetchTravelNotes({ userId: 'all', limit: 1000 }),
-    fetchOrganizations({ limit: 500 }),
-]);
-
-// A single failing module (e.g. a permission or validation error) no longer
-// blanks out every other list — it just logs which one failed and falls
-// back to an empty array for that module only.
-const [users, couriers, serviceCalls, orders, demos, installs, payments, dues, tasks, pms, salesVisits, leads, expenses, advances, travels, orgs] = results.map((r, i) => {
-    if (r.status === 'rejected') {
-        console.log(`❌ employee_timeline: ${moduleNames[i]} failed:`, r.reason?.message || r.reason);
-        return [];
-    }
-    return r.value;
-});
-
-setUserList(users); setCourierList(couriers);
-setServiceCallList(serviceCalls); setOrderList(orders); setDemoList(demos);
-setInstallList(installs); setPaymentList(payments); setDueList(dues); setTaskList(tasks);
-setPmsList(pms); setSalesVisitList(salesVisits); setLeadsList(leads);
-setExpenseList(expenses); setAdvanceList(advances);
-setTravelList(travels); setOrgList(orgs);
-      }
-  };
-
-  useEffect(() => {
-      loadAllData();
-  }, [currentUser]);
-
-  // 🔥 Phase 7: attendance/leaves — bounded fetch instead of "load the entire collection".
-  // Daily Timeline tab only needs the selected day; Employee 360 / Export tabs work off
-  // the selected FY. Re-fetches when the relevant selector changes. This screen is
-  // manager/reports-facing, so it always requests 'all' employees (server enforces the
-  // role check); an individual employee's own attendance/leave screens use Phase 7's
-  // narrower per-user endpoints instead.
-  useEffect(() => {
-      const loadAttendanceAndLeaves = async () => {
-          if (!currentUser?.companyId) return;
-
-          let fromDate: string, toDate: string;
-          if (activeTab === 'timeline') {
-              const d = getStandardDate(selectedDate);
-              fromDate = d; toDate = d;
-          } else {
-              const fyStart = new Date(selectedYear, 3, 1);
-              const fyEnd = new Date(selectedYear + 1, 2, 31);
-              fromDate = getStandardDate(fyStart);
-              toDate = getStandardDate(fyEnd < new Date() ? fyEnd : new Date());
-          }
-
-          const [attendance, leaves] = await Promise.all([
-              fetchAttendance({ userId: 'all', fromDate, toDate, limit: 1000 }),
-              fetchLeaves({ userId: 'all', limit: 500 }),
+  // 🔥 The 16 modules below are cache-first, each sharing the SAME cache key
+  // as its primary/owning screen where the fetch params match exactly
+  // (courier/tasks/travel use different params here — unbounded, all-users
+  // — than their per-screen bounded versions, so those three get their own
+  // keys instead of sharing). See hooks/useCachedList.ts.
+  const cuKey = (name: string) => buildCacheKey(name, currentUser?.companyId);
+  const { data: userList, loading: l1, refresh: r1 } = useCachedList({ cacheKey: cuKey('team_members'), enabled: !!currentUser?.companyId, fetcher: fetchTeamMembers });
+  const { data: courierList, loading: l2, refresh: r2 } = useCachedList({ cacheKey: cuKey('all_couriers'), enabled: !!currentUser?.companyId, fetcher: () => fetchCouriers({ limit: 1000 }) });
+  const { data: serviceCallList, loading: l3, refresh: r3 } = useCachedList({ cacheKey: cuKey('service_calls'), enabled: !!currentUser?.companyId, fetcher: listServiceCalls });
+  const { data: orderList, loading: l4, refresh: r4 } = useCachedList({ cacheKey: cuKey('orders'), enabled: !!currentUser?.companyId, fetcher: listOrders });
+  const { data: demoList, loading: l5, refresh: r5 } = useCachedList({ cacheKey: cuKey('demos'), enabled: !!currentUser?.companyId, fetcher: listDemos });
+  const { data: installList, loading: l6, refresh: r6 } = useCachedList({ cacheKey: cuKey('installations'), enabled: !!currentUser?.companyId, fetcher: listInstallations });
+  const { data: paymentList, loading: l7, refresh: r7 } = useCachedList({ cacheKey: cuKey('payment_collections'), enabled: !!currentUser?.companyId, fetcher: listPaymentCollections });
+  const { data: dueList, loading: l8, refresh: r8 } = useCachedList({ cacheKey: cuKey('payment_dues'), enabled: !!currentUser?.companyId, fetcher: listPaymentDues });
+  const { data: taskList, loading: l9, refresh: r9 } = useCachedList({
+      cacheKey: cuKey('all_tasks_merged'), enabled: !!currentUser?.companyId,
+      fetcher: async () => {
+          // Tasks needs both directions merged — matches employee_timeline's
+          // intent of showing everything a person touched, not just one side.
+          const [given, received] = await Promise.all([
+              fetchTasks({ direction: 'given', userId: 'all', limit: 1000 }),
+              fetchTasks({ direction: 'received', userId: 'all', limit: 1000 }),
           ]);
-          setAttendanceList(attendance);
-          setLeaveList(leaves);
-      };
-      loadAttendanceAndLeaves();
-  }, [currentUser, activeTab, selectedDate, selectedYear]);
+          return Array.from(new Map([...given, ...received].map((t: any) => [t.id, t])).values());
+      },
+  });
+  const { data: pmsList, loading: l10, refresh: r10 } = useCachedList({ cacheKey: cuKey('pms_reports'), enabled: !!currentUser?.companyId, fetcher: listPmsReports });
+  const { data: salesVisitList, loading: l11, refresh: r11 } = useCachedList({ cacheKey: cuKey('sales_visits'), enabled: !!currentUser?.companyId, fetcher: listSalesVisits });
+  const { data: leadsList, loading: l12, refresh: r12 } = useCachedList({ cacheKey: cuKey('leads'), enabled: !!currentUser?.companyId, fetcher: listLeads });
+  const { data: expenseList, loading: l13, refresh: r13 } = useCachedList({ cacheKey: cuKey('expenses'), enabled: !!currentUser?.companyId, fetcher: listExpenses });
+  const { data: advanceList, loading: l14, refresh: r14 } = useCachedList({ cacheKey: cuKey('advances'), enabled: !!currentUser?.companyId, fetcher: listAdvances });
+  const { data: travelList, loading: l15, refresh: r15 } = useCachedList({ cacheKey: cuKey('all_travel_notes'), enabled: !!currentUser?.companyId, fetcher: () => fetchTravelNotes({ userId: 'all', limit: 1000 }) });
+  const { data: orgList, loading: l16, refresh: r16 } = useCachedList({ cacheKey: cuKey('organizations'), enabled: !!currentUser?.companyId, fetcher: () => fetchOrganizations({ limit: 500 }) });
+  const isModulesLoading = l1 || l2 || l3 || l4 || l5 || l6 || l7 || l8 || l9 || l10 || l11 || l12 || l13 || l14 || l15 || l16;
+  const refreshAllModules = () => Promise.all([r1(), r2(), r3(), r4(), r5(), r6(), r7(), r8(), r9(), r10(), r11(), r12(), r13(), r14(), r15(), r16()]);
 
   const userRole = (currentUser?.role || '').toLowerCase().trim();
   const isFinanceRole = ['admin', 'manager', 'account', 'accountant', 'superadmin'].includes(userRole);
@@ -201,6 +135,45 @@ setTravelList(travels); setOrgList(orgs);
           }
       } catch (e) { return ""; }
       return "";
+  };
+
+  // 🔥 Phase 7: attendance/leaves — bounded fetch instead of "load the entire collection".
+  // Daily Timeline tab only needs the selected day; Employee 360 / Export tabs work off
+  // the selected FY. Re-fetches when the relevant selector changes. This screen is
+  // manager/reports-facing, so it always requests 'all' employees (server enforces the
+  // role check); an individual employee's own attendance/leave screens use Phase 7's
+  // narrower per-user endpoints instead.
+  const getTimelineFromTo = (): { fromDate: string; toDate: string } => {
+      if (activeTab === 'timeline') {
+          const d = getStandardDate(selectedDate);
+          return { fromDate: d, toDate: d };
+      }
+      const fyStart = new Date(selectedYear, 3, 1);
+      const fyEnd = new Date(selectedYear + 1, 2, 31);
+      return {
+          fromDate: getStandardDate(fyStart),
+          toDate: getStandardDate(fyEnd < new Date() ? fyEnd : new Date()),
+      };
+  };
+  const { fromDate: attFromDate, toDate: attToDate } = getTimelineFromTo();
+  const attLeaveCacheKey = buildCacheKey(`timeline_attendance_leaves:${activeTab}:${attFromDate}:${attToDate}`, currentUser?.companyId);
+  const { data: attendanceList, loading: l17, refresh: r17 } = useCachedList({
+      cacheKey: attLeaveCacheKey,
+      enabled: !!currentUser?.companyId,
+      fetcher: () => fetchAttendance({ userId: 'all', fromDate: attFromDate, toDate: attToDate, limit: 1000 }),
+  });
+  const attLeaveCacheKey2 = buildCacheKey(`timeline_leaves:${activeTab}:${attFromDate}:${attToDate}`, currentUser?.companyId);
+  const { data: leaveList, loading: l18, refresh: r18 } = useCachedList({
+      cacheKey: attLeaveCacheKey2,
+      enabled: !!currentUser?.companyId,
+      fetcher: () => fetchLeaves({ userId: 'all', limit: 500 }),
+  });
+  const isAnalysisLoading = isModulesLoading || l17 || l18;
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const onRefresh = async () => {
+      setIsRefreshing(true);
+      await Promise.all([refreshAllModules(), r17(), r18()]);
+      setIsRefreshing(false);
   };
 
   const getItemDate = (item: any) => {
@@ -738,9 +711,12 @@ setTravelList(travels); setOrgList(orgs);
             <FlatList 
                 data={timelineData} keyExtractor={(item) => item.id} renderItem={renderTimelineItem}
                 contentContainerStyle={{ padding: 15, paddingBottom: 50 }}
+                refreshControl={
+                    <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={['#3b5998']} tintColor="#3b5998" />
+                }
                 ListEmptyComponent={
                     <View style={{alignItems:'center', marginTop: 50}}>
-                        {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                        {isAnalysisLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
                             <>
                                 <Ionicons name="time-outline" size={50} color="#ccc" />
                                 <Text style={{color:'gray', marginTop:10}}>No activity found for this day.</Text>

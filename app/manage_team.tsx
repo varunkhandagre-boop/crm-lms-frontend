@@ -9,6 +9,7 @@ import {
     KeyboardAvoidingView,
     Modal,
     Platform,
+    RefreshControl,
     ScrollView,
     StatusBar,
     StyleSheet,
@@ -32,6 +33,9 @@ import { addHoliday as addHolidayApi, deleteHoliday as deleteHolidayApi, fetchHo
 import { fetchPermissions, PermissionsBlob, savePermissions } from '../services/api/permissions';
 // 🔥 Tracking tab — new Postgres adapter, replaces Firestore location_logs
 import { fetchLocationLogs, LocationLog } from '../services/api/locationLogs';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function ManageTeamScreen() {
     const router = useRouter();
@@ -99,8 +103,7 @@ const UsersTab = () => {
     const [selectedForBulk, setSelectedForBulk] = useState<Set<string>>(new Set());
     const [bulkMode, setBulkMode] = useState(false);
     
-    const [users, setUsers] = useState<LegacyTeamMember[]>([]);
-    const [loading, setLoading] = useState(true);
+    // users/loading now come from useCachedList below (cache-first)
     const [modalVisible, setModalVisible] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [editData, setEditData] = useState<any>(null);
@@ -118,17 +121,22 @@ const UsersTab = () => {
         assetNotes: ""
     });
 
-    useEffect(() => { loadUsers(); }, [currentUser]);
-
-    const loadUsers = async () => {
-        if (!currentUser?.companyId) return;
-        setLoading(true);
-        try {
-            const data = await fetchTeamMembers();
-            setUsers(data);
-        } catch (e) { Alert.alert("Error", "Could not load users"); }
-        setLoading(false);
-    };
+    // 🔥 TEAM MEMBERS — cache-first. Key deliberately named 'team_members' so
+    // future work can share this cache with any other screen's employee/user
+    // fetch (many screens across the app call fetchTeamMembers() for filter
+    // dropdowns — those are a good follow-up candidate for the same key).
+    // See hooks/useCachedList.ts.
+    const usersCacheKey = buildCacheKey('team_members', currentUser?.companyId);
+    const {
+        data: users,
+        loading,
+        refreshing: usersRefreshing,
+        refresh: refreshUsers,
+    } = useCachedList({
+        cacheKey: usersCacheKey,
+        enabled: !!currentUser?.companyId,
+        fetcher: fetchTeamMembers,
+    });
 
     const renderedUsers = users.slice(0, visibleCount);
 
@@ -194,7 +202,7 @@ const UsersTab = () => {
                 Alert.alert("Success ✅", `User Created: ${formData.empId}`);
             }
             setModalVisible(false);
-            loadUsers();
+            refreshUsers();
         } catch (e: any) {
             let msg = e?.message || "Something went wrong.";
             Alert.alert("Error", msg);
@@ -216,7 +224,7 @@ const UsersTab = () => {
                     onPress: async () => {
                         try {
                             await setTeamMemberStatus(user.id, isDisabled);
-                            loadUsers();
+                            refreshUsers();
                         } catch (e: any) {
                             Alert.alert("Error", e?.message || "Could not update status.");
                         }
@@ -258,7 +266,7 @@ const handleBulkDeactivate = () => {
                     await bulkSetTeamMemberStatus(Array.from(selectedForBulk), false);
                     setSelectedForBulk(new Set());
                     setBulkMode(false);
-                    loadUsers();
+                    refreshUsers();
                     Alert.alert('Success ✅', 'Selected employees deactivated.');
                 } catch (e: any) {
                     Alert.alert('Error', e?.message || 'Could not deactivate employees.');
@@ -299,6 +307,9 @@ const handleBulkDeactivate = () => {
                 data={renderedUsers}
                 keyExtractor={item => item.id}
                 contentContainerStyle={{paddingBottom: 80}}
+                refreshControl={
+                    <RefreshControl refreshing={usersRefreshing} onRefresh={refreshUsers} colors={['#2c3e50']} tintColor="#2c3e50" />
+                }
                 renderItem={({item}) => {
                     const isDisabled = item.status === 'Disabled';
                     return (
@@ -482,13 +493,11 @@ const handleBulkDeactivate = () => {
 const PermissionsTab = () => {
     const { currentUser } = useData();
 
-    const [loading, setLoading] = useState(true);
+    // loading/users/permissions now come from the hooks below (cache-first for users)
     const [editMode, setEditMode] = useState<'Role' | 'User'>('Role');
     const [roles] = useState(["Admin", "Sales Executive", "Service Engineer", "Manager", "Accountant", "Store Keeper", "Hr"]);
-    const [users, setUsers] = useState<LegacyTeamMember[]>([]);
     
     const [selectedTarget, setSelectedTarget] = useState("Sales Executive"); 
-    const [permissions, setPermissions] = useState<PermissionsBlob>({});
     
     const allModules = [
         { category: "📊 DASHBOARD & BASICS", items: [{ key: "dashboard", label: "Main Dashboard" }, { key: "calendar", label: "Calendar" }, { key: "map_view", label: "Live Map" }] },
@@ -500,26 +509,34 @@ const PermissionsTab = () => {
         { category: "⚙️ ADMIN CONTROL", items: [{ key: "users", label: "Manage Users" }, { key: "settings", label: "App Settings" }] }
     ];
 
-    useEffect(() => {
+    // 🔥 TEAM MEMBERS — shares the SAME 'team_members' cache key as
+    // UsersTab above (visiting either tab warms the other's cache).
+    const {
+        data: users,
+        loading: usersLoading,
+        refresh: refreshUsersForPermissions,
+    } = useCachedList({
+        cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: fetchTeamMembers,
+    });
+    // Permissions — a single object (role/user → module-flags map), not a
+    // list, so useCachedList (typed for arrays) doesn't apply here. Left as
+    // a plain fetch; out of scope for this pass.
+    const [permissions, setPermissions] = useState<PermissionsBlob>({});
+    const [permissionsLoading, setPermissionsLoading] = useState(true);
+    const loadPermissions = async () => {
         if (!currentUser?.companyId) return;
-
-        const loadData = async () => {
-            setLoading(true);
-            try {
-                const [usersData, permData] = await Promise.all([
-                    fetchTeamMembers(),
-                    fetchPermissions(),
-                ]);
-                setUsers(usersData);
-                setPermissions(permData || {});
-            } catch (e: any) {
-                Alert.alert("Error", e.message || "Could not load permissions.");
-            } finally {
-                setLoading(false);
-            }
-        };
-        loadData();
-    }, [currentUser]);
+        setPermissionsLoading(true);
+        try {
+            setPermissions((await fetchPermissions()) || {});
+        } finally {
+            setPermissionsLoading(false);
+        }
+    };
+    useEffect(() => { loadPermissions(); }, [currentUser]);
+    const loading = usersLoading || permissionsLoading;
+    const onRefresh = () => Promise.all([refreshUsersForPermissions(), loadPermissions()]);
 
     const getSwitchValue = (key: string) => {
         if (editMode === 'Role') {
@@ -649,19 +666,30 @@ const HolidaysTab = () => {
     const router = useRouter();
     const { currentUser } = useData();
 
-    const [holidays, setHolidays] = useState<any[]>([]);
+    // holidays now comes from useCachedList below (cache-first)
     const [modalVisible, setModalVisible] = useState(false);
     const [newHoliday, setNewHoliday] = useState({ date: new Date(), name: "", type: "Holiday" });
     const [showPicker, setShowPicker] = useState(false);
 
-    useEffect(() => { loadHolidays(); }, [currentUser]);
-
-    const loadHolidays = async () => {
-        if (!currentUser?.companyId) return;
-        const data = await fetchHolidays();
-        data.sort((a:any, b:any) => new Date(a.date).getTime() - new Date(b.date).getTime());
-        setHolidays(data);
-    };
+    // 🔥 HOLIDAYS (full list, unbounded) — cache-first. Distinct key from
+    // attendance.tsx/leave.tsx's holiday fetch, which is FY-bounded (a
+    // different query shape) — not the same data, so not shared here.
+    // See hooks/useCachedList.ts.
+    const holidaysCacheKey = buildCacheKey('all_holidays', currentUser?.companyId);
+    const {
+        data: holidays,
+        loading: holidaysLoading,
+        refreshing: holidaysRefreshing,
+        refresh: refreshHolidays,
+    } = useCachedList({
+        cacheKey: holidaysCacheKey,
+        enabled: !!currentUser?.companyId,
+        fetcher: async () => {
+            const data = await fetchHolidays();
+            data.sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
+            return data;
+        },
+    });
 
     const handleAddHoliday = async () => {
         if (!newHoliday.name) return Alert.alert("Error", "Enter Occasion Name");
@@ -669,12 +697,12 @@ const HolidaysTab = () => {
         await addHolidayApi(newHoliday.name, dateStr);
         setModalVisible(false);
         setNewHoliday({ date: new Date(), name: "", type: "Holiday" });
-        loadHolidays();
+        refreshHolidays();
     };
 
     const handleDeleteHoliday = async (id: string) => {
         await deleteHolidayApi(id);
-        loadHolidays();
+        refreshHolidays();
     };
 
     const onDateChange = (event: any, selectedDate?: Date) => {
@@ -688,6 +716,9 @@ const HolidaysTab = () => {
             <FlatList 
                 data={holidays}
                 keyExtractor={item => item.id}
+                refreshControl={
+                    <RefreshControl refreshing={holidaysRefreshing} onRefresh={refreshHolidays} colors={['#3b5998']} tintColor="#3b5998" />
+                }
                 renderItem={({item}) => (
                     <View style={styles.card}>
                         <View style={{flexDirection:'row', alignItems:'center'}}>
@@ -697,7 +728,6 @@ const HolidaysTab = () => {
                             </View>
                             <View style={{flex:1}}>
                                 <Text style={styles.cardTitle}>{item.name}</Text>
-                                <Text style={{fontSize:12, color:'gray'}}>{item.type}</Text>
                             </View>
                             <TouchableOpacity onPress={() => handleDeleteHoliday(item.id)}><Ionicons name="trash-outline" size={20} color="#e74c3c"/></TouchableOpacity>
                         </View>
@@ -749,47 +779,39 @@ import { AuditLogEntry, fetchAuditLogs } from '../services/api/auditLogs';
 const TrackingTab = () => {
     const { currentUser } = useData();
 
-    const [locations, setLocations] = useState<LocationLog[]>([]);
-    const [users, setUsers] = useState<LegacyTeamMember[]>([]);
     const [selectedUserId, setSelectedUserId] = useState("all");
     const [selectedUserName, setSelectedUserName] = useState("All Staff");
-    const [loading, setLoading] = useState(false);
-    
     const [mapDate, setMapDate] = useState(new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
 
-    useEffect(() => {
-        const loadUsers = async () => {
-            if (currentUser?.companyId) {
-                try {
-                    const uData = await fetchTeamMembers();
-                    setUsers(uData);
-                } catch (e) {}
-            }
-        };
-        loadUsers();
-    }, [currentUser]);
+    // 🔥 TEAM MEMBERS — shares the SAME 'team_members' cache key as
+    // UsersTab/PermissionsTab above.
+    const {
+        data: users,
+        refresh: refreshUsersForTracking,
+    } = useCachedList({
+        cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: fetchTeamMembers,
+    });
 
-    useEffect(() => {
-        fetchLocations();
-    }, [mapDate, selectedUserId]); 
-
-    const fetchLocations = async () => {
-        if (!currentUser?.companyId) return;
-        setLoading(true);
-        try {
-            const year = mapDate.getFullYear();
-            const month = String(mapDate.getMonth() + 1).padStart(2, '0');
-            const day = String(mapDate.getDate()).padStart(2, '0');
-            const dateQuery = `${year}-${month}-${day}`; 
-
-            const data = await fetchLocationLogs(dateQuery, selectedUserId);
-            setLocations(data);
-        } catch (e: any) {
-            Alert.alert("Error", e.message || "Could not fetch location logs.");
-        }
-        setLoading(false);
-    };
+    // 🔥 LOCATION LOGS — cache-first, parameterized by date + selected user
+    // (same pattern as attendance.tsx/travel.tsx). Note: for *today's* date
+    // this is live-ish tracking data that keeps changing through the day —
+    // cache still shows the last-known snapshot instantly, then refreshes
+    // in the background, same as everywhere else; the explicit refresh
+    // button below remains for an immediate manual re-check.
+    const dateQuery = `${mapDate.getFullYear()}-${String(mapDate.getMonth() + 1).padStart(2, '0')}-${String(mapDate.getDate()).padStart(2, '0')}`;
+    const locationsCacheKey = buildCacheKey(`location_logs:${dateQuery}:${selectedUserId}`, currentUser?.companyId);
+    const {
+        data: locations,
+        loading,
+        refresh: refreshLocations,
+    } = useCachedList({
+        cacheKey: locationsCacheKey,
+        enabled: !!currentUser?.companyId,
+        fetcher: () => fetchLocationLogs(dateQuery, selectedUserId),
+    });
 
     const onDateChange = (event: any, selectedDate?: Date) => {
         setShowDatePicker(Platform.OS === 'ios');
@@ -812,7 +834,7 @@ const TrackingTab = () => {
                         </TouchableOpacity>
                     </View>
 
-                    <TouchableOpacity onPress={fetchLocations} style={{backgroundColor: '#2c3e50', padding: 8, borderRadius: 5}}>
+                    <TouchableOpacity onPress={refreshLocations} style={{backgroundColor: '#2c3e50', padding: 8, borderRadius: 5}}>
                         <Ionicons name="refresh" size={18} color="white" />
                     </TouchableOpacity>
                 </View>
@@ -911,15 +933,21 @@ const TrackingTab = () => {
 // resets, cheque bounces, etc.)
 // ====================================================================
 const HistoryTab = () => {
-    const [logs, setLogs] = useState<AuditLogEntry[]>([]);
-    const [loading, setLoading] = useState(true);
+    const { currentUser } = useData();
 
-    useEffect(() => {
-        fetchAuditLogs(1)
-            .then((res) => setLogs(res.data))
-            .catch((e) => console.log('Failed to load audit logs:', e))
-            .finally(() => setLoading(false));
-    }, []);
+    // 🔥 AUDIT LOGS — cache-first (instant from AsyncStorage, then
+    // background refresh). See hooks/useCachedList.ts.
+    const logsCacheKey = buildCacheKey('audit_logs', currentUser?.companyId);
+    const {
+        data: logs,
+        loading,
+        refreshing: logsRefreshing,
+        refresh: refreshLogs,
+    } = useCachedList({
+        cacheKey: logsCacheKey,
+        enabled: !!currentUser?.companyId,
+        fetcher: async () => (await fetchAuditLogs(1)).data,
+    });
 
     const formatAction = (action: string) => action.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
@@ -941,6 +969,9 @@ const HistoryTab = () => {
             data={logs}
             keyExtractor={(item) => item.id}
             contentContainerStyle={{ padding: 15 }}
+            refreshControl={
+                <RefreshControl refreshing={logsRefreshing} onRefresh={refreshLogs} colors={['#3b5998']} tintColor="#3b5998" />
+            }
             renderItem={({ item }) => (
                 <View style={{backgroundColor:'white', borderRadius:10, padding:14, marginBottom:10, elevation:1}}>
                     <Text style={{fontSize:14, fontWeight:'bold', color:'#333'}}>{formatAction(item.action)}</Text>

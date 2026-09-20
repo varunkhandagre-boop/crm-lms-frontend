@@ -1,37 +1,39 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-// 🔥 SAAS IMPORTS (kept for isDbLoading UX only)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 5: activity plans now via new backend API
 import { listActivityPlans, updateActivityPlanStatus } from '../services/api/activityPlans';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function ActivityPlanScreen() {
   const router = useRouter();
   
   const { currentUser } = useData();
-  const { isDbLoading } = useSaaSDB();
 
-  const [activities, setActivities] = useState<any[]>([]);
+  // 🔥 ACTIVITY PLANS — cache-first (instant from AsyncStorage, then
+  // background refresh). See hooks/useCachedList.ts.
+  const activitiesCacheKey = buildCacheKey('activity_plans', currentUser?.companyId);
+  const {
+      data: activities,
+      setData: setActivities,
+      loading: activitiesLoading,
+      refreshing: activitiesRefreshing,
+      refresh: refreshActivities,
+  } = useCachedList({
+      cacheKey: activitiesCacheKey,
+      enabled: !!currentUser?.companyId,
+      fetcher: listActivityPlans, // was: fetchSaaSData("activity_plans")
+  });
   const [filter, setFilter] = useState<'Today' | 'Upcoming' | 'Completed' | 'All'>('Today');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   
   const role = currentUser?.role || '';
   const canManage = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr', 'SuperAdmin'].includes(role);
-
-  useEffect(() => {
-      loadData();
-  }, [currentUser]);
-
-  // 🔥 LOAD DATA — via new backend API
-  const loadData = async () => {
-      if (!currentUser?.companyId) return;
-      const data = await listActivityPlans(); // was: fetchSaaSData("activity_plans")
-      setActivities(data);
-  };
 
   const getTodayFormatted = () => {
       const now = new Date();
@@ -179,8 +181,8 @@ export default function ActivityPlanScreen() {
              <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
              <Text style={styles.headerTitle}>Activity Plans</Text>
              <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                 <TouchableOpacity onPress={loadData} style={{marginRight: 15}} disabled={isDbLoading}>
-                     <Ionicons name="refresh" size={24} color={isDbLoading ? "gray" : "#3b5998"} />
+                 <TouchableOpacity onPress={refreshActivities} style={{marginRight: 15}} disabled={activitiesLoading}>
+                     <Ionicons name="refresh" size={24} color={activitiesLoading ? "gray" : "#3b5998"} />
                  </TouchableOpacity>
                  <TouchableOpacity onPress={() => router.push('/add_activity' as any)}><Ionicons name="add-circle" size={32} color="#3b5998" /></TouchableOpacity>
              </View>
@@ -195,7 +197,7 @@ export default function ActivityPlanScreen() {
         </View>
       </View>
 
-      {isDbLoading && activities.length === 0 ? (
+      {activitiesLoading && activities.length === 0 ? (
           <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
               <ActivityIndicator size="large" color="#3b5998" />
               <Text style={{marginTop: 10, color: 'gray'}}>Loading Plans...</Text>
@@ -206,6 +208,9 @@ export default function ActivityPlanScreen() {
             keyExtractor={item => item.id}
             contentContainerStyle={{padding: 15}}
             renderItem={renderItem}
+            refreshControl={
+                <RefreshControl refreshing={activitiesRefreshing} onRefresh={refreshActivities} colors={['#3b5998']} tintColor="#3b5998" />
+            }
             ListEmptyComponent={
                 <View style={{alignItems:'center', marginTop:100}}>
                     <Ionicons name="calendar-outline" size={50} color="#ccc" />
