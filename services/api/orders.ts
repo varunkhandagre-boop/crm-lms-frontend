@@ -83,6 +83,7 @@ export function toLegacyOrder(o: ApiOrder): any {
     senderId: o.assignedToId || o.createdById,
     senderName: undefined,
     userId: o.assignedToId || o.createdById,
+    createdById: o.createdById,
     bookedBy: undefined,
     poFileName: '',
     poFileUri: '',

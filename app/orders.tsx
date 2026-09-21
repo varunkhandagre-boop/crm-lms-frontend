@@ -117,6 +117,26 @@ export default function OrderListScreen() {
       }
   }, [teamMembersForOrders, isAdmin]);
 
+  // 🔥 senderName/bookedBy were never populated anywhere — the API only
+  // ever returns senderId/createdById (see services/api/orders.ts's
+  // comment), so every order showed "Unknown" regardless of caching. Fill
+  // both in once team members are available: senderName from senderId,
+  // and bookedBy from createdById (only when it's someone different from
+  // senderId — an admin booking on another salesperson's behalf).
+  useEffect(() => {
+      if (teamMembersForOrders.length === 0 || orderList.length === 0) return;
+      const nameById = new Map(teamMembersForOrders.map((u: any) => [u.id, u.name || 'Unknown']));
+      const needsEnrichment = orderList.some((o: any) => o.senderName === undefined);
+      if (!needsEnrichment) return;
+      setOrderList(orderList.map((o: any) => ({
+          ...o,
+          senderName: nameById.get(o.senderId) || 'Unknown',
+          bookedBy: o.createdById && o.createdById !== o.senderId
+              ? (nameById.get(o.createdById) || undefined)
+              : undefined,
+      })));
+  }, [orderList, teamMembersForOrders]);
+
   // Payments — unchanged plain fetch-on-mount (payments list is currently
   // unused downstream; left as-is, out of scope for this pass).
   useEffect(() => {
