@@ -56,7 +56,7 @@ export default function HomeScreen() {
     activeSection, setActiveSection, 
     currentUser, logout, 
     shouldOpenSidebar, setShouldOpenSidebar,
-    appPermissions, notificationCount, companyProfile,
+    appPermissions, companyProfile,
     loading
 } = useData();
 
@@ -389,7 +389,6 @@ const saveTokenToDatabase = async (token: string) => {
                                 <Text style={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
                             </View>
                         )}
-                      {notificationCount > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{notificationCount}</Text></View>}
                   </TouchableOpacity>
                   
                   <TouchableOpacity onPress={() => router.push('/profile')}>

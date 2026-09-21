@@ -13,6 +13,14 @@ import * as Location from 'expo-location';
 // 🔥 Firestore direct imports minimized
 import { fetchCompanyProfile } from '../services/api/companies';
 import { recordLocationLog } from '../services/api/locationLogs';
+import { fetchTodayAttendance } from '../services/api/attendance';
+import { listLeads } from '../services/api/leads';
+import { listServiceCalls } from '../services/api/serviceCalls';
+import { fetchOrganizations } from '../services/api/organizations';
+import { fetchTasks } from '../services/api/tasks';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 // 🔥 SAAS IMPORT
 import { useSaaSDB } from '../hooks/useSaaSDB';
@@ -136,12 +144,49 @@ function NavigationLayout() {
       appPermissions, 
       loading,
       isSubscriptionExpired, 
-      attendanceList, 
-      taskList = [],
-      leadList = [],         
-      serviceCallList = [],  
-      orgList = []           
   } = useData();
+
+  // 🔥 These 5 were previously read from DataContext (a big Firestore-backed
+  // "God Context" that's since been cleaned up — see DataContext.tsx's own
+  // comment on that). _layout.tsx is the one place outside that cleanup
+  // that still genuinely needed them (sidebar badge counts + today's
+  // attendance for the reminder scheduler), so it now fetches them itself,
+  // cache-first, sharing keys with each item's primary screen so visiting
+  // Leads/Service Call/Organization/Tasks warms this too (and vice versa).
+  const { data: todayAttendance } = useCachedList({
+      cacheKey: buildCacheKey(`today_attendance_reminder:${currentUser?.id}`, currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: async () => {
+          const rec = await fetchTodayAttendance();
+          return rec ? [rec] : [];
+      },
+  });
+  const { data: taskList } = useCachedList({
+      cacheKey: buildCacheKey('all_tasks_merged', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: async () => {
+          const [given, received] = await Promise.all([
+              fetchTasks({ direction: 'given', userId: 'all', limit: 1000 }),
+              fetchTasks({ direction: 'received', userId: 'all', limit: 1000 }),
+          ]);
+          return Array.from(new Map([...given, ...received].map((t: any) => [t.id, t])).values());
+      },
+  });
+  const { data: leadList } = useCachedList({
+      cacheKey: buildCacheKey('leads', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: listLeads,
+  });
+  const { data: serviceCallList } = useCachedList({
+      cacheKey: buildCacheKey('service_calls', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: listServiceCalls,
+  });
+  const { data: orgList } = useCachedList({
+      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: () => fetchOrganizations({ limit: 200 }),
+  });
   
   const insets = useSafeAreaInsets(); 
 
@@ -271,12 +316,8 @@ function NavigationLayout() {
 
     const initReminders = async () => {
         await setupNotificationPermissions();
-        
-        const now = new Date();
-        const todayStr = now.toISOString().split('T')[0];
-        const myEntry = attendanceList.find((a: any) => 
-            a.date === todayStr && a.userName === currentUser.name
-        );
+
+        const myEntry = todayAttendance[0];
 
         let status: any = 'LOGIN_PENDING';
 
@@ -289,7 +330,7 @@ function NavigationLayout() {
 
     initReminders();
 
-  }, [attendanceList, currentUser, loading]);
+  }, [todayAttendance, currentUser, loading]);
 
   if (loading) {
    return <View style={{flex:1, justifyContent:'center', alignItems:'center'}}><ActivityIndicator size="large" color="#3b5998"/></View>;

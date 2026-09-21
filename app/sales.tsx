@@ -21,6 +21,7 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
+import { markAllNotificationsRead } from '../services/api/notifications';
 // 🔥 Phase 2: sales visits now go through the new backend API
 import { deleteSalesVisit as apiDeleteSalesVisit, listSalesVisits } from '../services/api/salesVisits';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
@@ -30,13 +31,13 @@ import { buildCacheKey } from '../utils/listCache';
 export default function SalesReportScreen() {
   const router = useRouter();
   
-  const { currentUser, markAllNotificationsRead } = useData();
+  const { currentUser } = useData();
 
   // 🔥 SaaS Engine kept for organizations/users only
   const { isDbLoading } = useSaaSDB();
 
   // salesVisitList now comes from useCachedList below (cache-first)
-  const [orgList, setOrgList] = useState<any[]>([]);
+  // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
   // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -105,17 +106,13 @@ export default function SalesReportScreen() {
       }
   }, [userList, isAdmin]);
 
-  // Organizations — unchanged plain fetch-on-mount (out of scope for this
-  // pass).
-  useEffect(() => {
-      const loadRest = async () => {
-          if (currentUser?.companyId) {
-              const orgs = await fetchOrganizations({ limit: 200 });
-              setOrgList(orgs);
-          }
-      };
-      loadRest();
-  }, [currentUser]);
+  // Organizations — cache-first, shares the SAME 'organizations' cache key
+  // as organization.tsx/messaging_center.tsx.
+  const { data: orgList } = useCachedList({
+      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: () => fetchOrganizations({ limit: 200 }),
+  });
 
   const onRefresh = async () => {
       setRefreshing(true);

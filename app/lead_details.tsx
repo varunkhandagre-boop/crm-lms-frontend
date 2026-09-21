@@ -22,16 +22,37 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useData } from './context/DataContext';
 // 🔥 Phase 1/2: lead update/delete and visit logging now via the new backend API
-import { deleteLead as apiDeleteLead, updateLead as apiUpdateLead } from '../services/api/leads';
+import { deleteLead as apiDeleteLead, listLeads, updateLead as apiUpdateLead } from '../services/api/leads';
 import { createSalesVisit } from '../services/api/salesVisits';
+import { listProducts } from '../services/api/products';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function LeadDetailsScreen() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
     const { id } = useLocalSearchParams();
     
-    // 🔥 leadsList now comes from the new API via DataContext's refreshLeads
-    const { leadsList, currentUser, refreshLeads, productList = [] } = useData();
+    const { currentUser } = useData();
+
+    // 🔥 Leads + Products — cache-first, sharing the SAME cache keys as
+    // leads.tsx ('leads') and product_master.tsx ('products'). Previously
+    // read from DataContext (leadsList was Postgres-sourced via
+    // refreshLeads() there, so no behavior change; productList was
+    // Firestore-sourced there — a genuine bug, since every other screen's
+    // product list comes from Postgres via listProducts(). This fixes that
+    // inconsistency.
+    const { data: leadsList, refresh: refreshLeads } = useCachedList({
+        cacheKey: buildCacheKey('leads', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: listLeads,
+    });
+    const { data: productList } = useCachedList({
+        cacheKey: buildCacheKey('products', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: listProducts,
+    });
 
     const [lead, setLead] = useState<any>(null);
     const [isUpdating, setIsUpdating] = useState(false);

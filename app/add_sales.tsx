@@ -26,6 +26,9 @@ import { useData } from './context/DataContext';
 // separate addSaaSData("leads", ...) call needed here.
 import { recordLocationLog } from '../services/api/locationLogs';
 import { fetchOrganizations } from '../services/api/organizations';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 import { listProducts } from '../services/api/products';
 import { createSalesVisit } from '../services/api/salesVisits';
 
@@ -33,12 +36,12 @@ export default function AddSalesScreen() {
     const router = useRouter();
     
     // 🔥 Context se current user aur global Notification engine
-    const { currentUser, addNotification, refreshLeads } = useData(); 
+    const { currentUser, addNotification } = useData(); 
 
     // 🔥 SaaS Engine for organizations/products (still Firestore)
     const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-    const [orgList, setOrgList] = useState<any[]>([]);
+    // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
     const [productList, setProductList] = useState<any[]>([]);
 
     // --- FORM STATES ---
@@ -73,15 +76,19 @@ export default function AddSalesScreen() {
 
     const outcomeOptions = ['Interested', 'Not Interested', 'Follow Up', 'Demo Planned'];
 
-    // 🔥 LOAD DATA ON MOUNT (organizations still Firestore; products via new API)
+    // 🔥 Organizations — cache-first, shares the SAME 'organizations' cache
+    // key as organization.tsx/messaging_center.tsx.
+    const { data: orgList } = useCachedList({
+        cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: () => fetchOrganizations({ limit: 200 }),
+    });
+
+    // 🔥 Products — unchanged plain fetch-on-mount (out of scope for this pass).
     useEffect(() => {
         const loadData = async () => {
             if (currentUser?.companyId) {
-                const [orgs, prods] = await Promise.all([
-                    fetchOrganizations({ limit: 200 }),
-                    listProducts() // was: fetchSaaSData("products")
-                ]);
-                setOrgList(orgs);
+                const prods = await listProducts(); // was: fetchSaaSData("products")
                 setProductList(prods);
             }
         };
@@ -230,7 +237,6 @@ if (locationData) {
             });
 
             if (visit.leadId && mobile) triggerAutomatedMessages({ hospital, person, mobile, email });
-            if (visit.leadId && refreshLeads) await refreshLeads();
 
             if (addNotification) {
                 await addNotification({
