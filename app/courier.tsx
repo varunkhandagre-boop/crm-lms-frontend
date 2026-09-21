@@ -44,7 +44,7 @@ export default function CourierScreen() {
 
   // 🔥 3. Lazy Loaded Lists
   // courierList now comes from useCachedList below (cache-first)
-  const [orgList, setOrgList] = useState<any[]>([]);
+  // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
 
   // --- STATES ---
   const [activeTab, setActiveTab] = useState<'All' | 'Inward' | 'Outward'>('All'); 
@@ -90,12 +90,13 @@ export default function CourierScreen() {
       return { fromDate: toIso(new Date(fyStartYear, 3, 1)), toDate: toIso(new Date(fyStartYear + 1, 2, 31)) };
   }
 
-  useEffect(() => {
-      const loadOrgs = async () => {
-          if (currentUser?.companyId) setOrgList(await fetchOrganizations({ limit: 200 }));
-      };
-      loadOrgs();
-  }, [currentUser]);
+  // Organizations — cache-first, shares the SAME 'organizations' cache key
+  // as organization.tsx/messaging_center.tsx.
+  const { data: orgList } = useCachedList({
+      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: () => fetchOrganizations({ limit: 200 }),
+  });
 
   // 🔥 COURIERS — cache-first, parameterized by date-range (server
   // auto-scopes by role, no employee filter param exists for this list).

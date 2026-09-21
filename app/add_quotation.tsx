@@ -11,6 +11,9 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: quotations now go through the new backend API
 import { fetchOrganizations } from '../services/api/organizations';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 import { listProducts } from '../services/api/products';
 import { createQuotation, listQuotations, updateQuotation } from '../services/api/quotations';
 
@@ -22,9 +25,8 @@ export default function AddQuotationScreen() {
     const { companyProfile, currentUser, sendDynamicEmail, sendSystemWhatsApp } = useData();
     const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-    const [orgList, setOrgList] = useState<any[]>([]);
+    // orgList/quotationList now come from useCachedList below (cache-first, shared keys)
     const [productList, setProductList] = useState<any[]>([]);
-    const [quotationList, setQuotationList] = useState<any[]>([]); 
 
     const [selectedOrg, setSelectedOrg] = useState<any>(null);
     const [showOrgModal, setShowOrgModal] = useState(false);
@@ -44,17 +46,26 @@ export default function AddQuotationScreen() {
     const [isSaving, setIsSaving] = useState(false); 
     const [existingEstimateNo, setExistingEstimateNo] = useState(''); 
 
+    // 🔥 Organizations + Quotations — cache-first, sharing the SAME cache
+    // keys as organization.tsx ('organizations') and quotations.tsx
+    // ('quotations').
+    const { data: orgList } = useCachedList({
+        cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: () => fetchOrganizations({ limit: 200 }),
+    });
+    const { data: quotationList } = useCachedList({
+        cacheKey: buildCacheKey('quotations', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: listQuotations, // was: fetchSaaSData("quotations")
+    });
+
+    // 🔥 Products — unchanged plain fetch-on-mount (out of scope for this pass).
     useEffect(() => {
         const loadData = async () => {
             if (currentUser?.companyId) {
-                const [orgs, prods, quotes] = await Promise.all([
-                    fetchOrganizations({ limit: 200 }),
-                    listProducts(), // was: fetchSaaSData("products")
-                    listQuotations() // was: fetchSaaSData("quotations")
-                ]);
-                setOrgList(orgs);
+                const prods = await listProducts(); // was: fetchSaaSData("products")
                 setProductList(prods);
-                setQuotationList(quotes);
             }
         };
         loadData();

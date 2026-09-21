@@ -29,6 +29,9 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { fetchOrganizations } from '../services/api/organizations';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 import { urlToBase64Image } from '../utils/pdfImageHelper';
 
 export default function AddPaymentScreen() {
@@ -38,9 +41,7 @@ export default function AddPaymentScreen() {
     const { currentUser, companyProfile, addNotification } = useData();
     const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-    const [orgList, setOrgList] = useState<any[]>([]);
-    const [orderList, setOrderList] = useState<any[]>([]);
-    const [dueList, setDueList] = useState<any[]>([]);
+    // orgList/orderList/dueList now come from useCachedList below (cache-first, shared keys)
 
     const [loading, setLoading] = useState(false);
     
@@ -69,23 +70,27 @@ export default function AddPaymentScreen() {
     const [filteredOrgs, setFilteredOrgs] = useState<any[]>([]);
     const hasPrefilledFromParams = React.useRef(false);
 
-    // 🔥 LOAD DATA — orders + payment dues via new API; organizations via Firestore
+    // 🔥 Organizations + Orders + Payment Dues — cache-first, sharing the
+    // SAME cache keys as organization.tsx ('organizations'), orders.tsx
+    // ('orders'), and payment_duelist.tsx ('payment_dues').
+    const { data: orgList } = useCachedList({
+        cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: () => fetchOrganizations({ limit: 200 }),
+    });
+    const { data: orderList } = useCachedList({
+        cacheKey: buildCacheKey('orders', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: listOrders, // was: fetchSaaSData("orders")
+    });
+    const { data: dueList } = useCachedList({
+        cacheKey: buildCacheKey('payment_dues', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: listPaymentDues, // was: fetchSaaSData("payment_dues")
+    });
     useEffect(() => {
-        const loadData = async () => {
-            if (currentUser?.companyId) {
-                const [orgs, orders, dues] = await Promise.all([
-                    fetchOrganizations({ limit: 200 }),
-                    listOrders(),          // was: fetchSaaSData("orders")
-                    listPaymentDues(),      // was: fetchSaaSData("payment_dues")
-                ]);
-                setOrgList(orgs);
-                setOrderList(orders);
-                setDueList(dues);
-                setFilteredOrgs(orgs);
-            }
-        };
-        loadData();
-    }, [currentUser]);
+        setFilteredOrgs(orgList);
+    }, [orgList]);
 
     // PRE-FILL FROM PARAMS — runs only once. `params` from useLocalSearchParams
     // is a new object identity on every render, so depending on it directly

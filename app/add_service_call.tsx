@@ -28,6 +28,9 @@ import { useData } from './context/DataContext';
 import { completeActivityPlan } from '../services/api/activityPlans';
 import { listInstallations } from '../services/api/installations';
 import { fetchOrganizations } from '../services/api/organizations';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 import { createServiceCall } from '../services/api/serviceCalls';
 import { listSpareParts } from '../services/api/spareParts';
 
@@ -46,9 +49,7 @@ export default function AddServiceCallScreen() {
   // 🔥 SaaS Engine kept for organizations only
   const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-  const [orgList, setOrgList] = useState<any[]>([]);
-  const [installList, setInstallList] = useState<any[]>([]);
-  const [sparePartsList, setSparePartsList] = useState<any[]>([]);
+  // orgList/installList/sparePartsList now come from useCachedList below (cache-first, shared keys)
 
   // --- FORM STATES ---
   const [org, setOrg] = useState('');
@@ -88,22 +89,24 @@ export default function AddServiceCallScreen() {
 
   const serviceOptions = ['Free', 'Paid', 'AMC', 'CMC', 'Under Warranty', 'Others'];
 
-  // 🔥 LOAD DATA — installations & spare parts via new API; organizations via Firestore
-  useEffect(() => {
-      const loadData = async () => {
-          if (currentUser?.companyId) {
-              const [orgs, installs, parts] = await Promise.all([
-                  fetchOrganizations({ limit: 200 }),
-                  listInstallations(), // was: fetchSaaSData("installations")
-                  listSpareParts(),    // was: fetchSaaSData("spare_parts")
-              ]);
-              setOrgList(orgs);
-              setInstallList(installs);
-              setSparePartsList(parts);
-          }
-      };
-      loadData();
-  }, [currentUser]);
+  // 🔥 Organizations + Installations + Spare Parts — cache-first, sharing
+  // the SAME cache keys as organization.tsx ('organizations'),
+  // installation.tsx ('installations'), and spare_parts.tsx ('spare_parts').
+  const { data: orgList } = useCachedList({
+      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: () => fetchOrganizations({ limit: 200 }),
+  });
+  const { data: installList } = useCachedList({
+      cacheKey: buildCacheKey('installations', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: listInstallations, // was: fetchSaaSData("installations")
+  });
+  const { data: sparePartsList } = useCachedList({
+      cacheKey: buildCacheKey('spare_parts', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: listSpareParts, // was: fetchSaaSData("spare_parts")
+  });
 
   useEffect(() => {
       if (params.org && org !== params.org) {

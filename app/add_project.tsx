@@ -21,6 +21,9 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 5: projects now via new backend API
 import { fetchOrganizations } from '../services/api/organizations';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 import { createProject } from '../services/api/projects';
 
 export default function AddProjectScreen() {
@@ -29,7 +32,7 @@ export default function AddProjectScreen() {
   const { currentUser, addNotification } = useData(); 
   const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-  const [orgList, setOrgList] = useState<any[]>([]);
+  // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
 
   const [name, setName] = useState('');
   const [totalValue, setTotalValue] = useState('');
@@ -51,16 +54,16 @@ export default function AddProjectScreen() {
   const [filteredOrgs, setFilteredOrgs] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // 🔥 Organizations — cache-first, shares the SAME 'organizations' cache
+  // key as organization.tsx/messaging_center.tsx.
+  const { data: orgList } = useCachedList({
+      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: () => fetchOrganizations({ limit: 200 }),
+  });
   useEffect(() => {
-      const loadData = async () => {
-          if (currentUser?.companyId) {
-              const orgs = await fetchOrganizations({ limit: 200 });
-              setOrgList(orgs);
-              setFilteredOrgs(orgs);
-          }
-      };
-      loadData();
-  }, [currentUser]);
+      setFilteredOrgs(orgList);
+  }, [orgList]);
 
   const handleSearch = (text: string) => {
       setSearchText(text);

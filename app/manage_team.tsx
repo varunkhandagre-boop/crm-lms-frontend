@@ -35,6 +35,7 @@ import { fetchPermissions, PermissionsBlob, savePermissions } from '../services/
 import { fetchLocationLogs, LocationLog } from '../services/api/locationLogs';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
+import { useCachedObject } from '../hooks/useCachedObject';
 import { buildCacheKey } from '../utils/listCache';
 
 export default function ManageTeamScreen() {
@@ -520,23 +521,32 @@ const PermissionsTab = () => {
         enabled: !!currentUser?.companyId,
         fetcher: fetchTeamMembers,
     });
-    // Permissions — a single object (role/user → module-flags map), not a
-    // list, so useCachedList (typed for arrays) doesn't apply here. Left as
-    // a plain fetch; out of scope for this pass.
-    const [permissions, setPermissions] = useState<PermissionsBlob>({});
-    const [permissionsLoading, setPermissionsLoading] = useState(true);
-    const loadPermissions = async () => {
-        if (!currentUser?.companyId) return;
-        setPermissionsLoading(true);
-        try {
-            setPermissions((await fetchPermissions()) || {});
-        } finally {
-            setPermissionsLoading(false);
-        }
+    // 🔥 PERMISSIONS — cache-first (instant from AsyncStorage, then
+    // background refresh). A single object, not a list, hence
+    // useCachedObject (see hooks/useCachedObject.ts) rather than
+    // useCachedList.
+    const {
+        data: permissionsData,
+        setData: setPermissionsData,
+        loading: permissionsLoading,
+        refreshing: permissionsRefreshing,
+        refresh: refreshPermissions,
+    } = useCachedObject<PermissionsBlob>({
+        cacheKey: buildCacheKey('permissions', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: async () => (await fetchPermissions()) || {},
+    });
+    // Downstream code expects a plain object, never null — matches the
+    // original useState<PermissionsBlob>({}) default.
+    const permissions = permissionsData || {};
+    const setPermissions: React.Dispatch<React.SetStateAction<PermissionsBlob>> = (update) => {
+        setPermissionsData((prev) => {
+            const base = prev || {};
+            return typeof update === 'function' ? (update as (p: PermissionsBlob) => PermissionsBlob)(base) : update;
+        });
     };
-    useEffect(() => { loadPermissions(); }, [currentUser]);
     const loading = usersLoading || permissionsLoading;
-    const onRefresh = () => Promise.all([refreshUsersForPermissions(), loadPermissions()]);
+    const onRefresh = () => Promise.all([refreshUsersForPermissions(), refreshPermissions()]);
 
     const getSwitchValue = (key: string) => {
         if (editMode === 'Role') {
@@ -622,7 +632,13 @@ const PermissionsTab = () => {
                 )}
             </ScrollView>
 
-            <ScrollView style={{flex:1, backgroundColor:'white', borderRadius:10, padding:10}} showsVerticalScrollIndicator={false}>
+            <ScrollView
+                style={{flex:1, backgroundColor:'white', borderRadius:10, padding:10}}
+                showsVerticalScrollIndicator={false}
+                refreshControl={
+                    <RefreshControl refreshing={permissionsRefreshing} onRefresh={onRefresh} colors={['#2c3e50']} tintColor="#2c3e50" />
+                }
+            >
                 {editMode === 'User' && (
                     <Text style={{backgroundColor:'#fff3e0', padding:10, marginBottom:10, fontSize:12, color:'#e67e22', borderRadius:5}}>
                         ℹ️ Showing effective permissions (Specific User Override {'>'} Role Default).

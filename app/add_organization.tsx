@@ -23,6 +23,9 @@ import { useData } from './context/DataContext';
 // cascading rename (into orders/leads/service_calls/etc.) happens server-side
 // inside the PATCH transaction now, so the old Firestore writeBatch code is gone.
 import { fetchOrganizations, createOrganization, updateOrganization } from '../services/api/organizations';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 
 // 🔥 OCR & CAMERA IMPORT
 import * as ImagePicker from 'expo-image-picker';
@@ -39,10 +42,9 @@ export default function AddOrganizationScreen() {
   const { currentUser, addNotification } = useData();
 
   // 🔥 2. Local loading state (no more useSaaSDB here)
-  const [isDbLoading, setIsDbLoading] = useState(true);
+  // isDbLoading/orgList now come from useCachedList below (cache-first, shared 'organizations' key)
 
   // 🔥 3. Lazy Loaded Organization List (For Edit Mode Auto-fill)
-  const [orgList, setOrgList] = useState<any[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
   const stateDistrictData: any = {
@@ -150,20 +152,14 @@ export default function AddOrganizationScreen() {
   ];
   const territoryOptions = ["North", "South", "East", "West", "Central"];
 
-  // 🔥 4. LOAD ORGS ON MOUNT (Needed for Edit Mode) — Phase 10: Postgres via fetchOrganizations()
-  useEffect(() => {
-      const loadData = async () => {
-          if (!currentUser?.companyId) return;
-          setIsDbLoading(true);
-          try {
-              const orgs = await fetchOrganizations();
-              setOrgList(orgs);
-          } finally {
-              setIsDbLoading(false);
-          }
-      };
-      loadData();
-  }, [currentUser]);
+  // 🔥 4. Organizations — cache-first, shares the SAME 'organizations'
+  // cache key as organization.tsx/messaging_center.tsx (needed for Edit
+  // Mode's duplicate-check against existing orgs).
+  const { data: orgList, loading: isDbLoading } = useCachedList({
+      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: fetchOrganizations,
+  });
 
   useEffect(() => {
       if (isEditMode && orgList.length > 0) {

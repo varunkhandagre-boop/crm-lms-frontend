@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 // ---------------------------------------------------------------------------
 // Cache-first loading for a SINGLE OBJECT (not a list).
@@ -22,6 +22,11 @@ interface UseCachedObjectOptions<T> {
 
 interface UseCachedObjectResult<T> {
   data: T | null;
+  /** Direct setter for optimistic local updates (e.g. toggling a switch
+   *  before an explicit Save action persists it) — same pattern as
+   *  useCachedList's setData. Does NOT immediately rewrite the
+   *  AsyncStorage cache; the next successful refresh reconciles it. */
+  setData: React.Dispatch<React.SetStateAction<T | null>>;
   loading: boolean;
   refreshing: boolean;
   error: Error | null;
@@ -81,5 +86,5 @@ export function useCachedObject<T>({
 
   const refresh = useCallback(() => fetchFresh(true), [fetchFresh]);
 
-  return { data, loading, refreshing, error, refresh };
+  return { data, setData, loading, refreshing, error, refresh };
 }

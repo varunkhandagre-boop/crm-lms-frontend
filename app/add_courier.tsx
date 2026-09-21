@@ -22,6 +22,9 @@ import { useData } from './context/DataContext';
 
 import { createCourier } from '../services/api/couriers';
 import { fetchOrganizations } from '../services/api/organizations';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 import { listProducts } from '../services/api/products';
 
 import * as FileSystem from 'expo-file-system/legacy';
@@ -32,7 +35,7 @@ export default function AddCourierScreen() {
   const router = useRouter();
   const { currentUser, companyProfile, addNotification } = useData();
 
-  const [orgList, setOrgList] = useState<any[]>([]);
+  // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
   const [productList, setProductList] = useState<any[]>([]);
   const [isDbLoading, setIsDbLoading] = useState(false);
 
@@ -64,19 +67,23 @@ export default function AddCourierScreen() {
   const [activeRowIndex, setActiveRowIndex] = useState(-1);
   const [searchProduct, setSearchProduct] = useState('');
 
+  // 🔥 Organizations — cache-first, shares the SAME 'organizations' cache
+  // key as organization.tsx/messaging_center.tsx.
+  const { data: orgList } = useCachedList({
+      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: () => fetchOrganizations({ limit: 200 }),
+  });
+
   useEffect(() => {
       const loadData = async () => {
           if (currentUser?.companyId) {
               setIsDbLoading(true);
               try {
-                  const [orgs, prods] = await Promise.all([
-                      fetchOrganizations({ limit: 200 }),
-                      listProducts({ limit: 100 } as any),
-                  ]);
-                  setOrgList(orgs);
+                  const prods = await listProducts({ limit: 100 } as any);
                   setProductList(prods);
               } catch (e) {
-                  console.log('Error loading orgs/products:', e);
+                  console.log('Error loading products:', e);
               } finally {
                   setIsDbLoading(false);
               }

@@ -40,7 +40,7 @@ export default function AddLeadScreen() {
   const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
   // 🔥 3. Lazy Loaded States
-  const [orgList, setOrgList] = useState<any[]>([]);
+  // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
   // userList/leadsList now come from useCachedList below (cache-first, shared keys)
   const [productList, setProductList] = useState<any[]>([]);
 
@@ -96,16 +96,19 @@ export default function AddLeadScreen() {
       fetcher: listLeads, // For duplicate checking — was: fetchSaaSData("leads")
   });
 
-  // 🔥 Organizations/products — unchanged plain fetch-on-mount (out of
-  // scope for this pass).
+  // 🔥 Organizations — cache-first, shares the SAME 'organizations' cache
+  // key as organization.tsx/messaging_center.tsx.
+  const { data: orgList } = useCachedList({
+      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: () => fetchOrganizations({ limit: 200 }),
+  });
+
+  // 🔥 Products — unchanged plain fetch-on-mount (out of scope for this pass).
   useEffect(() => {
       const loadRest = async () => {
           if (currentUser?.companyId) {
-              const [orgs, prods] = await Promise.all([
-                  fetchOrganizations({ limit: 200 }),
-                  listProducts(), // was: fetchSaaSData("products")
-              ]);
-              setOrgList(orgs);
+              const prods = await listProducts(); // was: fetchSaaSData("products")
               setProductList(prods);
           }
       };

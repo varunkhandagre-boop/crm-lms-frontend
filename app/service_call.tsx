@@ -44,10 +44,8 @@ export default function ServiceCallScreen() {
   // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); service calls no longer go through this
   const { isDbLoading } = useSaaSDB();
 
-  // serviceCallList now comes from useCachedList below (cache-first)
-  const [orgList, setOrgList] = useState<any[]>([]);
+  // serviceCallList/orgList/installList now come from useCachedList below (cache-first, shared keys)
   const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
-  const [installList, setInstallList] = useState<any[]>([]);
 
   const [statusFilter, setStatusFilter] = useState<'Open' | 'Closed' | 'All'>('Open');
   useEffect(() => {
@@ -115,26 +113,23 @@ export default function ServiceCallScreen() {
       }
   }, [teamMembersForServiceCall, isAdmin]);
 
-  // 🔥 Organizations/installations — unchanged plain fetch-on-mount (not
-  // part of the cache pilot; out of scope for this pass).
-  const loadRest = async () => {
-      if (currentUser?.companyId) {
-          const [orgs, installs] = await Promise.all([
-              fetchOrganizations({ limit: 200 }),
-              listInstallations()
-          ]);
-          setOrgList(orgs);
-          setInstallList(installs);
-      }
-  };
-
-  useEffect(() => {
-      loadRest();
-  }, [currentUser]);
+  // 🔥 Organizations/installations — cache-first, sharing the SAME cache
+  // keys as organization.tsx ('organizations') and installation.tsx
+  // ('installations').
+  const { data: orgList, refresh: refreshOrgsForServiceCall } = useCachedList({
+      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: () => fetchOrganizations({ limit: 200 }),
+  });
+  const { data: installList, refresh: refreshInstallsForServiceCall } = useCachedList({
+      cacheKey: buildCacheKey('installations', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: listInstallations,
+  });
 
   const onRefresh = async () => {
       setRefreshing(true);
-      await Promise.all([refreshServiceCalls(), loadRest(), refreshTeamMembersForServiceCall()]);
+      await Promise.all([refreshServiceCalls(), refreshTeamMembersForServiceCall(), refreshOrgsForServiceCall(), refreshInstallsForServiceCall()]);
       setRefreshing(false);
   };
 

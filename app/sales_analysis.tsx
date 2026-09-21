@@ -42,7 +42,7 @@ export default function SalesAnalysisScreen() {
   // STATES FOR DATA
   // orderList/paymentList now come from useCachedList below (cache-first,
   // sharing keys with orders.tsx / payment_collection.tsx)
-  const [orgList, setOrgList] = useState<any[]>([]);
+  // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
   // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
 
@@ -137,17 +137,13 @@ export default function SalesAnalysisScreen() {
       }
   }, [userList, isAdmin]);
 
-  // Organizations — unchanged plain fetch-on-mount (out of scope for this
-  // pass).
-  useEffect(() => {
-      const loadRest = async () => {
-          if (currentUser?.companyId) {
-              const orgs = await fetchOrganizations({ limit: 200 });
-              setOrgList(orgs);
-          }
-      };
-      loadRest();
-  }, [currentUser]);
+  // Organizations — cache-first, shares the SAME 'organizations' cache key
+  // as organization.tsx/messaging_center.tsx.
+  const { data: orgList } = useCachedList({
+      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: () => fetchOrganizations({ limit: 200 }),
+  });
 
   const getValidDateStr = (obj: any) => {
       if (obj.dateIso) return obj.dateIso;

@@ -22,6 +22,9 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: payment dues now via new backend API
 import { fetchOrganizations } from '../services/api/organizations';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 import { createPaymentDue } from '../services/api/paymentDues';
 
 export default function AddPaymentDueScreen() {
@@ -30,7 +33,7 @@ export default function AddPaymentDueScreen() {
     const { currentUser, addNotification } = useData();
     const { fetchSaaSData } = useSaaSDB();
 
-    const [orgList, setOrgList] = useState<any[]>([]);
+    // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
 
     const [selectedOrg, setSelectedOrg] = useState<any>(null);
     const [billNo, setBillNo] = useState('');
@@ -49,16 +52,16 @@ export default function AddPaymentDueScreen() {
     const [searchText, setSearchText] = useState('');
     const [filteredOrgs, setFilteredOrgs] = useState<any[]>([]);
 
+    // 🔥 Organizations — cache-first, shares the SAME 'organizations' cache
+    // key as organization.tsx/messaging_center.tsx.
+    const { data: orgList } = useCachedList({
+        cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: () => fetchOrganizations({ limit: 200 }),
+    });
     useEffect(() => {
-        const loadData = async () => {
-            if (currentUser?.companyId) {
-                const orgs = await fetchOrganizations({ limit: 200 });
-                setOrgList(orgs);
-                setFilteredOrgs(orgs);
-            }
-        };
-        loadData();
-    }, [currentUser]);
+        setFilteredOrgs(orgList);
+    }, [orgList]);
 
     const handleSearch = (text: string) => {
         setSearchText(text);

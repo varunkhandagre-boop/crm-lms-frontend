@@ -38,7 +38,7 @@ export default function PMSScheduleScreen() {
   const { isDbLoading } = useSaaSDB();
 
   // pmsList now comes from useCachedList below (cache-first)
-  const [orgList, setOrgList] = useState<any[]>([]);
+  // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
   const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
 
   const [filter, setFilter] = useState<'All' | 'Upcoming' | 'Completed' | 'Overdue'>('All');
@@ -99,17 +99,13 @@ export default function PMSScheduleScreen() {
       }
   }, [teamMembersForPms, isAdmin]);
 
-  // Organizations — unchanged plain fetch-on-mount (out of scope for this
-  // pass).
-  useEffect(() => {
-      const loadRest = async () => {
-          if (currentUser?.companyId) {
-              const orgs = await fetchOrganizations({ limit: 200 });
-              setOrgList(orgs);
-          }
-      };
-      loadRest();
-  }, [currentUser]);
+  // Organizations — cache-first, shares the SAME 'organizations' cache key
+  // as organization.tsx/messaging_center.tsx.
+  const { data: orgList, refresh: refreshOrgsForPms } = useCachedList({
+      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: () => fetchOrganizations({ limit: 200 }),
+  });
 
   // Refresh PMS reports (background, cache already shows something instant)
   // whenever the screen regains focus — same intent as the original
@@ -123,7 +119,7 @@ export default function PMSScheduleScreen() {
 
   const onRefresh = async () => {
       setRefreshing(true);
-      await refreshPms();
+      await Promise.all([refreshPms(), refreshOrgsForPms()]);
       setRefreshing(false);
   };
 

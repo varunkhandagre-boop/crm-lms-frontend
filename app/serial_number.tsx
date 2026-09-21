@@ -33,6 +33,9 @@ import { fetchCouriers } from '../services/api/couriers';
 import { listInstallations } from '../services/api/installations';
 import { listOrders } from '../services/api/orders';
 import { fetchOrganizations } from '../services/api/organizations';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 import { listPaymentCollections } from '../services/api/paymentCollections';
 import { listPaymentDues } from '../services/api/paymentDues';
 import { listPmsReports } from '../services/api/pmsReports';
@@ -55,8 +58,7 @@ export default function SerialNumberScreen() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [viewMode, setViewMode] = useState<'IDLE' | 'LIST' | 'DETAILS' | 'ORG_DETAILS'>('IDLE');
   
-  const [installList, setInstallList] = useState<any[]>([]);
-  const [orgList, setOrgList] = useState<any[]>([]);
+  // installList/orgList/isDataFetching now come from useCachedList below (cache-first, shared keys)
   
   const [machineList, setMachineList] = useState<any[]>([]); 
   const [selectedMachine, setSelectedMachine] = useState<any>(null); 
@@ -71,29 +73,30 @@ export default function SerialNumberScreen() {
   
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<any>(null);
-  const [isDataFetching, setIsDataFetching] = useState(false);
 
   useEffect(() => {
       setVisibleCount(20);
       setActiveTimelineFilter('All');
   }, [viewMode, selectedOrg, selectedMachine]);
 
-  // 🔥 3. LOAD CORE MASTERS ON MOUNT (Only Installs and Orgs for quick search)
-  useEffect(() => {
-      const loadInitialMasters = async () => {
-          if (currentUser?.companyId) {
-              setIsDataFetching(true);
-              const [installs, orgs] = await Promise.all([
-                  listInstallations(),
-                  fetchOrganizations({ limit: 200 }),
-              ]);
-              setInstallList(installs);
-              setOrgList(orgs);
-              setIsDataFetching(false);
-          }
-      };
-      loadInitialMasters();
-  }, [currentUser]);
+  // 🔥 Installations + Organizations — cache-first, sharing the SAME cache
+  // keys as installation.tsx ('installations') and organization.tsx
+  // ('organizations').
+  const { data: installList, loading: installsLoading } = useCachedList({
+      cacheKey: buildCacheKey('installations', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: listInstallations,
+  });
+  const { data: orgList, loading: orgsLoading } = useCachedList({
+      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: () => fetchOrganizations({ limit: 200 }),
+  });
+  // isDataFetching is also toggled manually elsewhere in this file (e.g.
+  // openMachineHistory) for unrelated action-loading spinners, so it stays
+  // local state — just OR'd with the two hooks' own loading for the
+  // initial-masters-load spinner specifically.
+  const [isDataFetching, setIsDataFetching] = useState(false);
 
   const handleSearchInput = (text: string) => {
       setSearchInput(text);
@@ -471,7 +474,7 @@ export default function SerialNumberScreen() {
             <Text style={styles.headerTitle}>
                 {viewMode === 'DETAILS' ? 'Machine History' : viewMode === 'ORG_DETAILS' ? 'Organization Record' : 'Universal Tracker'}
             </Text>
-            {isDataFetching ? <ActivityIndicator size="small" color="#333" /> : <View style={{width:24}} />}
+            {(isDataFetching || installsLoading || orgsLoading) ? <ActivityIndicator size="small" color="#333" /> : <View style={{width:24}} />}
         </View>
 
         {!['DETAILS', 'ORG_DETAILS'].includes(viewMode) && (

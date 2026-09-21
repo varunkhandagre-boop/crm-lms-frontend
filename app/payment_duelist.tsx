@@ -36,8 +36,7 @@ export default function PaymentDueList() {
 
     // dueList now comes from useCachedList below (cache-first)
     // orderList now comes from useCachedList below (cache-first, shares key with orders.tsx)
-    const [paymentList, setPaymentList] = useState<any[]>([]);
-    const [orgList, setOrgList] = useState<any[]>([]);
+    // paymentList/orgList now come from useCachedList below (cache-first, shared keys)
 
     const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All');
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -85,21 +84,19 @@ export default function PaymentDueList() {
         fetcher: listOrders, // was: fetchSaaSData("orders")
     });
 
-    // Payment collections/organizations — unchanged plain fetch-on-mount
-    // (not part of the merged dues view; out of scope for this pass).
-    useEffect(() => {
-        const loadRest = async () => {
-            if (currentUser?.companyId) {
-                const [payments, orgs] = await Promise.all([
-                    listPaymentCollections(),    // was: fetchSaaSData("payment_collections")
-                    fetchOrganizations({ limit: 200 })
-                ]);
-                setPaymentList(payments);
-                setOrgList(orgs);
-            }
-        };
-        loadRest();
-    }, [currentUser]);
+    // Payment collections/organizations — cache-first, sharing the SAME
+    // cache keys as payment_collection.tsx ('payment_collections') and
+    // organization.tsx/messaging_center.tsx ('organizations').
+    const { data: paymentList } = useCachedList({
+        cacheKey: buildCacheKey('payment_collections', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: listPaymentCollections, // was: fetchSaaSData("payment_collections")
+    });
+    const { data: orgList } = useCachedList({
+        cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: () => fetchOrganizations({ limit: 200 }),
+    });
 
     const roleToCheck = currentUser?.role || 'employee';
     const canAddDue = ['Admin', 'Accountant', 'Account', 'Manager', 'Hr', 'SuperAdmin'].includes(roleToCheck);

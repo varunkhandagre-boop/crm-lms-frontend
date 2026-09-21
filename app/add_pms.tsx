@@ -26,6 +26,9 @@ import { completeActivityPlan } from '../services/api/activityPlans';
 import { listInstallations } from '../services/api/installations';
 import { recordLocationLog } from '../services/api/locationLogs';
 import { fetchOrganizations } from '../services/api/organizations';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 import { createPmsReport } from '../services/api/pmsReports';
 import { urlToBase64Image } from '../utils/pdfImageHelper';
 
@@ -41,8 +44,7 @@ export default function AddPMSScreen() {
   const { currentUser, companyProfile, addNotification } = useData();
   const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-  const [orgList, setOrgList] = useState<any[]>([]);
-  const [installList, setInstallList] = useState<any[]>([]);
+  // orgList/installList now come from useCachedList below (cache-first, shared keys)
 
   const [org, setOrg] = useState('');
   const [orgId, setOrgId] = useState('');
@@ -70,20 +72,19 @@ export default function AddPMSScreen() {
   const [filteredData, setFilteredData] = useState<any[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
-  // 🔥 LOAD DATA — installations via new API; organizations via Firestore
-  useEffect(() => {
-      const loadData = async () => {
-          if (currentUser?.companyId) {
-              const [orgs, installs] = await Promise.all([
-                  fetchOrganizations({ limit: 200 }),
-                  listInstallations(), // was: fetchSaaSData("installations")
-              ]);
-              setOrgList(orgs);
-              setInstallList(installs);
-          }
-      };
-      loadData();
-  }, [currentUser]);
+  // 🔥 Organizations + Installations — cache-first, sharing the SAME cache
+  // keys as organization.tsx ('organizations') and installation.tsx
+  // ('installations').
+  const { data: orgList } = useCachedList({
+      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: () => fetchOrganizations({ limit: 200 }),
+  });
+  const { data: installList } = useCachedList({
+      cacheKey: buildCacheKey('installations', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: listInstallations, // was: fetchSaaSData("installations")
+  });
 
   const formatDate = (rawDate: Date) => {
     let day = rawDate.getDate().toString().padStart(2, '0');

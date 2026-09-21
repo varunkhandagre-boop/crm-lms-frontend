@@ -49,7 +49,7 @@ export default function AddOrderScreen() {
 
   const { mode, leadId, leadOrg, leadOrgId, leadPerson, leadMobile, leadEmail, leadCity, leadAddress, leadProduct } = useLocalSearchParams(); 
 
-  const [orgList, setOrgList] = useState<any[]>([]);
+  // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
   const [productList, setProductList] = useState<any[]>([]);
   // users now comes from useCachedList below (cache-first, shared 'team_members' key)
 
@@ -105,16 +105,19 @@ export default function AddOrderScreen() {
       fetcher: fetchTeamMembers,
   });
 
-  // 🔥 Organizations/products — unchanged plain fetch-on-mount (out of
-  // scope for this pass).
+  // 🔥 Organizations — cache-first, shares the SAME 'organizations' cache
+  // key as organization.tsx/messaging_center.tsx.
+  const { data: orgList } = useCachedList({
+      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: () => fetchOrganizations({ limit: 200 }),
+  });
+
+  // 🔥 Products — unchanged plain fetch-on-mount (out of scope for this pass).
   useEffect(() => {
       const loadRest = async () => {
           if (currentUser?.companyId) {
-              const [orgs, prods] = await Promise.all([
-                  fetchOrganizations({ limit: 200 }),
-                  listProducts(), // was: fetchSaaSData("products")
-              ]);
-              setOrgList(orgs);
+              const prods = await listProducts(); // was: fetchSaaSData("products")
               setProductList(prods);
           }
       };

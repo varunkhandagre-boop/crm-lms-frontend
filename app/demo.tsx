@@ -41,8 +41,7 @@ export default function DemoScreen() {
   const { isDbLoading } = useSaaSDB();
 
   // demoList now comes from useCachedList below (cache-first)
-  const [salesVisitList, setSalesVisitList] = useState<any[]>([]);
-  const [orgList, setOrgList] = useState<any[]>([]);
+  // salesVisitList/orgList now come from useCachedList below (cache-first, shared keys)
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
 
   const [searchText, setSearchText] = useState('');
@@ -103,19 +102,19 @@ export default function DemoScreen() {
 
   // Sales visits/orgs — unchanged plain fetch-on-mount (out of scope for
   // this pass).
-  useEffect(() => {
-      const loadRest = async () => {
-          if (currentUser?.companyId) {
-              const [sales, orgs] = await Promise.all([
-                  listSalesVisits(),   // was: fetchSaaSData("sales_reports")
-                  fetchOrganizations({ limit: 200 }),
-              ]);
-              setSalesVisitList(sales);
-              setOrgList(orgs);
-          }
-      };
-      loadRest();
-  }, [currentUser]);
+  // 🔥 Sales visits + Organizations — cache-first, sharing the SAME cache
+  // keys as sales.tsx ('sales_visits') and organization.tsx/messaging_center.tsx
+  // ('organizations').
+  const { data: salesVisitList } = useCachedList({
+      cacheKey: buildCacheKey('sales_visits', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: listSalesVisits, // was: fetchSaaSData("sales_reports")
+  });
+  const { data: orgList } = useCachedList({
+      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: () => fetchOrganizations({ limit: 200 }),
+  });
 
   const parseDate = (dateStr: string) => {
       if (!dateStr) return new Date(0);

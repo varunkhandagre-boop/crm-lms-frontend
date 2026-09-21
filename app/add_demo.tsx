@@ -27,6 +27,9 @@ import { completeActivityPlan } from '../services/api/activityPlans';
 import { createDemo, listDemos, updateDemo } from '../services/api/demos';
 import { recordLocationLog } from '../services/api/locationLogs';
 import { fetchOrganizations } from '../services/api/organizations';
+// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
+import { useCachedList } from '../hooks/useCachedList';
+import { buildCacheKey } from '../utils/listCache';
 import { listProducts } from '../services/api/products';
 
 // 🔥 PDF IMPORTS
@@ -47,9 +50,8 @@ export default function AddDemoScreen() {
   // 🔥 SaaS Engine kept for organizations/products
   const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
-  const [orgList, setOrgList] = useState<any[]>([]);
+  // orgList/demoList now come from useCachedList below (cache-first, shared keys)
   const [productList, setProductList] = useState<any[]>([]);
-  const [demoList, setDemoList] = useState<any[]>([]);
   
   const [customProduct, setCustomProduct] = useState(''); 
   const [customModel, setCustomModel] = useState('');
@@ -84,18 +86,25 @@ export default function AddDemoScreen() {
   const [searchText, setSearchText] = useState('');
   const [filteredData, setFilteredData] = useState<any[]>([]);
 
-  // 🔥 LOAD DATA — demos via new API; orgs via Firestore; products via new API
+  // 🔥 Organizations + Demos — cache-first, sharing the SAME cache keys as
+  // organization.tsx ('organizations') and demo.tsx ('demos').
+  const { data: orgList } = useCachedList({
+      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: () => fetchOrganizations({ limit: 200 }),
+  });
+  const { data: demoList } = useCachedList({
+      cacheKey: buildCacheKey('demos', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: listDemos, // was: fetchSaaSData("demos")
+  });
+
+  // 🔥 Products — unchanged plain fetch-on-mount (out of scope for this pass).
   useEffect(() => {
       const loadData = async () => {
           if (currentUser?.companyId) {
-              const [orgs, prods, demos] = await Promise.all([
-                  fetchOrganizations({ limit: 200 }),
-                  listProducts(), // was: fetchSaaSData("products")
-                  listDemos() // was: fetchSaaSData("demos")
-              ]);
-              setOrgList(orgs);
+              const prods = await listProducts(); // was: fetchSaaSData("products")
               setProductList(prods);
-              setDemoList(demos);
           }
       };
       loadData();
