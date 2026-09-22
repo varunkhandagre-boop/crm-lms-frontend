@@ -262,10 +262,15 @@ function NavigationLayout() {
             const { status: foreStatus } = await Location.requestForegroundPermissionsAsync();
             if (foreStatus !== 'granted') return;
 
-            try {
-                const { status: backStatus } = await Location.requestBackgroundPermissionsAsync();
-                if (backStatus !== 'granted') console.log("Bg Permission denied");
-            } catch (err) { }
+            // 🔥 Foreground-only now — this tracker is a best-effort convenience
+            // (works while the app is genuinely open/active), not a true
+            // background service; there's no registered TaskManager task for
+            // it to survive the app being backgrounded anyway. Google Play's
+            // background-location policy requires removing the permission
+            // entirely when it isn't core to the app's functionality — the
+            // location captured when filling in a report/order/installation
+            // etc. (foreground, tied to that action) is the feature that
+            // actually matters and is unaffected by this change.
 
             locationSubscription = await Location.watchPositionAsync(
                 {
