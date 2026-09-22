@@ -78,6 +78,7 @@ export default function LeadsScreen() {
     const leadsCacheKey = buildCacheKey('leads', currentUser?.companyId);
     const {
         data: leadsList,
+        setData: setLeadsList,
         loading: leadsLoading,
         refreshing: leadsRefreshing,
         refresh: refreshLeads,
@@ -88,10 +89,12 @@ export default function LeadsScreen() {
     });
 
     // 🔥 Team members — cache-first, shares the SAME 'team_members' cache
-    // key as manage_team.tsx/employee_timeline.tsx.
+    // key as manage_team.tsx/employee_timeline.tsx. Fetched regardless of
+    // canViewEmployeeFilter now — every role needs it for the senderName
+    // enrichment below, not just managers building the filter dropdown.
     const { data: teamMembersForLeads } = useCachedList({
         cacheKey: buildCacheKey('team_members', currentUser?.companyId),
-        enabled: !!currentUser?.companyId && canViewEmployeeFilter,
+        enabled: !!currentUser?.companyId,
         fetcher: fetchTeamMembers,
     });
     useEffect(() => {
@@ -103,6 +106,17 @@ export default function LeadsScreen() {
             setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
         }
     }, [teamMembersForLeads, canViewEmployeeFilter]);
+
+    // 🔥 senderName was never populated — the API only returns senderId
+    // (see services/api/leads.ts), so the lead-creator's name was never
+    // shown. Fill it in once team members are available.
+    useEffect(() => {
+        if (teamMembersForLeads.length === 0 || leadsList.length === 0) return;
+        const nameById = new Map(teamMembersForLeads.map((u: any) => [u.id, u.name || 'Unknown']));
+        const needsEnrichment = leadsList.some((l: any) => l.senderName === undefined);
+        if (!needsEnrichment) return;
+        setLeadsList(leadsList.map((l: any) => ({ ...l, senderName: nameById.get(l.senderId) || 'Unknown' })));
+    }, [leadsList, teamMembersForLeads]);
 
     const parseDate = (dateStr: any) => {
         if (!dateStr) return new Date(0);
@@ -432,7 +446,12 @@ export default function LeadsScreen() {
                             </View>
                             
                             <View style={styles.divider} />
-                            
+
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                                <Ionicons name="person-outline" size={12} color="#3b5998" />
+                                <Text style={{ fontSize: 11, color: '#3b5998', marginLeft: 4 }}>Added by: {item.senderName || 'Unknown'}</Text>
+                            </View>
+
                             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <View>
                                     <Text style={{ fontSize: 11, color: '#777', marginBottom: 3 }}>Next Follow-up:</Text>

@@ -111,6 +111,19 @@ export default function InstallationListScreen() {
       }
   }, [teamMembersForInstall, isAdmin]);
 
+  // 🔥 senderName ("Added by") was never populated — the API only returns
+  // senderId (see services/api/installations.ts's comment). Note this is
+  // separate from the "Engineer" field, which is a directly-typed text
+  // field on the record and always worked fine. Fill senderName in once
+  // team members are available.
+  useEffect(() => {
+      if (teamMembersForInstall.length === 0 || installList.length === 0) return;
+      const nameById = new Map(teamMembersForInstall.map((u: any) => [u.id, u.name || 'Unknown']));
+      const needsEnrichment = installList.some((i: any) => i.senderName === undefined);
+      if (!needsEnrichment) return;
+      setInstallList(installList.map((i: any) => ({ ...i, senderName: nameById.get(i.senderId) || 'Unknown' })));
+  }, [installList, teamMembersForInstall]);
+
   const parseDate = (dateStr: any) => {
     if (!dateStr) return 0;
     if (typeof dateStr === 'number') return dateStr;

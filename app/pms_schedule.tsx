@@ -73,6 +73,7 @@ export default function PMSScheduleScreen() {
   const pmsCacheKey = buildCacheKey('pms_reports', currentUser?.companyId);
   const {
       data: pmsList,
+      setData: setPmsList,
       loading: pmsLoading,
       refreshing: pmsRefreshing,
       refresh: refreshPms,
@@ -98,6 +99,17 @@ export default function PMSScheduleScreen() {
           setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
       }
   }, [teamMembersForPms, isAdmin]);
+
+  // 🔥 senderName was never populated — the API only returns senderId (see
+  // services/api/pmsReports.ts's comment), so every PMS report showed no
+  // name. Fill it in once team members are available.
+  useEffect(() => {
+      if (teamMembersForPms.length === 0 || pmsList.length === 0) return;
+      const nameById = new Map(teamMembersForPms.map((u: any) => [u.id, u.name || 'Unknown']));
+      const needsEnrichment = pmsList.some((p: any) => p.senderName === undefined);
+      if (!needsEnrichment) return;
+      setPmsList(pmsList.map((p: any) => ({ ...p, senderName: nameById.get(p.senderId) || 'Unknown' })));
+  }, [pmsList, teamMembersForPms]);
 
   // Organizations — cache-first, shares the SAME 'organizations' cache key
   // as organization.tsx/messaging_center.tsx.

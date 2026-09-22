@@ -81,6 +81,7 @@ export default function SalesReportScreen() {
   const salesVisitsCacheKey = buildCacheKey('sales_visits', currentUser?.companyId);
   const {
       data: salesVisitList,
+      setData: setSalesVisitList,
       loading: salesVisitsLoading,
       refresh: refreshSalesVisits,
   } = useCachedList({
@@ -96,6 +97,18 @@ export default function SalesReportScreen() {
       enabled: !!currentUser?.companyId,
       fetcher: fetchTeamMembers,
   });
+
+  // 🔥 senderName was never populated — the API only returns senderId (see
+  // services/api/salesVisits.ts), so DSR entries showed no name. Fill it
+  // in once team members are available.
+  useEffect(() => {
+      if (userList.length === 0 || salesVisitList.length === 0) return;
+      const nameById = new Map(userList.map((u: any) => [u.id, u.name || 'Unknown']));
+      const needsEnrichment = salesVisitList.some((v: any) => v.senderName === undefined);
+      if (!needsEnrichment) return;
+      setSalesVisitList(salesVisitList.map((v: any) => ({ ...v, senderName: nameById.get(v.senderId) || 'Unknown' })));
+  }, [salesVisitList, userList]);
+
   useEffect(() => {
       if (isAdmin) {
           const mappedUsers = userList.map((u: any) => ({

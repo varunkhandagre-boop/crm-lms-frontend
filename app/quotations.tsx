@@ -54,6 +54,7 @@ export default function QuotationsListScreen() {
     const quotationsCacheKey = buildCacheKey('quotations', currentUser?.companyId);
     const {
         data: quotations,
+        setData: setQuotations,
         loading,
         refreshing: quotationsRefreshing,
         refresh: refreshQuotations,
@@ -81,6 +82,17 @@ export default function QuotationsListScreen() {
             setEmployees([{ id: 'All', name: 'All' }, ...uniqueUsers as any]);
         }
     }, [teamMembersForQuotes, canManage]);
+
+    // 🔥 senderName was never populated — the API only returns senderId
+    // (see services/api/quotations.ts's comment), so quotations showed no
+    // creator name. Fill it in once team members are available.
+    useEffect(() => {
+        if (teamMembersForQuotes.length === 0 || quotations.length === 0) return;
+        const nameById = new Map(teamMembersForQuotes.map((u: any) => [u.id, u.name || 'Unknown']));
+        const needsEnrichment = quotations.some((q: any) => q.senderName === undefined);
+        if (!needsEnrichment) return;
+        setQuotations(quotations.map((q: any) => ({ ...q, senderName: nameById.get(q.senderId) || 'Unknown' })));
+    }, [quotations, teamMembersForQuotes]);
 
     const onRefresh = async () => {
         setRefreshing(true);

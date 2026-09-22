@@ -113,6 +113,18 @@ export default function ServiceCallScreen() {
       }
   }, [teamMembersForServiceCall, isAdmin]);
 
+  // 🔥 senderName was never populated — the API only returns senderId (see
+  // services/api/serviceCalls.ts's comment), so every service call showed
+  // no name (the "Unknown" text seen in the list). Fill it in once team
+  // members are available.
+  useEffect(() => {
+      if (teamMembersForServiceCall.length === 0 || serviceCallList.length === 0) return;
+      const nameById = new Map(teamMembersForServiceCall.map((u: any) => [u.id, u.name || 'Unknown']));
+      const needsEnrichment = serviceCallList.some((s: any) => s.senderName === undefined);
+      if (!needsEnrichment) return;
+      setServiceCallList(serviceCallList.map((s: any) => ({ ...s, senderName: nameById.get(s.senderId) || 'Unknown' })));
+  }, [serviceCallList, teamMembersForServiceCall]);
+
   // 🔥 Organizations/installations — cache-first, sharing the SAME cache
   // keys as organization.tsx ('organizations') and installation.tsx
   // ('installations').

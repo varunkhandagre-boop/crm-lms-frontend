@@ -74,6 +74,7 @@ export default function DemoScreen() {
   const demosCacheKey = buildCacheKey('demos', currentUser?.companyId);
   const {
       data: demoList,
+      setData: setDemoList,
       loading: demosLoading,
       refreshing: demosRefreshing,
       refresh: refreshDemos,
@@ -99,6 +100,17 @@ export default function DemoScreen() {
           setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
       }
   }, [teamMembersForDemo, isAdmin]);
+
+  // 🔥 senderName was never populated — the API only returns senderId (see
+  // services/api/demos.ts's comment), so every demo showed no name at all.
+  // Fill it in once team members are available.
+  useEffect(() => {
+      if (teamMembersForDemo.length === 0 || demoList.length === 0) return;
+      const nameById = new Map(teamMembersForDemo.map((u: any) => [u.id, u.name || 'Unknown']));
+      const needsEnrichment = demoList.some((d: any) => d.senderName === undefined);
+      if (!needsEnrichment) return;
+      setDemoList(demoList.map((d: any) => ({ ...d, senderName: nameById.get(d.senderId) || 'Unknown' })));
+  }, [demoList, teamMembersForDemo]);
 
   // Sales visits/orgs — unchanged plain fetch-on-mount (out of scope for
   // this pass).

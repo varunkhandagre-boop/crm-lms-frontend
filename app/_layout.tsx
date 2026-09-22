@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
 import { Slot, usePathname, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DataProvider, useData } from './context/DataContext';
@@ -144,6 +144,14 @@ function NavigationLayout() {
       loading,
       isSubscriptionExpired, 
   } = useData();
+  // Kept in sync below — the location-watcher's callback (further down)
+  // fires asynchronously and needs the *current* auth state at call time,
+  // not whatever currentUser was when the effect/closure was set up —
+  // otherwise a location update that happens to land right at logout can
+  // fire the API call with an already-cleared auth token (harmless, caught,
+  // but noisy 401 in the logs).
+  const currentUserRef = useRef(currentUser);
+  useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
 
   // 🔥 These 5 were previously read from DataContext (a big Firestore-backed
   // "God Context" that's since been cleaned up — see DataContext.tsx's own
@@ -286,6 +294,8 @@ function NavigationLayout() {
                     }
 
                     lastUpdateTimestamp = now;
+
+                    if (!currentUserRef.current) return; // logged out since this update was queued
 
                     try {
     await recordLocationLog({

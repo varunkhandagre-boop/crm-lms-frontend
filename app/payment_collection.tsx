@@ -99,6 +99,17 @@ export default function PaymentCollection() {
         fetcher: fetchTeamMembers,
     });
 
+    // 🔥 senderName was never populated — the API only returns senderId
+    // (see services/api/paymentCollections.ts), so the collector's name
+    // was never shown anywhere. Fill it in once team members are available.
+    useEffect(() => {
+        if (userList.length === 0 || paymentList.length === 0) return;
+        const nameById = new Map(userList.map((u: any) => [u.id, u.name || 'Unknown']));
+        const needsEnrichment = paymentList.some((p: any) => p.senderName === undefined);
+        if (!needsEnrichment) return;
+        setPaymentList(paymentList.map((p: any) => ({ ...p, senderName: nameById.get(p.senderId) || 'Unknown' })));
+    }, [paymentList, userList]);
+
     // Organizations — cache-first, shares the SAME 'organizations' cache
     // key as organization.tsx/messaging_center.tsx.
     const { data: orgList } = useCachedList({
@@ -516,6 +527,7 @@ export default function PaymentCollection() {
                 <View style={{flex:1}}>
                     <Text style={styles.hOrg} numberOfLines={1}>{item.orgName}</Text>
                     {city ? <Text style={{fontSize: 11, color: '#555', marginBottom: 4}}>📍 {city}</Text> : null}
+                    <Text style={{fontSize: 11, color: '#3b5998', marginBottom: 4}}>👤 {item.senderName || 'Unknown'}</Text>
                     
                     <View style={{flexDirection:'row', alignItems:'center', marginTop:2, flexWrap:'wrap'}}>
                         <View style={[styles.modeBadge, {backgroundColor: modeStyle.bg}]}>
