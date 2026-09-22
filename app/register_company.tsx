@@ -170,6 +170,20 @@ export default function RegisterCompanyScreen() {
                 console.warn('Backend registration failed (Firestore signup still succeeded):', backendErr);
             }
 
+            // Establish a proper Postgres session (JWT) so SubscriptionScreen's
+            // API calls (plans list, gateway config) are authenticated — the
+            // Firestore signup alone doesn't give apiClient a token to use.
+            // Awaited BEFORE the alert below (not fired alongside it) so
+            // currentUser is guaranteed set by the time the person can tap
+            // through to SubscriptionScreen — otherwise that screen's own
+            // `currentUser ? '/' : '/login'` check could still see a stale
+            // null and bounce them to the login screen instead.
+            try {
+                await login(email, password);
+            } catch (loginErr) {
+                console.warn('Post-registration auto-login failed:', loginErr);
+            }
+
             // 6. Success aur direct login option
             // 🔥 LINKED TO SUBSCRIPTION: User register hote hi direct Subscription page par jayega data lekar
             Alert.alert(
@@ -189,15 +203,6 @@ export default function RegisterCompanyScreen() {
                 ],
                 { cancelable: false } 
             );
-            // Automatically sign out to force fresh context login
-            // Establish a proper Postgres session (JWT) so SubscriptionScreen's
-            // API calls (plans list, gateway config) are authenticated — the
-            // Firestore signup alone doesn't give apiClient a token to use.
-            try {
-                await login(email, password);
-            } catch (loginErr) {
-                console.warn('Post-registration auto-login failed:', loginErr);
-            }
 
         } catch (error: any) {
             let msg = error.message;
@@ -209,7 +214,7 @@ export default function RegisterCompanyScreen() {
 
     return (
         <KeyboardAvoidingView 
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
             style={styles.container}
         >
             <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
