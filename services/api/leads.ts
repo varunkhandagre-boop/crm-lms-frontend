@@ -113,9 +113,12 @@ function toQueryString(params: Record<string, any>) {
 /** Returns leads already mapped to the legacy shape — drop-in replacement
  *  for `await fetchSaaSData("leads")`. */
 export async function listLeads(params: ListLeadsParams = {}): Promise<any[]> {
-  // limit=100: covers a company's active pipeline in one call for now.
-  // Move to real cursor pagination in the screen if a company outgrows this.
-  const res = await apiClient.get<ListLeadsResponse>(`/leads${toQueryString({ limit: 100, ...params })}`);
+  // 🔥 Bumped 100 → 1000: a real company hit 388 leads and the old cap
+  // was silently hiding 288 of them (no pagination UI anywhere calls this
+  // with a page/cursor param — every caller just wants "all my leads").
+  // Move to real cursor pagination in the screen if a company outgrows
+  // even this.
+  const res = await apiClient.get<ListLeadsResponse>(`/leads${toQueryString({ limit: 1000, ...params })}`);
   return res.data.map(toLegacyLead);
 }
 

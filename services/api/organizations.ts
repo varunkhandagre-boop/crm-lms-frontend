@@ -76,10 +76,24 @@ function toLegacyOrganization(o: any): LegacyOrganization {
   };
 }
 
+
 export async function fetchOrganizations(opts: { search?: string; limit?: number } = {}): Promise<LegacyOrganization[]> {
-  const qs = buildQuery({ search: opts.search, limit: opts.limit ?? 1000 });
-  const res = await apiClient.get<ListResponse<any>>(`/organizations${qs}`);
-  return (res.data ?? []).map(toLegacyOrganization);
+  if (opts.limit !== undefined) {
+    const qs = buildQuery({ search: opts.search, limit: opts.limit });
+    const res = await apiClient.get<ListResponse<any>>(`/organizations${qs}`);
+    return (res.data ?? []).map(toLegacyOrganization);
+  }
+  const all: any[] = [];
+  let page = 1;
+  const MAX_PAGES = 100;
+  while (page <= MAX_PAGES) {
+    const qs = buildQuery({ search: opts.search, limit: 500, page });
+    const res = await apiClient.get<ListResponse<any>>(`/organizations${qs}`);
+    all.push(...(res.data ?? []));
+    if (page >= res.meta.totalPages) break;
+    page++;
+  }
+  return all.map(toLegacyOrganization);
 }
 
 export interface OrganizationPayload {

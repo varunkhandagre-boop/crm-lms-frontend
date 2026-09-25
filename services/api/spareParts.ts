@@ -54,7 +54,7 @@ function toQueryString(params: Record<string, any>) {
 }
 
 export async function listSpareParts(params: ListSparePartsParams = {}): Promise<any[]> {
-  const res = await apiClient.get<ListResponse>(`/spare-parts${toQueryString({ limit: 100, ...params })}`);
+  const res = await apiClient.get<ListResponse>(`/spare-parts${toQueryString({limit: 1000,  ...params })}`);
   return res.data.map(toLegacySparePart);
 }
 

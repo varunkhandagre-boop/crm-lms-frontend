@@ -101,14 +101,27 @@ export function toLegacyAttendance(a: any): LegacyAttendance {
 }
 
 export async function fetchAttendance(opts: {
-  userId?: string; // omit = self; 'all' = every employee (managers only, enforced server-side)
+  userId?: string;
   fromDate?: string;
   toDate?: string;
   limit?: number;
 }): Promise<LegacyAttendance[]> {
-  const qs = buildQuery({ userId: opts.userId, fromDate: opts.fromDate, toDate: opts.toDate, limit: opts.limit ?? 500 });
-  const res = await apiClient.get<ListResponse<any>>(`/attendance${qs}`);
-  return (res.data ?? []).map(toLegacyAttendance);
+  if (opts.limit !== undefined) {
+    const qs = buildQuery({ userId: opts.userId, fromDate: opts.fromDate, toDate: opts.toDate, limit: opts.limit });
+    const res = await apiClient.get<ListResponse<any>>(`/attendance${qs}`);
+    return (res.data ?? []).map(toLegacyAttendance);
+  }
+  const all: any[] = [];
+  let page = 1;
+  const MAX_PAGES = 100;
+  while (page <= MAX_PAGES) {
+    const qs = buildQuery({ userId: opts.userId, fromDate: opts.fromDate, toDate: opts.toDate, limit: 200, page });
+    const res = await apiClient.get<ListResponse<any>>(`/attendance${qs}`);
+    all.push(...(res.data ?? []));
+    if (page >= res.meta.totalPages) break;
+    page++;
+  }
+  return all.map(toLegacyAttendance);
 }
 
 export async function fetchAttendanceSummary(opts: { userId?: string; fromDate: string; toDate: string }) {

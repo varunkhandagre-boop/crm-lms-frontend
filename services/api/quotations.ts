@@ -91,7 +91,7 @@ function toQueryString(params: Record<string, any>) {
 }
 
 export async function listQuotations(params: ListQuotationsParams = {}): Promise<any[]> {
-  const res = await apiClient.get<ListResponse>(`/quotations${toQueryString({ limit: 100, ...params })}`);
+  const res = await apiClient.get<ListResponse>(`/quotations${toQueryString({limit: 1000,  ...params })}`);
   return res.data.map(toLegacyQuotation);
 }
 

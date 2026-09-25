@@ -75,7 +75,7 @@ function toQueryString(params: Record<string, any>) {
 }
 
 export async function listPmsReports(params: { search?: string } = {}): Promise<any[]> {
-  const res = await apiClient.get<ListResponse>(`/pms-reports${toQueryString({ limit: 100, ...params })}`);
+  const res = await apiClient.get<ListResponse>(`/pms-reports${toQueryString({limit: 1000,  ...params })}`);
   return res.data.map(toLegacyPmsReport);
 }
 

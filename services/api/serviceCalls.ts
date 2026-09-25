@@ -93,7 +93,7 @@ export interface ListServiceCallsParams {
 }
 
 export async function listServiceCalls(params: ListServiceCallsParams = {}): Promise<any[]> {
-  const res = await apiClient.get<ListResponse>(`/service-calls${toQueryString({ limit: 100, ...params })}`);
+  const res = await apiClient.get<ListResponse>(`/service-calls${toQueryString({limit: 1000,  ...params })}`);
   return res.data.map(toLegacyServiceCall);
 }
 

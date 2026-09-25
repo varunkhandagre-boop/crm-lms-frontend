@@ -38,9 +38,21 @@ function toQueryString(params: Record<string, any>) {
   return s ? `?${s}` : '';
 }
 
+const ADVANCES_PAGE_SIZE = 200;
+
 export async function listAdvances(params: { status?: string } = {}): Promise<any[]> {
-  const res = await apiClient.get<{ data: ApiAdvance[] }>(`/advances${toQueryString({ limit: 100, ...params })}`);
-  return res.data.map(toLegacyAdvance);
+  const all: ApiAdvance[] = [];
+  let page = 1;
+  const MAX_PAGES = 100;
+  while (page <= MAX_PAGES) {
+    const res = await apiClient.get<{ data: ApiAdvance[]; meta: { totalPages: number } }>(
+      `/advances${toQueryString({ limit: ADVANCES_PAGE_SIZE, page, ...params })}`,
+    );
+    all.push(...res.data);
+    if (page >= res.meta.totalPages) break;
+    page++;
+  }
+  return all.map(toLegacyAdvance);
 }
 
 export async function createAdvance(payload: { amount: number; reason: string; date?: string }): Promise<any> {

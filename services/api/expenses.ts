@@ -43,7 +43,7 @@ function toQueryString(params: Record<string, any>) {
 }
 
 export async function listExpenses(params: { status?: string } = {}): Promise<any[]> {
-  const res = await apiClient.get<{ data: ApiExpense[] }>(`/expenses${toQueryString({ limit: 100, ...params })}`);
+  const res = await apiClient.get<{ data: ApiExpense[] }>(`/expenses${toQueryString({limit: 1000,  ...params })}`);
   return res.data.map(toLegacyExpense);
 }
 

@@ -69,9 +69,21 @@ function toQueryString(params: Record<string, any>) {
   return s ? `?${s}` : '';
 }
 
+const PAYMENT_COLLECTIONS_PAGE_SIZE = 200;
+
 export async function listPaymentCollections(params: { search?: string } = {}): Promise<any[]> {
-  const res = await apiClient.get<{ data: ApiPaymentCollection[] }>(`/payment-collections${toQueryString({ limit: 100, ...params })}`);
-  return res.data.map(toLegacyPayment);
+  const all: ApiPaymentCollection[] = [];
+  let page = 1;
+  const MAX_PAGES = 100;
+  while (page <= MAX_PAGES) {
+    const res = await apiClient.get<{ data: ApiPaymentCollection[]; meta: { totalPages: number } }>(
+      `/payment-collections${toQueryString({ limit: PAYMENT_COLLECTIONS_PAGE_SIZE, page, ...params })}`,
+    );
+    all.push(...res.data);
+    if (page >= res.meta.totalPages) break;
+    page++;
+  }
+  return all.map(toLegacyPayment);
 }
 
 export interface CreatePaymentCollectionPayload {

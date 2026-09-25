@@ -147,7 +147,7 @@ function toQueryString(params: Record<string, any>) {
 }
 
 export async function listProjects(params: { status?: string; search?: string } = {}): Promise<any[]> {
-  const res = await apiClient.get<{ data: ApiProject[] }>(`/projects${toQueryString({ limit: 100, ...params })}`);
+  const res = await apiClient.get<{ data: ApiProject[] }>(`/projects${toQueryString({limit: 1000,  ...params })}`);
   return res.data.map(toLegacyProject);
 }
 

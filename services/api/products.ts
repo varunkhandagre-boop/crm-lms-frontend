@@ -66,9 +66,19 @@ function toQueryString(params: Record<string, any>) {
   return s ? `?${s}` : '';
 }
 
+const PRODUCTS_PAGE_SIZE = 200;
+
 export async function listProducts(params: ListProductsParams = {}): Promise<any[]> {
-  const res = await apiClient.get<ListResponse>(`/products${toQueryString({ limit: 100, ...params })}`);
-  return res.data.map(toLegacyProduct);
+  const all: any[] = [];
+  let page = 1;
+  const MAX_PAGES = 100;
+  while (page <= MAX_PAGES) {
+    const res = await apiClient.get<ListResponse>(`/products${toQueryString({ limit: PRODUCTS_PAGE_SIZE, page, ...params })}`);
+    all.push(...res.data);
+    if (page >= res.meta.totalPages) break;
+    page++;
+  }
+  return all.map(toLegacyProduct);
 }
 
 export interface CreateProductPayload {

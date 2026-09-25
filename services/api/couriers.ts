@@ -80,16 +80,22 @@ export async function fetchCouriers(opts: {
   search?: string;
   limit?: number;
 } = {}): Promise<LegacyCourier[]> {
-  const qs = buildQuery({
-    type: opts.type,
-    status: opts.status,
-    fromDate: opts.fromDate,
-    toDate: opts.toDate,
-    search: opts.search,
-    limit: opts.limit ?? 500,
-  });
-  const res = await apiClient.get<ListResponse<any>>(`/couriers${qs}`);
-  return (res.data ?? []).map(toLegacyCourier);
+  if (opts.limit !== undefined) {
+    const qs = buildQuery({ type: opts.type, status: opts.status, fromDate: opts.fromDate, toDate: opts.toDate, search: opts.search, limit: opts.limit });
+    const res = await apiClient.get<ListResponse<any>>(`/couriers${qs}`);
+    return (res.data ?? []).map(toLegacyCourier);
+  }
+  const all: any[] = [];
+  let page = 1;
+  const MAX_PAGES = 100;
+  while (page <= MAX_PAGES) {
+    const qs = buildQuery({ type: opts.type, status: opts.status, fromDate: opts.fromDate, toDate: opts.toDate, search: opts.search, limit: 200, page });
+    const res = await apiClient.get<ListResponse<any>>(`/couriers${qs}`);
+    all.push(...(res.data ?? []));
+    if (page >= res.meta.totalPages) break;
+    page++;
+  }
+  return all.map(toLegacyCourier);
 }
 
 export async function createCourier(payload: {

@@ -76,9 +76,19 @@ function toQueryString(params: Record<string, any>) {
   return s ? `?${s}` : '';
 }
 
+const SALES_VISITS_PAGE_SIZE = 200;
+
 export async function listSalesVisits(params: ListSalesVisitsParams = {}): Promise<any[]> {
-  const res = await apiClient.get<ListResponse>(`/sales-visits${toQueryString({ limit: 100, ...params })}`);
-  return res.data.map(toLegacySalesVisit);
+  const all: any[] = [];
+  let page = 1;
+  const MAX_PAGES = 100;
+  while (page <= MAX_PAGES) {
+    const res = await apiClient.get<ListResponse>(`/sales-visits${toQueryString({ limit: SALES_VISITS_PAGE_SIZE, page, ...params })}`);
+    all.push(...res.data);
+    if (page >= res.meta.totalPages) break;
+    page++;
+  }
+  return all.map(toLegacySalesVisit);
 }
 
 export interface CreateSalesVisitPayload {

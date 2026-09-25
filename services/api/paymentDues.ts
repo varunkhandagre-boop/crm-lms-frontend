@@ -52,9 +52,21 @@ function toQueryString(params: Record<string, any>) {
   return s ? `?${s}` : '';
 }
 
+const PAYMENT_DUES_PAGE_SIZE = 200;
+
 export async function listPaymentDues(params: { status?: string; search?: string } = {}): Promise<any[]> {
-  const res = await apiClient.get<{ data: ApiPaymentDue[] }>(`/payment-dues${toQueryString({ limit: 100, ...params })}`);
-  return res.data.map(toLegacyDue);
+  const all: ApiPaymentDue[] = [];
+  let page = 1;
+  const MAX_PAGES = 100;
+  while (page <= MAX_PAGES) {
+    const res = await apiClient.get<{ data: ApiPaymentDue[]; meta: { totalPages: number } }>(
+      `/payment-dues${toQueryString({ limit: PAYMENT_DUES_PAGE_SIZE, page, ...params })}`,
+    );
+    all.push(...res.data);
+    if (page >= res.meta.totalPages) break;
+    page++;
+  }
+  return all.map(toLegacyDue);
 }
 
 export interface CreatePaymentDuePayload {

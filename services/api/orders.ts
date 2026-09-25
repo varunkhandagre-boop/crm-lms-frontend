@@ -108,9 +108,19 @@ function toQueryString(params: Record<string, any>) {
   return s ? `?${s}` : '';
 }
 
+const ORDERS_PAGE_SIZE = 200;
+
 export async function listOrders(params: ListOrdersParams = {}): Promise<any[]> {
-  const res = await apiClient.get<ListResponse>(`/orders${toQueryString({ limit: 100, ...params })}`);
-  return res.data.map(toLegacyOrder);
+  const all: ApiOrder[] = [];
+  let page = 1;
+  const MAX_PAGES = 100;
+  while (page <= MAX_PAGES) {
+    const res = await apiClient.get<ListResponse>(`/orders${toQueryString({ limit: ORDERS_PAGE_SIZE, page, ...params })}`);
+    all.push(...res.data);
+    if (page >= res.meta.totalPages) break;
+    page++;
+  }
+  return all.map(toLegacyOrder);
 }
 
 export interface CreateOrderPayload {
