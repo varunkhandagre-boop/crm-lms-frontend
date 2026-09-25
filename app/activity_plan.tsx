@@ -6,6 +6,7 @@ import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, T
 import { useData } from './context/DataContext';
 // 🔥 Phase 5: activity plans now via new backend API
 import { listActivityPlans, updateActivityPlanStatus } from '../services/api/activityPlans';
+import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
@@ -29,6 +30,28 @@ export default function ActivityPlanScreen() {
       enabled: !!currentUser?.companyId,
       fetcher: listActivityPlans, // was: fetchSaaSData("activity_plans")
   });
+
+  // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
+  // as manage_team.tsx/employee_timeline.tsx.
+  const { data: teamMembersForActivity } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: fetchTeamMembers,
+  });
+
+  // 🔥 senderName was never populated by the API (only senderId), so every
+  // activity plan showed a blank "By:" line — same fix pattern as orders.tsx.
+  useEffect(() => {
+      if (teamMembersForActivity.length === 0 || activities.length === 0) return;
+      const nameById = new Map(teamMembersForActivity.map((u: any) => [u.id, u.name || 'Unknown']));
+      const needsEnrichment = activities.some((a: any) => a.senderName === undefined);
+      if (!needsEnrichment) return;
+      setActivities(activities.map((a: any) => ({
+          ...a,
+          senderName: nameById.get(a.senderId) || 'Unknown',
+      })));
+  }, [activities, teamMembersForActivity]);
+
   const [filter, setFilter] = useState<'Today' | 'Upcoming' | 'Completed' | 'All'>('Today');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   

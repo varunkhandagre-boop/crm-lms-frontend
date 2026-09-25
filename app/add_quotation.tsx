@@ -13,9 +13,9 @@ import { useData } from './context/DataContext';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
-import { buildCacheKey } from '../utils/listCache';
 import { listProducts } from '../services/api/products';
 import { createQuotation, listQuotations, updateQuotation } from '../services/api/quotations';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function AddQuotationScreen() {
     const router = useRouter();
@@ -52,7 +52,7 @@ export default function AddQuotationScreen() {
     const { data: orgList } = useCachedList({
         cacheKey: buildCacheKey('organizations', currentUser?.companyId),
         enabled: !!currentUser?.companyId,
-        fetcher: () => fetchOrganizations({ limit: 200 }),
+        fetcher: () => fetchOrganizations({ limit: 500 }),
     });
     const { data: quotationList } = useCachedList({
         cacheKey: buildCacheKey('quotations', currentUser?.companyId),

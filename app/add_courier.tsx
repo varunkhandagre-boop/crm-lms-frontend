@@ -24,8 +24,8 @@ import { createCourier } from '../services/api/couriers';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
-import { buildCacheKey } from '../utils/listCache';
 import { listProducts } from '../services/api/products';
+import { buildCacheKey } from '../utils/listCache';
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
@@ -72,7 +72,7 @@ export default function AddCourierScreen() {
   const { data: orgList } = useCachedList({
       cacheKey: buildCacheKey('organizations', currentUser?.companyId),
       enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 200 }),
+      fetcher: () => fetchOrganizations({ limit: 500 }),
   });
 
   useEffect(() => {

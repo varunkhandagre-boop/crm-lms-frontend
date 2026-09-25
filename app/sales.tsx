@@ -18,10 +18,10 @@ import {
 
 // 🔥 SAAS IMPORTS (organizations/users still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
+import { markAllNotificationsRead } from '../services/api/notifications';
 import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
-import { markAllNotificationsRead } from '../services/api/notifications';
 // 🔥 Phase 2: sales visits now go through the new backend API
 import { deleteSalesVisit as apiDeleteSalesVisit, listSalesVisits } from '../services/api/salesVisits';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
@@ -124,7 +124,7 @@ export default function SalesReportScreen() {
   const { data: orgList } = useCachedList({
       cacheKey: buildCacheKey('organizations', currentUser?.companyId),
       enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 200 }),
+      fetcher: () => fetchOrganizations({ limit: 500 }),
   });
 
   const onRefresh = async () => {
@@ -334,10 +334,13 @@ export default function SalesReportScreen() {
       );
   };
 
-  const renderItem = ({ item }: any) => {
+    const renderItem = ({ item }: any) => {
       const isColdCall = item.visitType === 'Cold Call';
       const city = getCity(item); 
-      const createdBy = item.senderName || item.userName || 'Unknown';
+      // toLegacySalesVisit() never sets senderName (backend only returns
+      // createdById, a UUID) — resolve it from the already-loaded team list
+      // instead of always falling to "Unknown".
+      const createdBy = item.senderName || item.userName || (userList || []).find((u: any) => u.id === item.senderId)?.name || 'Unknown';
 
       return (
           <TouchableOpacity 

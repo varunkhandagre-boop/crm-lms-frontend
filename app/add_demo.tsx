@@ -29,8 +29,8 @@ import { recordLocationLog } from '../services/api/locationLogs';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
-import { buildCacheKey } from '../utils/listCache';
 import { listProducts } from '../services/api/products';
+import { buildCacheKey } from '../utils/listCache';
 
 // 🔥 PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
@@ -91,7 +91,7 @@ export default function AddDemoScreen() {
   const { data: orgList } = useCachedList({
       cacheKey: buildCacheKey('organizations', currentUser?.companyId),
       enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 200 }),
+      fetcher: () => fetchOrganizations({ limit: 500 }),
   });
   const { data: demoList } = useCachedList({
       cacheKey: buildCacheKey('demos', currentUser?.companyId),

@@ -33,14 +33,15 @@ import { fetchCouriers } from '../services/api/couriers';
 import { listInstallations } from '../services/api/installations';
 import { listOrders } from '../services/api/orders';
 import { fetchOrganizations } from '../services/api/organizations';
+import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
-import { buildCacheKey } from '../utils/listCache';
 import { listPaymentCollections } from '../services/api/paymentCollections';
 import { listPaymentDues } from '../services/api/paymentDues';
 import { listPmsReports } from '../services/api/pmsReports';
 import { listSalesVisits } from '../services/api/salesVisits';
 import { listServiceCalls } from '../services/api/serviceCalls';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function SerialNumberScreen() {
   const router = useRouter();
@@ -87,11 +88,28 @@ export default function SerialNumberScreen() {
       enabled: !!currentUser?.companyId,
       fetcher: listInstallations,
   });
-  const { data: orgList, loading: orgsLoading } = useCachedList({
+    const { data: orgList, loading: orgsLoading } = useCachedList({
       cacheKey: buildCacheKey('organizations', currentUser?.companyId),
       enabled: !!currentUser?.companyId,
       fetcher: () => fetchOrganizations({ limit: 200 }),
   });
+
+  // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
+  // as manage_team.tsx/employee_timeline.tsx.
+  const { data: teamMembersForSerial } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: fetchTeamMembers,
+  });
+  // 🔥 Many of the API mappers feeding this screen (installations, service
+  // calls, PMS reports, sales visits, ...) never populate a
+  // senderName/userName — only the raw senderId. This screen reads
+  // `.senderName` directly for several entity types below, so resolve it
+  // here once instead of patching every read site.
+  const userIdToNameForSerial = new Map((teamMembersForSerial || []).map((u: any) => [u.id, u.name]));
+  const resolveSerialName = (item: any): string | undefined =>
+      item?.senderName || item?.userName || item?.engineer ||
+      userIdToNameForSerial.get(item?.senderId || item?.userId);
   // isDataFetching is also toggled manually elsewhere in this file (e.g.
   // openMachineHistory) for unrelated action-loading spinners, so it stays
   // local state — just OR'd with the two hooks' own loading for the
@@ -184,7 +202,7 @@ export default function SerialNumberScreen() {
               type: 'Installation',
               date: machine.dateIso || machine.date || machine.createdAt,
               title: 'Machine Installed',
-              desc: `Model: ${machine.model || '-'} | By: ${machine.engineer || machine.senderName || 'Unknown'}`,
+              desc: `Model: ${machine.model || '-'} | By: ${machine.engineer || resolveSerialName(machine) || 'Unknown'}`,
               status: 'Installed',
               icon: 'checkmark-circle',
               color: '#4caf50',
@@ -324,7 +342,7 @@ export default function SerialNumberScreen() {
               type: 'Installation',
               date: i.dateIso || i.date || i.createdAt || new Date().toISOString(),
               title: `Install: ${i.product || i.productName}`,
-              desc: `S/N: ${i.serialNo}\nBy: ${i.engineer || i.senderName}`,
+              desc: `S/N: ${i.serialNo}\nBy: ${resolveSerialName(i)}`,
               status: 'Installed',
               icon: 'checkmark-done-circle',
               color: '#2e7d32', 
@@ -334,7 +352,7 @@ export default function SerialNumberScreen() {
               type: 'Service',
               date: s.dateIso || s.date || s.createdAt || new Date().toISOString(),
               title: `Service: ${s.machine || 'Machine'}`,
-              desc: `S/N: ${s.serialNo || 'N/A'}\nIssue: ${s.remark || 'N/A'}\nBy: ${s.senderName || 'Unknown'}`,
+              desc: `S/N: ${s.serialNo || 'N/A'}\nIssue: ${s.remark || 'N/A'}\nBy: ${resolveSerialName(s) || 'Unknown'}`,
               status: s.status || 'Open',
               icon: 'construct',
               color: '#c62828', 
@@ -344,7 +362,7 @@ export default function SerialNumberScreen() {
               type: 'PMS',
               date: p.lastDoneDate || p.dateIso || p.date || p.createdAt || new Date().toISOString(),
               title: `PMS: ${p.machine || 'Machine'}`,
-              desc: `S/N: ${p.serialNo || 'N/A'}\nCycle: ${p.currentPmsNumber}/${p.totalPms}\nBy: ${p.senderName || 'Unknown'}`,
+              desc: `S/N: ${p.serialNo || 'N/A'}\nCycle: ${p.currentPmsNumber}/${p.totalPms}\nBy: ${resolveSerialName(p) || 'Unknown'}`,
               status: p.status || 'Pending',
               icon: 'sync',
               color: '#1565c0', 
@@ -353,7 +371,7 @@ export default function SerialNumberScreen() {
           ...matchedVisits.map((v: any) => ({
               type: 'Sales Visit',
               date: v.dateIso || v.date || v.createdAt || new Date().toISOString(),
-              title: `Visit by ${v.senderName || 'Unknown'}`,
+              title: `Visit by ${resolveSerialName(v) || 'Unknown'}`,
               desc: `Met: ${v.person || 'N/A'}\nNote: ${v.discussion ? v.discussion.split('\n')[0] : 'N/A'}`,
               status: v.outcome || 'Visited',
               icon: 'walk',
@@ -423,7 +441,7 @@ export default function SerialNumberScreen() {
           value = item.rawData?.qty || '1';
         }
 
-        let assignedTo = (item.rawData?.assignedToName || item.rawData?.engineer || item.rawData?.userName || item.rawData?.senderName || item.rawData?.addedBy || item.rawData?.createdBy || '-').replace(/,/g, ' ');
+        let assignedTo = (item.rawData?.assignedToName || item.rawData?.engineer || resolveSerialName(item.rawData) || item.rawData?.addedBy || item.rawData?.createdBy || '-').replace(/,/g, ' ');
         let serialOrDocket = (item.rawData?.serialNo || item.rawData?.docketNo || item.rawData?.trackingNo || '-').replace(/,/g, ' ');
         let machineModel = (item.rawData?.product || item.rawData?.productName || item.rawData?.machine || item.rawData?.model || '-').replace(/,/g, ' ');
         
@@ -713,7 +731,7 @@ export default function SerialNumberScreen() {
                                             <DetailRow label="Pending Balance" value={`₹ ${Number(selectedEvent.rawData.balance ?? ((selectedEvent.rawData.totalValue || 0) - (selectedEvent.rawData.totalReceived || 0))).toLocaleString()}`} />
                                         </>
                                     )}
-                                    <DetailRow label="Created By" value={selectedEvent.rawData.createdBy || selectedEvent.rawData.senderName} />
+                                    <DetailRow label="Created By" value={selectedEvent.rawData.createdBy || resolveSerialName(selectedEvent.rawData)} />
                                     <DetailRow label="Client / Location" value={`${selectedEvent.rawData.client || selectedEvent.rawData.hospital || selectedEvent.rawData.hospitalName} (${selectedEvent.rawData.location || selectedEvent.rawData.city || 'N/A'})`} />
                                 </>
                             )}
@@ -722,7 +740,7 @@ export default function SerialNumberScreen() {
                                 <>
                                     <DetailRow label="Amount Received" value={`₹ ${Number(selectedEvent.rawData.amount || selectedEvent.rawData.receivedAmount || 0).toLocaleString()}`} />
                                     <DetailRow label="Payment Mode" value={selectedEvent.rawData.mode || selectedEvent.rawData.paymentMode} />
-                                    <DetailRow label="Added By" value={selectedEvent.rawData.addedBy || selectedEvent.rawData.senderName} />
+                                    <DetailRow label="Added By" value={selectedEvent.rawData.addedBy || resolveSerialName(selectedEvent.rawData)} />
                                     <View style={styles.infoBox}><Text style={styles.infoLabel}>Note:</Text><Text style={styles.infoValue}>{selectedEvent.rawData.note || selectedEvent.rawData.remark || '-'}</Text></View>
                                 </>
                             )}
@@ -732,7 +750,7 @@ export default function SerialNumberScreen() {
                                     <DetailRow label="Pending Amount" value={`₹ ${Number(selectedEvent.rawData.balance !== undefined ? selectedEvent.rawData.balance : (selectedEvent.rawData.dueAmount || selectedEvent.rawData.amount || 0)).toLocaleString()}`} />
                                     <DetailRow label="Original Bill" value={`₹ ${Number(selectedEvent.rawData.amount || 0).toLocaleString()}`} />
                                     <DetailRow label="Expected Due Date" value={selectedEvent.rawData.dueDate ? new Date(selectedEvent.rawData.dueDate).toLocaleDateString('en-GB') : '-'} />
-                                    <DetailRow label="Added By" value={selectedEvent.rawData.addedBy || selectedEvent.rawData.senderName} />
+                                    <DetailRow label="Added By" value={selectedEvent.rawData.addedBy || resolveSerialName(selectedEvent.rawData)} />
                                     <View style={styles.infoBox}><Text style={styles.infoLabel}>Note:</Text><Text style={styles.infoValue}>{selectedEvent.rawData.note || selectedEvent.rawData.remark || '-'}</Text></View>
                                 </>
                             )}
@@ -753,7 +771,7 @@ export default function SerialNumberScreen() {
                                     <DetailRow label="Machine Name" value={selectedEvent.rawData.product || selectedEvent.rawData.productName} />
                                     <DetailRow label="Machine Model" value={selectedEvent.rawData.model || 'N/A'} />
                                     <DetailRow label="Serial Number" value={selectedEvent.rawData.serialNo} />
-                                    <DetailRow label="Installed By" value={selectedEvent.rawData.engineer || selectedEvent.rawData.senderName} />
+                                    <DetailRow label="Installed By" value={selectedEvent.rawData.engineer || resolveSerialName(selectedEvent.rawData)} />
                                     <DetailRow label="Department" value={selectedEvent.rawData.department || 'N/A'} />
                                     <DetailRow label="Warranty Expiry" value={selectedEvent.rawData.warrantyExpiry || 'N/A'} />
                                     <View style={styles.infoBox}><Text style={styles.infoLabel}>Remarks:</Text><Text style={styles.infoValue}>{selectedEvent.rawData.note || '-'}</Text></View>
@@ -765,7 +783,7 @@ export default function SerialNumberScreen() {
                                     <DetailRow label="Ticket ID" value={selectedEvent.rawData.scrId || selectedEvent.rawData.id} />
                                     <DetailRow label="Machine / Model" value={`${selectedEvent.rawData.machine || 'N/A'} / ${selectedEvent.rawData.model || 'N/A'}`} />
                                     <DetailRow label="Serial Number" value={selectedEvent.rawData.serialNo || 'N/A'} />
-                                    <DetailRow label="Assigned To" value={selectedEvent.rawData.assignedToName || selectedEvent.rawData.senderName} />
+                                    <DetailRow label="Assigned To" value={selectedEvent.rawData.assignedToName || resolveSerialName(selectedEvent.rawData)} />
                                     <View style={[styles.infoBox, {backgroundColor: '#ffebee'}]}><Text style={styles.infoLabel}>Customer Complaint:</Text><Text style={styles.infoValue}>{selectedEvent.rawData.remark || 'N/A'}</Text></View>
                                     <View style={[styles.infoBox, {backgroundColor: '#e8f5e9'}]}><Text style={styles.infoLabel}>Resolution / Action Taken:</Text><Text style={styles.infoValue}>{selectedEvent.rawData.resolutionNote || 'Pending'}</Text></View>
                                 </>
@@ -775,7 +793,7 @@ export default function SerialNumberScreen() {
                                 <>
                                     <DetailRow label="Machine Name" value={selectedEvent.rawData.machine || 'N/A'} />
                                     <DetailRow label="Serial Number" value={selectedEvent.rawData.serialNo || 'N/A'} />
-                                    <DetailRow label="Attended By" value={selectedEvent.rawData.userName || selectedEvent.rawData.senderName} />
+                                    <DetailRow label="Attended By" value={resolveSerialName(selectedEvent.rawData)} />
                                     <DetailRow label="PMS Cycle" value={`Cycle ${selectedEvent.rawData.currentPmsNumber} out of ${selectedEvent.rawData.totalPms}`} />
                                     <DetailRow label="Next Due Date" value={selectedEvent.rawData.computedDueDate || selectedEvent.rawData.nextServiceDate || 'N/A'} />
                                     <View style={styles.infoBox}><Text style={styles.infoLabel}>Engineer's Report:</Text><Text style={styles.infoValue}>{selectedEvent.rawData.remarks || selectedEvent.rawData.remark || 'No remarks provided.'}</Text></View>
@@ -784,7 +802,7 @@ export default function SerialNumberScreen() {
 
                             {selectedEvent.type === 'Sales Visit' && (
                                 <>
-                                    <DetailRow label="Executive Name" value={selectedEvent.rawData.senderName} />
+                                    <DetailRow label="Executive Name" value={resolveSerialName(selectedEvent.rawData)} />
                                     <DetailRow label="Person Met" value={selectedEvent.rawData.person || 'N/A'} />
                                     <DetailRow label="Designation" value={selectedEvent.rawData.designation || 'N/A'} />
                                     <DetailRow label="Visit Purpose" value={selectedEvent.rawData.purpose || 'N/A'} />

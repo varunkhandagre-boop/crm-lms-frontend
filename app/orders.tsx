@@ -715,6 +715,19 @@ export default function OrderListScreen() {
               )}
           </View>
 
+                    {/* Total for whatever is currently filtered — same idea as "Total Pending" /
+              "Total Collected" on the Dues/Payments screens, but respects the
+              selected status chip (All/Pending/Approved/Billed/...) and employee. */}
+          <View style={{ flexDirection:'row', justifyContent:'space-between', alignItems:'center', paddingHorizontal:15, paddingVertical:10, backgroundColor:'#f8f9fa', marginHorizontal:15, borderRadius:8, marginBottom:8, borderWidth:1, borderColor:'#e0e0e0' }}>
+              <Text style={{ fontWeight:'bold', color:'#555', fontSize:13 }}>
+                  {statusFilter === 'All' ? 'Total' : `Total (${statusFilter})`}
+                  {selectedEmployee !== 'All' ? ` — ${selectedEmployeeName}` : ''}:
+              </Text>
+              <Text style={{ fontWeight:'bold', fontSize:16, color:'#3b5998' }}>
+                  {fullList.length} • ₹{fullList.reduce((sum: number, o: any) => sum + (parseFloat(o.amount) || 0), 0).toLocaleString('en-IN')}
+              </Text>
+          </View>
+
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingLeft:15, paddingVertical:10}}>
     {['All', 'Pending', 'Approved', 'Dispatched', 'Billed', 'Rejected'].map(s => {
         

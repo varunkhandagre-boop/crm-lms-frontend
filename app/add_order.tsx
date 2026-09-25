@@ -110,7 +110,7 @@ export default function AddOrderScreen() {
   const { data: orgList } = useCachedList({
       cacheKey: buildCacheKey('organizations', currentUser?.companyId),
       enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 200 }),
+      fetcher: () => fetchOrganizations({ limit: 500 }),
   });
 
   // 🔥 Products — unchanged plain fetch-on-mount (out of scope for this pass).

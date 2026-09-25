@@ -125,7 +125,7 @@ export default function DemoScreen() {
   const { data: orgList } = useCachedList({
       cacheKey: buildCacheKey('organizations', currentUser?.companyId),
       enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 200 }),
+      fetcher: () => fetchOrganizations({ limit: 500 }),
   });
 
   const parseDate = (dateStr: string) => {
@@ -351,7 +351,13 @@ export default function DemoScreen() {
   };
 
   // --- SMART MERGE LOGIC (unchanged, now fed by API data) ---
-  const getAllDemos = () => {
+    const getAllDemos = () => {
+      // toLegacySalesVisit() never sets senderName (services/api/salesVisits.ts
+      // — the backend only returns createdById, a UUID, not a name), so any
+      // DSR-sourced ("From Sales") demo entry always fell back to "Unknown"
+      // here. Resolve it from the already-loaded team list instead — same
+      // fix as payment_collection.tsx's employee filter.
+      const userIdToName = new Map((teamMembersForDemo || []).map((u: any) => [u.id, u.name]));
       const salesDemos = salesVisitList ? salesVisitList.filter((item: any) => 
           (item.discussion && item.discussion.toLowerCase().includes('demo')) || 
           (item.outcome && item.outcome.toLowerCase().includes('demo'))
@@ -366,7 +372,7 @@ export default function DemoScreen() {
           isFromSales: true,      
           fullData: item,
           senderId: item.senderId,
-          senderName: item.senderName || 'Unknown'
+          senderName: item.senderName || userIdToName.get(item.senderId) || 'Unknown'
       })) : [];
 
       const actualDemos = demoList || [];

@@ -71,7 +71,7 @@ export default function PMSScheduleScreen() {
   // 🔥 PMS REPORTS — cache-first (instant from AsyncStorage, then
   // background refresh). See hooks/useCachedList.ts.
   const pmsCacheKey = buildCacheKey('pms_reports', currentUser?.companyId);
-  const {
+    const {
       data: pmsList,
       setData: setPmsList,
       loading: pmsLoading,
@@ -90,6 +90,21 @@ export default function PMSScheduleScreen() {
       enabled: !!currentUser?.companyId,
       fetcher: fetchTeamMembers,
   });
+
+  // 🔥 senderName was never populated by the API (only senderId), so every
+  // PMS report showed a blank/undefined engineer name — same fix pattern
+  // as orders.tsx/installation.tsx.
+  useEffect(() => {
+      if (teamMembersForPms.length === 0 || pmsList.length === 0) return;
+      const nameById = new Map(teamMembersForPms.map((u: any) => [u.id, u.name || 'Unknown']));
+      const needsEnrichment = pmsList.some((p: any) => p.senderName === undefined);
+      if (!needsEnrichment) return;
+      setPmsList(pmsList.map((p: any) => ({
+          ...p,
+          senderName: nameById.get(p.senderId) || 'Unknown',
+      })));
+  }, [pmsList, teamMembersForPms]);
+
   useEffect(() => {
       if (isAdmin) {
           const mappedUsers = teamMembersForPms.map((u: any) => ({
@@ -116,7 +131,7 @@ export default function PMSScheduleScreen() {
   const { data: orgList, refresh: refreshOrgsForPms } = useCachedList({
       cacheKey: buildCacheKey('organizations', currentUser?.companyId),
       enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 200 }),
+      fetcher: () => fetchOrganizations({ limit: 500 }),
   });
 
   // Refresh PMS reports (background, cache already shows something instant)
@@ -413,8 +428,9 @@ export default function PMSScheduleScreen() {
   const getFilteredData = () => {
     let data = [...processedList];
 
-    if (isAdmin && selectedEmployee !== 'All') {
+        if (isAdmin && selectedEmployee !== 'All') {
       data = data.filter((item: any) =>
+        (item.senderId === selectedEmployee) ||
         (item.userId === selectedEmployee) ||
         (item.engineerId === selectedEmployee) ||
         (item.userName === selectedEmployeeName) ||

@@ -23,8 +23,8 @@ import { useData } from './context/DataContext';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
-import { buildCacheKey } from '../utils/listCache';
 import { createProject } from '../services/api/projects';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function AddProjectScreen() {
   const router = useRouter();
@@ -59,7 +59,7 @@ export default function AddProjectScreen() {
   const { data: orgList } = useCachedList({
       cacheKey: buildCacheKey('organizations', currentUser?.companyId),
       enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 200 }),
+      fetcher: () => fetchOrganizations({ limit: 500 }),
   });
   useEffect(() => {
       setFilteredOrgs(orgList);

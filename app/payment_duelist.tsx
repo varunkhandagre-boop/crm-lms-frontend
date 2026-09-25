@@ -95,7 +95,7 @@ export default function PaymentDueList() {
     const { data: orgList } = useCachedList({
         cacheKey: buildCacheKey('organizations', currentUser?.companyId),
         enabled: !!currentUser?.companyId,
-        fetcher: () => fetchOrganizations({ limit: 200 }),
+        fetcher: () => fetchOrganizations({ limit: 500 }),
     });
 
     const roleToCheck = currentUser?.role || 'employee';
@@ -169,7 +169,7 @@ export default function PaymentDueList() {
     };
 
     // MERGING MANUAL DUES AND SYSTEM ORDERS (unchanged logic, now fed by API data)
-    const getData = () => {
+        const getData = () => {
         const validDues = dueList ? dueList.filter((d:any) => {
             const rawBal = d.balance !== undefined ? d.balance : d.amount;
             const currentBal = parseFloat(String(rawBal).replace(/[^0-9.-]/g, '')) || 0;
@@ -182,7 +182,22 @@ export default function PaymentDueList() {
             return true;
         }).map((d: any) => ({ ...d, collectionName: 'payment_dues' })) : [];
 
+        // A payment_dues row's `orderId` (its displayId, e.g. "DUE-ORD-2026-27-095")
+        // sometimes carries the underlying order's own ref ("ORD-2026-27-095")
+        // after the "DUE-" prefix. When that's the case, this due and that
+        // order both represent the SAME outstanding balance — count it once
+        // (via the due), not twice (due + order). Native dues get a
+        // "DUE-<timestamp>" displayId that won't match any real order ref,
+        // so they're unaffected.
+        const referencedOrderRefs = new Set(
+            validDues
+                .map((d: any) => String(d.orderId || '').replace(/^DUE-/, ''))
+                .filter(Boolean)
+        );
+
         const validOrders = orderList ? orderList.filter((o:any) => {
+            if (referencedOrderRefs.has(String(o.orderId || ''))) return false;
+
             const rawBal = o.balance !== undefined ? o.balance : o.amount;
             const currentBal = parseFloat(String(rawBal).replace(/[^0-9.-]/g, '')) || 0;
             if (currentBal <= 0) return false;

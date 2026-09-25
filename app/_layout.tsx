@@ -11,12 +11,12 @@ import { manageAttendanceReminders, setupNotificationPermissions } from '../util
 
 import * as Location from 'expo-location';
 // 🔥 Firestore direct imports minimized
-import { fetchCompanyProfile } from '../services/api/companies';
-import { recordLocationLog } from '../services/api/locationLogs';
 import { fetchTodayAttendance } from '../services/api/attendance';
+import { fetchCompanyProfile } from '../services/api/companies';
 import { listLeads } from '../services/api/leads';
-import { listServiceCalls } from '../services/api/serviceCalls';
+import { recordLocationLog } from '../services/api/locationLogs';
 import { fetchOrganizations } from '../services/api/organizations';
+import { listServiceCalls } from '../services/api/serviceCalls';
 import { fetchTasks } from '../services/api/tasks';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -192,7 +192,7 @@ function NavigationLayout() {
   const { data: orgList } = useCachedList({
       cacheKey: buildCacheKey('organizations', currentUser?.companyId),
       enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 200 }),
+      fetcher: () => fetchOrganizations({ limit: 500 }),
   });
   
   const insets = useSafeAreaInsets(); 

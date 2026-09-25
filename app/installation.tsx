@@ -96,11 +96,25 @@ export default function InstallationListScreen() {
 
   // 🔥 Users — cache-first, shares the SAME 'team_members' cache key as
   // manage_team.tsx/employee_timeline.tsx.
-  const { data: teamMembersForInstall } = useCachedList({
+    const { data: teamMembersForInstall } = useCachedList({
       cacheKey: buildCacheKey('team_members', currentUser?.companyId),
       enabled: !!currentUser?.companyId,
       fetcher: fetchTeamMembers,
   });
+
+  // 🔥 senderName was never populated by the API (only senderId), so every
+  // installation showed "Unknown" — same fix pattern as orders.tsx.
+  useEffect(() => {
+      if (teamMembersForInstall.length === 0 || installList.length === 0) return;
+      const nameById = new Map(teamMembersForInstall.map((u: any) => [u.id, u.name || 'Unknown']));
+      const needsEnrichment = installList.some((i: any) => i.senderName === undefined);
+      if (!needsEnrichment) return;
+      setInstallList(installList.map((i: any) => ({
+          ...i,
+          senderName: nameById.get(i.senderId) || 'Unknown',
+      })));
+  }, [installList, teamMembersForInstall]);
+
   useEffect(() => {
       if (isAdmin) {
           const mappedUsers = teamMembersForInstall.map((u: any) => ({

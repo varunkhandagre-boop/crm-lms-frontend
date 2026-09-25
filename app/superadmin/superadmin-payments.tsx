@@ -48,7 +48,7 @@ export default function SuperAdminPayments() {
             const result = await listSubscriptionRequests({
                 status: activeTab,
                 search: searchQuery.trim() || undefined,
-                limit: 100,
+               limit: 1000, 
             });
             setRequests(result.data);
         } catch (e: any) {

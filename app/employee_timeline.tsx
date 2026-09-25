@@ -71,7 +71,16 @@ const [selectedDate, setSelectedDate] = useState(new Date());
   // — than their per-screen bounded versions, so those three get their own
   // keys instead of sharing). See hooks/useCachedList.ts.
   const cuKey = (name: string) => buildCacheKey(name, currentUser?.companyId);
-  const { data: userList, loading: l1, refresh: r1 } = useCachedList({ cacheKey: cuKey('team_members'), enabled: !!currentUser?.companyId, fetcher: fetchTeamMembers });
+    const { data: userList, loading: l1, refresh: r1 } = useCachedList({ cacheKey: cuKey('team_members'), enabled: !!currentUser?.companyId, fetcher: fetchTeamMembers });
+  // 🔥 Many of the API mappers feeding this screen (couriers, orders,
+  // installations, demos, sales visits, leads, ...) never populate a
+  // senderName/userName — only the raw senderId/userId. This screen reads
+  // `.senderName` directly for a dozen different entity types below, so
+  // resolve it here once instead of patching every read site.
+  const userIdToName = new Map((userList || []).map((u: any) => [u.id, u.name]));
+  const resolveName = (item: any): string | undefined =>
+      item?.senderName || item?.userName ||
+      userIdToName.get(item?.senderId || item?.userId || item?.assignedTo || item?.addedBy || item?.createdBy);
   const { data: courierList, loading: l2, refresh: r2 } = useCachedList({ cacheKey: cuKey('all_couriers'), enabled: !!currentUser?.companyId, fetcher: () => fetchCouriers({ limit: 1000 }) });
   const { data: serviceCallList, loading: l3, refresh: r3 } = useCachedList({ cacheKey: cuKey('service_calls'), enabled: !!currentUser?.companyId, fetcher: listServiceCalls });
   const { data: orderList, loading: l4, refresh: r4 } = useCachedList({ cacheKey: cuKey('orders'), enabled: !!currentUser?.companyId, fetcher: listOrders });
@@ -274,30 +283,30 @@ const [selectedDate, setSelectedDate] = useState(new Date());
       });
 
       orderList?.forEach((o: any) => {
-          if (getStandardDate(getItemDate(o)) === targetDate && checkUser(o.senderId || o.addedBy, o.senderName || o.addedBy)) events.push({ id: `ord_${o.id}`, time: getItemTime(o), title: `${o.senderName || o.addedBy || 'User'} added an Order`, desc: `Client: ${getClientName(o)}`, extra: `Products: ${getProductName(o)} | Value: ₹${o.amount || o.totalValue || '0'}`, icon: 'cart', color: '#8e24aa', rawData: o, type: 'Order' });
+          if (getStandardDate(getItemDate(o)) === targetDate && checkUser(o.senderId || o.addedBy, o.senderName || o.addedBy)) events.push({ id: `ord_${o.id}`, time: getItemTime(o), title: `${resolveName(o) || o.addedBy || 'User'} added an Order`, desc: `Client: ${getClientName(o)}`, extra: `Products: ${getProductName(o)} | Value: ₹${o.amount || o.totalValue || '0'}`, icon: 'cart', color: '#8e24aa', rawData: o, type: 'Order' });
       });
       serviceCallList?.forEach((s: any) => {
-          if (getStandardDate(getItemDate(s)) === targetDate && checkUser(s.senderId, s.senderName)) events.push({ id: `srv_${s.id}`, time: getItemTime(s), title: `${s.senderName || 'User'} updated Service`, desc: `Client: ${getClientName(s)}`, extra: `Machine: ${s.machine || s.machineName || 'N/A'}\nStatus: ${s.status}`, icon: 'construct', color: '#c62828', rawData: s, type: 'Service' });
+          if (getStandardDate(getItemDate(s)) === targetDate && checkUser(s.senderId, s.senderName)) events.push({ id: `srv_${s.id}`, time: getItemTime(s), title: `${resolveName(s) || 'User'} updated Service`, desc: `Client: ${getClientName(s)}`, extra: `Machine: ${s.machine || s.machineName || 'N/A'}\nStatus: ${s.status}`, icon: 'construct', color: '#c62828', rawData: s, type: 'Service' });
       });
       courierList?.forEach((c: any) => {
-          if (getStandardDate(getItemDate(c)) === targetDate && checkUser(c.senderId, c.senderName)) events.push({ id: `cr_${c.id}`, time: getItemTime(c), title: `${c.senderName || 'User'} sent Courier`, desc: `To: ${getClientName(c)}`, extra: `Item: ${c.itemName || c.name || '-'}\nStatus: ${c.status || 'Dispatched'}`, icon: 'cube', color: '#e67e22', rawData: c, type: 'Courier' });
+          if (getStandardDate(getItemDate(c)) === targetDate && checkUser(c.senderId, c.senderName)) events.push({ id: `cr_${c.id}`, time: getItemTime(c), title: `${resolveName(c) || 'User'} sent Courier`, desc: `To: ${getClientName(c)}`, extra: `Item: ${c.itemName || c.name || '-'}\nStatus: ${c.status || 'Dispatched'}`, icon: 'cube', color: '#e67e22', rawData: c, type: 'Courier' });
       });
       demoList?.forEach((d: any) => {
-          if (getStandardDate(getItemDate(d)) === targetDate && checkUser(d.senderId, d.senderName)) events.push({ id: `dm_${d.id}`, time: getItemTime(d), title: `${d.senderName || 'User'} gave a Demo`, desc: `Client: ${getClientName(d)}`, extra: `Product: ${d.product}`, icon: 'play-circle', color: '#00bcd4', rawData: d, type: 'Demo' });
+          if (getStandardDate(getItemDate(d)) === targetDate && checkUser(d.senderId, d.senderName)) events.push({ id: `dm_${d.id}`, time: getItemTime(d), title: `${resolveName(d) || 'User'} gave a Demo`, desc: `Client: ${getClientName(d)}`, extra: `Product: ${d.product}`, icon: 'play-circle', color: '#00bcd4', rawData: d, type: 'Demo' });
       });
       
       paymentList?.forEach((p: any) => {
-          if (getStandardDate(getItemDate(p)) === targetDate && checkUser(p.senderId || p.addedBy || p.userId, p.senderName || p.addedBy || p.userName)) events.push({ id: `pay_${p.id}`, time: getItemTime(p), title: `${p.senderName || p.addedBy || 'User'} collected Payment`, desc: `Client: ${getClientName(p)}`, extra: `Amount: ₹${p.amount || p.receivedAmount || 0}`, icon: 'cash', color: '#00897b', rawData: p, type: 'Payment' });
+          if (getStandardDate(getItemDate(p)) === targetDate && checkUser(p.senderId || p.addedBy || p.userId, p.senderName || p.addedBy || p.userName)) events.push({ id: `pay_${p.id}`, time: getItemTime(p), title: `${resolveName(p) || p.addedBy || 'User'} collected Payment`, desc: `Client: ${getClientName(p)}`, extra: `Amount: ₹${p.amount || p.receivedAmount || 0}`, icon: 'cash', color: '#00897b', rawData: p, type: 'Payment' });
       });
 
       installList?.forEach((i: any) => {
-          if (getStandardDate(getItemDate(i)) === targetDate && checkUser(i.senderId, i.senderName)) events.push({ id: `inst_${i.id}`, time: getItemTime(i), title: `${i.senderName || 'User'} did Installation`, desc: `Client: ${getClientName(i)}`, extra: `Product: ${i.product || i.productName || '-'}\nSn: ${i.serialNo || 'N/A'}`, icon: 'checkmark-circle', color: '#2e7d32', rawData: i, type: 'Installation' });
+          if (getStandardDate(getItemDate(i)) === targetDate && checkUser(i.senderId, i.senderName)) events.push({ id: `inst_${i.id}`, time: getItemTime(i), title: `${resolveName(i) || 'User'} did Installation`, desc: `Client: ${getClientName(i)}`, extra: `Product: ${i.product || i.productName || '-'}\nSn: ${i.serialNo || 'N/A'}`, icon: 'checkmark-circle', color: '#2e7d32', rawData: i, type: 'Installation' });
       });
       salesVisitList?.forEach((sv: any) => {
-          if (getStandardDate(getItemDate(sv)) === targetDate && checkUser(sv.senderId, sv.senderName)) events.push({ id: `sv_${sv.id}`, time: getItemTime(sv), title: `${sv.senderName || 'User'} Sales Visit`, desc: `Client: ${getClientName(sv)}`, extra: `Met: ${sv.person || '-'} | Outcome: ${sv.outcome || 'N/A'}`, icon: 'briefcase', color: '#f57c00', rawData: sv, type: 'Sales Visit' });
+          if (getStandardDate(getItemDate(sv)) === targetDate && checkUser(sv.senderId, sv.senderName)) events.push({ id: `sv_${sv.id}`, time: getItemTime(sv), title: `${resolveName(sv) || 'User'} Sales Visit`, desc: `Client: ${getClientName(sv)}`, extra: `Met: ${sv.person || '-'} | Outcome: ${sv.outcome || 'N/A'}`, icon: 'briefcase', color: '#f57c00', rawData: sv, type: 'Sales Visit' });
       });
       leadsList?.forEach((l: any) => {
-          if (getStandardDate(getItemDate(l)) === targetDate && checkUser(l.senderId || l.assignedTo, l.senderName || l.assignedToName)) events.push({ id: `ld_${l.id}`, time: getItemTime(l), title: `${l.senderName || 'User'} Generated Lead`, desc: `Client: ${getClientName(l)}`, extra: `Status: ${l.status || 'New'}`, icon: 'funnel', color: '#f39c12', rawData: l, type: 'Lead' });
+          if (getStandardDate(getItemDate(l)) === targetDate && checkUser(l.senderId || l.assignedTo, l.senderName || l.assignedToName)) events.push({ id: `ld_${l.id}`, time: getItemTime(l), title: `${resolveName(l) || 'User'} Generated Lead`, desc: `Client: ${getClientName(l)}`, extra: `Status: ${l.status || 'New'}`, icon: 'funnel', color: '#f39c12', rawData: l, type: 'Lead' });
       });
 
       events.sort((a, b) => getTimeValue(a.time) - getTimeValue(b.time));
@@ -546,7 +555,7 @@ const [selectedDate, setSelectedDate] = useState(new Date());
           let isUserMatch = true;
           if (selectedUserName !== 'All' && !isOrg) {
               const target = selectedUserName.toLowerCase().trim();
-              const possibleNames = [item.senderName, item.userName, item.name, item.bookedBy, item.createdBy, item.addedBy, item.userId, item.senderId];
+              const possibleNames = [resolveName(item), item.name, item.bookedBy, item.createdBy, item.addedBy, item.userId, item.senderId];
               isUserMatch = possibleNames.some(n => n && String(n).toLowerCase().includes(target));
           }
           return isYearMatch && isMonthMatch && isUserMatch;

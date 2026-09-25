@@ -23,6 +23,7 @@ import { useData } from './context/DataContext';
 
 // 🔥 Phase 8: couriers now come from Postgres via these adapters
 import { deleteCourier, fetchCouriers, updateCourier, updateCourierStatus } from '../services/api/couriers';
+import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
@@ -90,12 +91,20 @@ export default function CourierScreen() {
       return { fromDate: toIso(new Date(fyStartYear, 3, 1)), toDate: toIso(new Date(fyStartYear + 1, 2, 31)) };
   }
 
-  // Organizations — cache-first, shares the SAME 'organizations' cache key
+    // Organizations — cache-first, shares the SAME 'organizations' cache key
   // as organization.tsx/messaging_center.tsx.
   const { data: orgList } = useCachedList({
       cacheKey: buildCacheKey('organizations', currentUser?.companyId),
       enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 200 }),
+      fetcher: () => fetchOrganizations({ limit: 500 }),
+  });
+
+  // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
+  // as manage_team.tsx/employee_timeline.tsx.
+  const { data: teamMembersForCourier } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: fetchTeamMembers,
   });
 
   // 🔥 COURIERS — cache-first, parameterized by date-range (server
@@ -112,12 +121,22 @@ export default function CourierScreen() {
   } = useCachedList({
       cacheKey: courierCacheKey,
       enabled: !!currentUser?.companyId,
-      // type/status intentionally NOT filtered server-side here — the tab
-      // badges (inwardPending/outwardPending below) need visibility across
-      // every type+status within the current date window, not just the
-      // currently-selected tab.
       fetcher: () => fetchCouriers({ fromDate, toDate, limit: 500 }),
   });
+
+  // 🔥 senderName was never populated by the API (only senderId), so every
+  // courier entry showed "Unknown" — same fix pattern as orders.tsx.
+  useEffect(() => {
+      if (teamMembersForCourier.length === 0 || courierList.length === 0) return;
+      const nameById = new Map(teamMembersForCourier.map((u: any) => [u.id, u.name || 'Unknown']));
+      const needsEnrichment = courierList.some((c: any) => c.senderName === undefined);
+      if (!needsEnrichment) return;
+      setCourierList(courierList.map((c: any) => ({
+          ...c,
+          senderName: nameById.get(c.senderId) || 'Unknown',
+      })));
+  }, [courierList, teamMembersForCourier]);
+
   const isDbLoading = isOrgsLoading || courierLoading;
 
   // POWER USER CHECK

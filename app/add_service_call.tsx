@@ -30,9 +30,9 @@ import { listInstallations } from '../services/api/installations';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
-import { buildCacheKey } from '../utils/listCache';
 import { createServiceCall } from '../services/api/serviceCalls';
 import { listSpareParts } from '../services/api/spareParts';
+import { buildCacheKey } from '../utils/listCache';
 
 // 🔥 PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
@@ -95,7 +95,7 @@ export default function AddServiceCallScreen() {
   const { data: orgList } = useCachedList({
       cacheKey: buildCacheKey('organizations', currentUser?.companyId),
       enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 200 }),
+      fetcher: () => fetchOrganizations({ limit: 500 }),
   });
   const { data: installList } = useCachedList({
       cacheKey: buildCacheKey('installations', currentUser?.companyId),

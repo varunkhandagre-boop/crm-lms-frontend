@@ -115,7 +115,7 @@ export default function PaymentCollection() {
     const { data: orgList } = useCachedList({
         cacheKey: buildCacheKey('organizations', currentUser?.companyId),
         enabled: !!currentUser?.companyId,
-        fetcher: () => fetchOrganizations({ limit: 200 }),
+        fetcher: () => fetchOrganizations({ limit: 500 }),
     });
 
     const qrImageSource = companyProfile?.qrCodeUrl 
@@ -433,12 +433,20 @@ export default function PaymentCollection() {
         return "All Time";
     };
 
-    const getMyFilteredHistory = () => {
+        const getMyFilteredHistory = () => {
         let data = paymentList ? [...paymentList] : [];
+
+        // toLegacyPayment() never sets p.userName (services/api/paymentCollections.ts
+        // leaves it undefined — the backend only returns createdById, a UUID, not a
+        // name). Resolve it here from the already-loaded team list so employee
+        // filtering actually matches something instead of comparing against undefined.
+        const userIdToName = new Map((userList || []).map((u: any) => [u.id, u.name]));
+        const resolveName = (p: any) => p.userName || userIdToName.get(p.senderId) || '';
+
         if (isAdmin && selectedEmployee !== 'All') {
-            data = data.filter((p: any) => p.userName === selectedEmployee);
+            data = data.filter((p: any) => resolveName(p) === selectedEmployee);
         } else if (!isAdmin) {
-            data = data.filter((p: any) => p.senderId === currentUser?.id || p.userName === currentUser?.name);
+            data = data.filter((p: any) => p.senderId === currentUser?.id || resolveName(p) === currentUser?.name);
         }
         
         if (historySearch) {

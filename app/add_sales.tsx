@@ -28,9 +28,9 @@ import { recordLocationLog } from '../services/api/locationLogs';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
-import { buildCacheKey } from '../utils/listCache';
 import { listProducts } from '../services/api/products';
 import { createSalesVisit } from '../services/api/salesVisits';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function AddSalesScreen() {
     const router = useRouter();
@@ -81,7 +81,7 @@ export default function AddSalesScreen() {
     const { data: orgList } = useCachedList({
         cacheKey: buildCacheKey('organizations', currentUser?.companyId),
         enabled: !!currentUser?.companyId,
-        fetcher: () => fetchOrganizations({ limit: 200 }),
+        fetcher: () => fetchOrganizations({ limit: 500 }),
     });
 
     // 🔥 Products — unchanged plain fetch-on-mount (out of scope for this pass).
