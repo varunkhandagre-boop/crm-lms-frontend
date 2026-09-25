@@ -21,7 +21,7 @@ import {
 // 🔥 SAAS IMPORTS
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchCompanyProfile } from '../services/api/companies';
-import { fetchHomeSummary, HomeSummary } from '../services/api/homeSummary';
+import { fetchHomeSummary } from '../services/api/homeSummary';
 import { useData } from './context/DataContext';
 // 🔥 Cache-first dashboard summary (see hooks/useCachedObject.ts)
 import { useCachedObject } from '../hooks/useCachedObject';

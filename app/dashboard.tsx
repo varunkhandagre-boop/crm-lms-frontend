@@ -15,9 +15,15 @@ import {
     PieChart
 } from 'react-native-chart-kit';
 
-import { fetchCompanyProfile } from '../services/api/companies';
 import { DashboardSummary, fetchDashboardSummary } from '../services/api/dashboard';
 import { useData } from './context/DataContext';
+// 🔥 Cache-first dashboard summary (see hooks/useCachedObject.ts) — this
+// screen previously had NO caching at all, a plain fetch-on-mount every
+// single time it was opened, which is why it visibly went blank for a
+// couple of seconds on every visit (unlike the rest of the app, which
+// already had this pattern applied everywhere else).
+import { useCachedObject } from '../hooks/useCachedObject';
+import { buildCacheKey } from '../utils/listCache';
 
 const SCREEN_WIDTH = Dimensions.get('window').width - 36;
 
@@ -38,40 +44,37 @@ const PIE_COLORS_LEAD = ['#1976D2', '#F57C00', '#2E7D32', '#D32F2F', '#9C27B0'];
 
 export default function UpdatedDashboard() {
     const router = useRouter();
-    const { currentUser } = useData();
+    const { currentUser, companyProfile } = useData();
 
-    const [summary, setSummary] = useState<DashboardSummary | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [refreshing, setRefreshing] = useState(false);
+    // 🔥 Cache-first — instant from AsyncStorage on every visit, then
+    // silently refreshed in the background. Distinct cache key from
+    // index.tsx's older 'home_summary' (different endpoint/shape).
+    const {
+        data: summary,
+        loading,
+        refreshing,
+        refresh: refreshSummary,
+    } = useCachedObject<DashboardSummary>({
+        cacheKey: buildCacheKey('dashboard_summary', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: fetchDashboardSummary,
+    });
     const [subDaysLeft, setSubDaysLeft] = useState<number | null>(null);
     const [chartsVisible, setChartsVisible] = useState(false);
 
-    const loadAll = useCallback(async () => {
-        try {
-            const [summaryRes, profileRes] = await Promise.all([
-                fetchDashboardSummary(),
-                fetchCompanyProfile().catch(() => null),
-            ]);
-            setSummary(summaryRes);
-            if (profileRes?.expiryDate) {
-                const diff = Math.ceil((new Date(profileRes.expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-                setSubDaysLeft(diff);
-            }
-        } catch (e) {
-            // Dashboard staying blank on a transient error is preferable to a
-            // crash — the pull-to-refresh lets the person retry.
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
+    // companyProfile already comes from DataContext (fetched once at
+    // login, no need for this screen to fetch it again separately) — just
+    // derive the subscription-expiry countdown from it.
+    useEffect(() => {
+        if (companyProfile?.expiryDate) {
+            const diff = Math.ceil((new Date(companyProfile.expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+            setSubDaysLeft(diff);
         }
-    }, []);
-
-    useEffect(() => { loadAll(); }, [loadAll]);
+    }, [companyProfile]);
 
     const onRefresh = useCallback(async () => {
-        setRefreshing(true);
-        await loadAll();
-    }, [loadAll]);
+        await refreshSummary();
+    }, [refreshSummary]);
 
     const isAdmin = summary?.isAdmin ?? false;
     const userTarget = Number(currentUser?.salesTarget) || 0;
