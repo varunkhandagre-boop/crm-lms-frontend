@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -38,21 +38,43 @@ export default function ProfileScreen() {
   // 🔥 Type assertion (as any) add kiya gaya hai
   const [currentImage, setCurrentImage] = useState((currentUser as any)?.profileImage || null);
   const [userData, setUserData] = useState<any>(currentUser);
+  const [profileLoadFailed, setProfileLoadFailed] = useState(false);
 
   // 🔥 3. LOAD PROFILE DATA — Phase 10: Postgres via fetchSelf()
-  useEffect(() => {
-    const fetchLatestProfile = async () => {
-      if (!currentUser?.companyId) return;
-      try {
-        const data = await fetchSelf();
-        setCurrentImage(data.profileImage || null);
-        setUserData({ ...currentUser, ...data });
-      } catch (error) {
-        console.log("Error fetching profile:", error);
+  // Was: single fetch on mount, silent-fail on error (just console.log),
+  // never retried — if it failed once (e.g. app cold-start before the auth
+  // token finished loading), the extended profile fields (city/state/
+  // address/bank details/etc — anything not already in the minimal
+  // currentUser from login) stayed permanently blank until the app was
+  // force-restarted. Now retries a couple of times with a short delay, and
+  // re-fetches every time this screen comes into focus (not just on mount),
+  // so a transient failure self-heals the next time the user visits.
+  const loadProfile = useCallback(async (attempt = 1) => {
+    if (!currentUser?.companyId) return;
+    try {
+      const data = await fetchSelf();
+      setCurrentImage(data.profileImage || null);
+      setUserData({ ...currentUser, ...data });
+      setProfileLoadFailed(false);
+    } catch (error) {
+      console.log("Error fetching profile:", error);
+      if (attempt < 3) {
+        setTimeout(() => loadProfile(attempt + 1), 1000 * attempt);
+      } else {
+        setProfileLoadFailed(true);
       }
-    };
-    fetchLatestProfile();
+    }
   }, [currentUser]);
+
+  useEffect(() => {
+    loadProfile();
+  }, [loadProfile]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadProfile();
+    }, [loadProfile])
+  );
 
   const handleLogout = async () => {
     Alert.alert("Logout", "Are you sure?", [
@@ -254,7 +276,9 @@ export default function ProfileScreen() {
                 <Ionicons name="arrow-back" size={24} color="white" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>My Profile</Text>
-            <View style={{width: 24}} /> 
+            <TouchableOpacity onPress={() => loadProfile()} style={{width: 24, alignItems:'center'}}>
+                {profileLoadFailed ? <Ionicons name="refresh-circle" size={22} color="#ffcdd2" /> : <View style={{width:24}} />}
+            </TouchableOpacity> 
         </View>
 
         <View style={styles.cardContainer}>

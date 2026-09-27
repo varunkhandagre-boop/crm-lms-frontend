@@ -91,7 +91,7 @@ export default function SerialNumberScreen() {
     const { data: orgList, loading: orgsLoading } = useCachedList({
       cacheKey: buildCacheKey('organizations', currentUser?.companyId),
       enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 200 }),
+      fetcher: () => fetchOrganizations({ limit: 500 }),
   });
 
   // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
