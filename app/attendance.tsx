@@ -38,6 +38,11 @@ export default function AttendanceScreen() {
   // attendanceList now comes from useCachedList below (cache-first)
   const [leaveList, setLeaveList] = useState<any[]>([]);
   const [holidayList, setHolidayList] = useState<any[]>([]);
+  // Whole-financial-year list for the gift-icon modal. `holidayList` above is scoped to
+  // the *viewed range* (one day in Daily view) because attendance status uses it — the
+  // modal used to show that same list, so Daily view always said "No holidays added yet".
+  const [fyHolidays, setFyHolidays] = useState<any[]>([]);
+  const [fyHolidaysLoading, setFyHolidaysLoading] = useState(false);
   // 🔥 Users list — cache-first, shares the SAME 'team_members' cache key
   // as manage_team.tsx/employee_timeline.tsx. Declared early since
   // usersReady below reads userList.length.
@@ -173,6 +178,20 @@ export default function AttendanceScreen() {
   }, [currentUser, viewMode, currentDate, filterUser, userList]);
 
   const targetName = (filterUser === 'All' || !canManage) ? currentUser?.name : filterUser;
+
+  const holidayFyStartYear = currentDate.getMonth() >= 3 ? currentDate.getFullYear() : currentDate.getFullYear() - 1;
+  const openHolidayList = async () => {
+      setHolidayModalVisible(true);
+      setFyHolidaysLoading(true);
+      try {
+          const list = await fetchHolidays(`${holidayFyStartYear}-04-01`, `${holidayFyStartYear + 1}-03-31`);
+          setFyHolidays([...list].sort((a: any, b: any) => String(a.date).localeCompare(String(b.date))));
+      } catch (e) {
+          setFyHolidays(Array.isArray(holidayList) ? holidayList : []); // fall back to what the screen already has
+      } finally {
+          setFyHolidaysLoading(false);
+      }
+  };
 
   // SORT USERS
   const uniqueUsers = useMemo(() => {
@@ -570,7 +589,7 @@ export default function AttendanceScreen() {
             <TouchableOpacity onPress={downloadReport} style={[styles.holidayBtn, {marginRight:10, backgroundColor:'#e3f2fd'}]}>
                 <Ionicons name="download-outline" size={20} color="#1565c0" />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setHolidayModalVisible(true)} style={styles.holidayBtn}>
+            <TouchableOpacity onPress={openHolidayList} style={styles.holidayBtn}>
                 <Ionicons name="gift-outline" size={20} color="#e67e22" />
             </TouchableOpacity>
         </View>
@@ -810,18 +829,21 @@ export default function AttendanceScreen() {
         <View style={styles.modalOverlay}>
             <View style={styles.detailCard}>
                 <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:15}}>
-                    <Text style={styles.modalTitle}>🎉 Holiday List</Text>
+                    <View>
+                        <Text style={styles.modalTitle}>🎉 Holiday List</Text>
+                        <Text style={{ color: '#888', fontSize: 12, marginTop: 2 }}>FY {holidayFyStartYear}-{String(holidayFyStartYear + 1).slice(2)}</Text>
+                    </View>
                     <TouchableOpacity onPress={() => setHolidayModalVisible(false)}>
                         <Ionicons name="close-circle" size={30} color="#d32f2f" />
                     </TouchableOpacity>
                 </View>
                 <ScrollView style={{maxHeight:400}}>
-                    {Array.isArray(holidayList) && holidayList.length > 0 ? holidayList.map((h:any, i:number) => (
+                    {fyHolidaysLoading ? <ActivityIndicator style={{ padding: 20 }} /> : fyHolidays.length > 0 ? fyHolidays.map((h:any, i:number) => (
                         <View key={i} style={{flexDirection:'row', padding:10, borderBottomWidth:1, borderColor:'#eee'}}>
                             <Text style={{fontWeight:'bold', width:100}}>{formatDateDisplay(h.date)}</Text>
                             <Text style={{flex:1, color:'#555'}}>{h.name}</Text>
                         </View>
-                    )) : <Text style={{textAlign:'center', color:'gray', padding:20}}>No holidays added yet.</Text>}
+                    )) : <Text style={{textAlign:'center', color:'gray', padding:20}}>No holidays added for this financial year.</Text>}
                 </ScrollView>
             </View>
         </View>
