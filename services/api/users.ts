@@ -126,7 +126,7 @@ export async function updateTeamMember(id: string, payload: Partial<{
   personalEmail: string; personalMobile: string; bloodGroup: string;
   address: string; city: string; state: string; permanentAddress: string;
   bankName: string; bankAccountNo: string; bankIfsc: string;
-  aadhar: string; pan: string; assetNotes: string; password: string; profileImage: string;
+  aadhar: string; pan: string; assetNotes: string; password: string; profileImage: string; role: string;
 }>) {
   const res = await apiClient.patch<OneResponse<any>>(`/users/${id}`, payload);
   return { success: true, record: toLegacyTeamMember(res.data) };

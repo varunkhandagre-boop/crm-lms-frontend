@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -32,7 +32,7 @@ import { addHoliday as addHolidayApi, deleteHoliday as deleteHolidayApi, fetchHo
 // 🔥 Permissions tab — new Postgres adapter, replaces Firestore settings_permissions
 import { fetchPermissions, PermissionsBlob, savePermissions } from '../services/api/permissions';
 // 🔥 Tracking tab — new Postgres adapter, replaces Firestore location_logs
-import { fetchLocationLogs, LocationLog } from '../services/api/locationLogs';
+import { fetchLocationLogs } from '../services/api/locationLogs';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { useCachedObject } from '../hooks/useCachedObject';
@@ -150,6 +150,7 @@ const UsersTab = () => {
             if (editData) {
                 const res = await updateTeamMember(editData.id, {
                     name: formData.name,
+                    role: formData.role,
                     mobile: formData.mobile,
                     empId: formData.empId,
                     joiningDate: formData.joiningDate || undefined,
@@ -407,10 +408,10 @@ const handleBulkDeactivate = () => {
                         
                         <ScrollView showsVerticalScrollIndicator={false}>
                             <Text style={styles.sectionHeader}>🏢 Official Info</Text>
-                            <Text style={styles.label}>Role {editData && <Text style={{fontSize:10, color:'#999'}}>(cannot be changed after creation)</Text>}</Text>
+                            <Text style={styles.label}>Role</Text>
                             <View style={styles.pickerRow}>
                                 {ROLE_OPTIONS.map(r => (
-                                    <TouchableOpacity key={r.value} disabled={!!editData} onPress={() => setFormData({...formData, role: r.value})} style={[styles.roleChip, formData.role === r.value && styles.activeRoleChip, editData && {opacity: 0.5}]}>
+                                    <TouchableOpacity key={r.value} onPress={() => setFormData({...formData, role: r.value})} style={[styles.roleChip, formData.role === r.value && styles.activeRoleChip]}>
                                         <Text style={{fontSize:10, color: formData.role === r.value ? 'white' : '#333'}}>{r.label}</Text>
                                     </TouchableOpacity>
                                 ))}
@@ -787,7 +788,7 @@ const HolidaysTab = () => {
     );
 };
 
-import { AuditLogEntry, fetchAuditLogs } from '../services/api/auditLogs';
+import { fetchAuditLogs } from '../services/api/auditLogs';
 
 // ====================================================================
 // 4️⃣ TRACKING TAB — migrated to Postgres via locationLogs.ts adapter

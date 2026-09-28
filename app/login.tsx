@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
     Image,
+    Keyboard,
     KeyboardAvoidingView,
     Platform,
     ScrollView,
@@ -32,6 +33,27 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+
+  // Android keyboard handling. With edge-to-edge (default since Expo SDK 53) the OS no
+  // longer resizes the window when the keyboard opens, and this screen used to rely on
+  // exactly that (KeyboardAvoidingView behavior was undefined on Android) — so in the
+  // Play Store build the keyboard covered the password field. Track the keyboard height
+  // ourselves, pad the scroll content by it, and scroll the form into view. If the OS
+  // does still resize, the worst case is some extra blank space under the form.
+  const scrollRef = useRef<ScrollView>(null);
+  const [kbHeight, setKbHeight] = useState(0);
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const show = Keyboard.addListener('keyboardDidShow', (e) => setKbHeight(e.endCoordinates.height));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKbHeight(0));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
+  useEffect(() => {
+    if (kbHeight <= 0) return;
+    const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+    return () => clearTimeout(t);
+  }, [kbHeight]);
 
   // Dynamic Branding State
   const [branding, setBranding] = useState({
@@ -120,7 +142,8 @@ export default function LoginScreen() {
         style={{ flex: 1 }}
       >
         <ScrollView 
-          contentContainerStyle={styles.scrollContent}
+          ref={scrollRef}
+          contentContainerStyle={[styles.scrollContent, kbHeight > 0 && { paddingBottom: 20 + kbHeight }]}
           keyboardShouldPersistTaps="handled" 
           showsVerticalScrollIndicator={false}
           keyboardDismissMode="on-drag" 
@@ -163,8 +186,13 @@ export default function LoginScreen() {
                       placeholder="Password" 
                       value={password} 
                       onChangeText={setPassword} 
-                      secureTextEntry 
+                      secureTextEntry={!showPassword}
+                      autoCapitalize="none"
+                      autoCorrect={false}
                   />
+                  <TouchableOpacity onPress={() => setShowPassword(v => !v)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                      <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={22} color="#666" />
+                  </TouchableOpacity>
               </View>
 
               {/* 🔥 NEW: FORGOT PASSWORD BUTTON 🔥 */}

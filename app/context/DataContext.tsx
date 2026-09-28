@@ -138,7 +138,7 @@ export const DataProvider = ({ children }: any) => {
       }
   };
   
-    const fetchCompanySettings = async (companyId: string) => {
+    const fetchCompanySettings = async (companyId: string, attempt = 1) => {
     if (!companyId) return;
 
     try {
@@ -176,6 +176,15 @@ export const DataProvider = ({ children }: any) => {
         }
     } catch (error) {
         console.log("Error fetching company settings:", error);
+        // Was: single attempt, silent fail. If this lost a race with the auth
+        // token being ready (cold start / fresh install with no cached profile),
+        // companyProfile stayed at its "Loading..." placeholder for the whole
+        // session, so everything reading companyProfile.companyName (courier
+        // sender/receiver auto-fill, challans, quotations, ...) came out blank
+        // until the app was force-restarted. Retry a few times with backoff.
+        if (attempt < 4) {
+            setTimeout(() => fetchCompanySettings(companyId, attempt + 1), 1500 * attempt);
+        }
     }
 };
 

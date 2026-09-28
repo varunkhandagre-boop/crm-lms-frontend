@@ -23,6 +23,27 @@ import { useData } from './context/DataContext';
 
 const DEFAULT_AUTOMATION_ADDON_PRICE = 3000;
 
+// Razorpay's native SDK hands the failure back as a raw JSON string inside
+// `description` ({"error":{code,description,source,step,reason,metadata}}), which
+// is what users were seeing verbatim. Turn it into a readable message. When the
+// SDK gives no text (description is the literal string "undefined"), fall back to
+// what source/step tell us.
+function friendlyRazorpayError(error: any): string {
+    let inner: any = null;
+    try {
+        const parsed = typeof error?.description === 'string' ? JSON.parse(error.description) : null;
+        inner = parsed?.error ?? null;
+    } catch { /* description wasn't JSON — fall through */ }
+
+    const text = String(inner?.description ?? error?.description ?? '').trim();
+    if (text && text !== 'undefined' && !text.startsWith('{')) return text;
+
+    if (inner?.source === 'customer' && inner?.step === 'payment_authentication') {
+        return 'The payment could not be authenticated. This usually means it was cancelled, the OTP / UPI PIN was wrong or expired, or the bank declined it. Please try again or use another payment method.';
+    }
+    return 'Payment could not be completed. Please try again, or use the UPI QR option below.';
+}
+
 export default function SubscriptionScreen() {
     const router = useRouter();
     const { currentUser } = useData();
@@ -167,7 +188,8 @@ export default function SubscriptionScreen() {
                     if (error.code === 2) {
                         console.log('Payment cancelled by user');
                     } else {
-                        Alert.alert('Payment Failed', error.description || 'Payment could not be completed. Try again or use UPI QR.');
+                        console.log('Razorpay error (raw):', JSON.stringify(error));
+                        Alert.alert('Payment Failed', friendlyRazorpayError(error));
                     }
                 });
         } catch (e) {
