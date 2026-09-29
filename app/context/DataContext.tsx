@@ -92,7 +92,12 @@ export const DataProvider = ({ children }: any) => {
       bankDetails1: {},
       bankDetails2: {},
       logoUrl: '',
-      signatureUrl: ''
+      signatureUrl: '',
+      // Optimistic default while this is still loading — shows everything
+      // rather than flashing an empty menu before the real company data
+      // arrives. fetchCompanySettings() below overwrites this with the
+      // company's real enabledModules once it resolves.
+      enabledModules: ['sales', 'service', 'hr'] as string[]
   });
 
   // =========================================================

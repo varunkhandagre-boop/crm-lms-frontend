@@ -21,7 +21,8 @@ import {
 // 🔥 SAAS IMPORTS
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchCompanyProfile } from '../services/api/companies';
-import { fetchHomeSummary } from '../services/api/homeSummary';
+import { fetchHomeSummary, HomeSummary } from '../services/api/homeSummary';
+import { MENU_TAG_BUCKET } from '../constants/modules';
 import { useData } from './context/DataContext';
 // 🔥 Cache-first dashboard summary (see hooks/useCachedObject.ts)
 import { useCachedObject } from '../hooks/useCachedObject';
@@ -41,6 +42,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
+      shouldShowAlert: true,
       shouldPlaySound: true,
       shouldSetBadge: false,
       shouldShowBanner: true,
@@ -288,6 +290,15 @@ const saveTokenToDatabase = async (token: string) => {
 
     const myRole = currentUser.role.toLowerCase().trim();
 
+    // Company-level gate — checked BEFORE role-based permissions below, and
+    // applies even to Admin (but not SuperAdmin, who isn't tied to a single
+    // company's plan). Role permissions below only control who *within* a
+    // company sees a feature the company actually has; this controls
+    // whether the company has it at all (a construction/factory company
+    // with only the HR module shouldn't see Sales/Service no matter their role).
+    const bucket = MENU_TAG_BUCKET[moduleKey];
+    if (bucket && myRole !== 'superadmin' && !(companyProfile?.enabledModules || []).includes(bucket)) return false;
+
     if (myRole === 'admin' || myRole === 'superadmin') return true; 
     
     let userRoleKey = 'Sales Executive'; 
@@ -357,7 +368,6 @@ const saveTokenToDatabase = async (token: string) => {
 
   const filterItems = (items: any[]) => {
     return items.filter(i => {
-        if (i.module === 'personal_notes') return true;
         if (i.module === 'superadmin_only') return currentUser?.role === 'SuperAdmin';
         return canSee(i.module);
     });

@@ -31,6 +31,7 @@ type PlanForm = {
     pricePerEmployee: string;
     discountPercent: string;
     active: boolean;
+    modules: ('sales' | 'service' | 'hr')[];
 };
 
 const EMPTY_FORM: PlanForm = {
@@ -40,6 +41,7 @@ const EMPTY_FORM: PlanForm = {
     pricePerEmployee: '',
     discountPercent: '0',
     active: true,
+    modules: ['sales', 'service', 'hr'],
 };
 
 export default function ManagePlansScreen() {
@@ -144,6 +146,7 @@ export default function ManagePlansScreen() {
             pricePerEmployee: String(plan.pricePerEmployee),
             discountPercent: String(plan.discountPercent),
             active: plan.active,
+            modules: (plan.modules && plan.modules.length > 0 ? plan.modules : ['sales', 'service', 'hr']) as ('sales' | 'service' | 'hr')[],
         });
         setIsEditing(true);
         setModalVisible(true);
@@ -179,6 +182,7 @@ export default function ManagePlansScreen() {
                 pricePerEmployee: price,
                 discountPercent: discount,
                 active: form.active,
+                modules: form.modules,
             };
 
             if (isEditing) {
@@ -275,6 +279,11 @@ export default function ManagePlansScreen() {
                         <Text style={styles.planDetail}>Duration: {plan.durationMonths} months</Text>
                         <Text style={styles.planDetail}>Price: ₹{plan.pricePerEmployee} / employee / year</Text>
                         <Text style={styles.planDetail}>Discount: {plan.discountPercent}%</Text>
+                        <Text style={styles.planDetail}>
+                            Modules: {(!plan.modules || plan.modules.length === 0) ? 'None'
+                                : (plan.modules.length === 3 ? 'All (Sales, Service, HR)'
+                                : plan.modules.map(m => ({ sales: 'Sales', service: 'Service', hr: 'HR' } as any)[m] || m).join(', '))}
+                        </Text>
                         <Text style={styles.planId}>id: {plan.id}</Text>
 
                         <View style={styles.cardActions}>
@@ -395,6 +404,35 @@ export default function ManagePlansScreen() {
                                 placeholder="e.g. 10"
                                 keyboardType="numeric"
                             />
+
+                            <Text style={styles.label}>Modules granted by this plan</Text>
+                            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                                {([
+                                    { key: 'sales' as const, label: 'Sales & CRM' },
+                                    { key: 'service' as const, label: 'Service' },
+                                    { key: 'hr' as const, label: 'HR & Payroll' },
+                                ]).map(m => {
+                                    const active = form.modules.includes(m.key);
+                                    return (
+                                        <TouchableOpacity
+                                            key={m.key}
+                                            onPress={() => setForm({
+                                                ...form,
+                                                modules: active ? form.modules.filter(k => k !== m.key) : [...form.modules, m.key],
+                                            })}
+                                            style={{
+                                                paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+                                                backgroundColor: active ? '#3b5998' : 'white',
+                                                borderWidth: 1.5, borderColor: active ? '#3b5998' : '#ddd',
+                                            }}
+                                        >
+                                            <Text style={{ fontSize: 12, fontWeight: '700', color: active ? 'white' : '#555' }}>
+                                                {active ? '✓ ' : ''}{m.label}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
 
                             <View style={styles.statusRow}>
                                 <Text style={styles.label}>Active</Text>

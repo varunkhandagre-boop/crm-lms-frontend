@@ -26,6 +26,7 @@ export interface Company {
     gstNumber: string | null;
     website: string | null;
     automationAddonEnabled: boolean;
+    enabledModules: string[]; // 'sales' | 'service' | 'hr'
     createdAt: string;
 }
 
@@ -111,6 +112,11 @@ export async function updateEmployeeLimit(id: string, employeeLimit: number): Pr
 
 export async function updateAutomationAddon(id: string, enabled: boolean): Promise<Company> {
     const res = await apiClient.patch<OneResponse<Company>>(`/superadmin/companies/${id}/automation-addon`, { enabled });
+    return res.data;
+}
+
+export async function updateCompanyModules(id: string, modules: string[]): Promise<Company> {
+    const res = await apiClient.patch<OneResponse<Company>>(`/superadmin/companies/${id}/modules`, { modules });
     return res.data;
 }
 

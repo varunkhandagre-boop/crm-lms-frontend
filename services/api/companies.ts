@@ -36,6 +36,7 @@ export interface LegacyCompanyProfile {
   maxEmployees: number;
   currentEmployees: number;
   isActive: boolean;
+  enabledModules: string[]; // 'sales' | 'service' | 'hr' — which feature buckets this company has
 }
 
 interface OneResponse<T> { data: T; }
@@ -75,6 +76,7 @@ function toLegacyCompanyProfile(c: any): LegacyCompanyProfile {
     maxEmployees: c.employeeLimit ?? 10,
     currentEmployees: c.activeEmployeeCount ?? 0,
     isActive: c.subscriptionStatus === 'ACTIVE' || c.subscriptionStatus === 'TRIAL',
+    enabledModules: Array.isArray(c.enabledModules) ? c.enabledModules : ['sales', 'service', 'hr'],
   };
 }
 

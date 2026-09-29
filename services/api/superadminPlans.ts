@@ -14,6 +14,7 @@ export interface Plan {
   discountPercent: number;
   active: boolean;
   sortOrder: number;
+  modules: string[]; // 'sales' | 'service' | 'hr' — granted to a company when this plan is assigned
 }
 
 export interface BillingSettings {
@@ -39,6 +40,7 @@ export interface CreatePlanPayload {
   discountPercent?: number;
   active?: boolean;
   sortOrder?: number;
+  modules?: string[];
 }
 
 export async function createPlan(payload: CreatePlanPayload): Promise<Plan> {

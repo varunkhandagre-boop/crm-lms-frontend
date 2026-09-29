@@ -1,22 +1,23 @@
 import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
 import { Slot, usePathname, useRouter } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DataProvider, useData } from './context/DataContext';
+import { MENU_TAG_BUCKET } from '../constants/modules';
 
 import * as Notifications from 'expo-notifications';
 import { manageAttendanceReminders, setupNotificationPermissions } from '../utils/notificationHelper';
 
 import * as Location from 'expo-location';
 // 🔥 Firestore direct imports minimized
-import { fetchTodayAttendance } from '../services/api/attendance';
 import { fetchCompanyProfile } from '../services/api/companies';
-import { listLeads } from '../services/api/leads';
 import { recordLocationLog } from '../services/api/locationLogs';
-import { fetchOrganizations } from '../services/api/organizations';
+import { fetchTodayAttendance } from '../services/api/attendance';
+import { listLeads } from '../services/api/leads';
 import { listServiceCalls } from '../services/api/serviceCalls';
+import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTasks } from '../services/api/tasks';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -27,6 +28,7 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
+    shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
     shouldShowBanner: true,
@@ -143,15 +145,8 @@ function NavigationLayout() {
       appPermissions, 
       loading,
       isSubscriptionExpired, 
+      companyProfile,
   } = useData();
-  // Kept in sync below — the location-watcher's callback (further down)
-  // fires asynchronously and needs the *current* auth state at call time,
-  // not whatever currentUser was when the effect/closure was set up —
-  // otherwise a location update that happens to land right at logout can
-  // fire the API call with an already-cleared auth token (harmless, caught,
-  // but noisy 401 in the logs).
-  const currentUserRef = useRef(currentUser);
-  useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
 
   // 🔥 These 5 were previously read from DataContext (a big Firestore-backed
   // "God Context" that's since been cleaned up — see DataContext.tsx's own
@@ -192,7 +187,7 @@ function NavigationLayout() {
   const { data: orgList } = useCachedList({
       cacheKey: buildCacheKey('organizations', currentUser?.companyId),
       enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 500 }),
+      fetcher: () => fetchOrganizations({ limit: 200 }),
   });
   
   const insets = useSafeAreaInsets(); 
@@ -269,15 +264,10 @@ function NavigationLayout() {
             const { status: foreStatus } = await Location.requestForegroundPermissionsAsync();
             if (foreStatus !== 'granted') return;
 
-            // 🔥 Foreground-only now — this tracker is a best-effort convenience
-            // (works while the app is genuinely open/active), not a true
-            // background service; there's no registered TaskManager task for
-            // it to survive the app being backgrounded anyway. Google Play's
-            // background-location policy requires removing the permission
-            // entirely when it isn't core to the app's functionality — the
-            // location captured when filling in a report/order/installation
-            // etc. (foreground, tied to that action) is the feature that
-            // actually matters and is unaffected by this change.
+            try {
+                const { status: backStatus } = await Location.requestBackgroundPermissionsAsync();
+                if (backStatus !== 'granted') console.log("Bg Permission denied");
+            } catch (err) { }
 
             locationSubscription = await Location.watchPositionAsync(
                 {
@@ -294,8 +284,6 @@ function NavigationLayout() {
                     }
 
                     lastUpdateTimestamp = now;
-
-                    if (!currentUserRef.current) return; // logged out since this update was queued
 
                     try {
     await recordLocationLog({
@@ -357,6 +345,12 @@ if (currentUser && isSubscriptionExpired) {
 
   const canSeeTab = (moduleKey: string) => {
       const userRole = currentUser?.role || 'Service Engineer';
+      const myRole = userRole.toLowerCase().trim();
+      // Same company-level gate as index.tsx's canSee() — checked before
+      // role, applies even to Admin, skipped for SuperAdmin.
+      const bucket = MENU_TAG_BUCKET[moduleKey];
+      if (bucket && myRole !== 'superadmin' && !(companyProfile?.enabledModules || []).includes(bucket)) return false;
+
       if (userRole === 'Admin' || userRole === 'SuperAdmin') return true;
       const myPerms = appPermissions?.[userRole];
       if (!myPerms) return true;

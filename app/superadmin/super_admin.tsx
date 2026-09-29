@@ -27,6 +27,7 @@ import {
     listCompanies,
     StatusFilter,
     updateAutomationAddon,
+    updateCompanyModules,
     updateCompanyStatus,
     updateEmployeeLimit,
     UsageAnalyticsResponse,
@@ -88,7 +89,7 @@ export default function SuperAdminDashboard() {
         const mySeq = ++requestSeq.current;
         if (append) setLoadingMore(true); else setLoading(true);
         try {
-        const result = await listCompanies({
+            const result = await listCompanies({
                 page: targetPage,
                 limit: PAGE_LIMIT,
                 search: searchQuery.trim() || undefined,
@@ -229,6 +230,23 @@ export default function SuperAdminDashboard() {
             Alert.alert('Success', `Automation Add-on ${value ? 'ENABLED ✅' : 'DISABLED 🚫'}`);
         } catch (e: any) {
             Alert.alert('Error', e.message || 'Could not update automation status.');
+        }
+    };
+
+    const MODULE_OPTIONS: { key: 'sales' | 'service' | 'hr'; label: string }[] = [
+        { key: 'sales', label: 'Sales & CRM' },
+        { key: 'service', label: 'Service' },
+        { key: 'hr', label: 'HR & Payroll' },
+    ];
+    const toggleCompanyModule = async (moduleKey: 'sales' | 'service' | 'hr') => {
+        if (!selectedCompany) return;
+        const current = selectedCompany.enabledModules || [];
+        const next = current.includes(moduleKey) ? current.filter(m => m !== moduleKey) : [...current, moduleKey];
+        try {
+            const updated = await updateCompanyModules(selectedCompany.id, next);
+            refreshSelectedInList(updated);
+        } catch (e: any) {
+            Alert.alert('Error', e.message || 'Could not update modules.');
         }
     };
 
@@ -408,19 +426,14 @@ export default function SuperAdminDashboard() {
                         </View>
                     )}
 
-                    {/* Status filter chips row (Trial/Suspended not covered by stat cards above).
-                        Fixed height wrapper — same pattern as statsWrap above — so this row's
-                        own layout can never squeeze or shift depending on what's rendered
-                        elsewhere on screen. */}
-                    <View style={styles.filterPillsWrap}>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 15, alignItems: 'center' }}>
-                            {STATUS_FILTERS.map(f => (
-                                <TouchableOpacity key={f.key} style={[styles.filterPill, statusFilter === f.key && styles.filterPillActive]} onPress={() => setStatusFilter(f.key)}>
-                                    <Text style={[styles.filterPillText, statusFilter === f.key && { color: 'white' }]}>{f.label}</Text>
-                                </TouchableOpacity>
-                            ))}
-                        </ScrollView>
-                    </View>
+                    {/* Status filter chips row (Trial/Suspended not covered by stat cards above) */}
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 15, marginTop: 8, alignItems: 'flex-start' }}>
+                        {STATUS_FILTERS.map(f => (
+                            <TouchableOpacity key={f.key} style={[styles.filterPill, statusFilter === f.key && styles.filterPillActive]} onPress={() => setStatusFilter(f.key)}>
+                                <Text style={[styles.filterPillText, statusFilter === f.key && { color: 'white' }]}>{f.label}</Text>
+                            </TouchableOpacity>
+                        ))}
+                    </ScrollView>
 
                     <View style={styles.searchWrap}>
                         <Ionicons name="search" size={20} color="#3b5998" style={{ marginRight: 10 }} />
@@ -437,6 +450,7 @@ export default function SuperAdminDashboard() {
                             </TouchableOpacity>
                         )}
                     </View>
+
                     {loading
                         ? <ActivityIndicator size="large" color="#3b5998" style={{ marginTop: 50 }} />
                         : <FlatList
@@ -566,6 +580,31 @@ export default function SuperAdminDashboard() {
                                 <Switch trackColor={{ false: '#767577', true: '#81b0ff' }} thumbColor={selectedCompany?.automationAddonEnabled ? '#2e7d32' : '#f4f3f4'} onValueChange={toggleAutomationAddon} value={selectedCompany?.automationAddonEnabled === true} />
                             </View>
 
+                            <View style={{ marginTop: 14 }}>
+                                <Text style={styles.label}>Modules this company can access</Text>
+                                <Text style={styles.switchHint}>Overrides what their plan set. Even Admin can't see a screen outside these.</Text>
+                                <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                                    {MODULE_OPTIONS.map(m => {
+                                        const active = (selectedCompany?.enabledModules || []).includes(m.key);
+                                        return (
+                                            <TouchableOpacity
+                                                key={m.key}
+                                                onPress={() => toggleCompanyModule(m.key)}
+                                                style={{
+                                                    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+                                                    backgroundColor: active ? '#3b5998' : 'white',
+                                                    borderWidth: 1.5, borderColor: active ? '#3b5998' : '#ddd',
+                                                }}
+                                            >
+                                                <Text style={{ fontSize: 12, fontWeight: '700', color: active ? 'white' : '#555' }}>
+                                                    {active ? '✓ ' : ''}{m.label}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </View>
+                            </View>
+
                             <View style={styles.divider} />
 
                             <Text style={styles.label}>Details:</Text>
@@ -620,7 +659,6 @@ const styles = StyleSheet.create({
     statCardActiveNeutral: { backgroundColor: '#3b5998' },
     statNum: { fontSize: 19, fontWeight: 'bold', color: '#333' },
     statLabel: { fontSize: 10, color: '#666', marginTop: 2, textAlign: 'center' },
-    filterPillsWrap: { height: 44, marginTop: 8 },
     filterPill: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: 'white', borderWidth: 1.5, borderColor: '#ddd' },
     filterPillActive: { backgroundColor: '#3b5998', borderColor: '#3b5998' },
     filterPillText: { fontSize: 12, fontWeight: '700', color: '#555' },
