@@ -20,10 +20,27 @@ import {
 
 // 🔥 SAAS IMPORTS
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { fetchCompanyProfile } from '../services/api/companies';
-import { fetchHomeSummary, HomeSummary } from '../services/api/homeSummary';
 import { MENU_TAG_BUCKET } from '../constants/modules';
+import { fetchCompanyProfile } from '../services/api/companies';
+import { fetchHomeSummary } from '../services/api/homeSummary';
 import { useData } from './context/DataContext';
+
+// Sensible starting permissions per role, used ONLY for a role Admin has
+// never touched in Manage Team → Permissions (i.e. no key for it exists yet
+// in the saved permissions blob at all — see canSee() below). The moment
+// Admin saves any change for a role, that role's real saved settings take
+// over completely and these defaults never apply to it again. Without this,
+// a brand-new company's non-Admin employees see a completely empty menu
+// until Admin manually configures every single toggle for every role.
+const COMMON_DEFAULTS = ['dashboard', 'calendar', 'attendance', 'leave', 'travel', 'payroll', 'advance', 'expenses'];
+const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
+    'Sales Executive': [...COMMON_DEFAULTS, 'leads', 'quotations', 'orders', 'visits', 'demos', 'sales_analysis', 'catalogs', 'sales_team_report', 'map_view', 'courier', 'asset_history', 'payment_due', 'payment_coll'],
+    'Service Engineer': [...COMMON_DEFAULTS, 'tickets', 'service_reports', 'pms', 'installation', 'amc_cmc', 'spares', 'map_view', 'courier', 'asset_history'],
+    'Accountant': [...COMMON_DEFAULTS, 'payment_due', 'payment_coll', 'orders'],
+    'Store Keeper': [...COMMON_DEFAULTS, 'spares', 'courier', 'asset_history', 'installation'],
+    'Hr': [...COMMON_DEFAULTS],
+    'Manager': [...COMMON_DEFAULTS, 'leads', 'quotations', 'orders', 'visits', 'demos', 'sales_analysis', 'catalogs', 'sales_team_report', 'map_view', 'tickets', 'service_reports', 'pms', 'installation', 'amc_cmc', 'spares', 'courier', 'organizations', 'asset_history', 'company_profile', 'payment_due', 'payment_coll'],
+};
 // 🔥 Cache-first dashboard summary (see hooks/useCachedObject.ts)
 import { useCachedObject } from '../hooks/useCachedObject';
 import { buildCacheKey } from '../utils/listCache';
@@ -299,7 +316,12 @@ const saveTokenToDatabase = async (token: string) => {
     const bucket = MENU_TAG_BUCKET[moduleKey];
     if (bucket && myRole !== 'superadmin' && !(companyProfile?.enabledModules || []).includes(bucket)) return false;
 
-    if (myRole === 'admin' || myRole === 'superadmin') return true; 
+    // Personal Notes is a private per-employee scratchpad, not a shared
+    // CRM/ops feature — every employee gets it as long as their company has
+    // HR at all (the company-level check above), no per-role toggle needed.
+    if (moduleKey === 'personal_notes') return true;
+
+    if (myRole === 'admin' || myRole === 'superadmin') return true;
     
     let userRoleKey = 'Sales Executive'; 
     if (myRole.includes('sales')) userRoleKey = 'Sales Executive';
@@ -310,11 +332,20 @@ const saveTokenToDatabase = async (token: string) => {
     else if (myRole.includes('manager')) userRoleKey = 'Manager';
     else userRoleKey = currentUser.role;
 
+    const roleNeverConfigured = appPermissions?.[userRoleKey] === undefined;
     const rolePerms = appPermissions?.[userRoleKey] || {};
     const userSpecificPerms = appPermissions?.[currentUser.id] || appPermissions?.[currentUser.email] || {};
 
     if (userSpecificPerms[moduleKey] !== undefined) {
         return userSpecificPerms[moduleKey] === true; 
+    }
+
+    // Admin has never saved anything for this role at all (not even once) —
+    // use the sensible starting defaults instead of leaving every screen
+    // hidden. The instant Admin saves ANY change for this role, this branch
+    // stops applying and their real settings are used exactly as saved.
+    if (roleNeverConfigured) {
+        return (DEFAULT_ROLE_PERMISSIONS[userRoleKey] || []).includes(moduleKey);
     }
     
     return rolePerms[moduleKey] === true; 

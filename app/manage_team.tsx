@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -32,7 +32,7 @@ import { addHoliday as addHolidayApi, deleteHoliday as deleteHolidayApi, fetchHo
 // 🔥 Permissions tab — new Postgres adapter, replaces Firestore settings_permissions
 import { fetchPermissions, PermissionsBlob, savePermissions } from '../services/api/permissions';
 // 🔥 Tracking tab — new Postgres adapter, replaces Firestore location_logs
-import { fetchLocationLogs, LocationLog } from '../services/api/locationLogs';
+import { fetchLocationLogs } from '../services/api/locationLogs';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { useCachedObject } from '../hooks/useCachedObject';
@@ -788,7 +788,7 @@ const HolidaysTab = () => {
     );
 };
 
-import { AuditLogEntry, fetchAuditLogs } from '../services/api/auditLogs';
+import { fetchAuditLogs } from '../services/api/auditLogs';
 
 // ====================================================================
 // 4️⃣ TRACKING TAB — migrated to Postgres via locationLogs.ts adapter
