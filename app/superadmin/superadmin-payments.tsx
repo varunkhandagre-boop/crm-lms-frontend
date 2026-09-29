@@ -30,6 +30,13 @@ const TABS: { key: TabKey; label: string; color: string }[] = [
     { key: 'ALL', label: 'All History', color: '#3b5998' },
 ];
 
+const MODULE_LABELS: Record<string, string> = { sales: 'Sales & CRM', service: 'Service', hr: 'HR & Payroll' };
+function formatModules(modules?: string[]): string {
+    if (!modules || modules.length === 0) return 'None';
+    if (modules.length === 3) return 'All (Sales, Service, HR)';
+    return modules.map(m => MODULE_LABELS[m] || m).join(', ');
+}
+
 export default function SuperAdminPayments() {
     const router = useRouter();
 
@@ -48,7 +55,7 @@ export default function SuperAdminPayments() {
             const result = await listSubscriptionRequests({
                 status: activeTab,
                 search: searchQuery.trim() || undefined,
-               limit: 1000, 
+                limit: 100,
             });
             setRequests(result.data);
         } catch (e: any) {
@@ -97,7 +104,7 @@ export default function SuperAdminPayments() {
                 Alert.alert('No Data', 'No records found to export.');
                 return;
             }
-            const headers = ['Company Name', 'Owner', 'City', 'GST Number', 'Phone', 'Plan', 'Employees Requested', 'Automation', 'Amount', 'Status', 'Requested On', 'Approved On'];
+            const headers = ['Company Name', 'Owner', 'City', 'GST Number', 'Phone', 'Plan', 'Modules', 'Employees Requested', 'Automation', 'Amount', 'Status', 'Requested On', 'Approved On'];
             const rows = requests.map((item) => {
                 const cd = item.company;
                 return [
@@ -107,6 +114,7 @@ export default function SuperAdminPayments() {
                     cd?.gstNumber || '',
                     cd?.contactPhone || '',
                     item.planLabelSnapshot || '',
+                    formatModules(item.modulesSnapshot),
                     item.employeesRequested || '',
                     item.automationRequested ? 'Yes' : 'No',
                     item.amountPaid || 0,
@@ -134,7 +142,7 @@ export default function SuperAdminPayments() {
         const automationLine = item.automationRequested ? `\nAutomation Add-on: Yes (+₹${item.automationAmount || 3000})` : '';
         Alert.alert(
             'Approve Payment',
-            `Payment received confirm karo?\n\nCompany: ${companyLabel}\nPlan: ${item.planLabelSnapshot}\nAmount: ₹${item.amountPaid}\nEmployees: ${item.employeesRequested}${automationLine}`,
+            `Payment received confirm karo?\n\nCompany: ${companyLabel}\nPlan: ${item.planLabelSnapshot}\nModules: ${formatModules(item.modulesSnapshot)}\nAmount: ₹${item.amountPaid}\nEmployees: ${item.employeesRequested}${automationLine}\n\nApprove karte hi company ko EXACTLY ye modules milenge — isse zyada nahi. Alag chahiye ho to Approve ke baad Companies tab se badal sakte ho.`,
             [
                 { text: 'Cancel', style: 'cancel' },
                 {
@@ -245,6 +253,7 @@ export default function SuperAdminPayments() {
                 <View style={styles.divider} />
 
                 <Text style={styles.detail}>Plan: <Text style={styles.bold}>{item.planLabelSnapshot}</Text></Text>
+                <Text style={styles.detail}>Modules requested: <Text style={styles.bold}>{formatModules(item.modulesSnapshot)}</Text></Text>
                 <Text style={styles.detail}>Employees: <Text style={styles.bold}>{item.employeesRequested}</Text></Text>
                 {item.automationRequested && (
                     <View style={styles.automationBadge}>

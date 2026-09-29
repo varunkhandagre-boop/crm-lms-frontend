@@ -241,13 +241,28 @@ export default function SuperAdminDashboard() {
     const toggleCompanyModule = async (moduleKey: 'sales' | 'service' | 'hr') => {
         if (!selectedCompany) return;
         const current = selectedCompany.enabledModules || [];
-        const next = current.includes(moduleKey) ? current.filter(m => m !== moduleKey) : [...current, moduleKey];
-        try {
-            const updated = await updateCompanyModules(selectedCompany.id, next);
-            refreshSelectedInList(updated);
-        } catch (e: any) {
-            Alert.alert('Error', e.message || 'Could not update modules.');
-        }
+        const turningOn = !current.includes(moduleKey);
+        const next = turningOn ? [...current, moduleKey] : current.filter(m => m !== moduleKey);
+        const label = MODULE_OPTIONS.find(m => m.key === moduleKey)?.label || moduleKey;
+        Alert.alert(
+            turningOn ? `Grant ${label}?` : `Remove ${label}?`,
+            turningOn
+                ? `${selectedCompany.name} will get access to every ${label} screen and API, even if their plan/payment didn't include it.`
+                : `${selectedCompany.name} will lose access to ${label} immediately — confirm they've actually stopped using it.`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: turningOn ? 'Grant' : 'Remove', style: turningOn ? 'default' : 'destructive', onPress: async () => {
+                        try {
+                            const updated = await updateCompanyModules(selectedCompany.id, next);
+                            refreshSelectedInList(updated);
+                        } catch (e: any) {
+                            Alert.alert('Error', e.message || 'Could not update modules.');
+                        }
+                    },
+                },
+            ],
+        );
     };
 
     const saveEmployeeLimit = async () => {

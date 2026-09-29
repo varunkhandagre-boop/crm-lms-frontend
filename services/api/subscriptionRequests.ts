@@ -12,6 +12,7 @@ export interface SubscriptionRequest {
     companyId: string;
     planId: string | null;
     planLabelSnapshot: string;
+    modulesSnapshot: string[]; // 'sales' | 'service' | 'hr' — exactly what this request grants on approval
     employeesRequested: number;
     automationRequested: boolean;
     automationAmount: number | null;
