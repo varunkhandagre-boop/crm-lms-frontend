@@ -441,14 +441,19 @@ export default function SuperAdminDashboard() {
                         </View>
                     )}
 
-                    {/* Status filter chips row (Trial/Suspended not covered by stat cards above) */}
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 15, marginTop: 8, alignItems: 'flex-start' }}>
-                        {STATUS_FILTERS.map(f => (
-                            <TouchableOpacity key={f.key} style={[styles.filterPill, statusFilter === f.key && styles.filterPillActive]} onPress={() => setStatusFilter(f.key)}>
-                                <Text style={[styles.filterPillText, statusFilter === f.key && { color: 'white' }]}>{f.label}</Text>
-                            </TouchableOpacity>
-                        ))}
-                    </ScrollView>
+                    {/* Status filter chips row (Trial/Suspended not covered by stat cards above).
+                        Fixed height wrapper — same pattern as statsWrap above — so this row's
+                        own layout can never squeeze or shift depending on what's rendered
+                        elsewhere on screen (a squeeze here clips/hides the label text). */}
+                    <View style={styles.filterPillsWrap}>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 15, alignItems: 'center' }}>
+                            {STATUS_FILTERS.map(f => (
+                                <TouchableOpacity key={f.key} style={[styles.filterPill, statusFilter === f.key && styles.filterPillActive]} onPress={() => setStatusFilter(f.key)}>
+                                    <Text style={[styles.filterPillText, statusFilter === f.key && { color: 'white' }]}>{f.label}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </View>
 
                     <View style={styles.searchWrap}>
                         <Ionicons name="search" size={20} color="#3b5998" style={{ marginRight: 10 }} />
@@ -674,6 +679,7 @@ const styles = StyleSheet.create({
     statCardActiveNeutral: { backgroundColor: '#3b5998' },
     statNum: { fontSize: 19, fontWeight: 'bold', color: '#333' },
     statLabel: { fontSize: 10, color: '#666', marginTop: 2, textAlign: 'center' },
+    filterPillsWrap: { height: 44, marginTop: 8 },
     filterPill: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: 'white', borderWidth: 1.5, borderColor: '#ddd' },
     filterPillActive: { backgroundColor: '#3b5998', borderColor: '#3b5998' },
     filterPillText: { fontSize: 12, fontWeight: '700', color: '#555' },
