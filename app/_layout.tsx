@@ -4,20 +4,20 @@ import { Slot, usePathname, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { DataProvider, useData } from './context/DataContext';
 import { MENU_TAG_BUCKET } from '../constants/modules';
+import { DataProvider, useData } from './context/DataContext';
 
 import * as Notifications from 'expo-notifications';
 import { manageAttendanceReminders, setupNotificationPermissions } from '../utils/notificationHelper';
 
 import * as Location from 'expo-location';
 // 🔥 Firestore direct imports minimized
-import { fetchCompanyProfile } from '../services/api/companies';
-import { recordLocationLog } from '../services/api/locationLogs';
 import { fetchTodayAttendance } from '../services/api/attendance';
+import { fetchCompanyProfile } from '../services/api/companies';
 import { listLeads } from '../services/api/leads';
-import { listServiceCalls } from '../services/api/serviceCalls';
+import { recordLocationLog } from '../services/api/locationLogs';
 import { fetchOrganizations } from '../services/api/organizations';
+import { listServiceCalls } from '../services/api/serviceCalls';
 import { fetchTasks } from '../services/api/tasks';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -339,7 +339,12 @@ function NavigationLayout() {
 }
 
 // ✅ Subscription expired check
-if (currentUser && isSubscriptionExpired) {
+// SuperAdmin belongs to the "Platform" pseudo-company (999-employee-limit,
+// no real subscription) — it isn't a real paying tenant, so its own
+// subscriptionStatus (often SUSPENDED/not meaningfully maintained) must
+// never gate the SuperAdmin account itself, or SuperAdmin gets locked out
+// of the very panel that manages everyone else's subscriptions.
+if (currentUser && isSubscriptionExpired && currentUser?.role !== 'SuperAdmin') {
     return <SubscriptionExpiredScreen />;
 }
 

@@ -39,6 +39,17 @@ import { urlToBase64Image } from '../utils/pdfImageHelper';
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 
+// Legacy organizations sometimes carry a placeholder/malformed value in
+// their email field from the old Firestore data (blank isn't the only bad
+// case — things like "N/A", "-", a phone number, etc. show up too). The
+// backend's createOrder validates email strictly (z.string().email()), so
+// silently carrying one of these through from an existing org's record —
+// which happens automatically when picking a hospital from the list —
+// used to fail order submission with a raw "Invalid email" error the
+// person had no way to see coming, since they never typed the email
+// themselves. Treat anything that isn't a real email shape as blank.
+const looksLikeEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
+
 export default function AddOrderScreen() {
   const router = useRouter();
 
@@ -360,7 +371,7 @@ export default function AddOrderScreen() {
               setAddress(item.address || '');
               setContactPerson(item.contactPerson || '');
               setMobile(item.mobile || '');
-              setEmail(item.email || '');
+              setEmail(looksLikeEmail(item.email || '') ? item.email : '');
           } else {
               setHospitalName(item);
               setOrgId('');
@@ -455,7 +466,7 @@ if (locationData) {
           const savedOrder = await createOrder({
               orgId: orgId || undefined,
               orgName: hospitalName,
-              address, city, contactPerson, mobile, email: email || undefined,
+              address, city, contactPerson, mobile, email: (email && looksLikeEmail(email)) ? email : undefined,
               poNumber,
               amount: cleanAmount,
               advanceAmount: cleanAdvance,

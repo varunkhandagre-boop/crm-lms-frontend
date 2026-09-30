@@ -128,8 +128,9 @@ const UsersTab = () => {
     // dropdowns — those are a good follow-up candidate for the same key).
     // See hooks/useCachedList.ts.
     const usersCacheKey = buildCacheKey('team_members', currentUser?.companyId);
-    const {
+        const {
         data: users,
+        setData: setUsers,
         loading,
         refreshing: usersRefreshing,
         refresh: refreshUsers,
@@ -173,6 +174,14 @@ const UsersTab = () => {
                     password: formData.password || undefined,
                 });
                 if (!res.success) throw new Error("Could not update user.");
+                // Update this one row immediately from the server's own response —
+                // don't wait for the background refresh to (eventually) catch up.
+                // Was: only fired refreshUsers() off in the background (without
+                // awaiting it) after closing the modal, so re-opening Edit right
+                // after a save could still show the pre-save values if the
+                // refresh hadn't resolved yet — a real, reproducible race, not
+                // just a one-off timing fluke.
+                setUsers(prev => prev.map(u => u.id === editData.id ? res.record : u));
                 Alert.alert("Success", "User Details Updated!");
             } else {
                 const res = await createTeamMember({
@@ -201,10 +210,11 @@ const UsersTab = () => {
                     assetNotes: formData.assetNotes,
                 });
                 if (!res.success) throw new Error("Could not create user.");
+                setUsers(prev => [res.record, ...prev]);
                 Alert.alert("Success ✅", `User Created: ${formData.empId}`);
             }
             setModalVisible(false);
-            refreshUsers();
+            refreshUsers(); // background reconciliation — the optimistic update above already reflects on screen
         } catch (e: any) {
             let msg = e?.message || "Something went wrong.";
             Alert.alert("Error", msg);
