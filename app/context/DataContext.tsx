@@ -343,6 +343,7 @@ export const DataProvider = ({ children }: any) => {
             currentUserRef.current = restoredUser;
             isPostgresSession.current = true;
             setCurrentUser(restoredUser);
+            fetchCompanySettings(stored.companyId);
         } else if (!isPostgresSession.current) {
             console.log("❌ companyId is EMPTY — fetchCompanySettings NOT called!");
             setCurrentUser(null);
@@ -383,6 +384,7 @@ export const DataProvider = ({ children }: any) => {
           currentUserRef.current = newUser;
           isPostgresSession.current = true;
           setCurrentUser(newUser);
+          fetchCompanySettings(stored.companyId);
           setLoading(false);
       }, 600);
 
@@ -512,6 +514,7 @@ export const DataProvider = ({ children }: any) => {
               currentUserRef.current = newUser;
               isPostgresSession.current = true;
               setCurrentUser(newUser);
+              fetchCompanySettings(pgUser.companyId);
 
               // Best-effort: also sign into Firebase with the same
               // credentials, so any not-yet-migrated Firestore-backed

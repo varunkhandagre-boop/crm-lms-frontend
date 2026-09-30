@@ -197,7 +197,25 @@ export default function CompanyProfileScreen() {
                 officeLatitude: location.coords.latitude,
                 officeLongitude: location.coords.longitude,
             }));
-            Alert.alert('Success ✅', 'Office location captured! Remember to save your profile.');
+            // Was: staged into local state only, with an Alert asking the
+            // person to separately remember to tap the main Save button —
+            // easy to miss (this alert doesn't block navigating away), and
+            // when missed, every check-in silently kept tagging Office/Field
+            // as blank forever since the server never actually received
+            // this location. Save it immediately instead of relying on a
+            // second, easy-to-forget step.
+            try {
+                await updateCompanyProfile({
+                    officeLatitude: location.coords.latitude,
+                    officeLongitude: location.coords.longitude,
+                });
+                Alert.alert('Success ✅', 'Office location saved. Check-ins near here will now be tagged "Office".');
+            } catch (saveErr) {
+                Alert.alert(
+                    'Captured, but not saved',
+                    'Got your location, but saving it to the server failed. Please tap the main Save button below before leaving this screen.',
+                );
+            }
         } catch (error) {
             Alert.alert('Error', 'Could not get current location. Make sure GPS is turned on.');
         }
