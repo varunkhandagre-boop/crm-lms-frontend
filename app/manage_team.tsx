@@ -44,7 +44,7 @@ export default function ManageTeamScreen() {
     
     return (
         <View style={styles.container}>
-            <StatusBar barStyle="light-content" backgroundColor="#2c3e50" />
+            <StatusBar barStyle="light-content" />
             
             <View style={styles.header}>
                 <TouchableOpacity 

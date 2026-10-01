@@ -28,7 +28,6 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
     shouldShowBanner: true,
@@ -360,7 +359,7 @@ if (currentUser && isSubscriptionExpired) {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="white" />
+      <StatusBar barStyle="dark-content" />
       
       {/* 🔥 GLOBAL NETWORK INDICATOR */}
       <NetworkIndicator />

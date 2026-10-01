@@ -7,7 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "mycrm",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.crm.lms"
@@ -71,7 +70,7 @@
           "color": "#ffffff"
         }
       ],
-            "expo-font",
+      "expo-font",
       "expo-secure-store",
       [
         "expo-build-properties",
@@ -81,7 +80,10 @@
             "enableShrinkResourcesInReleaseBuilds": true
           }
         }
-      ]
+      ],
+      "expo-image",
+      "expo-sharing",
+      "expo-status-bar"
     ],
     "experiments": {
       "typedRoutes": true,

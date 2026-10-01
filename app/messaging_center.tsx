@@ -46,7 +46,7 @@ export default function MessagingCenterScreen() {
         return (
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
             <View style={styles.container}>
-                <StatusBar barStyle="light-content" backgroundColor="#3b5998" />
+                <StatusBar barStyle="light-content" />
 
                 <View style={styles.header}>
                     <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} style={{ padding: 5 }}>
