@@ -1,4 +1,5 @@
 import { apiClient } from './client';
+import type { LostReason, PipelineColumn } from '../../constants/leadStatus';
 
 // ---------------------------------------------------------------------------
 // Raw API shape (matches the backend's Prisma model)
@@ -27,6 +28,9 @@ export interface ApiLead {
   closingDate: string | null;
   history: { date: string; msg: string; type: string; by: string }[] | null;
   location: { latitude: number; longitude: number } | null;
+  lostReason: string | null;
+  lostReasonNote: string | null;
+  lostAt: string | null;
   createdById: string;
   createdAt: string;
   updatedAt: string;
@@ -86,6 +90,9 @@ export function toLegacyLead(l: ApiLead): any {
     createdAt: l.createdAt,
     history: l.history || [],
     location: l.location,
+    lostReason: l.lostReason || '',
+    lostReasonNote: l.lostReasonNote || '',
+    lostAt: l.lostAt,
   };
 }
 
@@ -147,6 +154,8 @@ export interface CreateLeadPayload {
   nextDate?: string;
   closingDate?: string;
   location?: { latitude: number; longitude: number } | null;
+  lostReason?: LostReason;
+  lostReasonNote?: string;
 }
 
 export async function createLead(payload: CreateLeadPayload): Promise<any> {
@@ -161,4 +170,103 @@ export async function updateLead(id: string, payload: Partial<CreateLeadPayload>
 
 export async function deleteLead(id: string): Promise<void> {
   await apiClient.delete(`/leads/${id}`);
+}
+
+// ---------------------------------------------------------------------------
+// Bulk reassign (Admin / Manager only — enforced server-side)
+// ---------------------------------------------------------------------------
+
+export async function getAssigneeSummary(userId: string): Promise<{ total: number; open: number }> {
+  const res = await apiClient.get<{ data: { total: number; open: number } }>(`/leads/assignee-summary${toQueryString({ userId })}`);
+  return res.data;
+}
+
+export async function bulkReassignLeads(payload: {
+  fromUserId: string;
+  toUserId: string;
+  scope: 'open' | 'all';
+}): Promise<{ count: number; fromUserName: string; toUserName: string }> {
+  const res = await apiClient.post<{ data: { count: number; fromUserName: string; toUserName: string } }>('/leads/bulk-reassign', payload);
+  return res.data;
+}
+
+// ---------------------------------------------------------------------------
+// Duplicate check — searches the whole company's open leads server-side
+// ---------------------------------------------------------------------------
+
+export interface DuplicateLeadMatch {
+  id: string;
+  orgName: string;
+  contactPerson: string | null;
+  status: string;
+  stage: string | null;
+  assignedToId: string;
+  assignedToName: string;
+  nextDate: string | null;
+  matchedOn: 'org' | 'mobile';
+  isMine: boolean;
+  canOpen: boolean;
+}
+
+export async function checkDuplicateLeads(params: { orgName?: string; orgId?: string; mobile?: string }): Promise<DuplicateLeadMatch[]> {
+  const res = await apiClient.get<{ data: DuplicateLeadMatch[] }>(`/leads/check-duplicate${toQueryString(params)}`);
+  return res.data;
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline (Kanban) board — each column is a small server-side page
+// ---------------------------------------------------------------------------
+
+export interface PipelineCard {
+  id: string;
+  orgName: string;
+  contactPerson: string | null;
+  city: string | null;
+  status: string;
+  stage: string | null;
+  isHot: boolean;
+  type: 'HOT' | 'WARM' | 'COLD';
+  nextDate: string | null;
+  requirements: string[];
+  assignedToId: string;
+  assignedToName: string;
+}
+
+export interface PipelineColumnData {
+  column: PipelineColumn;
+  count: number;
+  leads: PipelineCard[];
+}
+
+export async function getPipeline(params: { assignedToId?: string; perColumn?: number } = {}): Promise<PipelineColumnData[]> {
+  const res = await apiClient.get<{ data: PipelineColumnData[] }>(`/leads/pipeline${toQueryString(params)}`);
+  return res.data;
+}
+
+export async function getPipelineColumnPage(params: {
+  column: PipelineColumn;
+  page: number;
+  limit?: number;
+  assignedToId?: string;
+}): Promise<{ data: PipelineCard[]; meta: { total: number; totalPages: number } }> {
+  return apiClient.get<{ data: PipelineCard[]; meta: { total: number; totalPages: number } }>(`/leads/pipeline/column${toQueryString(params)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Lead Insights — funnel, lost reasons, source conversion (all server-side)
+// ---------------------------------------------------------------------------
+
+export interface LeadAnalytics {
+  summary: {
+    total: number; won: number; lost: number; open: number;
+    conversionPct: number; winRatePct: number; lostWithReasonRecorded: number;
+  };
+  funnel: { stage: string; count: number; pctOfTotal: number; pctOfPrevious: number }[];
+  lostReasons: { reason: string; count: number; pct: number }[];
+  bySource: { source: string; total: number; won: number; lost: number; open: number; conversionPct: number; winRatePct: number }[];
+}
+
+export async function getLeadAnalytics(params: { from?: string; to?: string; assignedToId?: string }): Promise<LeadAnalytics> {
+  const res = await apiClient.get<{ data: LeadAnalytics }>(`/leads/analytics${toQueryString(params)}`);
+  return res.data;
 }

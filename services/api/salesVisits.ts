@@ -1,6 +1,8 @@
 import { apiClient } from './client';
 
 export interface ApiSalesVisit {
+  /** Only on create: true when the backend logged this visit against the user's existing open lead instead of creating a new one. */
+  attachedToExistingLead?: boolean;
   id: string;
   companyId: string;
   visitType: string;

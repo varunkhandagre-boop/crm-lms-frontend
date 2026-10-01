@@ -236,7 +236,8 @@ if (locationData) {
                 location: locationData ? { latitude: locationData.lat, longitude: locationData.lng } : null,
             });
 
-            if (visit.leadId && mobile) triggerAutomatedMessages({ hospital, person, mobile, email });
+            // An existing lead already got its welcome message when it was created.
+            if (visit.leadId && mobile && !visit.attachedToExistingLead) triggerAutomatedMessages({ hospital, person, mobile, email });
 
             if (addNotification) {
                 await addNotification({
@@ -248,7 +249,12 @@ if (locationData) {
                 });
             }
 
-            Alert.alert("Success", "Cold Call Logged Successfully!");
+            Alert.alert(
+                "Success",
+                visit.attachedToExistingLead
+                    ? `Visit added to your existing lead for ${hospital} — no duplicate created. ✅`
+                    : "Cold Call Logged Successfully!"
+            );
             router.back();
         } catch (error: any) {
             Alert.alert("Error", error?.message || "Something went wrong.");

@@ -28,6 +28,7 @@ import { listProducts } from '../services/api/products';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { isLostState, LOST_REASONS, LostReason } from '../constants/leadStatus';
 
 export default function LeadDetailsScreen() {
     const router = useRouter();
@@ -64,6 +65,10 @@ export default function LeadDetailsScreen() {
     const [editStage, setEditStage] = useState('');
     const [editNote, setEditNote] = useState('');
     const [editNextDate, setEditNextDate] = useState(new Date());
+    const [editLostReason, setEditLostReason] = useState<LostReason | ''>('');
+    const [editLostNote, setEditLostNote] = useState('');
+    const [showLostReasonPicker, setShowLostReasonPicker] = useState(false);
+    const markingLost = isLostState(editOutcome, editStage);
     
     // 🔥 Multiple Product & Search States
     const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
@@ -112,6 +117,8 @@ export default function LeadDetailsScreen() {
             setSelectedProducts(initialProducts);
 
             if (found.nextDate) setEditNextDate(new Date(found.nextDate));
+            setEditLostReason((found.lostReason as LostReason) || '');
+            setEditLostNote(found.lostReasonNote || '');
         }
     }, [id, leadsList]);
 
@@ -195,6 +202,8 @@ export default function LeadDetailsScreen() {
     const handleLogVisit = async () => {
         if (!editNote.trim()) return Alert.alert("Required", "Please enter discussion note.");
         if (selectedProducts.includes('Other') && !otherProductText.trim()) return Alert.alert("Required", "Please type the new product name.");
+        if (markingLost && !editLostReason) return Alert.alert("Required", "Please select why this lead was lost.");
+        if (markingLost && editLostReason === 'Other' && !editLostNote.trim()) return Alert.alert("Required", "Please describe the reason for losing this lead.");
         
         setIsUpdating(true);
         try {
@@ -234,7 +243,15 @@ export default function LeadDetailsScreen() {
                 lead.type === 'Hot' ? 'HOT' :
                 lead.type === 'Cold' ? 'COLD' : 'WARM';
 
-            const logEntry = `📅 ${todayString}: Visit/Follow-up Logged.\nStatus: ${editOutcome} | Stage: ${editStage}\nProducts: ${productDisplayString}\nNote: ${editNote}`;
+            // Only send the reason when it's new or edited, so re-logging a note
+            // on an already-lost lead doesn't add a "reason updated" entry each time.
+            const lostReasonChanged = markingLost && !!editLostReason && (
+                !isLostState(lead.status, lead.stage) ||
+                editLostReason !== (lead.lostReason || '') ||
+                editLostNote.trim() !== (lead.lostReasonNote || '')
+            );
+            const lostLine = markingLost ? `\nLost Reason: ${editLostReason}${editLostNote.trim() ? ` — ${editLostNote.trim()}` : ''}` : '';
+            const logEntry = `📅 ${todayString}: Visit/Follow-up Logged.\nStatus: ${editOutcome} | Stage: ${editStage}${lostLine}\nProducts: ${productDisplayString}\nNote: ${editNote}`;
             const updatedDiscussion = lead.discussion ? `${logEntry}\n────────────────\n${lead.discussion}` : logEntry;
 
             await apiUpdateLead(lead.id, {
@@ -245,6 +262,9 @@ export default function LeadDetailsScreen() {
                 isHot: apiLeadType === 'HOT',
                 nextDate: nextDateISO,
                 discussion: updatedDiscussion,
+                ...(lostReasonChanged
+                    ? { lostReason: editLostReason as LostReason, lostReasonNote: editLostNote.trim() || undefined }
+                    : {}),
             });
 
             // 3. Timeline history is now handled automatically by the
@@ -265,7 +285,9 @@ export default function LeadDetailsScreen() {
                 requirements: finalProductsToSave,
                 product: productDisplayString,
                 nextDate: nextDateISO,
-                discussion: updatedDiscussion
+                discussion: updatedDiscussion,
+                lostReason: markingLost ? editLostReason : '',
+                lostReasonNote: markingLost ? editLostNote.trim() : '',
             }));
             
             Alert.alert("Success", "Visit Logged & Lead Updated Successfully! 🚀");
@@ -417,6 +439,18 @@ export default function LeadDetailsScreen() {
                                 </Text>
                             </View>
                         </View>
+
+                        {isLostState(lead.status, lead.stage) && (
+                            <View style={styles.lostReasonBox}>
+                                <Ionicons name="close-circle" size={16} color="#c62828" />
+                                <View style={{ flex: 1, marginLeft: 8 }}>
+                                    <Text style={styles.lostReasonTitle}>
+                                        Lost Reason: {lead.lostReason || 'Not recorded'}
+                                    </Text>
+                                    {lead.lostReasonNote ? <Text style={styles.lostReasonNote}>{lead.lostReasonNote}</Text> : null}
+                                </View>
+                            </View>
+                        )}
                     </View>
 
                     {/* 🔥 GENERATE QUOTATION BUTTON */}
@@ -533,6 +567,27 @@ export default function LeadDetailsScreen() {
                                     </View>
                                 </View>
 
+                                {markingLost && (
+                                    <View style={styles.lostReasonInputBox}>
+                                        <Text style={[styles.label, { color: '#c62828', marginTop: 0 }]}>
+                                            Why was this lead lost? <Text style={{color:'red'}}>*</Text>
+                                        </Text>
+                                        <TouchableOpacity style={[styles.pickerBtn, { backgroundColor: 'white' }]} onPress={() => setShowLostReasonPicker(true)}>
+                                            <Text style={{ color: editLostReason ? '#333' : 'gray', fontWeight: 'bold' }} numberOfLines={1}>
+                                                {editLostReason || 'Select reason...'}
+                                            </Text>
+                                            <Ionicons name="chevron-down" size={16} color="gray" />
+                                        </TouchableOpacity>
+                                        <TextInput
+                                            style={[styles.pickerBtn, { marginTop: 8, backgroundColor: 'white' }]}
+                                            placeholder={editLostReason === 'Other' ? 'Describe the reason (required)' : 'Details, e.g. competitor name / quoted price (optional)'}
+                                            value={editLostNote}
+                                            onChangeText={setEditLostNote}
+                                            maxLength={500}
+                                        />
+                                    </View>
+                                )}
+
                                 <Text style={styles.label}>Products Discussed:</Text>
                                 <TouchableOpacity style={styles.pickerBtn} onPress={() => { setProductSearchText(''); setShowProductPicker(true); }}>
                                     <Text style={{ color: selectedProducts.length > 0 ? '#333' : 'gray', fontWeight: 'bold', flex: 1 }} numberOfLines={1}>
@@ -549,12 +604,16 @@ export default function LeadDetailsScreen() {
                                     />
                                 )}
 
-                                <Text style={styles.label}>Next Follow-up Date:</Text>
-                                <TouchableOpacity style={styles.pickerBtn} onPress={() => setShowNextDatePicker(true)}>
-                                    <Text style={{ color: '#333', fontWeight: 'bold' }}>{editNextDate.toLocaleDateString('en-GB')}</Text>
-                                    <Ionicons name="calendar" size={16} color="#3b5998" />
-                                </TouchableOpacity>
-                                {showNextDatePicker && <DateTimePicker value={editNextDate} mode="date" onChange={(e, d) => { setShowNextDatePicker(false); if (d) setEditNextDate(d); }} />}
+                                {!markingLost && (
+                                    <>
+                                        <Text style={styles.label}>Next Follow-up Date:</Text>
+                                        <TouchableOpacity style={styles.pickerBtn} onPress={() => setShowNextDatePicker(true)}>
+                                            <Text style={{ color: '#333', fontWeight: 'bold' }}>{editNextDate.toLocaleDateString('en-GB')}</Text>
+                                            <Ionicons name="calendar" size={16} color="#3b5998" />
+                                        </TouchableOpacity>
+                                        {showNextDatePicker && <DateTimePicker value={editNextDate} mode="date" onChange={(e, d) => { setShowNextDatePicker(false); if (d) setEditNextDate(d); }} />}
+                                    </>
+                                )}
 
                                 <Text style={[styles.label, {marginTop: 15}]}>Discussion Note <Text style={{color:'red'}}>*</Text></Text>
                                 <View style={styles.voiceInputContainer}>
@@ -612,6 +671,21 @@ export default function LeadDetailsScreen() {
                             <TouchableOpacity style={styles.pickerItem} onPress={() => { setEditStage(item); setShowStagePicker(false); }}>
                                 <Text style={{ fontSize: 16, color: '#333', fontWeight: editStage === item ? 'bold' : 'normal' }}>{item}</Text>
                                 {editStage === item && <Ionicons name="checkmark" size={18} color="green" />}
+                            </TouchableOpacity>
+                        )} />
+                    </View>
+                </View>
+            </Modal>
+
+            <Modal visible={showLostReasonPicker} transparent animationType="fade">
+                <View style={styles.pickerOverlay}>
+                    <TouchableOpacity style={StyleSheet.absoluteFill} onPress={() => setShowLostReasonPicker(false)} />
+                    <View style={[styles.pickerContainerSmall, { maxHeight: 420 }]}>
+                        <Text style={styles.pickerHeader}>Lost Reason</Text>
+                        <FlatList data={LOST_REASONS as readonly string[]} keyExtractor={item => item} renderItem={({ item }) => (
+                            <TouchableOpacity style={styles.pickerItem} onPress={() => { setEditLostReason(item as LostReason); setShowLostReasonPicker(false); }}>
+                                <Text style={{ fontSize: 16, color: '#333', fontWeight: editLostReason === item ? 'bold' : 'normal' }}>{item}</Text>
+                                {editLostReason === item && <Ionicons name="checkmark" size={18} color="green" />}
                             </TouchableOpacity>
                         )} />
                     </View>
@@ -740,4 +814,9 @@ const styles = StyleSheet.create({
     closeBtn: { marginTop: 15, alignItems:'center', padding: 12 },
     
     modalSearchBox: { flexDirection:'row', alignItems:'center', backgroundColor:'#f0f0f0', borderRadius:8, padding:10, marginBottom:10 },
+
+    lostReasonBox: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#ffebee', borderRadius: 8, padding: 10, marginTop: 10, borderWidth: 1, borderColor: '#ffcdd2' },
+    lostReasonTitle: { fontSize: 13, fontWeight: 'bold', color: '#c62828' },
+    lostReasonNote: { fontSize: 12, color: '#555', marginTop: 2 },
+    lostReasonInputBox: { backgroundColor: '#fff5f5', borderWidth: 1, borderColor: '#ffcdd2', borderRadius: 8, padding: 10, marginTop: 12 },
 });

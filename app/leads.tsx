@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -25,6 +25,7 @@ import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading pilot (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import ReassignLeadsModal from '../components/ReassignLeadsModal';
 
 export default function LeadsScreen() {
     const router = useRouter();
@@ -44,6 +45,12 @@ export default function LeadsScreen() {
     const [activeFilter, setActiveFilter] = useState('All');
     const [activeStageFilter, setActiveStageFilter] = useState('All'); 
     const [quickFilter, setQuickFilter] = useState('');
+
+    // Opened from the morning follow-up reminder push (/leads?quick=today)
+    const { quick } = useLocalSearchParams<{ quick?: string }>();
+    useEffect(() => {
+        if (quick === 'today' || quick === 'overdue' || quick === 'hot') setQuickFilter(quick);
+    }, [quick]);
     const [searchText, setSearchText] = useState('');
     const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -62,6 +69,9 @@ export default function LeadsScreen() {
     const userRole = currentUser?.role ? currentUser.role.toLowerCase() : 'employee';
     const canViewEmployeeFilter = ['admin', 'manager', 'accountant', 'hr'].includes(userRole);
     const isMaster = ['admin', 'manager', 'accountant', 'hr', 'store', 'superadmin'].includes(userRole);
+    // Matches the backend's REASSIGN_ROLES on /leads/bulk-reassign
+    const canBulkReassign = ['admin', 'manager', 'superadmin'].includes(userRole);
+    const [showReassign, setShowReassign] = useState(false);
 
     useEffect(() => {
         if (viewMode === 'Day' && !quickFilter && !searchText) setVisibleCount(500); 
@@ -316,12 +326,26 @@ export default function LeadsScreen() {
                 <View style={styles.headerTop}>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
-                        <Text style={styles.headerTitle}>Leads Pipeline</Text>
+                        <Text style={styles.headerTitle}>Leads</Text>
                     </View>
-                    <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_sales' as any)}>
-                        <Ionicons name="add" size={20} color="white" />
-                        <Text style={{ color: 'white', fontWeight: 'bold', marginLeft: 2 }}>Cold Call</Text>
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <TouchableOpacity style={styles.reassignBtn} onPress={() => router.push('/leads_board' as any)}>
+                            <Ionicons name="grid-outline" size={16} color="#3b5998" />
+                            <Text style={{ color: '#3b5998', fontWeight: 'bold', marginLeft: 3, fontSize: 12 }}>Board</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.reassignBtn} onPress={() => router.push('/lead_insights' as any)} accessibilityLabel="Lead insights">
+                            <Ionicons name="stats-chart" size={16} color="#3b5998" />
+                        </TouchableOpacity>
+                        {canBulkReassign && (
+                            <TouchableOpacity style={styles.reassignBtn} onPress={() => setShowReassign(true)} accessibilityLabel="Reassign leads">
+                                <Ionicons name="swap-horizontal" size={18} color="#3b5998" />
+                            </TouchableOpacity>
+                        )}
+                        <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_sales' as any)}>
+                            <Ionicons name="add" size={20} color="white" />
+                            <Text style={{ color: 'white', fontWeight: 'bold', marginLeft: 2 }}>Cold Call</Text>
+                        </TouchableOpacity>
+                    </View>
                 </View>
             </View>
 
@@ -530,6 +554,15 @@ export default function LeadsScreen() {
                 </View>
             </Modal>
 
+            {canBulkReassign && (
+                <ReassignLeadsModal
+                    visible={showReassign}
+                    onClose={() => setShowReassign(false)}
+                    onDone={() => { refreshLeads(); }}
+                    teamMembers={teamMembersForLeads}
+                    initialFromUserId={selectedEmployee}
+                />
+            )}
         </View>
     );
 }
@@ -540,6 +573,7 @@ const styles = StyleSheet.create({
     headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 15, marginBottom: 5 },
     headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
     addBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#3b5998', borderRadius: 5, paddingHorizontal: 10, paddingVertical: 6 },
+    reassignBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e8eaf6', borderRadius: 5, paddingHorizontal: 8, paddingVertical: 6 },
 
     actionCardsRow: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 15, marginBottom: 10, marginTop: 10 },
     actionCard: { flex: 1, alignItems: 'center', paddingVertical: 5, borderRadius: 8, marginHorizontal: 3, elevation: 1 },

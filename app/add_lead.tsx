@@ -22,13 +22,27 @@ import {
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 1/2: leads now go through the new backend API
-import { updateLead as apiUpdateLead, createLead, listLeads } from '../services/api/leads';
+import { updateLead as apiUpdateLead, checkDuplicateLeads, createLead, DuplicateLeadMatch, getLead } from '../services/api/leads';
 import { fetchOrganizations } from '../services/api/organizations';
 import { listProducts } from '../services/api/products';
 import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+
+type ChoiceButton = { key: string; text: string; style?: 'cancel' | 'destructive' };
+
+// Alert.alert is callback-based; this lets the save flow await the user's pick.
+function askChoice(title: string, message: string, buttons: ChoiceButton[]): Promise<string> {
+  return new Promise((resolve) => {
+    Alert.alert(
+      title,
+      message,
+      buttons.map((b) => ({ text: b.text, style: b.style, onPress: () => resolve(b.key) })),
+      { cancelable: true, onDismiss: () => resolve('cancel') }
+    );
+  });
+}
 
 export default function AddLeadScreen() {
   const router = useRouter();
@@ -90,11 +104,8 @@ export default function AddLeadScreen() {
       enabled: !!currentUser?.companyId,
       fetcher: fetchTeamMembers,
   });
-  const { data: leadsList } = useCachedList({
-      cacheKey: buildCacheKey('leads', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: listLeads, // For duplicate checking — was: fetchSaaSData("leads")
-  });
+  // Duplicate checking is now a server-side query (checkDuplicateLeads) —
+  // this screen no longer downloads the whole lead list just to check one name.
 
   // 🔥 Organizations — cache-first, shares the SAME 'organizations' cache
   // key as organization.tsx/messaging_center.tsx.
@@ -267,45 +278,73 @@ export default function AddLeadScreen() {
               finalRequirements.push(otherRequirement.trim());
           }
 
+          // 🔥 DUPLICATE CHECK — server-side, across the whole company's open
+          // leads (not just this user's), matching by organization or mobile.
+          let matches: DuplicateLeadMatch[] = [];
           try {
-              // 🔥 FAST LOCAL DUPLICATE CHECK (against API-sourced leadsList)
-              const existingLead = leadsList.find(d => {
-                  return d.orgName === org && 
-                         d.status !== 'Closed' && 
-                         d.status !== 'Converted' && 
-                         d.status !== 'Lost' && 
-                         d.status !== 'Plan Drop';
-              });
-
-              if (existingLead) {
-                  // ⚠️ DUPLICATE FOUND: MERGE DATA VIA NEW API
-                  let currentReqs = existingLead.requirements || [];
-                  let newReqsToAdd = finalRequirements.filter((r: string) => !currentReqs.includes(r));
-                  let updatedReqs = [...currentReqs, ...newReqsToAdd];
-
-                  const todayStr = new Date().toLocaleDateString('en-GB');
-                  const newNote = `➕ New Inquiry Merged (${todayStr}):\nAdded Req: ${finalRequirements.join(', ')}\nNote: ${discussion}`;
-                  const updatedDiscussion = `${newNote}\n────────────────\n${existingLead.discussion || ''}`;
-
-                  await apiUpdateLead(existingLead.id, {
-                      requirements: updatedReqs,
-                      discussion: updatedDiscussion,
-                      orgId: orgId || existingLead.orgId || undefined, 
-                      isHot: leadType === 'Hot' ? true : existingLead.isHot 
-                  });
-
-                  Alert.alert(
-                      "Lead Merged 🔄", 
-                      `This organization already exists.\n\n✅ Added new products: ${newReqsToAdd.join(', ') || 'None'}\n✅ Updated discussion history.`,
-                      [{ text: "OK", onPress: () => router.back() }]
-                  );
-                  
-                  setIsSubmitting(false);
-                  return; 
-              }
-
+              matches = await checkDuplicateLeads({ orgName: org, orgId: orgId || undefined, mobile: mobile || undefined });
           } catch (e) {
-              console.log("Error checking duplicate:", e);
+              // A failed check shouldn't block saving a genuine new lead.
+              console.log("Duplicate check failed:", e);
+          }
+
+          const ownMatch = matches.find(m => m.isMine && m.matchedOn === 'org');
+          const otherMatch = ownMatch ? undefined : matches[0];
+
+          if (ownMatch) {
+              const choice = await askChoice(
+                  "Lead Already Exists 🔄",
+                  `You already have an open lead for ${ownMatch.orgName} (Stage: ${ownMatch.stage || 'New'}).\n\nAdd this inquiry to it instead of creating a duplicate?`,
+                  [
+                      { key: 'merge', text: 'Add to Existing' },
+                      { key: 'create', text: 'Create New Anyway' },
+                      { key: 'cancel', text: 'Cancel', style: 'cancel' },
+                  ]
+              );
+              if (choice === 'cancel') { setIsSubmitting(false); return; }
+              if (choice === 'merge') {
+                  try {
+                      const existingLead = await getLead(ownMatch.id);
+                      const currentReqs: string[] = existingLead.requirements || [];
+                      const newReqsToAdd = finalRequirements.filter((r: string) => !currentReqs.includes(r));
+                      const todayStr = new Date().toLocaleDateString('en-GB');
+                      const newNote = `➕ New Inquiry Merged (${todayStr}):\nAdded Req: ${finalRequirements.join(', ')}\nNote: ${discussion}`;
+
+                      await apiUpdateLead(existingLead.id, {
+                          requirements: [...currentReqs, ...newReqsToAdd],
+                          discussion: `${newNote}\n────────────────\n${existingLead.discussion || ''}`,
+                          orgId: orgId || existingLead.orgId || undefined,
+                          isHot: leadType === 'Hot' ? true : existingLead.isHot,
+                      });
+                      Alert.alert(
+                          "Lead Updated 🔄",
+                          `✅ Added new products: ${newReqsToAdd.join(', ') || 'None'}\n✅ Updated discussion history.`,
+                          [{ text: "OK", onPress: () => router.back() }]
+                      );
+                  } catch (err: any) {
+                      Alert.alert("Error", err?.message || "Could not update the existing lead.");
+                  } finally {
+                      setIsSubmitting(false);
+                  }
+                  return;
+              }
+          } else if (otherMatch) {
+              const who = otherMatch.isMine ? 'you' : otherMatch.assignedToName;
+              const message = otherMatch.matchedOn === 'mobile'
+                  ? `This mobile number is already on an open lead: ${otherMatch.orgName}, handled by ${who}.`
+                  : `${otherMatch.orgName} is already an open lead handled by ${who} (Stage: ${otherMatch.stage || 'New'}).\n\nPlease coordinate with them before creating another lead.`;
+              const buttons: ChoiceButton[] = [
+                  ...(otherMatch.canOpen ? [{ key: 'open', text: 'View Lead' }] : []),
+                  { key: 'create', text: 'Create Anyway' },
+                  { key: 'cancel', text: 'Cancel', style: 'cancel' as const },
+              ];
+              const choice = await askChoice("Possible Duplicate ⚠️", message, buttons);
+              if (choice === 'open') {
+                  setIsSubmitting(false);
+                  router.replace({ pathname: '/lead_details', params: { id: otherMatch.id } } as any);
+                  return;
+              }
+              if (choice === 'cancel') { setIsSubmitting(false); return; }
           }
 
           // ✅ CREATE NEW LEAD via the new backend API
