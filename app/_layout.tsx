@@ -4,20 +4,20 @@ import { Slot, usePathname, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MENU_TAG_BUCKET } from '../constants/modules';
 import { DataProvider, useData } from './context/DataContext';
+import { MENU_TAG_BUCKET } from '../constants/modules';
 
 import * as Notifications from 'expo-notifications';
 import { manageAttendanceReminders, setupNotificationPermissions } from '../utils/notificationHelper';
 
 import * as Location from 'expo-location';
 // 🔥 Firestore direct imports minimized
-import { fetchTodayAttendance } from '../services/api/attendance';
 import { fetchCompanyProfile } from '../services/api/companies';
-import { listLeads } from '../services/api/leads';
 import { recordLocationLog } from '../services/api/locationLogs';
-import { fetchOrganizations } from '../services/api/organizations';
+import { fetchTodayAttendance } from '../services/api/attendance';
+import { getLeadCounts } from '../services/api/leads';
 import { listServiceCalls } from '../services/api/serviceCalls';
+import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTasks } from '../services/api/tasks';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -174,11 +174,14 @@ function NavigationLayout() {
           return Array.from(new Map([...given, ...received].map((t: any) => [t.id, t])).values());
       },
   });
-  const { data: leadList } = useCachedList({
-      cacheKey: buildCacheKey('leads', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: listLeads,
-  });
+  // Leads badge = open-lead count from the server (one COUNT query) — this
+  // used to download every lead at app start just to count them.
+  const [leadCount, setLeadCount] = useState(0);
+  useEffect(() => {
+      if (!currentUser?.companyId) return;
+      getLeadCounts().then(c => setLeadCount(c.open)).catch(() => {});
+      // Refreshed when the person lands back on Home, where the badge shows.
+  }, [currentUser?.companyId, pathname === '/']);
   const { data: serviceCallList } = useCachedList({
       cacheKey: buildCacheKey('service_calls', currentUser?.companyId),
       enabled: !!currentUser?.companyId,
@@ -235,10 +238,6 @@ function NavigationLayout() {
   };
   const taskCount = calculateTaskBadge();
 
-  const leadCount = leadList.filter((l: any) => {
-      if (l.status === 'Closed' || l.status === 'Converted') return false; 
-      return isBoss || l.senderId === currentUser?.uid || l.userId === currentUser?.uid;
-  }).length;
 
   const serviceCount = serviceCallList.filter((s: any) => {
       if (s.status !== 'Open' && s.status !== 'Assigned') return false;
@@ -339,12 +338,7 @@ function NavigationLayout() {
 }
 
 // ✅ Subscription expired check
-// SuperAdmin belongs to the "Platform" pseudo-company (999-employee-limit,
-// no real subscription) — it isn't a real paying tenant, so its own
-// subscriptionStatus (often SUSPENDED/not meaningfully maintained) must
-// never gate the SuperAdmin account itself, or SuperAdmin gets locked out
-// of the very panel that manages everyone else's subscriptions.
-if (currentUser && isSubscriptionExpired && currentUser?.role !== 'SuperAdmin') {
+if (currentUser && isSubscriptionExpired) {
     return <SubscriptionExpiredScreen />;
 }
 

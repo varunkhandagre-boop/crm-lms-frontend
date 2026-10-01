@@ -9,6 +9,7 @@ import {
     ScrollView,
     StyleSheet,
     Text,
+    TextInput,
     TouchableOpacity,
     useWindowDimensions,
     View,
@@ -56,6 +57,7 @@ export default function LeadsBoardScreen() {
     const [employeeId, setEmployeeId] = useState<string | undefined>(undefined);
     const [showEmployeePicker, setShowEmployeePicker] = useState(false);
     const [moving, setMoving] = useState<PipelineCard | null>(null);
+    const [moveNote, setMoveNote] = useState('');
 
     const { data: teamMembers } = useCachedList({
         cacheKey: buildCacheKey('team_members', currentUser?.companyId),
@@ -92,7 +94,10 @@ export default function LeadsBoardScreen() {
     };
 
     // Optimistic move: update the board immediately, reload it if the save fails.
+    const openMove = (card: PipelineCard) => { setMoveNote(''); setMoving(card); };
+
     const moveTo = async (card: PipelineCard, stage: string) => {
+        const note = moveNote.trim();
         setMoving(null);
         const fromColumn = columns.find(c => c.leads.some(l => l.id === card.id))?.column;
         setColumns(prev => prev.map(c => {
@@ -101,7 +106,7 @@ export default function LeadsBoardScreen() {
             return c;
         }));
         try {
-            await updateLead(card.id, { stage });
+            await updateLead(card.id, { stage, ...(note ? { note } : {}) });
         } catch (e: any) {
             Alert.alert('Error', e?.message || 'Could not move the lead');
             load();
@@ -118,14 +123,14 @@ export default function LeadsBoardScreen() {
                 key={card.id}
                 style={styles.card}
                 onPress={() => router.push({ pathname: '/lead_details', params: { id: card.id } } as any)}
-                onLongPress={() => setMoving(card)}
+                onLongPress={() => openMove(card)}
                 delayLongPress={300}
             >
                 <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
                     <Text style={styles.cardTitle} numberOfLines={2}>
                         {card.isHot ? '🔥 ' : ''}{card.orgName}
                     </Text>
-                    <TouchableOpacity onPress={() => setMoving(card)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <TouchableOpacity onPress={() => openMove(card)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                         <Ionicons name="swap-horizontal" size={18} color="#3b5998" />
                     </TouchableOpacity>
                 </View>
@@ -224,6 +229,14 @@ export default function LeadsBoardScreen() {
                     <TouchableOpacity style={StyleSheet.absoluteFill} onPress={() => setMoving(null)} />
                     <View style={styles.pickerBox}>
                         <Text style={styles.pickerTitle} numberOfLines={2}>Move "{moving?.orgName}" to</Text>
+                        <TextInput
+                            style={styles.noteInput}
+                            placeholder="Add a note (optional) — e.g. Quotation sent ₹4.5L"
+                            value={moveNote}
+                            onChangeText={setMoveNote}
+                            maxLength={1000}
+                            multiline
+                        />
                         {PIPELINE_STAGES.map(stage => {
                             const current = (moving?.stage || 'New') === stage;
                             return (
@@ -302,5 +315,6 @@ const styles = StyleSheet.create({
     pickerTitle: { fontSize: 16, fontWeight: 'bold', color: '#3b5998', marginBottom: 8, textAlign: 'center' },
     pickerItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eee' },
     dot: { width: 10, height: 10, borderRadius: 5, marginRight: 10 },
+    noteInput: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, fontSize: 13, backgroundColor: '#fafafa', marginBottom: 6, maxHeight: 90, textAlignVertical: 'top' },
     pickerHint: { fontSize: 11, color: 'gray', marginTop: 10, textAlign: 'center' },
 });

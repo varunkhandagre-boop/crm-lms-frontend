@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -22,7 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useData } from './context/DataContext';
 // 🔥 Phase 1/2: lead update/delete and visit logging now via the new backend API
-import { deleteLead as apiDeleteLead, listLeads, updateLead as apiUpdateLead } from '../services/api/leads';
+import { deleteLead as apiDeleteLead, getLead, updateLead as apiUpdateLead } from '../services/api/leads';
 import { createSalesVisit } from '../services/api/salesVisits';
 import { listProducts } from '../services/api/products';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
@@ -37,18 +37,20 @@ export default function LeadDetailsScreen() {
     
     const { currentUser } = useData();
 
-    // 🔥 Leads + Products — cache-first, sharing the SAME cache keys as
-    // leads.tsx ('leads') and product_master.tsx ('products'). Previously
-    // read from DataContext (leadsList was Postgres-sourced via
-    // refreshLeads() there, so no behavior change; productList was
-    // Firestore-sourced there — a genuine bug, since every other screen's
-    // product list comes from Postgres via listProducts(). This fixes that
-    // inconsistency.
-    const { data: leadsList, refresh: refreshLeads } = useCachedList({
-        cacheKey: buildCacheKey('leads', currentUser?.companyId),
-        enabled: !!currentUser?.companyId,
-        fetcher: listLeads,
-    });
+    // Only this one lead is fetched (by id) — this screen used to download
+    // the company's entire lead list just to find it. Products stay
+    // cache-first, sharing product_master.tsx's 'products' key.
+    const [fetchedLead, setFetchedLead] = useState<any>(null);
+    const refreshLeads = useCallback(async () => {
+        if (!id) return;
+        try {
+            setFetchedLead(await getLead(String(id)));
+        } catch (e: any) {
+            Alert.alert('Error', e?.message || 'Could not load this lead');
+        }
+    }, [id]);
+    useEffect(() => { refreshLeads(); }, [refreshLeads]);
+
     const { data: productList } = useCachedList({
         cacheKey: buildCacheKey('products', currentUser?.companyId),
         enabled: !!currentUser?.companyId,
@@ -97,7 +99,7 @@ export default function LeadDetailsScreen() {
     };
 
     useEffect(() => {
-        const found = leadsList.find((l: any) => l.id === id);
+        const found = fetchedLead;
         if (found) {
             setLead(found);
             setEditOutcome(found.status || 'Follow Up');
@@ -120,7 +122,7 @@ export default function LeadDetailsScreen() {
             setEditLostReason((found.lostReason as LostReason) || '');
             setEditLostNote(found.lostReasonNote || '');
         }
-    }, [id, leadsList]);
+    }, [fetchedLead]);
 
     const toggleRecording = () => {
         Alert.alert("Coming Soon 🎤", "Voice-to-Text feature will be available in the next update!");
@@ -315,8 +317,7 @@ export default function LeadDetailsScreen() {
                         try {
                             await apiDeleteLead(lead.id);
                             Alert.alert("Deleted", "Lead has been deleted successfully.");
-                            if (refreshLeads) await refreshLeads();
-                            router.back(); 
+                            router.back(); // the Leads list refreshes itself when it regains focus
                         } catch (error: any) {
                             Alert.alert("Error", error.message);
                         } finally {

@@ -137,7 +137,9 @@ export default function AddLeadScreen() {
 
   const sources = ["Cold Call", "Freelancer", "Dealer", "Tele Calling", "Website", "Existing Customer", "Conference", "Exhibition"];
   const probabilityOptions = ["25", "50", "75", "100"];
-  const statusOptions = ["Open", "Replied", "Follow up", "Converted", "Plan Drop", "Lost"];
+  // A brand-new lead can't already be lost — marking a lead Lost happens from
+  // Lead Details, where the lost reason is captured.
+  const statusOptions = ["Open", "Replied", "Follow up", "Converted"];
   const stageOptions = ["New", "Introduction", "Technical Review", "Quotation", "Order Negotiation", "Price Review"];
   const typeOptions = ["Hot", "Warm", "Cold"];
   

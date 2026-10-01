@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -19,13 +19,15 @@ import {
 // 🔥 SAAS IMPORTS (users still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
-// 🔥 Phase 1: leads now go through the new backend API
-import { listLeads } from '../services/api/leads';
+// Leads are filtered + paginated on the server (hooks/useServerLeads.ts)
+import { getLeadCounts, LeadCounts } from '../services/api/leads';
+import { buildLeadFilters, useServerLeads } from '../hooks/useServerLeads';
 import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading pilot (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import ReassignLeadsModal from '../components/ReassignLeadsModal';
+import CloseStaleLeadsModal from '../components/CloseStaleLeadsModal';
 
 export default function LeadsScreen() {
     const router = useRouter();
@@ -38,13 +40,13 @@ export default function LeadsScreen() {
     const { isDbLoading } = useSaaSDB();
 
     // 🔥 3. Lazy Loaded States
-    // leadsList now comes from useCachedList below (cache-first pilot)
+    // Leads come from useServerLeads below (server-side filtered pages)
     const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
 
     // --- STATES ---
     const [activeFilter, setActiveFilter] = useState('All');
     const [activeStageFilter, setActiveStageFilter] = useState('All'); 
-    const [quickFilter, setQuickFilter] = useState('');
+    const [quickFilter, setQuickFilter] = useState<'' | 'overdue' | 'today' | 'hot'>('');
 
     // Opened from the morning follow-up reminder push (/leads?quick=today)
     const { quick } = useLocalSearchParams<{ quick?: string }>();
@@ -64,7 +66,6 @@ export default function LeadsScreen() {
     const [filterModalVisible, setFilterModalVisible] = useState(false);
     const [stageFilterModalVisible, setStageFilterModalVisible] = useState(false); 
     
-    const [visibleCount, setVisibleCount] = useState(20);
 
     const userRole = currentUser?.role ? currentUser.role.toLowerCase() : 'employee';
     const canViewEmployeeFilter = ['admin', 'manager', 'accountant', 'hr'].includes(userRole);
@@ -72,31 +73,76 @@ export default function LeadsScreen() {
     // Matches the backend's REASSIGN_ROLES on /leads/bulk-reassign
     const canBulkReassign = ['admin', 'manager', 'superadmin'].includes(userRole);
     const [showReassign, setShowReassign] = useState(false);
+    const [showCloseStale, setShowCloseStale] = useState(false);
+    const [showAdminMenu, setShowAdminMenu] = useState(false);
 
-    useEffect(() => {
-        if (viewMode === 'Day' && !quickFilter && !searchText) setVisibleCount(500); 
-        else setVisibleCount(20); 
-    }, [viewMode, currentDate, activeFilter, activeStageFilter, quickFilter, searchText, selectedEmployee]);
 
     // OPTIONS
     const leadStatuses = ['All', 'Interested', 'Follow Up', 'Demo Planned', 'Order Expected', 'Converted (Win)', 'Lost'];
     const leadStages = ['All', 'New', 'Introduction', 'Technical Review', 'Quotation', 'Negotiation', 'Order Closed'];
 
-    // 🔥 4. LEADS — cache-first (instant from AsyncStorage, then background
-    // refresh from the API). See hooks/useCachedList.ts for how this works
-    // and why the cache key must include companyId.
-    const leadsCacheKey = buildCacheKey('leads', currentUser?.companyId);
+    // 🔥 4. LEADS — filtered, sorted and paginated on the server; only the
+    // current page is ever on the phone. Search is debounced so typing
+    // doesn't fire a request per keystroke.
+    const [debouncedSearch, setDebouncedSearch] = useState('');
+    useEffect(() => {
+        const t = setTimeout(() => setDebouncedSearch(searchText), 400);
+        return () => clearTimeout(t);
+    }, [searchText]);
+
+    const employeeFilterId = canViewEmployeeFilter && selectedEmployee !== 'All' ? selectedEmployee : undefined;
+    const leadFilters = useMemo(() => buildLeadFilters({
+        quickFilter,
+        status: activeFilter,
+        stage: activeStageFilter,
+        search: debouncedSearch,
+        viewMode,
+        currentDate,
+        employeeId: employeeFilterId,
+    }), [quickFilter, activeFilter, activeStageFilter, debouncedSearch, viewMode, currentDate, employeeFilterId]);
+
+    // Only the screen's default view (this FY, open leads, no filters) is
+    // cached, so the screen still opens instantly without storing every
+    // filter combination on the device.
+    const isDefaultView = !quickFilter && activeFilter === 'All' && activeStageFilter === 'All' && !debouncedSearch
+        && viewMode === 'FY' && !employeeFilterId && buildLeadFilters({ quickFilter: '', status: 'All', stage: 'All', search: '', viewMode: 'FY', currentDate: new Date() }).from === leadFilters.from;
     const {
-        data: leadsList,
-        setData: setLeadsList,
+        items: leadItems,
+        total: leadsTotal,
         loading: leadsLoading,
+        loadingMore: leadsLoadingMore,
         refreshing: leadsRefreshing,
-        refresh: refreshLeads,
-    } = useCachedList({
-        cacheKey: leadsCacheKey,
+        hasMore: leadsHasMore,
+        loadMore: loadMoreLeads,
+        refresh: refreshLeadPage,
+        reload: reloadLeadPage,
+    } = useServerLeads({
+        filters: leadFilters,
         enabled: !!currentUser?.companyId,
-        fetcher: listLeads, // was: fetchSaaSData("leads")
+        cacheKey: isDefaultView ? buildCacheKey('leads_first_page', currentUser?.companyId) : null,
     });
+
+    // Overdue / Due Today / Hot cards — server-side counts.
+    const [counts, setCounts] = useState<LeadCounts>({ open: 0, overdue: 0, today: 0, hot: 0 });
+    const loadCounts = useCallback(() => {
+        getLeadCounts(employeeFilterId).then(setCounts).catch(() => {});
+    }, [employeeFilterId]);
+    useEffect(() => { if (currentUser?.companyId) loadCounts(); }, [loadCounts, currentUser?.companyId]);
+
+    const refreshLeads = useCallback(async () => {
+        loadCounts();
+        await refreshLeadPage();
+    }, [loadCounts, refreshLeadPage]);
+
+    // Coming back from Lead Details / Board / Add Lead: re-fetch the current
+    // page so edits show up. Skips the first focus (the initial load above
+    // already covers it). One small page request — not the whole table.
+    const hasFocusedOnce = useRef(false);
+    useFocusEffect(useCallback(() => {
+        if (!hasFocusedOnce.current) { hasFocusedOnce.current = true; return; }
+        loadCounts();
+        reloadLeadPage();
+    }, [loadCounts, reloadLeadPage]));
 
     // 🔥 Team members — cache-first, shares the SAME 'team_members' cache
     // key as manage_team.tsx/employee_timeline.tsx. Fetched regardless of
@@ -117,16 +163,11 @@ export default function LeadsScreen() {
         }
     }, [teamMembersForLeads, canViewEmployeeFilter]);
 
-    // 🔥 senderName was never populated — the API only returns senderId
-    // (see services/api/leads.ts), so the lead-creator's name was never
-    // shown. Fill it in once team members are available.
-    useEffect(() => {
-        if (teamMembersForLeads.length === 0 || leadsList.length === 0) return;
-        const nameById = new Map(teamMembersForLeads.map((u: any) => [u.id, u.name || 'Unknown']));
-        const needsEnrichment = leadsList.some((l: any) => l.senderName === undefined);
-        if (!needsEnrichment) return;
-        setLeadsList(leadsList.map((l: any) => ({ ...l, senderName: nameById.get(l.senderId) || 'Unknown' })));
-    }, [leadsList, teamMembersForLeads]);
+    // The API only returns createdById; show the creator's name from the team list.
+    const nameById = useMemo(
+        () => new Map(teamMembersForLeads.map((u: any) => [u.id, u.name || 'Unknown'])),
+        [teamMembersForLeads]
+    );
 
     const parseDate = (dateStr: any) => {
         if (!dateStr) return new Date(0);
@@ -189,127 +230,6 @@ export default function LeadsScreen() {
         }
     };
 
-    const getFilteredData = () => {
-        let data = Array.isArray(leadsList) ? [...leadsList] : [];
-
-        if (!isMaster) {
-            const myId = currentUser?.id || currentUser?.uid;
-            data = data.filter((item: any) => 
-                item.userId === myId || item.assignedTo === myId || item.senderId === myId || item.senderUid === myId
-            );
-        }
-
-        if (isMaster && selectedEmployee !== 'All') {
-            data = data.filter((item: any) =>
-                (item.senderUid === selectedEmployee) || (item.uid === selectedEmployee) || (item.userId === selectedEmployee) || 
-                (item.assignedTo === selectedEmployee) || (item.senderName === selectedEmployeeName) || (item.ownerName === selectedEmployeeName)
-            );
-        }
-
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        if (quickFilter === 'overdue') {
-            data = data.filter((item: any) => {
-                if (!item.nextDate) return false;
-                const d = parseDate(item.nextDate);
-                return d < today && item.status !== 'Converted (Win)' && item.status !== 'Lost' && item.status !== 'Order Closed';
-            });
-        } else if (quickFilter === 'today') {
-            data = data.filter((item: any) => {
-                if (!item.nextDate) return false;
-                const d = parseDate(item.nextDate);
-                return d.getTime() === today.getTime() && item.status !== 'Converted (Win)' && item.status !== 'Lost';
-            });
-        } else if (quickFilter === 'hot') {
-            data = data.filter((item: any) => (item.isHot === true || item.type === 'Hot') && item.status !== 'Converted (Win)' && item.status !== 'Lost');
-        }
-
-        if (!quickFilter) {
-            if (activeFilter === 'All') {
-                data = data.filter((item: any) => {
-                    const s = (item.status || '').toLowerCase().trim();
-                    return s !== 'converted (win)' && s !== 'lost' && s !== 'plan drop' && s !== 'order closed';
-                });
-            } else {
-                data = data.filter((item: any) => {
-                    const dbStatus = (item.status || 'open').toLowerCase().trim();
-                    const filterStatus = activeFilter.toLowerCase().trim();
-                    return dbStatus === filterStatus || (filterStatus === 'open' && dbStatus === 'new');
-                });
-            }
-
-            if (activeStageFilter !== 'All') {
-                data = data.filter((item: any) => {
-                    return (item.stage || '').toLowerCase().trim() === activeStageFilter.toLowerCase().trim();
-                });
-            }
-        }
-
-        if (searchText) {
-            const lowerText = searchText.toLowerCase();
-            data = data.filter((item: any) => {
-                const fullString = `${item.org || ''} ${item.contactPerson || ''} ${item.status || ''} ${item.stage || ''} ${item.requirements || item.product || ''}`.toLowerCase();
-                return fullString.includes(lowerText);
-            });
-        } 
-        else if (viewMode !== 'All' && !quickFilter) {
-            const targetYear = currentDate.getFullYear();
-            const targetMonth = currentDate.getMonth();
-            const targetDay = currentDate.getDate();
-
-            const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-            let fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-            const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
-
-            data = data.filter((item: any) => {
-                const dateToCheck = item.nextDate || item.dateIso || item.createdAt || item.date;
-                if (!dateToCheck) return false;
-                const itemDate = parseDate(dateToCheck);
-                const itemTime = itemDate.getTime();
-                if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-                if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-                if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-                return true;
-            });
-        }
-
-        data.sort((a: any, b: any) => {
-            const dateA = a.nextDate ? parseDate(a.nextDate).getTime() : 0;
-            const dateB = b.nextDate ? parseDate(b.nextDate).getTime() : 0;
-            if (dateA === 0) return 1;
-            if (dateB === 0) return -1;
-            return dateA - dateB;
-        });
-
-        return data;
-    };
-
-    const fullList = getFilteredData(); 
-    const renderedList = fullList.slice(0, visibleCount);
-
-    const getActionCounts = () => {
-        let baseData = Array.isArray(leadsList) ? [...leadsList] : [];
-        
-        if (!isMaster) {
-            const myId = currentUser?.id || currentUser?.uid;
-            baseData = baseData.filter((item: any) => item.userId === myId || item.assignedTo === myId || item.senderId === myId);
-        }
-        if (isMaster && selectedEmployee !== 'All') {
-            baseData = baseData.filter((item: any) => item.senderUid === selectedEmployee || item.userId === selectedEmployee || item.senderName === selectedEmployeeName);
-        }
-
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        const overdue = baseData.filter((i: any) => i.nextDate && parseDate(i.nextDate) < today && i.status !== 'Converted (Win)' && i.status !== 'Lost' && i.status !== 'Order Closed').length;
-        const dueToday = baseData.filter((i: any) => i.nextDate && parseDate(i.nextDate).getTime() === today.getTime() && i.status !== 'Converted (Win)' && i.status !== 'Lost').length;
-        const hot = baseData.filter((i: any) => (i.isHot || i.type === 'Hot') && i.status !== 'Converted (Win)' && i.status !== 'Lost').length;
-
-        return { overdue, dueToday, hot };
-    };
-    const actionCounts = getActionCounts();
-
     const openWhatsApp = (item: any) => {
         const mobile = item.mobile || item.contactNumber || '';
         if (!mobile) return Alert.alert("Error", "No mobile number found.");
@@ -337,8 +257,8 @@ export default function LeadsScreen() {
                             <Ionicons name="stats-chart" size={16} color="#3b5998" />
                         </TouchableOpacity>
                         {canBulkReassign && (
-                            <TouchableOpacity style={styles.reassignBtn} onPress={() => setShowReassign(true)} accessibilityLabel="Reassign leads">
-                                <Ionicons name="swap-horizontal" size={18} color="#3b5998" />
+                            <TouchableOpacity style={styles.reassignBtn} onPress={() => setShowAdminMenu(true)} accessibilityLabel="Lead management">
+                                <Ionicons name="ellipsis-vertical" size={18} color="#3b5998" />
                             </TouchableOpacity>
                         )}
                         <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_sales' as any)}>
@@ -352,15 +272,15 @@ export default function LeadsScreen() {
             <View style={{ backgroundColor: 'white', paddingBottom: 5 }}>
                 <View style={styles.actionCardsRow}>
                     <TouchableOpacity style={[styles.actionCard, { backgroundColor: '#ffebee', borderColor: quickFilter === 'overdue' ? '#d32f2f' : 'transparent', borderWidth: 1 }]} onPress={() => setQuickFilter(quickFilter === 'overdue' ? '' : 'overdue')}>
-                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#d32f2f' }}>{actionCounts.overdue}</Text>
+                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#d32f2f' }}>{counts.overdue}</Text>
                         <Text style={{ fontSize: 10, color: '#d32f2f', fontWeight: '600' }}>OVERDUE</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={[styles.actionCard, { backgroundColor: '#fff3e0', borderColor: quickFilter === 'today' ? '#f57c00' : 'transparent', borderWidth: 1 }]} onPress={() => setQuickFilter(quickFilter === 'today' ? '' : 'today')}>
-                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#f57c00' }}>{actionCounts.dueToday}</Text>
+                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#f57c00' }}>{counts.today}</Text>
                         <Text style={{ fontSize: 10, color: '#f57c00', fontWeight: '600' }}>DUE TODAY</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={[styles.actionCard, { backgroundColor: '#e8f5e9', borderColor: quickFilter === 'hot' ? '#2e7d32' : 'transparent', borderWidth: 1 }]} onPress={() => setQuickFilter(quickFilter === 'hot' ? '' : 'hot')}>
-                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#2e7d32' }}>{actionCounts.hot}</Text>
+                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#2e7d32' }}>{counts.hot}</Text>
                         <Text style={{ fontSize: 10, color: '#2e7d32', fontWeight: '600' }}>HOT LEADS</Text>
                     </TouchableOpacity>
                 </View>
@@ -409,11 +329,11 @@ export default function LeadsScreen() {
                         )}
                     </>
                 )}
-                <Text style={{ textAlign:'right', fontSize: 12, color: 'gray', paddingHorizontal:15, paddingBottom:5 }}>Total Leads: <Text style={{ fontWeight: 'bold', color: '#3b5998' }}>{fullList.length}</Text></Text>
+                <Text style={{ textAlign:'right', fontSize: 12, color: 'gray', paddingHorizontal:15, paddingBottom:5 }}>Total Leads: <Text style={{ fontWeight: 'bold', color: '#3b5998' }}>{leadsTotal}</Text>{leadsLoading && leadItems.length > 0 ? '  ⏳' : ''}</Text>
             </View>
 
             <FlatList
-                data={renderedList}
+                data={leadItems}
                 keyExtractor={item => item.id}
                 contentContainerStyle={styles.contentContainer}
                 refreshControl={
@@ -473,7 +393,7 @@ export default function LeadsScreen() {
 
                             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
                                 <Ionicons name="person-outline" size={12} color="#3b5998" />
-                                <Text style={{ fontSize: 11, color: '#3b5998', marginLeft: 4 }}>Added by: {item.senderName || 'Unknown'}</Text>
+                                <Text style={{ fontSize: 11, color: '#3b5998', marginLeft: 4 }}>Added by: {nameById.get(item.senderId) || 'Unknown'}</Text>
                             </View>
 
                             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -498,12 +418,14 @@ export default function LeadsScreen() {
                 }}
                 ListFooterComponent={
                     <View style={{ paddingBottom: 80 }}> 
-                        {visibleCount < fullList.length ? (
-                            <TouchableOpacity onPress={() => setVisibleCount(prev => prev + 20)} style={styles.loadMoreBtn}>
-                                <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({fullList.length - visibleCount} remaining)</Text>
+                        {leadsHasMore ? (
+                            <TouchableOpacity onPress={loadMoreLeads} style={styles.loadMoreBtn} disabled={leadsLoadingMore}>
+                                {leadsLoadingMore
+                                    ? <ActivityIndicator color="#3b5998" />
+                                    : <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({leadsTotal - leadItems.length} remaining)</Text>}
                             </TouchableOpacity>
                         ) : (
-                            fullList.length > 0 ? <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>--- End of Leads ---</Text> : null
+                            leadItems.length > 0 ? <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>--- End of Leads ---</Text> : null
                         )}
                     </View>
                 }
@@ -555,6 +477,38 @@ export default function LeadsScreen() {
             </Modal>
 
             {canBulkReassign && (
+                <Modal visible={showAdminMenu} transparent animationType="fade" onRequestClose={() => setShowAdminMenu(false)}>
+                    <TouchableOpacity style={styles.menuOverlay} activeOpacity={1} onPress={() => setShowAdminMenu(false)}>
+                        <View style={styles.menuBox}>
+                            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowAdminMenu(false); setShowReassign(true); }}>
+                                <Ionicons name="swap-horizontal" size={20} color="#3b5998" />
+                                <View style={{ marginLeft: 12, flex: 1 }}>
+                                    <Text style={styles.menuTitle}>Reassign Leads</Text>
+                                    <Text style={styles.menuSub}>Move an employee's leads to someone else</Text>
+                                </View>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.menuItem, { borderBottomWidth: 0 }]} onPress={() => { setShowAdminMenu(false); setShowCloseStale(true); }}>
+                                <Ionicons name="archive-outline" size={20} color="#c62828" />
+                                <View style={{ marginLeft: 12, flex: 1 }}>
+                                    <Text style={styles.menuTitle}>Close Stale Leads</Text>
+                                    <Text style={styles.menuSub}>Mark old, untouched leads as Lost</Text>
+                                </View>
+                            </TouchableOpacity>
+                        </View>
+                    </TouchableOpacity>
+                </Modal>
+            )}
+
+            {canBulkReassign && (
+                <CloseStaleLeadsModal
+                    visible={showCloseStale}
+                    onClose={() => setShowCloseStale(false)}
+                    onDone={() => { refreshLeads(); }}
+                    teamMembers={teamMembersForLeads}
+                />
+            )}
+
+            {canBulkReassign && (
                 <ReassignLeadsModal
                     visible={showReassign}
                     onClose={() => setShowReassign(false)}
@@ -573,6 +527,11 @@ const styles = StyleSheet.create({
     headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 15, marginBottom: 5 },
     headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
     addBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#3b5998', borderRadius: 5, paddingHorizontal: 10, paddingVertical: 6 },
+    menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.25)', justifyContent: 'flex-start', alignItems: 'flex-end', paddingTop: 90, paddingRight: 12 },
+    menuBox: { width: 270, backgroundColor: 'white', borderRadius: 10, elevation: 8, paddingVertical: 4 },
+    menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+    menuTitle: { fontSize: 14, fontWeight: 'bold', color: '#333' },
+    menuSub: { fontSize: 11, color: 'gray', marginTop: 1 },
     reassignBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e8eaf6', borderRadius: 5, paddingHorizontal: 8, paddingVertical: 6 },
 
     actionCardsRow: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 15, marginBottom: 10, marginTop: 10 },

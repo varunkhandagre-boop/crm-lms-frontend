@@ -129,6 +129,34 @@ export async function listLeads(params: ListLeadsParams = {}): Promise<any[]> {
   return res.data.map(toLegacyLead);
 }
 
+// ---------------------------------------------------------------------------
+// Server-side filtered + paginated list (Leads screen). Unlike listLeads()
+// above, this never downloads the whole table — one page at a time.
+// ---------------------------------------------------------------------------
+
+export interface LeadPageParams extends ListLeadsParams {
+  page: number;
+  limit?: number;
+  outcome?: 'open' | 'won' | 'lost';
+  quick?: 'overdue' | 'today' | 'hot';
+  from?: string; // YYYY-MM-DD
+  to?: string;
+}
+
+export async function listLeadsPage(params: LeadPageParams): Promise<{ items: any[]; total: number; totalPages: number }> {
+  const res = await apiClient.get<{ data: ApiLead[]; meta: { total: number; totalPages: number } }>(
+    `/leads${toQueryString({ limit: 20, sortBy: 'nextDate', sortOrder: 'asc', view: 'card', ...params })}`
+  );
+  return { items: res.data.map(toLegacyLead), total: res.meta.total, totalPages: res.meta.totalPages };
+}
+
+export interface LeadCounts { open: number; overdue: number; today: number; hot: number }
+
+export async function getLeadCounts(assignedToId?: string): Promise<LeadCounts> {
+  const res = await apiClient.get<{ data: LeadCounts }>(`/leads/counts${toQueryString({ assignedToId })}`);
+  return res.data;
+}
+
 export async function getLead(id: string): Promise<any> {
   const res = await apiClient.get<OneLeadResponse>(`/leads/${id}`);
   return toLegacyLead(res.data);
@@ -163,7 +191,9 @@ export async function createLead(payload: CreateLeadPayload): Promise<any> {
   return toLegacyLead(res.data);
 }
 
-export async function updateLead(id: string, payload: Partial<CreateLeadPayload>): Promise<any> {
+// `note` is appended on top of the existing discussion server-side (unlike
+// `discussion`, which replaces it) — used by the Kanban board's move dialog.
+export async function updateLead(id: string, payload: Partial<CreateLeadPayload> & { note?: string }): Promise<any> {
   const res = await apiClient.patch<OneLeadResponse>(`/leads/${id}`, payload);
   return toLegacyLead(res.data);
 }
@@ -269,4 +299,23 @@ export interface LeadAnalytics {
 export async function getLeadAnalytics(params: { from?: string; to?: string; assignedToId?: string }): Promise<LeadAnalytics> {
   const res = await apiClient.get<{ data: LeadAnalytics }>(`/leads/analytics${toQueryString(params)}`);
   return res.data;
+}
+
+// ---------------------------------------------------------------------------
+// Close stale leads (Admin / Manager only — enforced server-side)
+// ---------------------------------------------------------------------------
+
+export async function getStaleLeadsCount(params: { olderThanDays: number; assignedToId?: string }): Promise<number> {
+  const res = await apiClient.get<{ data: { count: number } }>(`/leads/stale-summary${toQueryString(params)}`);
+  return res.data.count;
+}
+
+export async function closeStaleLeads(payload: {
+  olderThanDays: number;
+  assignedToId?: string;
+  lostReason?: LostReason;
+  note?: string;
+}): Promise<number> {
+  const res = await apiClient.post<{ data: { count: number } }>('/leads/close-stale', payload);
+  return res.data.count;
 }
