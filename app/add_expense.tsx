@@ -56,7 +56,7 @@ export default function AddExpenseScreen() {
       }
 
       let result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          mediaTypes: ['images'],
           allowsEditing: false, 
           quality: 0.5,
       });

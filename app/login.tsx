@@ -35,14 +35,17 @@ export default function LoginScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  // Android keyboard handling. With edge-to-edge (default since Expo SDK 53) the OS no
-  // longer resizes the window when the keyboard opens, and this screen used to rely on
-  // exactly that (KeyboardAvoidingView behavior was undefined on Android) — so in the
-  // Play Store build the keyboard covered the password field. Track the keyboard height
-  // ourselves, pad the scroll content by it, and scroll the form into view. If the OS
-  // does still resize, the worst case is some extra blank space under the form.
+  // Android keyboard handling. Under edge-to-edge, whether the OS shrinks the screen
+  // when the keyboard opens depends on the React Native version (SDK 54 didn't, SDK 57
+  // does) and on Expo Go vs a real build. Padding by the full keyboard height on top of
+  // an OS resize pushed the form far up. So measure how much the screen actually shrank
+  // and pad only the part of the keyboard the OS didn't already make room for.
   const scrollRef = useRef<ScrollView>(null);
   const [kbHeight, setKbHeight] = useState(0);
+  const fullHeightRef = useRef(0);
+  const [viewHeight, setViewHeight] = useState(0);
+  const osShrink = Math.max(0, fullHeightRef.current - viewHeight);
+  const extraKbPad = Math.max(0, kbHeight - osShrink);
   useEffect(() => {
     if (Platform.OS !== 'android') return;
     const show = Keyboard.addListener('keyboardDidShow', (e) => setKbHeight(e.endCoordinates.height));
@@ -136,14 +139,21 @@ export default function LoginScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <View
+      style={styles.container}
+      onLayout={(e) => {
+        const h = e.nativeEvent.layout.height;
+        if (kbHeight === 0) fullHeightRef.current = Math.max(fullHeightRef.current, h);
+        setViewHeight(h);
+      }}
+    >
       <KeyboardAvoidingView 
         behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
         style={{ flex: 1 }}
       >
         <ScrollView 
           ref={scrollRef}
-          contentContainerStyle={[styles.scrollContent, kbHeight > 0 && { paddingBottom: 20 + kbHeight }]}
+          contentContainerStyle={[styles.scrollContent, kbHeight > 0 && { paddingBottom: 20 + extraKbPad }]}
           keyboardShouldPersistTaps="handled" 
           showsVerticalScrollIndicator={false}
           keyboardDismissMode="on-drag" 

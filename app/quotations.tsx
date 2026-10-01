@@ -15,6 +15,7 @@ import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 
 
 export default function QuotationsListScreen() {
@@ -358,9 +359,9 @@ export default function QuotationsListScreen() {
             </body>
             </html>
             `;
-            const { uri } = await Print.printToFileAsync({ html: htmlContent });
-            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+            await sharePdfFromHtml(htmlContent, `Quotation_${item.estimateNo || item.id || Date.now()}`);
         } catch (error) {
+            console.log("PDF Error:", error);
             Alert.alert("Error", "Could not generate PDF");
         }
     };
@@ -506,19 +507,15 @@ export default function QuotationsListScreen() {
                                 </View>
 
                                 <Text style={{fontWeight: 'bold', marginBottom: 10, color: '#555'}}>Items Included ({selectedQuote.items?.length}):</Text>
-                                <View style={{maxHeight: 180}}>
-                                    <FlatList 
-                                        data={selectedQuote.items}
-                                        keyExtractor={(item, idx) => idx.toString()}
-                                        nestedScrollEnabled={true}
-                                        renderItem={({item}) => (
-                                            <View style={{flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderColor: '#f0f0f0', paddingVertical: 10}}>
-                                                <Text style={{fontSize: 13, flex: 1, color: '#333'}} numberOfLines={2}>{item.qty}x {item.name}</Text>
-                                                <Text style={{fontSize: 13, fontWeight: 'bold', color: '#333'}}>₹{(item.qty * item.price).toLocaleString()}</Text>
-                                            </View>
-                                        )}
-                                    />
-                                </View>
+                                {/* Plain ScrollView, not FlatList: a FlatList inside the outer ScrollView triggers a nested-VirtualizedList error */}
+                                <ScrollView style={{maxHeight: 180}} nestedScrollEnabled={true}>
+                                    {(selectedQuote.items || []).map((item: any, idx: number) => (
+                                        <View key={idx} style={{flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderColor: '#f0f0f0', paddingVertical: 10}}>
+                                            <Text style={{fontSize: 13, flex: 1, color: '#333'}} numberOfLines={2}>{item.qty}x {item.name}</Text>
+                                            <Text style={{fontSize: 13, fontWeight: 'bold', color: '#333'}}>₹{(item.qty * item.price).toLocaleString()}</Text>
+                                        </View>
+                                    ))}
+                                </ScrollView>
 
                                 <View style={{marginTop: 15, borderTopWidth: 2, borderColor: '#eee', paddingTop: 15}}>
                                     <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5}}>

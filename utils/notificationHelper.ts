@@ -1,5 +1,5 @@
 import * as Device from 'expo-device';
-import * as Notifications from 'expo-notifications';
+import { Notifications } from './notificationsModule';
 import { Platform } from 'react-native';
 
 // ==========================================

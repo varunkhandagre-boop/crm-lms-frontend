@@ -115,7 +115,7 @@ export default function ProfileScreen() {
             if (status !== 'granted') return Alert.alert("Permission Needed", "Please allow gallery access in Settings.");
         }
         let result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.2, base64: true, 
+            mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.2, base64: true, 
         });
         if (!result.canceled && result.assets[0].base64) {
             savePhoto(result.assets[0].base64);

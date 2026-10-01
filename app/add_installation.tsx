@@ -201,7 +201,7 @@ export default function AddInstallationScreen() {
           }
 
           const result = await ImagePicker.launchCameraAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              mediaTypes: ['images'],
               quality: 0.2, 
               base64: true,
           });

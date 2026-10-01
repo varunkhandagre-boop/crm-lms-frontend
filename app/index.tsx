@@ -14,7 +14,6 @@ import {
     StyleSheet,
     Text,
     TouchableOpacity,
-    UIManager,
     View
 } from 'react-native';
 
@@ -47,15 +46,11 @@ import { buildCacheKey } from '../utils/listCache';
 
 // NOTIFICATION IMPORTS
 import * as Device from 'expo-device';
-import * as Notifications from 'expo-notifications';
+import { Notifications } from '../utils/notificationsModule';
 import { doc, setDoc } from 'firebase/firestore';
 import { fetchNotifications } from '../services/api/notifications';
 import { savePushTokenToBackend } from '../services/api/users';
 import { auth, db } from './../firebaseConfig';
-
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({

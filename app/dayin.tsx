@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
-import * as Notifications from 'expo-notifications';
+import { Notifications } from '../utils/notificationsModule';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {

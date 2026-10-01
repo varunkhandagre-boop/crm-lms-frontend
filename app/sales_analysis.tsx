@@ -3,6 +3,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -612,8 +613,7 @@ export default function SalesAnalysisScreen() {
           </html>
           `;
 
-          const { uri } = await Print.printToFileAsync({ html: htmlContent });
-          await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: 'Download Report' });
+          await sharePdfFromHtml(htmlContent, `Sales_Report_${Date.now()}`, 'Download Report');
       } catch (error) {
           Alert.alert("Error", "Could not generate PDF report");
       } finally {

@@ -105,7 +105,7 @@ export default function CompanyProfileScreen() {
                 if (status !== 'granted') return Alert.alert("Permission", "Gallery permission required in Settings.");
             }
             let result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                mediaTypes: ['images'],
                 allowsEditing: true,
                 aspect: field === 'signatureUrl' ? [3, 1] : [1, 1],
                 quality: 0.2,

@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -470,9 +471,9 @@ export default function AddQuotationScreen() {
 
         try {
             const htmlContent = getQuotationHTML(estimateNo);
-            const { uri } = await Print.printToFileAsync({ html: htmlContent });
-            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+            await sharePdfFromHtml(htmlContent, `Quotation_${estimateNo}`);
         } catch (error) {
+            console.log("PDF Error:", error);
             Alert.alert("Error", "Could not generate PDF");
         }
     };

@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DataProvider, useData } from './context/DataContext';
 import { MENU_TAG_BUCKET } from '../constants/modules';
 
-import * as Notifications from 'expo-notifications';
+import { Notifications } from '../utils/notificationsModule';
 import { manageAttendanceReminders, setupNotificationPermissions } from '../utils/notificationHelper';
 
 import * as Location from 'expo-location';
@@ -256,6 +256,10 @@ function NavigationLayout() {
 
     let locationSubscription: any = null;
     let lastUpdateTimestamp = 0; 
+    // startTracking is async (permission prompts + watchPositionAsync), so the cleanup
+    // below can run before locationSubscription is set — e.g. on logout. Without this
+    // flag the watcher kept running after logout and posted location logs with no token.
+    let cancelled = false;
 
     const startTracking = async () => {
         try {
@@ -274,6 +278,7 @@ function NavigationLayout() {
                     distanceInterval: 0           
                 },
                 async (loc) => {
+                    if (cancelled) return;
                     const now = Date.now();
                     const THIRTY_MINUTES = 30 * 60 * 1000; 
 
@@ -290,11 +295,17 @@ function NavigationLayout() {
         type: "Auto-Track (30 min)",
         device: "App",
     });
-} catch (dbError) {
+} catch (dbError: any) {
+    // 401 = the user logged out while this request was in flight; nothing to record.
+    if (dbError?.status === 401) return;
     console.error("DB Error:", dbError);
 }
                 }
             );
+            if (cancelled) {
+                locationSubscription.remove();
+                locationSubscription = null;
+            }
 
         } catch (error) {
             console.error("Tracking Error:", error);
@@ -304,6 +315,7 @@ function NavigationLayout() {
     startTracking();
 
     return () => {
+        cancelled = true;
         if (locationSubscription) {
             locationSubscription.remove();
         }

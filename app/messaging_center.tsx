@@ -37,7 +37,7 @@ import {
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 
-import { TemplatesTab } from './TemplatesTab';
+import { TemplatesTab } from '../components/TemplatesTab';
 
 export default function MessagingCenterScreen() {
     const router = useRouter();
