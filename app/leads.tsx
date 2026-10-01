@@ -76,6 +76,7 @@ export default function LeadsScreen() {
     const [showReassign, setShowReassign] = useState(false);
     const [showCloseStale, setShowCloseStale] = useState(false);
     const [showAdminMenu, setShowAdminMenu] = useState(false);
+    const [showAddMenu, setShowAddMenu] = useState(false);
 
 
     // OPTIONS
@@ -262,9 +263,9 @@ export default function LeadsScreen() {
                                 <Ionicons name="ellipsis-vertical" size={18} color="#3b5998" />
                             </TouchableOpacity>
                         )}
-                        <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_sales' as any)}>
-                            <Ionicons name="add" size={20} color="white" />
-                            <Text style={{ color: 'white', fontWeight: 'bold', marginLeft: 2 }}>Cold Call</Text>
+                        <TouchableOpacity style={styles.addBtn} onPress={() => setShowAddMenu(true)}>
+                            <Ionicons name="add" size={18} color="white" />
+                            <Text style={{ color: 'white', fontWeight: 'bold', marginLeft: 1, fontSize: 13 }}>Lead</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
@@ -478,6 +479,28 @@ export default function LeadsScreen() {
                 </View>
             </Modal>
 
+            {/* "+ Lead" — both ways a lead gets created */}
+            <Modal visible={showAddMenu} transparent animationType="fade" onRequestClose={() => setShowAddMenu(false)}>
+                <TouchableOpacity style={styles.menuOverlay} activeOpacity={1} onPress={() => setShowAddMenu(false)}>
+                    <View style={styles.menuBox}>
+                        <TouchableOpacity style={styles.menuItem} onPress={() => { setShowAddMenu(false); router.push('/add_sales' as any); }}>
+                            <Ionicons name="location-outline" size={20} color="#3b5998" />
+                            <View style={{ marginLeft: 12, flex: 1 }}>
+                                <Text style={styles.menuTitle}>Cold Call / Visit</Text>
+                                <Text style={styles.menuSub}>Log a visit — interested hospitals become leads</Text>
+                            </View>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.menuItem, { borderBottomWidth: 0 }]} onPress={() => { setShowAddMenu(false); router.push('/add_lead' as any); }}>
+                            <Ionicons name="create-outline" size={20} color="#2e7d32" />
+                            <View style={{ marginLeft: 12, flex: 1 }}>
+                                <Text style={styles.menuTitle}>Add Lead Directly</Text>
+                                <Text style={styles.menuSub}>Enquiry by phone, reference, website…</Text>
+                            </View>
+                        </TouchableOpacity>
+                    </View>
+                </TouchableOpacity>
+            </Modal>
+
             {canBulkReassign && (
                 <Modal visible={showAdminMenu} transparent animationType="fade" onRequestClose={() => setShowAdminMenu(false)}>
                     <TouchableOpacity style={styles.menuOverlay} activeOpacity={1} onPress={() => setShowAdminMenu(false)}>
@@ -528,7 +551,7 @@ const styles = StyleSheet.create({
     header: { backgroundColor: 'white', paddingTop: 55, paddingBottom: 2, elevation: 2 },
     headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 15, marginBottom: 5 },
     headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
-    addBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#3b5998', borderRadius: 5, paddingHorizontal: 10, paddingVertical: 6 },
+    addBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#3b5998', borderRadius: 5, paddingHorizontal: 8, paddingVertical: 6 },
     menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.25)', justifyContent: 'flex-start', alignItems: 'flex-end', paddingTop: 90, paddingRight: 12 },
     menuBox: { width: 270, backgroundColor: 'white', borderRadius: 10, elevation: 8, paddingVertical: 4 },
     menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },

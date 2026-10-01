@@ -59,6 +59,9 @@ export default function AddSalesScreen() {
     
     const [discussion, setDiscussion] = useState('');
     const [outcome, setOutcome] = useState('Interested');
+    const [dealValue, setDealValue] = useState('');
+    // Outcomes that create (or update) a lead — mirrors POSITIVE_OUTCOMES on the backend.
+    const createsLead = ['Interested', 'Follow Up', 'Demo Planned', 'Quotation Requested'].includes(outcome);
     
     const [nextDate, setNextDate] = useState(new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
@@ -235,6 +238,9 @@ if (locationData) {
                 outcome,
                 nextFollowUp: nextDateISO,
                 location: locationData ? { latitude: locationData.lat, longitude: locationData.lng } : null,
+                ...(createsLead && dealValue.trim() && !isNaN(parseFloat(dealValue.replace(/[^0-9.]/g, '')))
+                    ? { dealValue: parseFloat(dealValue.replace(/[^0-9.]/g, '')) }
+                    : {}),
             });
 
             // An existing lead already got its welcome message when it was created.
@@ -335,6 +341,19 @@ if (locationData) {
                             {showDatePicker && <DateTimePicker value={nextDate} mode="date" onChange={(e, d) => { setShowDatePicker(false); if(d) setNextDate(d); }} />}
                         </View>
                     </View>
+
+                    {createsLead && (
+                        <>
+                            <Text style={styles.label}>Expected Deal Value (₹) — optional</Text>
+                            <TextInput
+                                style={styles.inputGray}
+                                placeholder="e.g. 450000"
+                                keyboardType="numeric"
+                                value={dealValue}
+                                onChangeText={setDealValue}
+                            />
+                        </>
+                    )}
 
                     <Text style={styles.label}>Discussion Summary *</Text>
                     <View style={styles.voiceInputContainer}>

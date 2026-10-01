@@ -111,6 +111,8 @@ export interface CreateSalesVisitPayload {
   // the lead details screen) — the backend links to it directly instead of
   // auto-creating a new lead for a positive outcome.
   leadId?: string;
+  /** ₹ value for the lead this visit creates/updates (positive outcomes only). */
+  dealValue?: number;
 }
 
 // Returns the raw API shape (not adapted) since add_sales.tsx only needs
