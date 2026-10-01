@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -65,24 +66,55 @@ export default function LeadsBoardScreen() {
         fetcher: fetchTeamMembers,
     });
 
+    // Search: typed text → debounced value that actually hits the server.
+    const [searchText, setSearchText] = useState('');
+    const [search, setSearch] = useState('');
+    useEffect(() => {
+        const t = setTimeout(() => setSearch(searchText.trim()), 400);
+        return () => clearTimeout(t);
+    }, [searchText]);
+
+    // Only the default board (no search, all staff) is cached — it opens
+    // instantly from the last copy, then refreshes quietly in the background.
+    const cacheKey = !search && !employeeId ? buildCacheKey('leads_board', currentUser?.companyId) : null;
+    const requestId = useRef(0);
+
     const load = useCallback(async () => {
+        const id = ++requestId.current;
         setLoading(true);
         try {
-            setColumns(await getPipeline({ assignedToId: employeeId, perColumn: PAGE_SIZE }));
+            const fresh = await getPipeline({ assignedToId: employeeId, perColumn: PAGE_SIZE, search: search || undefined });
+            if (id !== requestId.current) return; // a newer search/filter is already loading
+            setColumns(fresh);
+            if (cacheKey) AsyncStorage.setItem(cacheKey, JSON.stringify(fresh)).catch(() => {});
         } catch (e: any) {
-            Alert.alert('Error', e?.message || 'Could not load the pipeline');
+            if (id === requestId.current) Alert.alert('Error', e?.message || 'Could not load the pipeline');
         } finally {
-            setLoading(false);
+            if (id === requestId.current) setLoading(false);
         }
-    }, [employeeId]);
+    }, [employeeId, search, cacheKey]);
 
-    useEffect(() => { load(); }, [load]);
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            if (cacheKey) {
+                try {
+                    const raw = await AsyncStorage.getItem(cacheKey);
+                    if (raw && !cancelled) setColumns(JSON.parse(raw));
+                } catch {
+                    // unreadable cache — the network load below covers it
+                }
+            }
+            if (!cancelled) load();
+        })();
+        return () => { cancelled = true; };
+    }, [load, cacheKey]);
 
     const loadMore = async (col: PipelineColumnData) => {
         setLoadingMore(col.column);
         try {
             const nextPage = Math.floor(col.leads.length / PAGE_SIZE) + 1;
-            const res = await getPipelineColumnPage({ column: col.column, page: nextPage, limit: PAGE_SIZE, assignedToId: employeeId });
+            const res = await getPipelineColumnPage({ column: col.column, page: nextPage, limit: PAGE_SIZE, assignedToId: employeeId, search: search || undefined });
             setColumns(prev => prev.map(c => c.column === col.column
                 ? { ...c, leads: [...c.leads, ...res.data.filter(n => !c.leads.some(o => o.id === n.id))] }
                 : c));
@@ -206,6 +238,23 @@ export default function LeadsBoardScreen() {
                 </TouchableOpacity>
             </View>
 
+            <View style={styles.searchBar}>
+                <Ionicons name="search" size={18} color="#1565c0" />
+                <TextInput
+                    style={styles.searchInput}
+                    placeholder="Search hospital, contact, city, mobile..."
+                    value={searchText}
+                    onChangeText={setSearchText}
+                    returnKeyType="search"
+                />
+                {loading && columns.length > 0 ? <ActivityIndicator size="small" color="#3b5998" /> : null}
+                {searchText.length > 0 && (
+                    <TouchableOpacity onPress={() => setSearchText('')} style={{ marginLeft: 6 }}>
+                        <Ionicons name="close-circle" size={18} color="#d32f2f" />
+                    </TouchableOpacity>
+                )}
+            </View>
+
             {canFilterByEmployee && (
                 <View style={styles.filterRow}>
                     <TouchableOpacity style={styles.filterChip} onPress={() => setShowEmployeePicker(true)}>
@@ -216,7 +265,7 @@ export default function LeadsBoardScreen() {
                 </View>
             )}
 
-            {loading ? (
+            {loading && columns.length === 0 ? (
                 <ActivityIndicator size="large" color="#3b5998" style={{ marginTop: 50 }} />
             ) : (
                 <ScrollView
@@ -297,6 +346,8 @@ const styles = StyleSheet.create({
     header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, paddingBottom: 12, backgroundColor: 'white', elevation: 3 },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
     headerSub: { fontSize: 11, color: 'gray', marginTop: 1 },
+    searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e3f2fd', marginHorizontal: 15, marginTop: 10, borderRadius: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: '#bbdefb' },
+    searchInput: { flex: 1, paddingVertical: 9, paddingHorizontal: 8, fontSize: 14, color: '#333' },
     filterRow: { flexDirection: 'row', paddingHorizontal: 15, paddingVertical: 8 },
     filterChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e8f5e9', borderColor: '#a5d6a7', borderWidth: 1, borderRadius: 15, paddingHorizontal: 12, paddingVertical: 5 },
     filterText: { color: '#2e7d32', fontWeight: 'bold', fontSize: 12, marginRight: 4 },

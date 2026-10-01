@@ -273,7 +273,7 @@ export interface PipelineColumnData {
   leads: PipelineCard[];
 }
 
-export async function getPipeline(params: { assignedToId?: string; perColumn?: number } = {}): Promise<PipelineColumnData[]> {
+export async function getPipeline(params: { assignedToId?: string; perColumn?: number; search?: string } = {}): Promise<PipelineColumnData[]> {
   const res = await apiClient.get<{ data: PipelineColumnData[] }>(`/leads/pipeline${toQueryString(params)}`);
   return res.data;
 }
@@ -283,6 +283,7 @@ export async function getPipelineColumnPage(params: {
   page: number;
   limit?: number;
   assignedToId?: string;
+  search?: string;
 }): Promise<{ data: PipelineCard[]; meta: { total: number; totalPages: number } }> {
   return apiClient.get<{ data: PipelineCard[]; meta: { total: number; totalPages: number } }>(`/leads/pipeline/column${toQueryString(params)}`);
 }
