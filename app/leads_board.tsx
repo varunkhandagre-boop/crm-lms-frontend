@@ -17,7 +17,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useData } from './context/DataContext';
-import { PIPELINE_STAGES, STAGE_COLORS } from '../constants/leadStatus';
+import { formatInr, PIPELINE_STAGES, STAGE_COLORS } from '../constants/leadStatus';
 import { getPipeline, getPipelineColumnPage, PipelineCard, PipelineColumnData, updateLead } from '../services/api/leads';
 import { fetchTeamMembers } from '../services/api/users';
 import { useCachedList } from '../hooks/useCachedList';
@@ -101,8 +101,9 @@ export default function LeadsBoardScreen() {
         setMoving(null);
         const fromColumn = columns.find(c => c.leads.some(l => l.id === card.id))?.column;
         setColumns(prev => prev.map(c => {
-            if (c.column === fromColumn) return { ...c, count: c.count - 1, leads: c.leads.filter(l => l.id !== card.id) };
-            if (c.column === stage) return { ...c, count: c.count + 1, leads: [{ ...card, stage }, ...c.leads] };
+            const v = card.dealValue || 0;
+            if (c.column === fromColumn) return { ...c, count: c.count - 1, value: c.value - v, leads: c.leads.filter(l => l.id !== card.id) };
+            if (c.column === stage) return { ...c, count: c.count + 1, value: c.value + v, leads: [{ ...card, stage }, ...c.leads] };
             return c;
         }));
         try {
@@ -143,8 +144,11 @@ export default function LeadsBoardScreen() {
                     <Text style={styles.cardSub} numberOfLines={1}>📦 {card.requirements.join(', ')}</Text>
                 )}
                 <View style={styles.cardFooter}>
-                    <View style={[styles.badge, { backgroundColor: badge.bg }]}>
-                        <Text style={{ fontSize: 10, fontWeight: 'bold', color: badge.color }}>{badge.label}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <View style={[styles.badge, { backgroundColor: badge.bg }]}>
+                            <Text style={{ fontSize: 10, fontWeight: 'bold', color: badge.color }}>{badge.label}</Text>
+                        </View>
+                        {!!card.dealValue && <Text style={styles.value}>{formatInr(card.dealValue)}</Text>}
                     </View>
                     {canFilterByEmployee && !employeeId && (
                         <Text style={styles.owner} numberOfLines={1}>👤 {card.assignedToName}</Text>
@@ -160,7 +164,10 @@ export default function LeadsBoardScreen() {
         return (
             <View key={col.column} style={[styles.column, { width: columnWidth }]}>
                 <View style={[styles.columnHeader, { borderTopColor: color }]}>
-                    <Text style={[styles.columnTitle, { color }]}>{col.column}</Text>
+                    <View style={{ flex: 1 }}>
+                        <Text style={[styles.columnTitle, { color }]}>{col.column}</Text>
+                        {col.value > 0 && <Text style={styles.columnValue}>{formatInr(col.value)} in pipeline</Text>}
+                    </View>
                     <View style={[styles.countPill, { backgroundColor: color }]}>
                         <Text style={styles.countText}>{col.count}</Text>
                     </View>
@@ -297,6 +304,8 @@ const styles = StyleSheet.create({
     column: { marginHorizontal: 6, marginTop: 8, backgroundColor: '#f7f8fb', borderRadius: 10, paddingHorizontal: 8 },
     columnHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, borderTopWidth: 4, borderTopLeftRadius: 10, borderTopRightRadius: 10, marginHorizontal: -8, paddingHorizontal: 12, backgroundColor: 'white', marginBottom: 8 },
     columnTitle: { fontSize: 14, fontWeight: 'bold' },
+    columnValue: { fontSize: 11, color: '#2e7d32', fontWeight: '600', marginTop: 1 },
+    value: { fontSize: 11, fontWeight: 'bold', color: '#2e7d32' },
     countPill: { borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
     countText: { color: 'white', fontSize: 12, fontWeight: 'bold' },
 

@@ -28,6 +28,7 @@ import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import ReassignLeadsModal from '../components/ReassignLeadsModal';
 import CloseStaleLeadsModal from '../components/CloseStaleLeadsModal';
+import { formatInr } from '../constants/leadStatus';
 
 export default function LeadsScreen() {
     const router = useRouter();
@@ -380,6 +381,7 @@ export default function LeadsScreen() {
                                         <Text style={[styles.hotBadge, {color: badgeColor}]}>
                                             {leadType === 'Hot' ? '🔥' : leadType === 'Warm' ? '🌤️' : '❄️'} {leadType.toUpperCase()}
                                         </Text>
+                                        {item.dealValue ? <Text style={[styles.hotBadge, { color: '#2e7d32' }]}>💰 {formatInr(item.dealValue)}</Text> : null}
                                     </View>
                                     
                                     <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 5 }}>

@@ -21,7 +21,7 @@ export default function AddQuotationScreen() {
     const router = useRouter();
     const insets = useSafeAreaInsets(); 
     
-    const { id, mode, leadOrg, leadPerson, leadMobile, leadCity, leadAddress, leadProduct } = useLocalSearchParams(); 
+    const { id, mode, leadId, leadOrg, leadPerson, leadMobile, leadCity, leadAddress, leadProduct } = useLocalSearchParams(); 
     const { companyProfile, currentUser, sendDynamicEmail, sendSystemWhatsApp } = useData();
     const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
@@ -514,7 +514,12 @@ export default function AddQuotationScreen() {
                 await updateQuotation(id as string, payload);
                 Alert.alert("Success", `Estimate Updated Successfully!`);
             } else {
-                const created = await createQuotation(payload);
+                // From Lead Details: link the quotation to that lead (the
+                // backend then moves the lead to the Quotation stage).
+                const created = await createQuotation({
+                    ...payload,
+                    ...(mode === 'from_lead' && leadId ? { leadId: String(leadId) } : {}),
+                });
                 finalEstimateNo = created.estimateNo;
                 Alert.alert("Success", `Estimate ${finalEstimateNo} Created Successfully!`);
             }

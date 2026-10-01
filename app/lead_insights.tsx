@@ -16,7 +16,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useData } from './context/DataContext';
-import { STAGE_COLORS } from '../constants/leadStatus';
+import { formatInr, STAGE_COLORS } from '../constants/leadStatus';
 import { getLeadAnalytics, LeadAnalytics } from '../services/api/leads';
 import { fetchTeamMembers } from '../services/api/users';
 import { useCachedList } from '../hooks/useCachedList';
@@ -107,6 +107,40 @@ export default function LeadInsightsScreen() {
             </View>
         </View>
     );
+
+    const renderPipelineValue = (d: LeadAnalytics) => {
+        const p = d.pipeline;
+        const max = Math.max(1, ...p.byStage.map(s => s.value));
+        return (
+            <View style={styles.section}>
+                <Text style={styles.sectionTitle}>💰 Pipeline Value (open deals right now)</Text>
+                <View style={[styles.ratesRow, { marginTop: 10 }]}>
+                    <View style={[styles.rateBox, { backgroundColor: '#e8f5e9' }]}>
+                        <Text style={[styles.rateValue, { color: '#2e7d32' }]}>{formatInr(p.totalValue)}</Text>
+                        <Text style={styles.rateLabel}>Total in pipeline</Text>
+                    </View>
+                    <View style={[styles.rateBox, { backgroundColor: '#fff8e1' }]}>
+                        <Text style={[styles.rateValue, { color: '#f57c00' }]}>{formatInr(p.weightedForecast)}</Text>
+                        <Text style={styles.rateLabel}>Expected (forecast)</Text>
+                    </View>
+                </View>
+                {p.byStage.filter(s => s.value > 0).map(s => (
+                    <View key={s.stage} style={{ marginTop: 10 }}>
+                        <View style={styles.barLabelRow}>
+                            <Text style={styles.barLabel}>{s.stage} <Text style={{ color: '#9e9e9e', fontSize: 11 }}>({s.winChancePct}% chance)</Text></Text>
+                            <Text style={styles.barCount}>{formatInr(s.value)}</Text>
+                        </View>
+                        <View style={styles.barTrack}>
+                            <View style={[styles.barFill, { width: `${Math.max(2, (s.value / max) * 100)}%`, backgroundColor: STAGE_COLORS[s.stage] || '#607d8b' }]} />
+                        </View>
+                    </View>
+                ))}
+                <Text style={[styles.sectionHint, { marginTop: 10 }]}>
+                    {p.leadsWithValue} of {p.openLeads} open leads have a deal value. Forecast = each deal × a typical win chance for its stage — an estimate, not a promise.
+                </Text>
+            </View>
+        );
+    };
 
     const renderFunnel = (d: LeadAnalytics) => {
         const max = Math.max(1, d.funnel[0]?.count || 0);
@@ -231,6 +265,7 @@ export default function LeadInsightsScreen() {
                         <>
                             {renderSummary(data)}
                             {renderRates(data)}
+                            {renderPipelineValue(data)}
                             {renderFunnel(data)}
                             {renderLostReasons(data)}
                             {renderSources(data)}

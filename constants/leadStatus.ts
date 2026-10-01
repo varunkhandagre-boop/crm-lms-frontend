@@ -33,3 +33,12 @@ export const STAGE_COLORS: Record<string, string> = {
     'Lost': '#f44336',
     'Other': '#607d8b',
 };
+
+/** ₹ amounts in the Indian short style: ₹4.5L, ₹1.2Cr, ₹85K. */
+export function formatInr(value: number | null | undefined): string {
+    const v = Number(value || 0);
+    if (v >= 1_00_00_000) return `₹${(v / 1_00_00_000).toFixed(v >= 10_00_00_000 ? 0 : 1).replace(/\.0$/, '')}Cr`;
+    if (v >= 1_00_000) return `₹${(v / 1_00_000).toFixed(v >= 10_00_000 ? 0 : 1).replace(/\.0$/, '')}L`;
+    if (v >= 1_000) return `₹${Math.round(v / 1_000)}K`;
+    return `₹${Math.round(v)}`;
+}

@@ -74,7 +74,8 @@ export default function AddSalesScreen() {
     const [isRecording, setIsRecording] = useState(false);
     const originalDiscussionRef = useRef(''); 
 
-    const outcomeOptions = ['Interested', 'Not Interested', 'Follow Up', 'Demo Planned'];
+    // "Quotation Requested" creates the lead directly at the Quotation stage.
+    const outcomeOptions = ['Interested', 'Not Interested', 'Follow Up', 'Demo Planned', 'Quotation Requested'];
 
     // 🔥 Organizations — cache-first, shares the SAME 'organizations' cache
     // key as organization.tsx/messaging_center.tsx.

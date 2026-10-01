@@ -72,6 +72,7 @@ export default function AddLeadScreen() {
   const [allocatedTo, setAllocatedTo] = useState(currentUser?.name || 'Select');
   const [leadSource, setLeadSource] = useState('Select');
   const [probability, setProbability] = useState('Select');
+  const [dealValue, setDealValue] = useState('');
   const [status, setStatus] = useState('Open');
   const [leadStage, setLeadStage] = useState('New'); 
   const [leadType, setLeadType] = useState('Hot');
@@ -372,6 +373,7 @@ export default function AddLeadScreen() {
                   discussion,
                   nextDate: nextDate.toISOString().split('T')[0],
                   closingDate: closingDate.toISOString().split('T')[0],
+                  dealValue: dealValue.trim() && !isNaN(parseFloat(dealValue)) ? parseFloat(dealValue.replace(/[^0-9.]/g, '')) : undefined,
                   location: { latitude: locationData.lat, longitude: locationData.lng },
               });
 
@@ -472,6 +474,15 @@ export default function AddLeadScreen() {
                     </TouchableOpacity>
                 </View>
             </View>
+
+            <Text style={styles.label}>Expected Deal Value (₹) — optional</Text>
+            <TextInput
+                style={styles.inputGray}
+                placeholder="e.g. 450000"
+                keyboardType="numeric"
+                value={dealValue}
+                onChangeText={setDealValue}
+            />
 
             <View style={styles.row}>
                 <View style={styles.col}>

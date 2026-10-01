@@ -31,6 +31,7 @@ export interface ApiLead {
   lostReason: string | null;
   lostReasonNote: string | null;
   lostAt: string | null;
+  dealValue: string | number | null; // Prisma DECIMAL arrives as a string
   createdById: string;
   createdAt: string;
   updatedAt: string;
@@ -93,6 +94,7 @@ export function toLegacyLead(l: ApiLead): any {
     lostReason: l.lostReason || '',
     lostReasonNote: l.lostReasonNote || '',
     lostAt: l.lostAt,
+    dealValue: l.dealValue === null || l.dealValue === undefined ? null : Number(l.dealValue),
   };
 }
 
@@ -184,6 +186,7 @@ export interface CreateLeadPayload {
   location?: { latitude: number; longitude: number } | null;
   lostReason?: LostReason;
   lostReasonNote?: string;
+  dealValue?: number | null;
 }
 
 export async function createLead(payload: CreateLeadPayload): Promise<any> {
@@ -258,6 +261,7 @@ export interface PipelineCard {
   type: 'HOT' | 'WARM' | 'COLD';
   nextDate: string | null;
   requirements: string[];
+  dealValue: number | null;
   assignedToId: string;
   assignedToName: string;
 }
@@ -265,6 +269,7 @@ export interface PipelineCard {
 export interface PipelineColumnData {
   column: PipelineColumn;
   count: number;
+  value: number; // ₹ total of the whole column
   leads: PipelineCard[];
 }
 
@@ -287,6 +292,13 @@ export async function getPipelineColumnPage(params: {
 // ---------------------------------------------------------------------------
 
 export interface LeadAnalytics {
+  pipeline: {
+    totalValue: number;
+    weightedForecast: number;
+    openLeads: number;
+    leadsWithValue: number;
+    byStage: { stage: string; value: number; count: number; winChancePct: number }[];
+  };
   summary: {
     total: number; won: number; lost: number; open: number;
     conversionPct: number; winRatePct: number; lostWithReasonRecorded: number;

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Location from 'expo-location';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -28,7 +28,9 @@ import { listProducts } from '../services/api/products';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
-import { isLostState, LOST_REASONS, LostReason } from '../constants/leadStatus';
+import { formatInr, isLostState, LOST_REASONS, LostReason } from '../constants/leadStatus';
+import { listLeadQuotations } from '../services/api/quotations';
+import { fetchTeamMembers } from '../services/api/users';
 
 export default function LeadDetailsScreen() {
     const router = useRouter();
@@ -41,15 +43,28 @@ export default function LeadDetailsScreen() {
     // the company's entire lead list just to find it. Products stay
     // cache-first, sharing product_master.tsx's 'products' key.
     const [fetchedLead, setFetchedLead] = useState<any>(null);
+    const [quotes, setQuotes] = useState<any[]>([]);
     const refreshLeads = useCallback(async () => {
         if (!id) return;
         try {
-            setFetchedLead(await getLead(String(id)));
+            const [l, q] = await Promise.all([getLead(String(id)), listLeadQuotations(String(id)).catch(() => [])]);
+            setFetchedLead(l);
+            setQuotes(q);
         } catch (e: any) {
             Alert.alert('Error', e?.message || 'Could not load this lead');
         }
     }, [id]);
-    useEffect(() => { refreshLeads(); }, [refreshLeads]);
+    // Runs on first open AND when coming back (e.g. after creating a
+    // quotation, which moves the lead's stage on the server).
+    useFocusEffect(useCallback(() => { refreshLeads(); }, [refreshLeads]));
+
+    const { data: teamMembers } = useCachedList({
+        cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+        enabled: !!currentUser?.companyId,
+        fetcher: fetchTeamMembers,
+    });
+    const [showAssignPicker, setShowAssignPicker] = useState(false);
+    const [editDealValue, setEditDealValue] = useState('');
 
     const { data: productList } = useCachedList({
         cacheKey: buildCacheKey('products', currentUser?.companyId),
@@ -120,12 +135,32 @@ export default function LeadDetailsScreen() {
 
             if (found.nextDate) setEditNextDate(new Date(found.nextDate));
             setEditLostReason((found.lostReason as LostReason) || '');
+            setEditDealValue(found.dealValue ? String(found.dealValue) : '');
             setEditLostNote(found.lostReasonNote || '');
         }
     }, [fetchedLead]);
 
     const toggleRecording = () => {
         Alert.alert("Coming Soon 🎤", "Voice-to-Text feature will be available in the next update!");
+    };
+
+    const reassignTo = (member: { id: string; name: string }) => {
+        setShowAssignPicker(false);
+        if (member.id === lead?.assignedTo) return;
+        Alert.alert('Reassign Lead?', `${lead.orgName || lead.org} will be assigned to ${member.name}.`, [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Reassign', onPress: async () => {
+                    try {
+                        await apiUpdateLead(lead.id, { assignedToId: member.id });
+                        await refreshLeads();
+                        Alert.alert('Done ✅', `Lead assigned to ${member.name}.`);
+                    } catch (e: any) {
+                        Alert.alert('Error', e?.message || 'Could not reassign');
+                    }
+                },
+            },
+        ]);
     };
 
     const handleCall = () => {
@@ -247,6 +282,10 @@ export default function LeadDetailsScreen() {
 
             // Only send the reason when it's new or edited, so re-logging a note
             // on an already-lost lead doesn't add a "reason updated" entry each time.
+            const parsedDeal = parseFloat(editDealValue.replace(/[^0-9.]/g, ''));
+            const newDealValue = editDealValue.trim() && !isNaN(parsedDeal) ? parsedDeal : null;
+            const dealValueChanged = (newDealValue ?? null) !== (lead.dealValue ?? null);
+
             const lostReasonChanged = markingLost && !!editLostReason && (
                 !isLostState(lead.status, lead.stage) ||
                 editLostReason !== (lead.lostReason || '') ||
@@ -264,6 +303,7 @@ export default function LeadDetailsScreen() {
                 isHot: apiLeadType === 'HOT',
                 nextDate: nextDateISO,
                 discussion: updatedDiscussion,
+                ...(dealValueChanged ? { dealValue: newDealValue } : {}),
                 ...(lostReasonChanged
                     ? { lostReason: editLostReason as LostReason, lostReasonNote: editLostNote.trim() || undefined }
                     : {}),
@@ -290,6 +330,7 @@ export default function LeadDetailsScreen() {
                 discussion: updatedDiscussion,
                 lostReason: markingLost ? editLostReason : '',
                 lostReasonNote: markingLost ? editLostNote.trim() : '',
+                dealValue: newDealValue,
             }));
             
             Alert.alert("Success", "Visit Logged & Lead Updated Successfully! 🚀");
@@ -441,6 +482,25 @@ export default function LeadDetailsScreen() {
                             </View>
                         </View>
 
+                        <View style={styles.row}>
+                            <View style={styles.actionPill}>
+                                <Text style={styles.pillLabel}>Deal Value</Text>
+                                <Text style={[styles.pillValue, { color: '#2e7d32' }]}>
+                                    {lead.dealValue ? formatInr(lead.dealValue) : 'Not set'}
+                                </Text>
+                            </View>
+                            <TouchableOpacity
+                                style={styles.actionPill}
+                                disabled={!isStrictAdmin}
+                                onPress={() => setShowAssignPicker(true)}
+                            >
+                                <Text style={styles.pillLabel}>Assigned To {isStrictAdmin ? '✎' : ''}</Text>
+                                <Text style={styles.pillValue} numberOfLines={1}>
+                                    {teamMembers.find((m: any) => m.id === lead.assignedTo)?.name || '—'}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+
                         {isLostState(lead.status, lead.stage) && (
                             <View style={styles.lostReasonBox}>
                                 <Ionicons name="close-circle" size={16} color="#c62828" />
@@ -461,6 +521,7 @@ export default function LeadDetailsScreen() {
                             pathname: '/add_quotation',
                             params: {
                                 mode: 'from_lead',
+                                leadId: lead.id,
                                 leadOrg: lead.org || lead.orgName || '',
                                 leadPerson: lead.contactPerson || '',
                                 leadMobile: lead.mobile || '',
@@ -473,6 +534,26 @@ export default function LeadDetailsScreen() {
                         <Ionicons name="document-text" size={20} color="#1565c0" />
                         <Text style={{color: '#1565c0', fontWeight: 'bold', marginLeft: 8}}>📄 Generate Quotation for this Lead</Text>
                     </TouchableOpacity>
+
+                    {quotes.length > 0 && (
+                        <View style={styles.quotesBox}>
+                            <Text style={styles.quotesTitle}>📑 Quotations for this lead ({quotes.length})</Text>
+                            {quotes.map((q: any) => (
+                                <TouchableOpacity
+                                    key={q.id}
+                                    style={styles.quoteRow}
+                                    onPress={() => router.push({ pathname: '/add_quotation', params: { id: q.id, mode: 'edit' } } as any)}
+                                >
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={{ fontWeight: 'bold', color: '#333', fontSize: 13 }}>{q.estimateNo}</Text>
+                                        <Text style={{ fontSize: 11, color: 'gray' }}>{q.date ? new Date(q.date).toLocaleDateString('en-GB') : ''} • {q.status}</Text>
+                                    </View>
+                                    <Text style={{ fontWeight: 'bold', color: '#1565c0' }}>₹{Number(q.grandTotal || 0).toLocaleString('en-IN')}</Text>
+                                    <Ionicons name="chevron-forward" size={16} color="#999" style={{ marginLeft: 6 }} />
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    )}
 
                     {(lead.stage === 'Order Closed' || lead.status === 'Converted') && (
                         <TouchableOpacity 
@@ -567,6 +648,19 @@ export default function LeadDetailsScreen() {
                                         </TouchableOpacity>
                                     </View>
                                 </View>
+
+                                {!markingLost && (
+                                    <>
+                                        <Text style={styles.label}>Expected Deal Value (₹):</Text>
+                                        <TextInput
+                                            style={styles.pickerBtn}
+                                            placeholder="e.g. 450000"
+                                            keyboardType="numeric"
+                                            value={editDealValue}
+                                            onChangeText={setEditDealValue}
+                                        />
+                                    </>
+                                )}
 
                                 {markingLost && (
                                     <View style={styles.lostReasonInputBox}>
@@ -674,6 +768,25 @@ export default function LeadDetailsScreen() {
                                 {editStage === item && <Ionicons name="checkmark" size={18} color="green" />}
                             </TouchableOpacity>
                         )} />
+                    </View>
+                </View>
+            </Modal>
+
+            <Modal visible={showAssignPicker} transparent animationType="fade" onRequestClose={() => setShowAssignPicker(false)}>
+                <View style={styles.pickerOverlay}>
+                    <TouchableOpacity style={StyleSheet.absoluteFill} onPress={() => setShowAssignPicker(false)} />
+                    <View style={[styles.pickerContainerSmall, { maxHeight: 450 }]}>
+                        <Text style={styles.pickerHeader}>Assign Lead To</Text>
+                        <FlatList
+                            data={teamMembers.filter((m: any) => m.status !== 'Disabled')}
+                            keyExtractor={(item: any) => item.id}
+                            renderItem={({ item }: any) => (
+                                <TouchableOpacity style={styles.pickerItem} onPress={() => reassignTo(item)}>
+                                    <Text style={{ fontSize: 16, color: '#333', fontWeight: item.id === lead?.assignedTo ? 'bold' : 'normal' }}>{item.name}</Text>
+                                    {item.id === lead?.assignedTo && <Ionicons name="checkmark" size={18} color="green" />}
+                                </TouchableOpacity>
+                            )}
+                        />
                     </View>
                 </View>
             </Modal>
@@ -816,6 +929,9 @@ const styles = StyleSheet.create({
     
     modalSearchBox: { flexDirection:'row', alignItems:'center', backgroundColor:'#f0f0f0', borderRadius:8, padding:10, marginBottom:10 },
 
+    quotesBox: { backgroundColor: 'white', borderRadius: 8, padding: 12, marginBottom: 15, borderWidth: 1, borderColor: '#e3f2fd' },
+    quotesTitle: { fontSize: 13, fontWeight: 'bold', color: '#1565c0', marginBottom: 6 },
+    quoteRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#f0f0f0' },
     lostReasonBox: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#ffebee', borderRadius: 8, padding: 10, marginTop: 10, borderWidth: 1, borderColor: '#ffcdd2' },
     lostReasonTitle: { fontSize: 13, fontWeight: 'bold', color: '#c62828' },
     lostReasonNote: { fontSize: 12, color: '#555', marginTop: 2 },

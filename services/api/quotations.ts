@@ -79,6 +79,7 @@ export function toLegacyQuotation(q: ApiQuotation): any {
 export interface ListQuotationsParams {
   status?: string;
   search?: string;
+  leadId?: string;
 }
 
 function toQueryString(params: Record<string, any>) {
@@ -102,6 +103,8 @@ export interface CreateQuotationPayload {
   orgName: string;
   orgAddress?: string;
   orgPhone?: string;
+  /** The lead this quotation is for — only sent on create. */
+  leadId?: string;
   items: ApiQuotationItem[];
   termsAndConditions?: string;
   taxType?: string;
@@ -111,6 +114,12 @@ export interface CreateQuotationPayload {
   status?: string;
   date?: string;
   validTill?: string;
+}
+
+/** Quotations made for one lead (Lead Details) — small, server-filtered. */
+export async function listLeadQuotations(leadId: string): Promise<any[]> {
+  const res = await apiClient.get<ListResponse>(`/quotations${toQueryString({ leadId, limit: 50, sortBy: 'createdAt', sortOrder: 'desc' })}`);
+  return res.data.map(toLegacyQuotation);
 }
 
 export async function createQuotation(payload: CreateQuotationPayload): Promise<any> {
