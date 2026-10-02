@@ -143,6 +143,9 @@ export interface LeadPageParams extends ListLeadsParams {
   outcome?: 'open' | 'won' | 'lost';
   quick?: 'overdue' | 'today' | 'hot';
   sourceGroup?: 'website'; // only leads that came from the company website form
+  // Default (when omitted) is follow-up date, oldest first — the work-list order.
+  sortBy?: 'nextDate' | 'createdAt';
+  sortOrder?: 'asc' | 'desc';
   from?: string; // YYYY-MM-DD
   to?: string;
 }

@@ -21,7 +21,7 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // Leads are filtered + paginated on the server (hooks/useServerLeads.ts)
 import { getLeadCounts, LeadCounts } from '../services/api/leads';
-import { buildLeadFilters, useServerLeads } from '../hooks/useServerLeads';
+import { buildLeadFilters, LeadSortMode, useServerLeads } from '../hooks/useServerLeads';
 import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading pilot (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -51,6 +51,7 @@ export default function LeadsScreen() {
     const [activeStageFilter, setActiveStageFilter] = useState('All'); 
     const [quickFilter, setQuickFilter] = useState<'' | 'overdue' | 'today' | 'hot'>('');
     const [websiteOnly, setWebsiteOnly] = useState(false);
+    const [sortMode, setSortMode] = useState<LeadSortMode>('newest');
     const [showWebsiteSettings, setShowWebsiteSettings] = useState(false);
 
     // Opened from the morning follow-up reminder push (/leads?quick=today)
@@ -106,12 +107,13 @@ export default function LeadsScreen() {
         currentDate,
         employeeId: employeeFilterId,
         websiteOnly,
-    }), [quickFilter, activeFilter, activeStageFilter, debouncedSearch, viewMode, currentDate, employeeFilterId, websiteOnly]);
+        sortMode,
+    }), [quickFilter, activeFilter, activeStageFilter, debouncedSearch, viewMode, currentDate, employeeFilterId, websiteOnly, sortMode]);
 
     // Only the screen's default view (this FY, open leads, no filters) is
     // cached, so the screen still opens instantly without storing every
     // filter combination on the device.
-    const isDefaultView = !quickFilter && !websiteOnly && activeFilter === 'All' && activeStageFilter === 'All' && !debouncedSearch
+    const isDefaultView = !quickFilter && !websiteOnly && sortMode === 'newest' && activeFilter === 'All' && activeStageFilter === 'All' && !debouncedSearch
         && viewMode === 'FY' && !employeeFilterId && buildLeadFilters({ quickFilter: '', status: 'All', stage: 'All', search: '', viewMode: 'FY', currentDate: new Date() }).from === leadFilters.from;
     const {
         items: leadItems,
@@ -126,7 +128,7 @@ export default function LeadsScreen() {
     } = useServerLeads({
         filters: leadFilters,
         enabled: !!currentUser?.companyId,
-        cacheKey: isDefaultView ? buildCacheKey('leads_first_page', currentUser?.companyId) : null,
+        cacheKey: isDefaultView ? buildCacheKey('leads_first_page_v2', currentUser?.companyId) : null,
     });
 
     // Overdue / Due Today / Hot cards — server-side counts.
@@ -314,6 +316,13 @@ export default function LeadsScreen() {
                         >
                             <Text style={[styles.smartFilterText, websiteOnly && { color: '#00838f' }]}>🌐 Website</Text>
                             {websiteOnly && <Ionicons name="close" size={14} color="#00838f" />}
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.smartFilterChip}
+                            onPress={() => setSortMode(sortMode === 'newest' ? 'followup' : 'newest')}
+                        >
+                            <Ionicons name="swap-vertical" size={12} color="#3b5998" style={{ marginRight: 4 }} />
+                            <Text style={styles.smartFilterText}>{sortMode === 'newest' ? 'Newest first' : 'Follow-up date'}</Text>
                         </TouchableOpacity>
                         {canViewEmployeeFilter && (
                             <TouchableOpacity style={[styles.smartFilterChip, {backgroundColor: '#e8f5e9', borderColor: '#a5d6a7'}]} onPress={() => setShowEmployeePicker(true)}>

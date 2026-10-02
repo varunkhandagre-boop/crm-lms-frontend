@@ -128,7 +128,11 @@ export interface LeadsScreenState {
     currentDate: Date;
     employeeId?: string; // only for roles that may filter by employee
     websiteOnly?: boolean; // only leads that came from the company website form
+    sortMode?: LeadSortMode;
 }
+
+/** 'newest' = most recently created first; 'followup' = follow-up date, oldest (most overdue) first. */
+export type LeadSortMode = 'newest' | 'followup';
 
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
@@ -148,6 +152,8 @@ function dateWindow(viewMode: ViewMode, d: Date): { from?: string; to?: string }
 export function buildLeadFilters(s: LeadsScreenState): LeadFilters {
     const filters: LeadFilters = { assignedToId: s.employeeId };
     if (s.websiteOnly) filters.sourceGroup = 'website';
+    if (s.sortMode === 'newest') { filters.sortBy = 'createdAt'; filters.sortOrder = 'desc'; }
+    else { filters.sortBy = 'nextDate'; filters.sortOrder = 'asc'; }
     if (s.quickFilter) {
         filters.quick = s.quickFilter;
     } else {
