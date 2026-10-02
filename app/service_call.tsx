@@ -36,6 +36,8 @@ import { sharePdfFromHtml } from '../utils/sharePdf';
 import { listInstallations } from '../services/api/installations';
 import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTeamMembers } from '../services/api/users';
+import { listSpareParts } from '../services/api/spareParts';
+import { sortAndFilterParts } from '../utils/sparePartSearch';
 
 export default function ServiceCallScreen() {
   const router = useRouter();
@@ -88,6 +90,10 @@ export default function ServiceCallScreen() {
   const [showAssignPicker, setShowAssignPicker] = useState(false);
   const [assigning, setAssigning] = useState(false);
   const [showStats, setShowStats] = useState(false);
+  // Parts used, recorded while closing the call
+  const [closeParts, setCloseParts] = useState<{ id: string; partName: string; partNo?: string; usedQty: string }[]>([]);
+  const [showPartPicker, setShowPartPicker] = useState(false);
+  const [partSearch, setPartSearch] = useState('');
 
   // 🔥 SERVICE CALLS — cache-first (instant from AsyncStorage, then
   // background refresh). See hooks/useCachedList.ts.
@@ -132,6 +138,12 @@ export default function ServiceCallScreen() {
       if (!needsEnrichment) return;
       setServiceCallList(serviceCallList.map((s: any) => ({ ...s, senderName: nameById.get(s.senderId) || 'Unknown' })));
   }, [serviceCallList, teamMembersForServiceCall]);
+
+  const { data: sparePartsList, refresh: refreshSpareParts } = useCachedList({
+      cacheKey: buildCacheKey('spare_parts', currentUser?.companyId),
+      enabled: !!currentUser?.companyId,
+      fetcher: listSpareParts,
+  });
 
   const engineerNameById = useMemo(
       () => new Map(teamMembersForServiceCall.map((u: any) => [u.id, u.name || 'Unknown'])),
@@ -503,7 +515,15 @@ export default function ServiceCallScreen() {
   const openDetails = (item: any) => {
     setSelectedCall(item);
     setResolutionNote(item.resolutionNote || '');
+    setCloseParts((item.partsUsed || []).map((p: any) => ({ id: p.id, partName: p.partName, partNo: p.partNo, usedQty: String(p.usedQty ?? 1) })));
+    setShowPartPicker(false);
     setDetailsModalVisible(true);
+  };
+
+  const addClosePart = (part: any) => {
+    setShowPartPicker(false);
+    if (closeParts.some((p) => p.id === part.id)) return;
+    setCloseParts([...closeParts, { id: part.id, partName: part.partName, partNo: part.partNo, usedQty: '1' }]);
   };
 
   // Assign / change / remove the engineer (Admin, Manager)
@@ -528,7 +548,11 @@ export default function ServiceCallScreen() {
     if (!resolutionNote) { Alert.alert("Required", "Please enter a resolution note."); return; }
     setLoading(true);
     try {
-      const updated = await apiCloseServiceCall(selectedCall.id, resolutionNote);
+      const parts = closeParts
+        .map((p) => ({ ...p, usedQty: String(Math.max(0, parseInt(p.usedQty) || 0)) }))
+        .filter((p) => p.usedQty !== '0');
+      const updated = await apiCloseServiceCall(selectedCall.id, resolutionNote, parts);
+      refreshSpareParts();
       setServiceCallList(prev => prev.map(item => item.id === selectedCall.id ? { ...item, ...updated } : item));
 
       setDetailsModalVisible(false);
@@ -810,7 +834,7 @@ export default function ServiceCallScreen() {
                   <Text style={{ color: '#c62828' }}>{selectedCall.remark}</Text>
                 </View>
 
-                {selectedCall.partsText && (
+                {selectedCall.partsText && !(selectedCall.status === 'Open' || selectedCall.status === 'Assigned') && (
                   <View>
                     <Text style={styles.sectionHeader}>SPARE PARTS USED</Text>
                     <View style={{ backgroundColor: '#fff3e0', padding: 10, borderRadius: 8, marginBottom: 10 }}>
@@ -821,6 +845,56 @@ export default function ServiceCallScreen() {
 
                 {(selectedCall.status === 'Open' || selectedCall.status === 'Assigned') ? (
                   <View style={{ marginTop: 10 }}>
+                    <Text style={styles.sectionHeader}>SPARE PARTS USED</Text>
+                    {closeParts.map((p) => (
+                      <View key={p.id} style={styles.closePartRow}>
+                        <Text style={{ flex: 1, fontWeight: 'bold', color: '#333' }} numberOfLines={1}>{p.partName}</Text>
+                        <Text style={{ fontSize: 12, color: 'gray', marginRight: 6 }}>Qty</Text>
+                        <TextInput
+                          style={styles.closePartQty}
+                          keyboardType="numeric"
+                          value={p.usedQty}
+                          onChangeText={(v) => setCloseParts(closeParts.map((x) => x.id === p.id ? { ...x, usedQty: v } : x))}
+                        />
+                        <TouchableOpacity onPress={() => setCloseParts(closeParts.filter((x) => x.id !== p.id))} style={{ marginLeft: 8 }}>
+                          <Ionicons name="close-circle" size={22} color="#c62828" />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                    {showPartPicker ? (
+                      <View style={styles.assignList}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 8, marginBottom: 6 }}>
+                          <Ionicons name="search" size={14} color="gray" />
+                          <TextInput style={{ flex: 1, paddingVertical: 6, marginLeft: 6 }} placeholder="Search name, part no. or model" value={partSearch} onChangeText={setPartSearch} />
+                        </View>
+                        <ScrollView style={{ maxHeight: 220 }} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                          {sortAndFilterParts(sparePartsList, partSearch, myId, selectedCall.model).map((part: any) => (
+                            <TouchableOpacity key={part.id} style={styles.pickerItem} onPress={() => addClosePart(part)}>
+                              <View style={{ flex: 1, marginRight: 8 }}>
+                                <Text style={{ fontSize: 14, color: '#333', fontWeight: 'bold' }}>{part.partName}</Text>
+                                <Text style={{ fontSize: 11, color: 'gray' }}>PN: {part.partNo}</Text>
+                              </View>
+                              <Text style={{ fontSize: 11, color: 'green' }}>You: {part.stockHolders?.[myId] || 0} • Office: {part.officeStock || 0}</Text>
+                            </TouchableOpacity>
+                          ))}
+                          {sortAndFilterParts(sparePartsList, partSearch, myId, selectedCall.model).length === 0 && (
+                            <Text style={{ color: 'gray', textAlign: 'center', marginVertical: 12 }}>
+                              {sparePartsList.length === 0 ? 'No spare parts in Spare Part Book yet.' : 'No part matches your search.'}
+                            </Text>
+                          )}
+                        </ScrollView>
+                        <TouchableOpacity onPress={() => setShowPartPicker(false)} style={{ alignSelf: 'flex-end', marginTop: 6 }}>
+                          <Text style={{ color: 'gray', fontWeight: 'bold' }}>Cancel</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <TouchableOpacity style={styles.addPartLink} onPress={() => { refreshSpareParts(); setPartSearch(''); setShowPartPicker(true); }}>
+                        <Ionicons name="add-circle-outline" size={18} color="#1565c0" />
+                        <Text style={{ color: '#1565c0', fontWeight: 'bold', marginLeft: 6 }}>Add spare part</Text>
+                      </TouchableOpacity>
+                    )}
+                    <Text style={{ fontSize: 11, color: 'gray', marginBottom: 6 }}>Stock is reduced when you close — from your own stock first, then office stock.</Text>
+
                     <Text style={styles.sectionHeader}>ACTION TAKEN (TO CLOSE)</Text>
                     <TextInput
                       style={styles.actionInput}
@@ -937,6 +1011,9 @@ const styles = StyleSheet.create({
   myCallsChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: '#1565c0' },
   myCallsChipActive: { backgroundColor: '#1565c0' },
   myCallsText: { fontSize: 12, fontWeight: 'bold', color: '#1565c0', marginLeft: 4 },
+  closePartRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff3e0', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginBottom: 6 },
+  closePartQty: { borderWidth: 1, borderColor: '#ddd', borderRadius: 6, backgroundColor: 'white', width: 50, textAlign: 'center', paddingVertical: 2 },
+  addPartLink: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8 },
   assignBtn: { backgroundColor: '#e3f2fd', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14 },
   assignBtnText: { color: '#1565c0', fontWeight: 'bold', fontSize: 12 },
   assignList: { backgroundColor: '#f5f9ff', borderRadius: 8, padding: 10, marginBottom: 10, borderWidth: 1, borderColor: '#bbdefb' },

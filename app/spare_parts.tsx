@@ -20,7 +20,7 @@ import {
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 3: spare parts catalog + stock now go through the new backend API
-import { issueStock as apiIssueStock, listSpareParts } from '../services/api/spareParts';
+import { issueStock as apiIssueStock, listSpareParts, updateSparePart } from '../services/api/spareParts';
 import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -50,6 +50,8 @@ export default function SparePartsScreen() {
 
   const [detailsModalVisible, setDetailsModalVisible] = useState(false);
   const [selectedPart, setSelectedPart] = useState<any>(null);
+  const [minStockInput, setMinStockInput] = useState('');
+  const [savingMin, setSavingMin] = useState(false);
   
   const [machineDetailVisible, setMachineDetailVisible] = useState(false);
   const [selectedMachine, setSelectedMachine] = useState<any>(null);
@@ -235,6 +237,7 @@ export default function SparePartsScreen() {
       const officeQty = item.officeStock || 0;
       
       setSelectedPart({ ...item, myQty, officeQty });
+      setMinStockInput(item.minStock ? String(item.minStock) : '');
       setDetailsModalVisible(true);
   };
 
@@ -295,6 +298,12 @@ export default function SparePartsScreen() {
           <View style={{flexDirection:'row', marginTop:8, alignItems:'center'}}>
               <Text style={{fontSize:12, color:'#555'}}>Office Stock: </Text>
               <Text style={styles.bigStockTextOrange}>{item.officeStock || 0}</Text>
+              <Text style={{fontSize:12, color:'#555', marginLeft: 12}}>Total: {item.totalStock ?? item.officeStock ?? 0}</Text>
+              {item.minStock > 0 && (item.totalStock ?? 0) <= item.minStock && (
+                  <View style={{ backgroundColor: '#ffebee', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 8 }}>
+                      <Text style={{ color: '#c62828', fontSize: 10, fontWeight: 'bold' }}>LOW STOCK</Text>
+                  </View>
+              )}
           </View>
       </TouchableOpacity>
   );
@@ -444,6 +453,38 @@ export default function SparePartsScreen() {
                                     <Text style={[styles.officeStockValue, {fontSize:24}]}>{selectedPart.officeStock || 0}</Text>
                                 </View>
                             </View>
+
+                            {isAdmin && (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12 }}>
+                                    <Text style={{ fontSize: 12, color: '#555', flex: 1 }}>Low-stock alert at (0 = off)</Text>
+                                    <TextInput
+                                        style={{ borderWidth: 1, borderColor: '#ddd', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4, width: 60, textAlign: 'center' }}
+                                        keyboardType="numeric"
+                                        value={minStockInput}
+                                        onChangeText={setMinStockInput}
+                                        placeholder="0"
+                                    />
+                                    <TouchableOpacity
+                                        style={{ marginLeft: 8, backgroundColor: '#3b5998', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 6 }}
+                                        disabled={savingMin}
+                                        onPress={async () => {
+                                            setSavingMin(true);
+                                            try {
+                                                const updated = await updateSparePart(selectedPart.id, { minStock: parseInt(minStockInput) || 0 });
+                                                setSelectedPart({ ...selectedPart, minStock: updated.minStock });
+                                                refreshSpareParts();
+                                                Alert.alert('Saved', updated.minStock ? `Store will be alerted at ${updated.minStock} or fewer.` : 'Low-stock alert turned off for this part.');
+                                            } catch (e: any) {
+                                                Alert.alert('Error', e?.message || 'Could not save');
+                                            } finally {
+                                                setSavingMin(false);
+                                            }
+                                        }}
+                                    >
+                                        {savingMin ? <ActivityIndicator color="white" size="small" /> : <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 12 }}>Save</Text>}
+                                    </TouchableOpacity>
+                                </View>
+                            )}
 
                             {isAdmin && (selectedPart.officeStock > 0) && (
                                 <TouchableOpacity 

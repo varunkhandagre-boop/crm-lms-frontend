@@ -33,6 +33,7 @@ import { fetchOrganizations } from '../services/api/organizations';
 import { useCachedList } from '../hooks/useCachedList';
 import { createServiceCall } from '../services/api/serviceCalls';
 import { listSpareParts } from '../services/api/spareParts';
+import { sortAndFilterParts } from '../utils/sparePartSearch';
 import { buildCacheKey } from '../utils/listCache';
 
 // 🔥 PDF IMPORTS
@@ -104,7 +105,8 @@ export default function AddServiceCallScreen() {
       enabled: !!currentUser?.companyId,
       fetcher: listInstallations, // was: fetchSaaSData("installations")
   });
-  const { data: sparePartsList } = useCachedList({
+  const [partSearch, setPartSearch] = useState('');
+  const { data: sparePartsList, refresh: refreshSpareParts } = useCachedList({
       cacheKey: buildCacheKey('spare_parts', currentUser?.companyId),
       enabled: !!currentUser?.companyId,
       fetcher: listSpareParts, // was: fetchSaaSData("spare_parts")
@@ -656,6 +658,7 @@ recordLocationLog({
             <TextInput style={[styles.inputGray, {height: 60}, errors.remark && styles.errorBorder]} multiline placeholder="Describe issue..." value={remark} onChangeText={setRemark} />
 
             <Text style={styles.sectionHeader}>Spare Parts</Text>
+            <Text style={{ fontSize: 11, color: 'gray', marginTop: -4, marginBottom: 6 }}>Stock is reduced automatically when you save — from your own stock first, then office stock.</Text>
             <View style={styles.partsContainer}>
                 {usedParts.map((part, index) => (
                     <View key={index} style={styles.partRow}>
@@ -664,7 +667,7 @@ recordLocationLog({
                         <TouchableOpacity onPress={() => removePart(part.id)}><Ionicons name="trash-outline" size={20} color="red" /></TouchableOpacity>
                     </View>
                 ))}
-                <TouchableOpacity style={styles.addPartBtn} onPress={() => setPartsModalVisible(true)}>
+                <TouchableOpacity style={styles.addPartBtn} onPress={() => { refreshSpareParts(); setPartSearch(''); setPartsModalVisible(true); }}>
                     <Ionicons name="add-circle-outline" size={20} color="#3b5998" />
                     <Text style={{color:'#3b5998', fontWeight:'bold', marginLeft:5}}>+ Add Spare Part</Text>
                 </TouchableOpacity>
@@ -776,16 +779,26 @@ recordLocationLog({
           <View style={styles.modalOverlay}>
               <View style={styles.modalContent}>
                   <Text style={styles.modalTitle}>Select Spare Part</Text>
-                  <FlatList 
-                      data={sparePartsList}
-                      keyExtractor={item => item.id}
-                      renderItem={({item}) => (
-                          <TouchableOpacity style={styles.partItem} onPress={() => handleAddPart(item)}>
-                              <View><Text style={{fontWeight:'bold'}}>{item.partName}</Text><Text style={{fontSize:12, color:'gray'}}>PN: {item.partNo}</Text></View>
-                              <View style={{backgroundColor:'#e8f5e9', padding:5, borderRadius:4}}><Text style={{fontSize:11, color:'green'}}>Avail: {item.officeStock || 0}</Text></View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 10, marginBottom: 8 }}>
+                      <Ionicons name="search" size={16} color="gray" />
+                      <TextInput style={{ flex: 1, paddingVertical: 8, marginLeft: 6 }} placeholder="Search name, part no. or model" value={partSearch} onChangeText={setPartSearch} />
+                      {partSearch ? <TouchableOpacity onPress={() => setPartSearch('')}><Ionicons name="close-circle" size={16} color="gray" /></TouchableOpacity> : null}
+                  </View>
+                  <Text style={{ fontSize: 11, color: 'gray', marginBottom: 4 }}>Parts you carry are shown first, then parts for this model.</Text>
+                  {/* Plain ScrollView with a fixed max height: a FlatList in this auto-sized modal collapsed to zero height on the new React Native, so the list looked empty. */}
+                  <ScrollView style={{ maxHeight: 420 }} keyboardShouldPersistTaps="handled">
+                      {sortAndFilterParts(sparePartsList, partSearch, currentUser?.uid || currentUser?.id, modelName).map((item: any) => (
+                          <TouchableOpacity key={item.id} style={styles.partItem} onPress={() => handleAddPart(item)}>
+                              <View style={{ flex: 1, marginRight: 8 }}><Text style={{fontWeight:'bold'}}>{item.partName}</Text><Text style={{fontSize:12, color:'gray'}}>PN: {item.partNo}</Text></View>
+                              <View style={{backgroundColor:'#e8f5e9', padding:5, borderRadius:4}}><Text style={{fontSize:11, color:'green'}}>You: {item.stockHolders?.[currentUser?.uid || currentUser?.id] || 0} • Office: {item.officeStock || 0}</Text></View>
                           </TouchableOpacity>
+                      ))}
+                      {sortAndFilterParts(sparePartsList, partSearch, currentUser?.uid || currentUser?.id, modelName).length === 0 && (
+                          <Text style={{ textAlign: 'center', color: 'gray', marginVertical: 20 }}>
+                              {sparePartsList.length === 0 ? 'No spare parts found. Add them in Spare Part Book first.' : 'No part matches your search.'}
+                          </Text>
                       )}
-                  />
+                  </ScrollView>
                   <TouchableOpacity style={styles.closeBtn} onPress={() => setPartsModalVisible(false)}><Text style={{color:'red'}}>Close</Text></TouchableOpacity>
               </View>
           </View>

@@ -26,6 +26,7 @@ export default function AddSparePartScreen() {
   const [price, setPrice] = useState('');
   const [models, setModels] = useState('');
   const [stock, setStock] = useState('0');
+  const [minStock, setMinStock] = useState('');
   const [loading, setLoading] = useState(false);
 
   // 🔥 SAVE LOGIC — via new backend API
@@ -43,6 +44,7 @@ export default function AddSparePartScreen() {
               price: parseFloat(price.trim()) || 0,
               compatibleModels: models.trim(),
               officeStock: parseInt(stock) || 0,
+              minStock: parseInt(minStock) || 0,
           });
 
           if (addNotification) {
@@ -90,6 +92,9 @@ export default function AddSparePartScreen() {
 
           <Text style={styles.label}>Initial Office Stock</Text>
           <TextInput style={styles.input} placeholder="e.g. 10" keyboardType="numeric" value={stock} onChangeText={setStock} />
+
+          <Text style={styles.label}>Low-stock alert at (optional)</Text>
+          <TextInput style={styles.input} placeholder="e.g. 3 — Store gets an alert at 3 or fewer" keyboardType="numeric" value={minStock} onChangeText={setMinStock} />
 
           <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={loading}>
               {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Save Spare Part</Text>}
