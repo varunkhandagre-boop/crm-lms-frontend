@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -38,6 +39,7 @@ import { buildCacheKey } from '../utils/listCache';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 import { recordLocationLog } from '../services/api/locationLogs';
 
 export default function AddServiceCallScreen() {
@@ -378,18 +380,8 @@ export default function AddServiceCallScreen() {
           </body>
         </html>`;
 
-        const { uri } = await Print.printToFileAsync({ html: htmlContent });
         const cleanName = `Service_${ticketData.scrId}.pdf`;
-        // @ts-ignore
-        const newPath = `${FileSystem.cacheDirectory}${cleanName}`;
-
-        try {
-            await FileSystem.copyAsync({ from: uri, to: newPath });
-            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Report` });
-
-        } catch (error) {
-            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-        }
+        await sharePdfFromHtml(htmlContent, cleanName, `Share Report`);
     } catch (error) {
         Alert.alert("Error", "Could not generate PDF");
     }
@@ -585,7 +577,7 @@ recordLocationLog({
                 <Text style={{color: '#333'}}>{formatDate(callDate)}</Text>
                 <Ionicons name="calendar-outline" size={18} color="gray" />
             </TouchableOpacity>
-            {showDatePicker && <DateTimePicker value={callDate} mode="date" onChange={(e, d) => { setShowDatePicker(false); if(d) setCallDate(d); }} />}
+            {showDatePicker && <DateTimePicker value={callDate} mode="date" {...pickerHandlers((e, d) => { setShowDatePicker(false); if(d) setCallDate(d); })} />}
 
             <Text style={styles.label}>Organization *</Text>
             <TouchableOpacity style={[styles.dropdown, errors.org && styles.errorBorder]} onPress={() => openModal('Org')}>

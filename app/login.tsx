@@ -153,7 +153,7 @@ export default function LoginScreen() {
       >
         <ScrollView 
           ref={scrollRef}
-          contentContainerStyle={[styles.scrollContent, kbHeight > 0 && { paddingBottom: 20 + extraKbPad }]}
+          contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled" 
           showsVerticalScrollIndicator={false}
           keyboardDismissMode="on-drag" 
@@ -173,7 +173,7 @@ export default function LoginScreen() {
           </View>
 
           {/* --- FORM SECTION --- */}
-          <View style={styles.formContainer}>
+          <View style={[styles.formContainer, kbHeight > 0 && { paddingBottom: 30 + extraKbPad }]}>
               <Text style={styles.welcomeText}>Welcome Back!</Text>
               <Text style={styles.subText}>Sign in to continue</Text>
 
@@ -242,7 +242,7 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#3b5998' },
-  scrollContent: { flexGrow: 1, paddingBottom: 20 },
+  scrollContent: { flexGrow: 1 },
   
   logoContainer: { alignItems: 'center', marginTop: 60, marginBottom: 40 },
   logoBox: { 

@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
@@ -103,7 +104,7 @@ export default function AddAdvanceScreen() {
                 <DateTimePicker 
                     value={date} 
                     mode="date" 
-                    onChange={(e, d) => { setShowDatePicker(false); if(d) setDate(d); }} 
+                    {...pickerHandlers((e, d) => { setShowDatePicker(false); if(d) setDate(d); })} 
                 />
             )}
 

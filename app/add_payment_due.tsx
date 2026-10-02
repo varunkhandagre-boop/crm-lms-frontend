@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -163,10 +164,10 @@ export default function AddPaymentDueScreen() {
                             value={billDate}
                             mode="date"
                             display="default"
-                            onChange={(event, selectedDate) => {
+                            {...pickerHandlers((event, selectedDate) => {
                                 setShowBillDatePicker(false);
                                 if (selectedDate) setBillDate(selectedDate);
-                            }}
+                            })}
                         />
                     )}
 
@@ -189,10 +190,10 @@ export default function AddPaymentDueScreen() {
                             value={dueDate}
                             mode="date"
                             display="default"
-                            onChange={(event, selectedDate) => {
+                            {...pickerHandlers((event, selectedDate) => {
                                 setShowDatePicker(false);
                                 if (selectedDate) setDueDate(selectedDate);
-                            }}
+                            })}
                         />
                     )}
 

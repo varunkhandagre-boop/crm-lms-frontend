@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
@@ -709,7 +710,7 @@ const [selectedDate, setSelectedDate] = useState(new Date());
                     <Ionicons name="calendar" size={18} color="#3b5998" />
                     <Text style={styles.filterText}>{selectedDate.toLocaleDateString('en-GB')}</Text>
                 </TouchableOpacity>
-                {showDatePicker && <DateTimePicker value={selectedDate} mode="date" onChange={(e, d) => { setShowDatePicker(false); if(d) setSelectedDate(d); }} />}
+                {showDatePicker && <DateTimePicker value={selectedDate} mode="date" {...pickerHandlers((e, d) => { setShowDatePicker(false); if(d) setSelectedDate(d); })} />}
 
                 <TouchableOpacity style={styles.filterBox} onPress={() => setUserModalVisible(true)}>
                     <Ionicons name="person" size={18} color="#3b5998" />

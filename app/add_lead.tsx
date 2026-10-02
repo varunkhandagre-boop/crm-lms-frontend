@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -508,7 +509,7 @@ export default function AddLeadScreen() {
                         <Text style={{color:'#3b5998', fontWeight:'bold'}}>{formatDate(nextDate)}</Text>
                         <Ionicons name="calendar" size={16} color="#3b5998" />
                     </TouchableOpacity>
-                    {showNextPicker && <DateTimePicker value={nextDate} mode="date" minimumDate={new Date()} onChange={(e, d) => { setShowNextPicker(false); if(d) setNextDate(d); }} />}
+                    {showNextPicker && <DateTimePicker value={nextDate} mode="date" minimumDate={new Date()} {...pickerHandlers((e, d) => { setShowNextPicker(false); if(d) setNextDate(d); })} />}
                 </View>
                 <View style={styles.col}>
                     <Text style={styles.label}>Expected Closing</Text>
@@ -516,7 +517,7 @@ export default function AddLeadScreen() {
                         <Text style={{color:'#333'}}>{formatDate(closingDate)}</Text>
                         <Ionicons name="calendar-outline" size={16} color="gray" />
                     </TouchableOpacity>
-                    {showClosingPicker && <DateTimePicker value={closingDate} mode="date" minimumDate={new Date()} onChange={(e, d) => { setShowClosingPicker(false); if(d) setClosingDate(d); }} />}
+                    {showClosingPicker && <DateTimePicker value={closingDate} mode="date" minimumDate={new Date()} {...pickerHandlers((e, d) => { setShowClosingPicker(false); if(d) setClosingDate(d); })} />}
                 </View>
             </View>
 

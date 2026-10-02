@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as Location from 'expo-location';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -23,6 +24,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useData } from './context/DataContext';
 // 🔥 Phase 1/2: lead update/delete and visit logging now via the new backend API
 import { deleteLead as apiDeleteLead, getLead, updateLead as apiUpdateLead } from '../services/api/leads';
+import { isWebsiteLead } from '../services/api/websiteLeads';
 import { createSalesVisit } from '../services/api/salesVisits';
 import { listProducts } from '../services/api/products';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
@@ -501,6 +503,15 @@ export default function LeadDetailsScreen() {
                             </TouchableOpacity>
                         </View>
 
+                        {isWebsiteLead(lead.source) && (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#e0f7fa', borderRadius: 8, padding: 8, marginTop: 8 }}>
+                                <Ionicons name="globe-outline" size={16} color="#00838f" />
+                                <Text style={{ marginLeft: 8, color: '#00838f', fontWeight: 'bold', fontSize: 12, flex: 1 }}>
+                                    Website lead — {lead.source.replace(/^website\s*-\s*/i, '') || 'website form'}
+                                </Text>
+                            </View>
+                        )}
+
                         {isLostState(lead.status, lead.stage) && (
                             <View style={styles.lostReasonBox}>
                                 <Ionicons name="close-circle" size={16} color="#c62828" />
@@ -706,7 +717,7 @@ export default function LeadDetailsScreen() {
                                             <Text style={{ color: '#333', fontWeight: 'bold' }}>{editNextDate.toLocaleDateString('en-GB')}</Text>
                                             <Ionicons name="calendar" size={16} color="#3b5998" />
                                         </TouchableOpacity>
-                                        {showNextDatePicker && <DateTimePicker value={editNextDate} mode="date" onChange={(e, d) => { setShowNextDatePicker(false); if (d) setEditNextDate(d); }} />}
+                                        {showNextDatePicker && <DateTimePicker value={editNextDate} mode="date" {...pickerHandlers((e, d) => { setShowNextDatePicker(false); if (d) setEditNextDate(d); })} />}
                                     </>
                                 )}
 

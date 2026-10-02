@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
@@ -778,7 +779,7 @@ const HolidaysTab = () => {
                         <TouchableOpacity onPress={() => setShowPicker(true)} style={[styles.input, {justifyContent:'center'}]}>
                             <Text style={{color:'#333'}}>{newHoliday.date.toDateString()}</Text>
                         </TouchableOpacity>
-                        {showPicker && <DateTimePicker value={newHoliday.date} mode="date" display="default" onChange={onDateChange} />}
+                        {showPicker && <DateTimePicker value={newHoliday.date} mode="date" display="default" {...pickerHandlers(onDateChange)} />}
                         <TextInput style={styles.input} placeholder="Occasion Name" value={newHoliday.name} onChangeText={t=>setNewHoliday({...newHoliday, name:t})} />
                         <View style={styles.pickerRow}>
                             {["Holiday", "Optional", "Event"].map(type => (
@@ -867,7 +868,7 @@ const TrackingTab = () => {
                 </View>
 
                 {showDatePicker && (
-                    <DateTimePicker value={mapDate} mode="date" display="default" onChange={onDateChange} />
+                    <DateTimePicker value={mapDate} mode="date" display="default" {...pickerHandlers(onDateChange)} />
                 )}
 
                 <Text style={{fontSize: 10, color: 'gray', fontWeight:'bold', marginBottom:5}}>SELECT EMPLOYEE</Text>

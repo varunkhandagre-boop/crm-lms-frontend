@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -30,6 +31,7 @@ import { buildCacheKey } from '../utils/listCache';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 
 export default function AddCourierScreen() {
   const router = useRouter();
@@ -334,19 +336,10 @@ export default function AddCourierScreen() {
             </body>
           </html>`;
 
-          const { uri } = await Print.printToFileAsync({ html: htmlContent });
           
           const cleanName = `${data.dcNo}_${data.receiver.split(',')[0].replace(/[^a-zA-Z0-9]/g, '_')}`;
           const newFileName = `${cleanName}.pdf`;
-          // @ts-ignore
-          const newPath = `${FileSystem.cacheDirectory}${newFileName}`;
-
-          try {
-              await FileSystem.copyAsync({ from: uri, to: newPath });
-              await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Challan` });
-          } catch (renameError) {
-              await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-          }
+          await sharePdfFromHtml(htmlContent, newFileName, `Share Challan`);
 
       } catch (error) { 
           Alert.alert("Error", "Could not generate challan."); 
@@ -465,7 +458,7 @@ export default function AddCourierScreen() {
                         <Text style={{marginLeft:5, fontWeight:'bold', color:'#333'}}>{formatDate(date)}</Text>
                     </View>
                 </TouchableOpacity>
-                {showDatePicker && <DateTimePicker value={date} mode="date" onChange={(e, d) => { setShowDatePicker(false); if(d) setDate(d); }} />}
+                {showDatePicker && <DateTimePicker value={date} mode="date" {...pickerHandlers((e, d) => { setShowDatePicker(false); if(d) setDate(d); })} />}
 
                 <View style={styles.toggleBox}>
                     <TouchableOpacity style={[styles.toggleBtn, type==='Outward' && styles.activeOutward]} onPress={() => setType('Outward')}>
@@ -546,7 +539,7 @@ export default function AddCourierScreen() {
                     <Text style={{color:'#333', fontWeight:'bold'}}>{formatDate(courierDate)}</Text>
                     <Ionicons name="calendar" size={20} color="#3b5998" />
                 </TouchableOpacity>
-                {showCourierDatePicker && <DateTimePicker value={courierDate} mode="date" onChange={(e, d) => { setShowCourierDatePicker(false); if(d) setCourierDate(d); }} />}
+                {showCourierDatePicker && <DateTimePicker value={courierDate} mode="date" {...pickerHandlers((e, d) => { setShowCourierDatePicker(false); if(d) setCourierDate(d); })} />}
             </View>
 
             <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginTop:10}}>

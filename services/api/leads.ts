@@ -95,6 +95,7 @@ export function toLegacyLead(l: ApiLead): any {
     lostReasonNote: l.lostReasonNote || '',
     lostAt: l.lostAt,
     dealValue: l.dealValue === null || l.dealValue === undefined ? null : Number(l.dealValue),
+    source: l.source || '',
   };
 }
 
@@ -141,6 +142,7 @@ export interface LeadPageParams extends ListLeadsParams {
   limit?: number;
   outcome?: 'open' | 'won' | 'lost';
   quick?: 'overdue' | 'today' | 'hot';
+  sourceGroup?: 'website'; // only leads that came from the company website form
   from?: string; // YYYY-MM-DD
   to?: string;
 }

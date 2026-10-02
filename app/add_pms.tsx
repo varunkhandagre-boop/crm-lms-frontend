@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -36,6 +37,7 @@ import { urlToBase64Image } from '../utils/pdfImageHelper';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 
 export default function AddPMSScreen() {
   const router = useRouter();
@@ -313,17 +315,8 @@ export default function AddPMSScreen() {
           </body>
         </html>`;
 
-        const { uri } = await Print.printToFileAsync({ html: htmlContent });
         const cleanName = `${pmsData.pmsId}_${(pmsData.hospitalName || 'Client').replace(/ /g, '_')}.pdf`;
-        // @ts-ignore
-        const newPath = `${FileSystem.cacheDirectory}${cleanName}`;
-
-        try {
-            await FileSystem.copyAsync({ from: uri, to: newPath });
-            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share PMS Report` });
-        } catch (error) {
-            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-        }
+        await sharePdfFromHtml(htmlContent, cleanName, `Share PMS Report`);
     } catch (error) {
         Alert.alert("Error", "Could not generate PDF");
     }
@@ -467,7 +460,7 @@ recordLocationLog({
                         <Text style={{color: '#333', fontSize:13}}>{formatDate(pmsDate)}</Text>
                         <Ionicons name="calendar-outline" size={16} color="gray" />
                     </TouchableOpacity>
-                    {showPmsDatePicker && <DateTimePicker value={pmsDate} mode="date" onChange={(e, d) => { setShowPmsDatePicker(false); if(d) setPmsDate(d); }} />}
+                    {showPmsDatePicker && <DateTimePicker value={pmsDate} mode="date" {...pickerHandlers((e, d) => { setShowPmsDatePicker(false); if(d) setPmsDate(d); })} />}
                 </View>
 
                 <View style={styles.col}>
@@ -476,7 +469,7 @@ recordLocationLog({
                         <Text style={{color: '#d32f2f', fontWeight:'bold', fontSize:13}}>{formatDate(dueDate)}</Text>
                         <Ionicons name="calendar" size={16} color="#d32f2f" />
                     </TouchableOpacity>
-                    {showDueDatePicker && <DateTimePicker value={dueDate} mode="date" onChange={(e, d) => { setShowDueDatePicker(false); if(d) setDueDate(d); }} />}
+                    {showDueDatePicker && <DateTimePicker value={dueDate} mode="date" {...pickerHandlers((e, d) => { setShowDueDatePicker(false); if(d) setDueDate(d); })} />}
                 </View>
             </View>
 

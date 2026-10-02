@@ -32,6 +32,7 @@ import * as ImagePicker from 'expo-image-picker';
 
 // 🔥 DATE PICKER IMPORT
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 
 export default function AddOrganizationScreen() {
   const router = useRouter();
@@ -637,7 +638,7 @@ export default function AddOrganizationScreen() {
                     {showDobPicker && (
                         <DateTimePicker 
                             value={dob || new Date()} mode="date" maximumDate={new Date()} 
-                            onChange={(e, d) => { setShowDobPicker(false); if(d) setDob(d); }} 
+                            {...pickerHandlers((e, d) => { setShowDobPicker(false); if(d) setDob(d); })} 
                         />
                     )}
                 </View>
@@ -650,7 +651,7 @@ export default function AddOrganizationScreen() {
                     {showAnniversaryPicker && (
                         <DateTimePicker 
                             value={anniversary || new Date()} mode="date" maximumDate={new Date()} 
-                            onChange={(e, d) => { setShowAnniversaryPicker(false); if(d) setAnniversary(d); }} 
+                            {...pickerHandlers((e, d) => { setShowAnniversaryPicker(false); if(d) setAnniversary(d); })} 
                         />
                     )}
                 </View>

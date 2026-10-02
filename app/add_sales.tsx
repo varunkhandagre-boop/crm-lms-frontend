@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
@@ -338,7 +339,7 @@ if (locationData) {
                                 <Text style={{color:'#333', fontWeight:'bold'}}>{formatDate(nextDate)}</Text>
                                 <Ionicons name="calendar" size={16} color="#3b5998" />
                             </TouchableOpacity>
-                            {showDatePicker && <DateTimePicker value={nextDate} mode="date" onChange={(e, d) => { setShowDatePicker(false); if(d) setNextDate(d); }} />}
+                            {showDatePicker && <DateTimePicker value={nextDate} mode="date" {...pickerHandlers((e, d) => { setShowDatePicker(false); if(d) setNextDate(d); })} />}
                         </View>
                     </View>
 

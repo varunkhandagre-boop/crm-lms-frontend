@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
@@ -31,6 +32,7 @@ import { listProducts } from '../services/api/products';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 import { recordLocationLog } from '../services/api/locationLogs';
 import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTeamMembers } from '../services/api/users';
@@ -291,16 +293,8 @@ export default function AddOrderScreen() {
         </body>
         </html>`;
 
-        const { uri } = await Print.printToFileAsync({ html: htmlContent });
         const cleanName = `Order_${orderData.orderId}.pdf`;
-        const newPath = `${(FileSystem as any).cacheDirectory}${cleanName}`;
-
-        try {
-            await FileSystem.copyAsync({ from: uri, to: newPath });
-            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Order PDF` });
-        } catch (error) {
-            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-        }
+        await sharePdfFromHtml(htmlContent, cleanName, `Share Order PDF`);
     } catch (error) {
         Alert.alert("Error", "Could not generate PDF");
     }
@@ -609,7 +603,7 @@ if (locationData) {
                 <Text style={{color: '#333', fontSize:16}}>{formatDate(poDate)}</Text>
                 <Ionicons name="calendar-outline" size={20} color="gray" />
             </TouchableOpacity>
-            {showDatePicker && <DateTimePicker value={poDate} mode="date" onChange={(e, d) => { setShowDatePicker(false); if(d) setPoDate(d); }} />}
+            {showDatePicker && <DateTimePicker value={poDate} mode="date" {...pickerHandlers((e, d) => { setShowDatePicker(false); if(d) setPoDate(d); })} />}
 
             <Text style={styles.label}>Select Client / Hospital *</Text>
             <TouchableOpacity style={styles.dropdownBtn} onPress={() => openModal('Hospital', orgList)}>
@@ -690,7 +684,7 @@ if (locationData) {
                                 <Text style={{color: '#333', fontSize: 13}}>{formatDate(advancePdcDate)}</Text>
                             </TouchableOpacity>
                             {showAdvancePdcPicker && (
-                                <DateTimePicker value={advancePdcDate} mode="date" onChange={(e, d) => { setShowAdvancePdcPicker(false); if(d) setAdvancePdcDate(d); }} />
+                                <DateTimePicker value={advancePdcDate} mode="date" {...pickerHandlers((e, d) => { setShowAdvancePdcPicker(false); if(d) setAdvancePdcDate(d); })} />
                             )}
                         </View>
                     )}

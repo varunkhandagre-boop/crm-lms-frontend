@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -475,7 +476,7 @@ export default function ProjectDetailsScreen() {
                   <View style={{flexDirection:'row', justifyContent:'space-between'}}><Text style={styles.modalTitle}>Mark Delivered</Text><CloseButton onPress={()=>setDeliveryModalVisible(false)}/></View>
                   <TextInput style={styles.input} placeholder="Delivery Mode (Courier/Hand)" value={deliveryMode} onChangeText={setDeliveryMode} />
                   <TouchableOpacity style={styles.input} onPress={()=>setShowDatePicker(true)}><Text>{deliveryDate.toLocaleDateString()}</Text></TouchableOpacity>
-                  {showDatePicker && <DateTimePicker value={deliveryDate} mode="date" onChange={(e,d)=>{setShowDatePicker(false);if(d)setDeliveryDate(d)}} />}
+                  {showDatePicker && <DateTimePicker value={deliveryDate} mode="date" {...pickerHandlers((e,d)=>{setShowDatePicker(false);if(d)setDeliveryDate(d)})} />}
                   <TouchableOpacity onPress={confirmDelivery} style={[styles.saveBtn, {backgroundColor:'#4caf50'}]} disabled={isSaving}><Text style={{color:'white'}}>Confirm</Text></TouchableOpacity>
               </View>
           </View>

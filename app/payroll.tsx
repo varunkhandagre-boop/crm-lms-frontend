@@ -3,6 +3,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -374,16 +375,8 @@ const generatePayslipPDF = async (slip: Payslip) => {
           </body>
         </html>`;
 
-        const { uri } = await Print.printToFileAsync({ html: htmlContent });
         const cleanName = `Payslip_${slip.user?.name?.replace(/ /g, '_') || 'Employee'}_${MONTH_NAMES[slip.month - 1]}_${slip.year}.pdf`;
-        const newPath = `${(FileSystem as any).cacheDirectory}${cleanName}`;
-
-        try {
-            await FileSystem.copyAsync({ from: uri, to: newPath });
-            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Payslip` });
-        } catch {
-            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-        }
+        await sharePdfFromHtml(htmlContent, cleanName, `Share Payslip`);
     } catch (error: any) {
         Alert.alert('Error', error.message || 'Could not generate payslip PDF.');
     }

@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
@@ -237,7 +238,7 @@ export default function AddActivityScreen() {
                     {showDatePicker && (
                         <DateTimePicker 
                             value={date} mode="date" minimumDate={new Date()}
-                            onChange={(e, d) => { setShowDatePicker(false); if(d) setDate(d); }} 
+                            {...pickerHandlers((e, d) => { setShowDatePicker(false); if(d) setDate(d); })} 
                         />
                     )}
                 </View>

@@ -127,6 +127,7 @@ export interface LeadsScreenState {
     viewMode: ViewMode;
     currentDate: Date;
     employeeId?: string; // only for roles that may filter by employee
+    websiteOnly?: boolean; // only leads that came from the company website form
 }
 
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -146,6 +147,7 @@ function dateWindow(viewMode: ViewMode, d: Date): { from?: string; to?: string }
 /** Same rules the screen used to apply on the phone, expressed as API params. */
 export function buildLeadFilters(s: LeadsScreenState): LeadFilters {
     const filters: LeadFilters = { assignedToId: s.employeeId };
+    if (s.websiteOnly) filters.sourceGroup = 'website';
     if (s.quickFilter) {
         filters.quick = s.quickFilter;
     } else {

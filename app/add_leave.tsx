@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -158,7 +159,7 @@ export default function AddLeaveScreen() {
                     {showFromPicker && (
                         <DateTimePicker 
                             value={fromDate} mode="date" 
-                            onChange={(e, d) => { setShowFromPicker(false); if(d) setFromDate(d); }} 
+                            {...pickerHandlers((e, d) => { setShowFromPicker(false); if(d) setFromDate(d); })} 
                         />
                     )}
                 </View>
@@ -171,7 +172,7 @@ export default function AddLeaveScreen() {
                     {showToPicker && (
                         <DateTimePicker 
                             value={toDate} mode="date" minimumDate={fromDate}
-                            onChange={(e, d) => { setShowToPicker(false); if(d) setToDate(d); }} 
+                            {...pickerHandlers((e, d) => { setShowToPicker(false); if(d) setToDate(d); })} 
                         />
                     )}
                 </View>

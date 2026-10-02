@@ -28,6 +28,8 @@ import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import ReassignLeadsModal from '../components/ReassignLeadsModal';
 import CloseStaleLeadsModal from '../components/CloseStaleLeadsModal';
+import WebsiteLeadSettingsModal from '../components/WebsiteLeadSettingsModal';
+import { isWebsiteLead } from '../services/api/websiteLeads';
 import { formatInr } from '../constants/leadStatus';
 
 export default function LeadsScreen() {
@@ -48,6 +50,8 @@ export default function LeadsScreen() {
     const [activeFilter, setActiveFilter] = useState('All');
     const [activeStageFilter, setActiveStageFilter] = useState('All'); 
     const [quickFilter, setQuickFilter] = useState<'' | 'overdue' | 'today' | 'hot'>('');
+    const [websiteOnly, setWebsiteOnly] = useState(false);
+    const [showWebsiteSettings, setShowWebsiteSettings] = useState(false);
 
     // Opened from the morning follow-up reminder push (/leads?quick=today)
     const { quick } = useLocalSearchParams<{ quick?: string }>();
@@ -101,12 +105,13 @@ export default function LeadsScreen() {
         viewMode,
         currentDate,
         employeeId: employeeFilterId,
-    }), [quickFilter, activeFilter, activeStageFilter, debouncedSearch, viewMode, currentDate, employeeFilterId]);
+        websiteOnly,
+    }), [quickFilter, activeFilter, activeStageFilter, debouncedSearch, viewMode, currentDate, employeeFilterId, websiteOnly]);
 
     // Only the screen's default view (this FY, open leads, no filters) is
     // cached, so the screen still opens instantly without storing every
     // filter combination on the device.
-    const isDefaultView = !quickFilter && activeFilter === 'All' && activeStageFilter === 'All' && !debouncedSearch
+    const isDefaultView = !quickFilter && !websiteOnly && activeFilter === 'All' && activeStageFilter === 'All' && !debouncedSearch
         && viewMode === 'FY' && !employeeFilterId && buildLeadFilters({ quickFilter: '', status: 'All', stage: 'All', search: '', viewMode: 'FY', currentDate: new Date() }).from === leadFilters.from;
     const {
         items: leadItems,
@@ -303,6 +308,13 @@ export default function LeadsScreen() {
                             <Text style={styles.smartFilterText}>Stage: {activeStageFilter}</Text>
                             <Ionicons name="caret-down" size={14} color="#3b5998" />
                         </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.smartFilterChip, websiteOnly && { backgroundColor: '#e0f7fa', borderColor: '#00838f' }]}
+                            onPress={() => setWebsiteOnly(!websiteOnly)}
+                        >
+                            <Text style={[styles.smartFilterText, websiteOnly && { color: '#00838f' }]}>🌐 Website</Text>
+                            {websiteOnly && <Ionicons name="close" size={14} color="#00838f" />}
+                        </TouchableOpacity>
                         {canViewEmployeeFilter && (
                             <TouchableOpacity style={[styles.smartFilterChip, {backgroundColor: '#e8f5e9', borderColor: '#a5d6a7'}]} onPress={() => setShowEmployeePicker(true)}>
                                 <Ionicons name="person" size={12} color="#2e7d32" style={{marginRight: 4}} />
@@ -331,6 +343,12 @@ export default function LeadsScreen() {
                         )}
                     </>
                 )}
+                {websiteOnly && (searchText || quickFilter) ? (
+                    <TouchableOpacity onPress={() => setWebsiteOnly(false)} style={{ alignSelf: 'flex-start', marginLeft: 15, marginBottom: 4, flexDirection: 'row', alignItems: 'center' }}>
+                        <Text style={{ fontSize: 12, color: '#00838f', fontWeight: 'bold' }}>🌐 Website leads only </Text>
+                        <Ionicons name="close-circle" size={14} color="#00838f" />
+                    </TouchableOpacity>
+                ) : null}
                 <Text style={{ textAlign:'right', fontSize: 12, color: 'gray', paddingHorizontal:15, paddingBottom:5 }}>Total Leads: <Text style={{ fontWeight: 'bold', color: '#3b5998' }}>{leadsTotal}</Text>{leadsLoading && leadItems.length > 0 ? '  ⏳' : ''}</Text>
             </View>
 
@@ -383,6 +401,7 @@ export default function LeadsScreen() {
                                             {leadType === 'Hot' ? '🔥' : leadType === 'Warm' ? '🌤️' : '❄️'} {leadType.toUpperCase()}
                                         </Text>
                                         {item.dealValue ? <Text style={[styles.hotBadge, { color: '#2e7d32' }]}>💰 {formatInr(item.dealValue)}</Text> : null}
+                                        {isWebsiteLead(item.source) ? <Text style={[styles.hotBadge, { color: '#00838f' }]}>🌐 WEBSITE</Text> : null}
                                     </View>
                                     
                                     <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 5 }}>
@@ -512,11 +531,18 @@ export default function LeadsScreen() {
                                     <Text style={styles.menuSub}>Move an employee's leads to someone else</Text>
                                 </View>
                             </TouchableOpacity>
-                            <TouchableOpacity style={[styles.menuItem, { borderBottomWidth: 0 }]} onPress={() => { setShowAdminMenu(false); setShowCloseStale(true); }}>
+                            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowAdminMenu(false); setShowCloseStale(true); }}>
                                 <Ionicons name="archive-outline" size={20} color="#c62828" />
                                 <View style={{ marginLeft: 12, flex: 1 }}>
                                     <Text style={styles.menuTitle}>Close Stale Leads</Text>
                                     <Text style={styles.menuSub}>Mark old, untouched leads as Lost</Text>
+                                </View>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.menuItem, { borderBottomWidth: 0 }]} onPress={() => { setShowAdminMenu(false); setShowWebsiteSettings(true); }}>
+                                <Ionicons name="globe-outline" size={20} color="#00838f" />
+                                <View style={{ marginLeft: 12, flex: 1 }}>
+                                    <Text style={styles.menuTitle}>Website Leads</Text>
+                                    <Text style={styles.menuSub}>Choose who gets leads from the website</Text>
                                 </View>
                             </TouchableOpacity>
                         </View>
@@ -530,6 +556,15 @@ export default function LeadsScreen() {
                     onClose={() => setShowCloseStale(false)}
                     onDone={() => { refreshLeads(); }}
                     teamMembers={teamMembersForLeads}
+                />
+            )}
+
+            {canBulkReassign && (
+                <WebsiteLeadSettingsModal
+                    visible={showWebsiteSettings}
+                    onClose={() => setShowWebsiteSettings(false)}
+                    teamMembers={teamMembersForLeads}
+                    canEdit={['admin', 'superadmin'].includes(userRole)}
                 />
             )}
 

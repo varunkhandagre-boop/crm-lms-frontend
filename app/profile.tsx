@@ -25,6 +25,7 @@ import { fetchSelf, updateTeamMember } from '../services/api/users';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -251,15 +252,8 @@ export default function ProfileScreen() {
             </body>
           </html>`;
 
-          const { uri } = await Print.printToFileAsync({ html: htmlContent, width: 600, height: 350 });
           const newFileName = `Card_${empName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
-          // @ts-ignore
-          const newPath = `${FileSystem.cacheDirectory}${newFileName}`;
-
-          try {
-             await FileSystem.copyAsync({ from: uri, to: newPath });
-             await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: 'Share Visiting Card' });
-          } catch (e) { await Sharing.shareAsync(uri); }
+          await sharePdfFromHtml(htmlContent, newFileName, 'Share Visiting Card', { width: 600, height: 350 });
       } catch (error) { Alert.alert("Error", "Could not generate card."); } 
       finally { setSharing(false); }
   };

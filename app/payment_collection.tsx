@@ -32,6 +32,7 @@ import { deletePaymentCollection, listPaymentCollections, markChequeBounced, mar
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTeamMembers } from '../services/api/users';
 
@@ -300,16 +301,9 @@ export default function PaymentCollection() {
               </body>
             </html>`;
 
-            const { uri } = await Print.printToFileAsync({ html: htmlContent });
             const cleanName = (paymentData.receiptNo || 'Receipt').replace(/[^a-zA-Z0-9-_]/g, '_');
             const fileName = `${cleanName}_${Date.now()}.pdf`; 
-            const newPath = `${(FileSystem as any).cacheDirectory}${fileName}`;
-            try {
-                await FileSystem.moveAsync({ from: uri, to: newPath });
-                await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share ${cleanName}` });
-            } catch (error) {
-                await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-            }
+            await sharePdfFromHtml(htmlContent, fileName, `Share ${cleanName}`);
         } catch (error) { 
             Alert.alert("Error", "Could not generate receipt."); 
         } finally {

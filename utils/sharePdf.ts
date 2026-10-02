@@ -11,8 +11,9 @@ export async function sharePdfFromHtml(
   html: string,
   fileName: string,
   dialogTitle?: string,
+  pageSize?: { width?: number; height?: number },
 ): Promise<void> {
-  const { uri, base64 } = await Print.printToFileAsync({ html, base64: true });
+  const { uri, base64 } = await Print.printToFileAsync({ html, base64: true, ...pageSize });
   const safeName = fileName.replace(/[^\w.-]+/g, '_').replace(/\.pdf$/i, '') + '.pdf';
   const target = `${FileSystem.cacheDirectory}${safeName}`;
   try {

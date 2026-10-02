@@ -31,6 +31,7 @@ import { buildCacheKey } from '../utils/listCache';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 import { fetchOrganizations } from '../services/api/organizations';
 
 export default function CourierScreen() {
@@ -362,18 +363,9 @@ export default function CourierScreen() {
             </body>
           </html>`;
 
-          const { uri } = await Print.printToFileAsync({ html: htmlContent });
           const newFileName = `${data.dcNo || 'Challan'}.pdf`;
           
-          const fs = FileSystem as any;
-          const newPath = `${fs.cacheDirectory}${newFileName}`;
-
-          try {
-              await FileSystem.copyAsync({ from: uri, to: newPath });
-              await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf' });
-          } catch (renameError) {
-              await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-          }
+          await sharePdfFromHtml(htmlContent, newFileName);
       } catch (error) { Alert.alert("Error", "Could not generate PDF."); }
   };
 

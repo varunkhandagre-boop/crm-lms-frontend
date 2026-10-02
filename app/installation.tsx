@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -35,6 +36,7 @@ import { buildCacheKey } from '../utils/listCache';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 import { fetchTeamMembers } from '../services/api/users';
 import { urlToBase64Image } from '../utils/pdfImageHelper';
 
@@ -372,15 +374,8 @@ export default function InstallationListScreen() {
           </body>
         </html>`;
 
-        const { uri } = await Print.printToFileAsync({ html: htmlContent });
         const cleanName = `Installation_${(item.orgName || 'Client').replace(/ /g, '_')}_${Date.now()}.pdf`;
-        const newPath = `${(FileSystem as any).cacheDirectory}${cleanName}`;
-        try {
-            await FileSystem.copyAsync({ from: uri, to: newPath });
-            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Report` });
-        } catch (error) {
-            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-        }
+        await sharePdfFromHtml(htmlContent, cleanName, `Share Report`);
     } catch (error) {
         Alert.alert("Error", "Could not generate PDF");
     } finally {
@@ -789,13 +784,13 @@ export default function InstallationListScreen() {
                           <DateTimePicker 
                               value={editInstallDateObj} 
                               mode="date" 
-                              onChange={(e, d) => { 
+                              {...pickerHandlers((e, d) => { 
                                   setShowEditInstallDate(false); 
                                   if(d) { 
                                       setEditInstallDateObj(d); 
                                       setEditData({...editData, date: formatDateStr(d)}); 
                                   }
-                              }} 
+                              })} 
                           />
                       )}
 
@@ -808,13 +803,13 @@ export default function InstallationListScreen() {
                           <DateTimePicker 
                               value={editExpiryDateObj} 
                               mode="date" 
-                              onChange={(e, d) => { 
+                              {...pickerHandlers((e, d) => { 
                                   setShowEditExpiryDate(false); 
                                   if(d) { 
                                       setEditExpiryDateObj(d); 
                                       setEditData({...editData, warrantyExpiry: formatDateStr(d)}); 
                                   }
-                              }} 
+                              })} 
                           />
                       )}
 

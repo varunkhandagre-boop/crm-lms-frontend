@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -31,6 +32,7 @@ import { listProducts } from '../services/api/products';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 import { recordLocationLog } from '../services/api/locationLogs';
 import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
@@ -455,16 +457,8 @@ export default function AddInstallationScreen() {
           </body>
         </html>`;
 
-        const { uri } = await Print.printToFileAsync({ html: htmlContent });
         const cleanName = `${installId}_${hospital.replace(/ /g, '_')}.pdf`;
-        const newPath = `${(FileSystem as any).cacheDirectory}${cleanName}`;
-
-        try {
-            await FileSystem.copyAsync({ from: uri, to: newPath });
-            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Report` });
-        } catch (error) {
-            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-        }
+        await sharePdfFromHtml(htmlContent, cleanName, `Share Report`);
     } catch (error) { Alert.alert("Error", "Could not generate PDF"); }
   };
 
@@ -669,7 +663,7 @@ export default function AddInstallationScreen() {
                         <Text style={{color: '#333'}}>{formatDate(installDate)}</Text>
                         <Ionicons name="calendar-outline" size={18} color="gray" />
                     </TouchableOpacity>
-                    {showDatePicker && <DateTimePicker value={installDate} mode="date" onChange={(e, d) => { setShowDatePicker(false); if(d) setInstallDate(d); }} />}
+                    {showDatePicker && <DateTimePicker value={installDate} mode="date" {...pickerHandlers((e, d) => { setShowDatePicker(false); if(d) setInstallDate(d); })} />}
                 </View>
             </View>
 
@@ -730,7 +724,7 @@ export default function AddInstallationScreen() {
                         <View style={styles.col}>
                             <Text style={styles.label}>Expiry Date</Text>
                             <TouchableOpacity style={styles.inputGray} onPress={() => setShowManualExpiryPicker(true)}><Text style={{color: '#333', marginTop: 4}}>{formatDate(manualExpiry)}</Text></TouchableOpacity>
-                            {showManualExpiryPicker && <DateTimePicker value={manualExpiry} mode="date" onChange={(e, d) => { setShowManualExpiryPicker(false); if(d) setManualExpiry(d); }} />}
+                            {showManualExpiryPicker && <DateTimePicker value={manualExpiry} mode="date" {...pickerHandlers((e, d) => { setShowManualExpiryPicker(false); if(d) setManualExpiry(d); })} />}
                         </View>
                     </View>
                 </View>

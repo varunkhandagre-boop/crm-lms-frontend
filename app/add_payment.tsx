@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -28,6 +29,7 @@ import { listPaymentDues } from '../services/api/paymentDues';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -359,16 +361,9 @@ export default function AddPaymentScreen() {
               </body>
             </html>`;
 
-            const { uri } = await Print.printToFileAsync({ html: htmlContent });
             const cleanName = (paymentData.receiptNo || 'Receipt').replace(/[^a-zA-Z0-9-_]/g, '_');
             const fileName = `${cleanName}_${Date.now()}.pdf`; 
-            const newPath = `${FileSystem.cacheDirectory}${fileName}`;
-            try {
-                await FileSystem.moveAsync({ from: uri, to: newPath });
-                await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share ${cleanName}` });
-            } catch (error) {
-                await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-            }
+            await sharePdfFromHtml(htmlContent, fileName, `Share ${cleanName}`);
         } catch (error) { 
             Alert.alert("Error", "Could not generate receipt."); 
         }
@@ -495,7 +490,7 @@ export default function AddPaymentScreen() {
                                 <Text style={styles.dateText}>{formatDate(date)}</Text>
                             </TouchableOpacity>
                         </View>
-                        {showDatePicker && <DateTimePicker value={date} mode="date" onChange={onChangeDate} />}
+                        {showDatePicker && <DateTimePicker value={date} mode="date" {...pickerHandlers(onChangeDate)} />}
 
                         <Text style={styles.label}>Select Customer *</Text>
                         <TouchableOpacity style={styles.selector} onPress={() => setShowOrgModal(true)}>
@@ -569,7 +564,7 @@ export default function AddPaymentScreen() {
                                 <TouchableOpacity style={[styles.input, {justifyContent:'center'}]} onPress={() => setShowPdcDatePicker(true)}>
                                     <Text style={{color: '#333'}}>{formatDate(pdcDate)}</Text>
                                 </TouchableOpacity>
-                                {showPdcDatePicker && <DateTimePicker value={pdcDate} mode="date" onChange={onChangePdcDate} />}
+                                {showPdcDatePicker && <DateTimePicker value={pdcDate} mode="date" {...pickerHandlers(onChangePdcDate)} />}
                             </View>
                         )}
 

@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -36,6 +37,7 @@ import { buildCacheKey } from '../utils/listCache';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 
 export default function AddDemoScreen() {
   const router = useRouter();
@@ -359,17 +361,8 @@ export default function AddDemoScreen() {
           </body>
         </html>`;
 
-        const { uri } = await Print.printToFileAsync({ html: htmlContent });
         const cleanName = `${demoData.demoId}_${demoData.hospital.replace(/ /g, '_')}.pdf`;
-        // @ts-ignore
-        const newPath = `${FileSystem.cacheDirectory}${cleanName}`;
-
-        try {
-            await FileSystem.copyAsync({ from: uri, to: newPath });
-            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Demo Report` });
-        } catch (error) {
-            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-        }
+        await sharePdfFromHtml(htmlContent, cleanName, `Share Demo Report`);
     } catch (error) {
         Alert.alert("Error", "Could not generate PDF");
     }
@@ -621,7 +614,7 @@ export default function AddDemoScreen() {
                     <Text style={{color: '#333'}}>{formatDate(demoDate)}</Text>
                     <Ionicons name="calendar-outline" size={20} color="gray" />
                 </TouchableOpacity>
-                {showDatePicker && <DateTimePicker value={demoDate} mode="date" onChange={(e, d) => { setShowDatePicker(false); if(d) setDemoDate(d); }} />}
+                {showDatePicker && <DateTimePicker value={demoDate} mode="date" {...pickerHandlers((e, d) => { setShowDatePicker(false); if(d) setDemoDate(d); })} />}
             </View>
 
             <Text style={styles.sectionHeader}>👤 Contact Person</Text>
