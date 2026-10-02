@@ -135,8 +135,18 @@ export async function updateServiceCall(id: string, payload: Partial<CreateServi
   return toLegacyServiceCall(res.data);
 }
 
-export async function closeServiceCall(id: string, resolutionNote: string): Promise<any> {
-  const res = await apiClient.post<OneResponse>(`/service-calls/${id}/close`, { resolutionNote });
+/** partsUsed (optional): parts used on the visit — saved on the call and taken out of stock. */
+export async function closeServiceCall(
+  id: string,
+  resolutionNote: string,
+  partsUsed?: { id: string; partName: string; partNo?: string; usedQty: string | number }[]
+): Promise<any> {
+  const body: Record<string, any> = { resolutionNote };
+  if (partsUsed) {
+    body.partsUsed = partsUsed;
+    body.partsText = partsUsed.map((p) => `${p.partName} (${p.usedQty})`).join(', ');
+  }
+  const res = await apiClient.post<OneResponse>(`/service-calls/${id}/close`, body);
   return toLegacyServiceCall(res.data);
 }
 
