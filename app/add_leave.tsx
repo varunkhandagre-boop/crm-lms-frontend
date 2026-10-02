@@ -21,7 +21,7 @@ import {
 import { useData } from './context/DataContext';
 
 // 🔥 Phase 7: leaves now go to Postgres via this adapter instead of addSaaSData("leaves", ...)
-import { applyLeave } from '../services/api/leaves';
+import { applyLeave, fetchLeaves, fetchLeaveSummary } from '../services/api/leaves';
 
 export default function AddLeaveScreen() {
   const router = useRouter();
@@ -43,6 +43,26 @@ export default function AddLeaveScreen() {
 
   // Modal
   const [modalVisible, setModalVisible] = useState(false);
+
+  // Leave balance for this FY (server-computed) and days already waiting for approval
+  const [balanceInfo, setBalanceInfo] = useState<{ fyLabel: string; balance: number; used: number; totalQuota: number } | null>(null);
+  const [pendingDays, setPendingDays] = useState(0);
+  useEffect(() => {
+      let cancelled = false;
+      Promise.all([fetchLeaveSummary(), fetchLeaves({ status: 'Pending' })])
+          .then(([summary, pending]) => {
+              if (cancelled) return;
+              setBalanceInfo(summary);
+              setPendingDays(pending.reduce((n, l) => n + (parseFloat(l.days) || 0), 0));
+          })
+          .catch(() => {}); // the form still works without the balance
+      return () => { cancelled = true; };
+  }, []);
+
+  const requested = parseInt(days) || 0;
+  const available = balanceInfo ? Math.max(0, balanceInfo.balance - pendingDays) : null;
+  // Leave Without Pay doesn't use the balance, so no warning for it
+  const overBy = available !== null && type !== 'Leave Without Pay' ? Math.max(0, requested - available) : 0;
   
   const leaveTypes = [
       "Compensatory Off", "Leave Without Pay", "Sick Leave", 
@@ -86,6 +106,20 @@ export default function AddLeaveScreen() {
       if (days === 'Invalid' || parseInt(days) <= 0) {
           Alert.alert("Invalid Dates", "To Date must be same or after From Date.");
           return;
+      }
+      if (overBy > 0) {
+          const ok = await new Promise<boolean>((resolve) =>
+              Alert.alert(
+                  "More than your balance",
+                  `You have ${available} day(s) available but are applying for ${requested}. The extra ${overBy} day(s) may be treated as Leave Without Pay.`,
+                  [
+                      { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+                      { text: "Apply anyway", onPress: () => resolve(true) },
+                  ],
+                  { cancelable: true, onDismiss: () => resolve(false) }
+              )
+          );
+          if (!ok) return;
       }
 
       setLoading(true);
@@ -141,6 +175,20 @@ export default function AddLeaveScreen() {
       >
         <ScrollView contentContainerStyle={{padding: 20, paddingBottom: 100}} keyboardShouldPersistTaps="handled">
             
+            {/* Leave balance */}
+            {balanceInfo && (
+                <View style={styles.balanceCard}>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.balanceLabel}>Leave balance ({balanceInfo.fyLabel})</Text>
+                        <Text style={styles.balanceValue}>{available} <Text style={{ fontSize: 13, fontWeight: 'normal' }}>day(s) available</Text></Text>
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={styles.balanceSub}>Used: {balanceInfo.used}</Text>
+                        {pendingDays > 0 && <Text style={styles.balanceSub}>Pending approval: {pendingDays}</Text>}
+                    </View>
+                </View>
+            )}
+
             {/* Type Dropdown */}
             <Text style={styles.label}>Leave Type <Text style={{color:'red'}}>*</Text></Text>
             <TouchableOpacity style={styles.inputBox} onPress={() => setModalVisible(true)}>
@@ -186,6 +234,14 @@ export default function AddLeaveScreen() {
                 </Text>
                 <Text style={{fontSize:12, color:'gray'}}>Days</Text>
             </View>
+            {overBy > 0 && (
+                <View style={styles.overBox}>
+                    <Ionicons name="warning" size={16} color="#c62828" />
+                    <Text style={styles.overText}>
+                        {overBy} day(s) more than your balance — the extra may be Leave Without Pay.
+                    </Text>
+                </View>
+            )}
 
             {/* Reason */}
             <Text style={styles.label}>Reason <Text style={{color:'red'}}>*</Text></Text>
@@ -236,6 +292,12 @@ export default function AddLeaveScreen() {
 }
 
 const styles = StyleSheet.create({
+  balanceCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e3f2fd', borderRadius: 10, padding: 14, marginBottom: 10 },
+  balanceLabel: { fontSize: 12, color: '#1565c0', fontWeight: '600' },
+  balanceValue: { fontSize: 22, color: '#0d47a1', fontWeight: 'bold', marginTop: 2 },
+  balanceSub: { fontSize: 11, color: '#555' },
+  overBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ffebee', borderRadius: 8, padding: 10, marginTop: 8 },
+  overText: { color: '#c62828', fontSize: 12, fontWeight: 'bold', marginLeft: 6, flex: 1 },
   container: { flex: 1, backgroundColor: 'white' },
   header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
