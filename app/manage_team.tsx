@@ -38,10 +38,14 @@ import { fetchLocationLogs } from '../services/api/locationLogs';
 import { useCachedList } from '../hooks/useCachedList';
 import { useCachedObject } from '../hooks/useCachedObject';
 import { buildCacheKey } from '../utils/listCache';
+import AlertSettingsTab from '../components/AlertSettingsTab';
 
 export default function ManageTeamScreen() {
     const router = useRouter();
-    const [activeTab, setActiveTab] = useState<'Users' | 'Permissions' | 'Holidays' | 'Tracking' | 'History'>('Users'); 
+    const { currentUser } = useData();
+    const [activeTab, setActiveTab] = useState<'Users' | 'Permissions' | 'Holidays' | 'Tracking' | 'History' | 'Alerts'>('Users'); 
+    // Alert settings are Admin-only (the API enforces it too).
+    const tabs = ['Users', 'Permissions', 'Holidays', 'Tracking', 'History', ...(['Admin', 'SuperAdmin'].includes(currentUser?.role || '') ? ['Alerts'] : [])];
     
     return (
         <View style={styles.container}>
@@ -64,7 +68,7 @@ export default function ManageTeamScreen() {
             <View>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{flexGrow: 1}}>
                     <View style={styles.tabContainer}>
-                        {['Users', 'Permissions', 'Holidays', 'Tracking', 'History'].map((tab) => (
+                        {tabs.map((tab) => (
                             <TouchableOpacity 
                                 key={tab} 
                                 style={[styles.tabBtn, activeTab === tab && styles.activeTabBtn]} 
@@ -85,6 +89,7 @@ export default function ManageTeamScreen() {
                 {activeTab === 'Holidays' && <HolidaysTab />}
                 {activeTab === 'Tracking' && <TrackingTab />}
                 {activeTab === 'History' && <HistoryTab />}
+                {activeTab === 'Alerts' && <AlertSettingsTab />}
             </View>
         </View>
     );

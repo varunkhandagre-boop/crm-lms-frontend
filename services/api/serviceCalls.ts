@@ -27,6 +27,9 @@ export interface ApiServiceCall {
   date: string;
   location: { latitude: number; longitude: number } | null;
   createdById: string | null;
+  assignedEngineerId?: string | null;
+  assignedAt?: string | null;
+  closedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -74,6 +77,9 @@ export function toLegacyServiceCall(s: ApiServiceCall): any {
     senderId: s.createdById || undefined,
     senderName: undefined,
     userName: undefined,
+    assignedToId: s.assignedEngineerId || undefined, // the screens already filter on this name
+    assignedAt: s.assignedAt || null,
+    closedAt: s.closedAt || null,
     createdAt: s.createdAt,
   };
 }
@@ -132,4 +138,26 @@ export async function updateServiceCall(id: string, payload: Partial<CreateServi
 export async function closeServiceCall(id: string, resolutionNote: string): Promise<any> {
   const res = await apiClient.post<OneResponse>(`/service-calls/${id}/close`, { resolutionNote });
   return toLegacyServiceCall(res.data);
+}
+
+/** Assign the call to an engineer (Admin/Manager). null = unassign. */
+export async function assignServiceCall(id: string, engineerId: string | null): Promise<any> {
+  const res = await apiClient.post<OneResponse>(`/service-calls/${id}/assign`, { engineerId });
+  return toLegacyServiceCall(res.data);
+}
+
+export interface EngineerStat {
+  engineerId: string;
+  name: string;
+  openNow: number;
+  closed: number;
+  avgHours: number | null;
+}
+
+/** Per-engineer open calls, calls closed in the period, average hours to close. */
+export async function getEngineerStats(from?: string, to?: string): Promise<{ engineers: EngineerStat[]; unassignedOpen: number }> {
+  const res = await apiClient.get<{ data: { engineers: EngineerStat[]; unassignedOpen: number } }>(
+    `/service-calls/engineer-stats${toQueryString({ from, to })}`
+  );
+  return res.data;
 }

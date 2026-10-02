@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -22,7 +22,8 @@ import {
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: service calls now via new backend API
-import { closeServiceCall as apiCloseServiceCall, listServiceCalls } from '../services/api/serviceCalls';
+import { assignServiceCall, closeServiceCall as apiCloseServiceCall, listServiceCalls } from '../services/api/serviceCalls';
+import EngineerStatsModal, { formatHours } from '../components/EngineerStatsModal';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
@@ -81,6 +82,12 @@ export default function ServiceCallScreen() {
   }, [viewMode, currentDate, statusFilter, searchText, selectedEmployee]);
 
   const isAdmin = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
+  const canAssign = ['Admin', 'Manager', 'SuperAdmin'].includes(currentUser?.role || '');
+  const myId = currentUser?.uid || currentUser?.id;
+  const [myCallsOnly, setMyCallsOnly] = useState(false);
+  const [showAssignPicker, setShowAssignPicker] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const [showStats, setShowStats] = useState(false);
 
   // 🔥 SERVICE CALLS — cache-first (instant from AsyncStorage, then
   // background refresh). See hooks/useCachedList.ts.
@@ -125,6 +132,29 @@ export default function ServiceCallScreen() {
       if (!needsEnrichment) return;
       setServiceCallList(serviceCallList.map((s: any) => ({ ...s, senderName: nameById.get(s.senderId) || 'Unknown' })));
   }, [serviceCallList, teamMembersForServiceCall]);
+
+  const engineerNameById = useMemo(
+      () => new Map(teamMembersForServiceCall.map((u: any) => [u.id, u.name || 'Unknown'])),
+      [teamMembersForServiceCall]
+  );
+  const activeEngineers = useMemo(
+      () => teamMembersForServiceCall.filter((u: any) => u.status !== 'Disabled'),
+      [teamMembersForServiceCall]
+  );
+
+  // Opened from an "assigned to you" notification: /service_call?id=<callId>
+  const openedFromLink = useRef<string | null>(null);
+  useEffect(() => {
+      const id = typeof params.id === 'string' ? params.id : undefined;
+      if (!id || openedFromLink.current === id || serviceCallList.length === 0) return;
+      const call = serviceCallList.find((c: any) => c.id === id);
+      if (call) {
+          openedFromLink.current = id;
+          setSelectedCall(call);
+          setResolutionNote(call.resolutionNote || '');
+          setDetailsModalVisible(true);
+      }
+  }, [params.id, serviceCallList]);
 
   // 🔥 Organizations/installations — cache-first, sharing the SAME cache
   // keys as organization.tsx ('organizations') and installation.tsx
@@ -410,9 +440,9 @@ export default function ServiceCallScreen() {
         return false;
       });
     } else if (!isAdmin) {
-      const myId = currentUser?.uid || currentUser?.id;
       data = data.filter((item: any) => item.senderId === myId || item.assignedToId === myId);
     }
+    if (myCallsOnly) data = data.filter((item: any) => item.assignedToId === myId);
 
     if (statusFilter === 'Open') {
       data = data.filter((item: any) => item.status === 'Open' || item.status === 'Assigned');
@@ -476,6 +506,23 @@ export default function ServiceCallScreen() {
     setDetailsModalVisible(true);
   };
 
+  // Assign / change / remove the engineer (Admin, Manager)
+  const handleAssign = async (engineerId: string | null) => {
+    if (!selectedCall) return;
+    setShowAssignPicker(false);
+    setAssigning(true);
+    try {
+      const updated = await assignServiceCall(selectedCall.id, engineerId);
+      const merged = { ...selectedCall, ...updated, senderName: selectedCall.senderName };
+      setSelectedCall(merged);
+      setServiceCallList(prev => prev.map(item => item.id === merged.id ? merged : item));
+    } catch (error: any) {
+      Alert.alert('Error', error?.message || 'Could not assign engineer');
+    } finally {
+      setAssigning(false);
+    }
+  };
+
   // 🔥 CLOSE TICKET LOGIC — via new backend API
   const handleCloseCall = async () => {
     if (!resolutionNote) { Alert.alert("Required", "Please enter a resolution note."); return; }
@@ -500,6 +547,25 @@ export default function ServiceCallScreen() {
     finally { setLoading(false); }
   };
 
+  // "Open 3 days" (red after 2 days) / "Closed in 5 hrs"
+  const renderAge = (item: any) => {
+    const created = parseDate(item.createdAt);
+    if (!created) return null;
+    const isOpen = item.status === 'Open' || item.status === 'Assigned';
+    if (!isOpen && !item.closedAt) return null;
+    const end = isOpen ? Date.now() : parseDate(item.closedAt);
+    const hours = Math.max(0, (end - created) / 3600000);
+    const late = isOpen && hours >= 48;
+    return (
+      <View style={[styles.ageChip, { backgroundColor: isOpen ? (late ? '#ffebee' : '#fff8e1') : '#e8f5e9' }]}>
+        <Ionicons name={isOpen ? 'time-outline' : 'checkmark-done'} size={12} color={isOpen ? (late ? '#c62828' : '#f57f17') : '#2e7d32'} />
+        <Text style={[styles.ageText, { color: isOpen ? (late ? '#c62828' : '#f57f17') : '#2e7d32' }]}>
+          {isOpen ? `Open ${formatHours(hours)}` : `Closed in ${formatHours(hours)}`}
+        </Text>
+      </View>
+    );
+  };
+
   const renderCard = ({ item }: any) => {
     const statusStyle = getStatusColor(item.status);
     return (
@@ -522,6 +588,13 @@ export default function ServiceCallScreen() {
           <Text style={styles.label}>Ticket:</Text>
           <Text style={[styles.value, { fontWeight: 'bold' }]}>{item.scrId}</Text>
         </View>
+        <View style={styles.row}>
+          <Text style={styles.label}>Engineer:</Text>
+          <Text style={[styles.value, !item.assignedToId && { color: '#c62828' }]} numberOfLines={1}>
+            {item.assignedToId ? (engineerNameById.get(item.assignedToId) || '—') : 'Not assigned'}
+          </Text>
+        </View>
+        {renderAge(item)}
         <View style={styles.divider} />
         <View style={styles.cardFooter}>
           <Text style={styles.footerText}>{item.dateIso || item.date}</Text>
@@ -543,10 +616,17 @@ export default function ServiceCallScreen() {
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Service Calls</Text>
           </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          {isAdmin && (
+            <TouchableOpacity onPress={() => setShowStats(true)} style={{ marginRight: 12 }}>
+              <Ionicons name="stats-chart" size={22} color="#3b5998" />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_service_call' as any)}>
             <Ionicons name="add" size={20} color="white" />
             <Text style={{ color: 'white', fontWeight: 'bold', marginLeft: 5 }}>New</Text>
           </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -569,6 +649,16 @@ export default function ServiceCallScreen() {
               <Text style={[styles.dateTabText, viewMode === m && styles.activeDateTabText]}>{m}</Text>
             </TouchableOpacity>
           ))}
+        </View>
+
+        <View style={{ flexDirection: 'row', paddingHorizontal: 10, marginBottom: 6 }}>
+          <TouchableOpacity
+            style={[styles.myCallsChip, myCallsOnly && styles.myCallsChipActive]}
+            onPress={() => setMyCallsOnly(!myCallsOnly)}
+          >
+            <Ionicons name="person" size={12} color={myCallsOnly ? 'white' : '#1565c0'} />
+            <Text style={[styles.myCallsText, myCallsOnly && { color: 'white' }]}>My Calls</Text>
+          </TouchableOpacity>
         </View>
 
         {isAdmin && (
@@ -662,7 +752,7 @@ export default function ServiceCallScreen() {
               <ScrollView showsVerticalScrollIndicator={false}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, borderBottomWidth: 1, borderColor: '#eee', paddingBottom: 5 }}>
                   <Text style={styles.modalTitle}>Ticket Details</Text>
-                  <TouchableOpacity onPress={() => setDetailsModalVisible(false)}>
+                  <TouchableOpacity onPress={() => { setDetailsModalVisible(false); setShowAssignPicker(false); }}>
                     <Ionicons name="close-circle" size={30} color="#d32f2f" />
                   </TouchableOpacity>
                 </View>
@@ -671,7 +761,40 @@ export default function ServiceCallScreen() {
                 <DetailRow label="City" value={selectedCall.city} icon="location" />
                 <DetailRow label="Ticket No" value={selectedCall.scrId} icon="pricetag" />
                 <DetailRow label="Date" value={selectedCall.dateIso || selectedCall.date} icon="calendar" />
-                <DetailRow label="Engineer" value={selectedCall.senderName || selectedCall.userName} icon="person" />
+                <DetailRow label="Logged by" value={selectedCall.senderName || selectedCall.userName} icon="person" />
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                  <View style={{ width: 25 }}><Ionicons name="construct" size={16} color="#3b5998" /></View>
+                  <Text style={{ fontSize: 12, color: 'gray', width: 80 }}>Assigned to</Text>
+                  <Text style={{ fontSize: 14, fontWeight: 'bold', color: selectedCall.assignedToId ? '#333' : '#c62828', flex: 1 }}>
+                    {selectedCall.assignedToId ? (engineerNameById.get(selectedCall.assignedToId) || '—') : 'Not assigned'}
+                  </Text>
+                  {canAssign && (selectedCall.status === 'Open' || selectedCall.status === 'Assigned') && (
+                    <TouchableOpacity style={styles.assignBtn} onPress={() => setShowAssignPicker(true)} disabled={assigning}>
+                      {assigning ? <ActivityIndicator size="small" color="#1565c0" /> : (
+                        <Text style={styles.assignBtnText}>{selectedCall.assignedToId ? 'Change' : 'Assign'}</Text>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                </View>
+                {showAssignPicker && (
+                  <View style={styles.assignList}>
+                    <Text style={styles.sectionHeader}>ASSIGN TO ENGINEER</Text>
+                    <ScrollView style={{ maxHeight: 220 }} nestedScrollEnabled>
+                      {activeEngineers.map((u: any) => (
+                        <TouchableOpacity key={u.id} style={styles.pickerItem} onPress={() => handleAssign(u.id)}>
+                          <Text style={{ fontSize: 15, color: '#333' }}>{u.name}</Text>
+                          {selectedCall.assignedToId === u.id && <Ionicons name="checkmark" size={18} color="green" />}
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
+                      {selectedCall.assignedToId ? (
+                        <TouchableOpacity onPress={() => handleAssign(null)}><Text style={{ color: '#c62828', fontWeight: 'bold' }}>Remove engineer</Text></TouchableOpacity>
+                      ) : <View />}
+                      <TouchableOpacity onPress={() => setShowAssignPicker(false)}><Text style={{ color: 'gray', fontWeight: 'bold' }}>Cancel</Text></TouchableOpacity>
+                    </View>
+                  </View>
+                )}
 
                 <View style={styles.divider} />
 
@@ -748,6 +871,8 @@ export default function ServiceCallScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
+      {isAdmin && <EngineerStatsModal visible={showStats} onClose={() => setShowStats(false)} />}
+
       <Modal visible={showEmployeePicker} transparent animationType="fade">
         <TouchableOpacity style={styles.pickerOverlay} onPress={() => setShowEmployeePicker(false)}>
           <View style={styles.pickerContainer}>
@@ -807,6 +932,14 @@ const styles = StyleSheet.create({
   dateTabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
   activeDateTabText: { color: '#3b5998', fontWeight: 'bold' },
 
+  ageChip: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, marginTop: 4, marginBottom: 2 },
+  ageText: { fontSize: 11, fontWeight: 'bold', marginLeft: 4 },
+  myCallsChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: '#1565c0' },
+  myCallsChipActive: { backgroundColor: '#1565c0' },
+  myCallsText: { fontSize: 12, fontWeight: 'bold', color: '#1565c0', marginLeft: 4 },
+  assignBtn: { backgroundColor: '#e3f2fd', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14 },
+  assignBtnText: { color: '#1565c0', fontWeight: 'bold', fontSize: 12 },
+  assignList: { backgroundColor: '#f5f9ff', borderRadius: 8, padding: 10, marginBottom: 10, borderWidth: 1, borderColor: '#bbdefb' },
   employeeFilterBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e8f5e9', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2e7d32' },
 
   dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 4, marginHorizontal: 10, borderRadius: 8, marginBottom: 5, borderWidth: 1, borderColor: '#eee' },
