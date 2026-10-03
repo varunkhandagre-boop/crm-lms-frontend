@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DataProvider, useData } from './context/DataContext';
 import { MENU_TAG_BUCKET } from '../constants/modules';
 
-import { Notifications } from '../utils/notificationsModule';
+import { Notifications, notificationsAvailable } from '../utils/notificationsModule';
 import { manageAttendanceReminders, setupNotificationPermissions } from '../utils/notificationHelper';
 
 import * as Location from 'expo-location';
@@ -232,9 +232,13 @@ function NavigationLayout() {
 
   useEffect(() => {
     const subscription = Notifications.addNotificationResponseReceivedListener(takeResponse);
-    Notifications.getLastNotificationResponseAsync()
-      .then((r: any) => r && takeResponse(r))
-      .catch(() => {});
+    // Expo Go uses a no-op stand-in (utils/notificationsModule.ts) whose calls
+    // don't return promises — only ask for the launch notification in real builds.
+    if (notificationsAvailable) {
+      Promise.resolve(Notifications.getLastNotificationResponseAsync())
+        .then((r: any) => r && takeResponse(r))
+        .catch(() => {});
+    }
     return () => subscription.remove();
   }, []);
 
