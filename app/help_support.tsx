@@ -299,6 +299,8 @@ const GUIDE_SECTIONS = [
             'The assigned person gets a notification immediately and the lead appears in today\'s follow-ups.',
             'If the same mobile number enquires again, it is added to the existing lead instead of creating a new one.',
             'Admin: Leads → ⋮ → "Website Leads" to choose who receives all new website leads (default: Admin). Any single lead can still be reassigned from Lead Details.',
+            'Connect your website (Admin, one time): Company Profile → 🌐 Website Leads → type your website address → Save website.',
+            'Tap "Send setup to developer" and send it to whoever manages your website — it has your link and a ready-made form. Then fill your website form once yourself to test.',
         ],
     },
     {
@@ -711,6 +713,11 @@ const FAQS = [
         category: 'Leads & Sales',
         q: 'How do I make website leads go to a particular salesperson?',
         a: `Admin only:\n\n1. Leads → ⋮ (top right) → "Website Leads".\n2. Choose the employee — every new website lead goes to them, with a notification.\n3. Choose "Default" to send them to the Admin again.\n\nTo move a single lead, open it and tap the ✎ next to "Assigned To".`,
+    },
+    {
+        category: 'Leads & Sales',
+        q: 'How do we connect our company website?',
+        a: `Admin only:\n\n1. Company Profile → scroll to 🌐 Website Leads.\n2. Type your website address (e.g. www.yourcompany.com) → Save website.\n3. Tap "Send setup to developer" and send it to whoever made or manages your website. They connect your Contact form to the link, or paste the ready-made form.\n4. Fill the form on your website once with your own number — the lead should appear within a minute.\n\nNo website? Leave it empty — nothing else changes.`,
     },
     {
         category: 'Leads & Sales',

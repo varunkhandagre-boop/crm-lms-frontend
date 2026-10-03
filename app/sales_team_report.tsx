@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
@@ -27,6 +27,14 @@ import { buildCacheKey } from '../utils/listCache';
 
 export default function SalesTeamReport() {
     const router = useRouter();
+    // The 8 PM "Team today" notification links here with ?view=today (older app
+    // builds just open this screen); the new app shows the day view instead.
+    const reportParams = useLocalSearchParams<{ view?: string; date?: string }>();
+    useEffect(() => {
+        if (reportParams.view === 'today') {
+            router.replace({ pathname: '/team_today' as any, params: reportParams.date ? { date: reportParams.date } : {} });
+        }
+    }, [reportParams.view]);
 
     const { currentUser, user } = useData();
     const activeUser = currentUser || user;

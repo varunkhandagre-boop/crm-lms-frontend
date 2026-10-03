@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -228,6 +228,19 @@ export default function EmployeeAdvanceScreen() {
       setSelectedItem(item);
       setModalVisible(true);
   };
+
+  // Opened from a notification: /advance?id=<request id> → show that request.
+  const linkParams = useLocalSearchParams<{ id?: string }>();
+  const openedFromLink = useRef<string | null>(null);
+  useEffect(() => {
+      const id = typeof linkParams.id === 'string' ? linkParams.id : undefined;
+      if (!id || openedFromLink.current === id) return;
+      const item = fullFilteredList.find((x: any) => x.id === id) || (advanceList || []).find((x: any) => x.id === id);
+      if (item) {
+          openedFromLink.current = id;
+          openDetails(item);
+      }
+  }, [linkParams.id, fullFilteredList, advanceList]);
 
   const [installmentAmount, setInstallmentAmount] = useState('');
 

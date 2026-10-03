@@ -121,18 +121,15 @@ export default function NotificationScreen() {
   const handlePress = async (item: any) => {
       let targetRoute = item.route || item.screen;
 
-      if (targetRoute === 'organization' || item.type === 'organization') targetRoute = '/organization'; 
-      
-      if (
-          targetRoute === 'service_call' || 
-          targetRoute === 'service_calls' || 
-          item.title?.includes('Service Call')
-      ) {
-          targetRoute = '/service_call'; 
+      // Old notifications stored bare names ("leads") or nothing at all — map
+      // those. A full route ("/lead_details?id=…") is always used as sent;
+      // guessing from the title used to override it and lose the record id.
+      if (!targetRoute || !String(targetRoute).startsWith('/')) {
+          if (targetRoute === 'organization' || item.type === 'organization') targetRoute = '/organization';
+          else if (targetRoute === 'service_call' || targetRoute === 'service_calls' || (!targetRoute && item.title?.includes('Service Call'))) targetRoute = '/service_call';
+          else if (targetRoute === 'leads' || (!targetRoute && item.title?.includes('Lead'))) targetRoute = '/leads';
+          else if (targetRoute === 'tasks' || (!targetRoute && item.title?.includes('Task'))) targetRoute = '/tasks';
       }
-
-      if (targetRoute === 'leads' || item.title?.includes('Lead')) targetRoute = '/leads';
-      if (targetRoute === 'tasks' || item.title?.includes('Task')) targetRoute = '/tasks';
 
       if (!item.read) {
           item.read = true; // Optimistic UI update

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
 import { Slot, usePathname, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DataProvider, useData } from './context/DataContext';
@@ -194,37 +194,51 @@ function NavigationLayout() {
   
   const insets = useSafeAreaInsets(); 
 
-  useEffect(() => {
-    let isMounted = true;
+  // ── Tapping a push notification opens its screen (route in data.route) ──
+  // Two cases: the app was running (listener), or the tap STARTED the app —
+  // then the response is only available via getLastNotificationResponseAsync().
+  // Either way we wait until the user session is loaded, otherwise the login /
+  // home redirect would override the navigation.
+  const pendingRoute = useRef<string | null>(null);
+  const handledResponseId = useRef<string | null>(null);
+  // The listener below is registered once, so it reads readiness from a ref, not stale state.
+  const sessionReady = useRef(false);
+  sessionReady.current = !loading && !!currentUser;
 
-    const subscription = Notifications.addNotificationResponseReceivedListener(response => {
-      if (!isMounted) return;
-
-      const data = response.notification.request.content.data as any;
-      let targetPath = data?.route || data?.url || data?.screen || "";
-
-      if (!targetPath) return; 
-
-      if (typeof targetPath === 'string') {
-          if (!targetPath.startsWith('/')) {
-              targetPath = '/' + targetPath;
-          }
+  const openPendingRoute = () => {
+    if (!pendingRoute.current || !sessionReady.current) return;
+    const target = pendingRoute.current;
+    pendingRoute.current = null;
+    setTimeout(() => {
+      try {
+        router.push(target as any);
+      } catch (error) {
+        router.push('/');
       }
+    }, 300);
+  };
 
-      setTimeout(() => {
-          try {
-              router.push(targetPath as any);
-          } catch (error) {
-              router.push('/');
-          }
-      }, 800); 
-    });
+  const takeResponse = (response: any) => {
+    const id = response?.notification?.request?.identifier;
+    if (!id || handledResponseId.current === id) return;
+    handledResponseId.current = id;
+    const data = response.notification.request.content?.data as any;
+    let target = data?.route || data?.url || data?.screen || '';
+    if (!target || typeof target !== 'string') return;
+    if (!target.startsWith('/')) target = '/' + target;
+    pendingRoute.current = target;
+    openPendingRoute();
+  };
 
-    return () => {
-        isMounted = false;
-        subscription.remove();
-    };
+  useEffect(() => {
+    const subscription = Notifications.addNotificationResponseReceivedListener(takeResponse);
+    Notifications.getLastNotificationResponseAsync()
+      .then((r: any) => r && takeResponse(r))
+      .catch(() => {});
+    return () => subscription.remove();
   }, []);
+
+  useEffect(() => { openPendingRoute(); }, [loading, currentUser]);
 
   const isBoss = currentUser?.role === 'Admin' || currentUser?.role === 'Manager';
   const todayStr = new Date().toISOString().split('T')[0];
