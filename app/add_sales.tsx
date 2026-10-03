@@ -420,7 +420,7 @@ if (locationData) {
                                         </View>
                                     ) : (
                                         <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%'}}>
-                                            <Text style={[styles.modalText, isSelected && {color: '#1976d2', fontWeight: 'bold'}]}>
+                                            <Text style={[styles.modalText, { flex: 1, marginRight: 12 }, isSelected && {color: '#1976d2', fontWeight: 'bold'}]}>
                                                 {typeof item === 'string' ? item : (item.name)}
                                             </Text>
                                             {currentModalType === 'Product' && (

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { bulkReassignLeads, getAssigneeSummary } from '../services/api/leads';
 
@@ -93,13 +93,12 @@ export default function ReassignLeadsModal({ visible, onClose, onDone, teamMembe
                 <Text style={styles.title}>{pickerFor === 'from' ? 'Move leads FROM' : 'Move leads TO'}</Text>
                 <View style={{ width: 30 }} />
             </View>
-            <FlatList
-                data={pickerData}
-                keyExtractor={(m) => m.id}
-                renderItem={({ item }) => {
+            <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
+                {pickerData.map((item) => {
                     const selected = (pickerFor === 'from' ? fromId : toId) === item.id;
                     return (
                         <TouchableOpacity
+                            key={item.id}
                             style={[styles.pickerItem, selected && { backgroundColor: '#e3f2fd' }]}
                             onPress={() => {
                                 if (pickerFor === 'from') setFromId(item.id); else setToId(item.id);
@@ -112,9 +111,9 @@ export default function ReassignLeadsModal({ visible, onClose, onDone, teamMembe
                             {selected && <Ionicons name="checkmark" size={18} color="green" />}
                         </TouchableOpacity>
                     );
-                }}
-                ListEmptyComponent={<Text style={styles.muted}>No employees available.</Text>}
-            />
+                })}
+                {pickerData.length === 0 && <Text style={styles.muted}>No employees available.</Text>}
+            </ScrollView>
         </View>
     );
 
@@ -133,6 +132,7 @@ export default function ReassignLeadsModal({ visible, onClose, onDone, teamMembe
                 <Text style={{ color: fromId ? '#333' : 'gray', fontWeight: 'bold' }}>{nameOf(fromId) || 'Select employee...'}</Text>
                 <Ionicons name="chevron-down" size={16} color="gray" />
             </TouchableOpacity>
+            {!fromId && <Text style={[styles.muted, { marginTop: 6 }]}>Choose who the leads belong to now — you'll see how many leads will move.</Text>}
 
             {fromId ? (
                 loadingSummary ? (

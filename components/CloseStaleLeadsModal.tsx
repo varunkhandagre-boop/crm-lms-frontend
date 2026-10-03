@@ -94,11 +94,10 @@ export default function CloseStaleLeadsModal({ visible, onClose, onDone, teamMem
                     <Text style={styles.title}>{picker === 'employee' ? 'Employee' : 'Lost Reason'}</Text>
                     <View style={{ width: 30 }} />
                 </View>
-                <FlatList
-                    data={items}
-                    keyExtractor={i => i.id || 'all'}
-                    renderItem={({ item }) => (
+                <ScrollView style={{ flex: 1 }}>
+                    {items.map((item) => (
                         <TouchableOpacity
+                            key={item.id || 'all'}
                             style={[styles.pickerItem, selected === item.id && { backgroundColor: '#e3f2fd' }]}
                             onPress={() => {
                                 if (picker === 'employee') setEmployeeId(item.id); else setReason(item.id as LostReason);
@@ -108,8 +107,8 @@ export default function CloseStaleLeadsModal({ visible, onClose, onDone, teamMem
                             <Text style={{ fontSize: 15, color: item.muted ? 'gray' : '#333', fontWeight: selected === item.id ? 'bold' : 'normal' }}>{item.label}</Text>
                             {selected === item.id && <Ionicons name="checkmark" size={18} color="green" />}
                         </TouchableOpacity>
-                    )}
-                />
+                    ))}
+                </ScrollView>
             </View>
         );
     };

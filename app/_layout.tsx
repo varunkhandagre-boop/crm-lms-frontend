@@ -389,7 +389,10 @@ if (currentUser && isSubscriptionExpired) {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+      {/* backgroundColor only matters where the app is NOT edge-to-edge (Expo Go):
+          without it the bar is black and the dark icons disappear. Real builds
+          (edge-to-edge) ignore it and show the screen behind a transparent bar. */}
+      <StatusBar barStyle="dark-content" backgroundColor="#f5f5f5" />
       
       {/* 🔥 GLOBAL NETWORK INDICATOR */}
       <NetworkIndicator />

@@ -559,7 +559,7 @@ const DetailRow = ({label, value, color}: any) => (
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   header: { backgroundColor: 'white', paddingTop: 50, padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 4 },
-  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom:10 },
+  headerTop: { flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom:10 },
   backCircle: { backgroundColor: '#F0F0F0', padding: 8, borderRadius: 20 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#1A237E', marginLeft: 12 },
   addBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#3B5998', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },

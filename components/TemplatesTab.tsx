@@ -101,7 +101,7 @@ export const TemplatesTab = () => {
             };
             if (editId) {
                 await updateTemplate(editId, payload);
-                Alert.alert('Success', 'Template Updated!');
+                Alert.alert('Success', editId.startsWith('standard:') ? 'Saved as your company\'s own version. Other companies still use the standard one.' : 'Template Updated!');
             } else {
                 await createTemplate(payload);
                 Alert.alert('Success', 'New Template Created!');
@@ -115,11 +115,13 @@ export const TemplatesTab = () => {
         }
     };
 
-    const handleDelete = (id: string) => {
-        Alert.alert('Delete Template?', 'Are you sure you want to delete this template?', [
+    const handleDelete = (id: string, backToStandard = false) => {
+        Alert.alert(
+            backToStandard ? 'Go back to the standard template?' : 'Delete Template?',
+            backToStandard ? 'Your changes to this template will be removed and the standard version will be used again.' : 'Are you sure you want to delete this template?', [
             { text: 'Cancel', style: 'cancel' },
             {
-                text: 'Delete',
+                text: backToStandard ? 'Use standard' : 'Delete',
                 style: 'destructive',
                 onPress: async () => {
                     try {
@@ -180,9 +182,16 @@ export const TemplatesTab = () => {
                                             {item.type === 'email' ? 'EMAIL' : 'WHATSAPP'}
                                         </Text>
                                     </View>
-                                    <Text style={{ fontSize: 10, color: 'gray', marginLeft: 10 }}>
-                                        Updated: {new Date(item.updatedAt || item.createdAt).toLocaleDateString()}
-                                    </Text>
+                                    {item.isStandard ? (
+                                        <Text style={[tStyles.originBadge, { color: '#6a1b9a', backgroundColor: '#f3e5f5' }]}>STANDARD</Text>
+                                    ) : item.overridesStandard ? (
+                                        <Text style={[tStyles.originBadge, { color: '#e65100', backgroundColor: '#fff3e0' }]}>CUSTOMISED</Text>
+                                    ) : null}
+                                    {!item.isStandard && (item.updatedAt || item.createdAt) ? (
+                                        <Text style={{ fontSize: 10, color: 'gray', marginLeft: 10 }}>
+                                            Updated: {new Date((item.updatedAt || item.createdAt) as string).toLocaleDateString()}
+                                        </Text>
+                                    ) : null}
                                 </View>
                                 <Text style={tStyles.templateName}>{item.name}</Text>
                                 {item.type === 'email' && <Text style={tStyles.subjectText} numberOfLines={1}>Sub: {item.subject}</Text>}
@@ -195,10 +204,12 @@ export const TemplatesTab = () => {
                                 <Ionicons name="create-outline" size={16} color="#3b5998" />
                                 <Text style={{ color: '#3b5998', fontWeight: 'bold', marginLeft: 5 }}>Edit</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity style={tStyles.actionBtn} onPress={() => handleDelete(item.id)}>
-                                <Ionicons name="trash-outline" size={16} color="#d32f2f" />
-                                <Text style={{ color: '#d32f2f', fontWeight: 'bold', marginLeft: 5 }}>Delete</Text>
-                            </TouchableOpacity>
+                            {!item.isStandard && (
+                                <TouchableOpacity style={tStyles.actionBtn} onPress={() => handleDelete(item.id, !!item.overridesStandard)}>
+                                    <Ionicons name={item.overridesStandard ? 'refresh' : 'trash-outline'} size={16} color="#d32f2f" />
+                                    <Text style={{ color: '#d32f2f', fontWeight: 'bold', marginLeft: 5 }}>{item.overridesStandard ? 'Use standard' : 'Delete'}</Text>
+                                </TouchableOpacity>
+                            )}
                         </View>
                     </TouchableOpacity>
                 )}
@@ -321,6 +332,9 @@ export const TemplatesTab = () => {
                                 placeholder={templateType === 'email' ? 'Hello {customer_name}, ...' : 'Hello {customer_name}, your payment is...'}
                                 multiline
                             />
+                            <Text style={{ fontSize: 11, color: 'gray', marginTop: -8, marginBottom: 12 }}>
+                                Company details fill in automatically from Company Profile: {'{company_name}'}, {'{company_phone}'}, {'{company_email}'}, {'{company_website}'}, {'{company_address}'}.
+                            </Text>
 
                             <TouchableOpacity style={tStyles.bigSaveBtn} onPress={handleSave} disabled={isSaving}>
                                 {isSaving ? <ActivityIndicator color="white" /> : <Text style={tStyles.bigBtnText}>Save Template</Text>}
@@ -340,6 +354,7 @@ const tStyles = StyleSheet.create({
     card: { backgroundColor: 'white', padding: 14, borderRadius: 10, marginBottom: 10, elevation: 1 },
     templateBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, gap: 4 },
     templateBadgeText: { fontSize: 10, fontWeight: 'bold' },
+    originBadge: { fontSize: 9, fontWeight: 'bold', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8, overflow: 'hidden' },
     templateName: { fontSize: 16, fontWeight: 'bold', color: '#333' },
     subjectText: { fontSize: 12, color: '#1565c0', marginTop: 2 },
     bodyPreview: { fontSize: 12, color: '#777', marginTop: 4 },

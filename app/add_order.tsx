@@ -798,11 +798,12 @@ if (locationData) {
                                 </View>
                             ) : (
                                 <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%'}}>
-                                    <Text style={[styles.modalText, isSelected && {color: '#1976d2', fontWeight: 'bold'}]}>
+                                    {/* flex:1 lets long names wrap so the checkbox keeps its column */}
+                                    <Text style={[styles.modalText, { flex: 1, marginRight: 12 }, isSelected && {color: '#1976d2', fontWeight: 'bold'}]}>
                                         {typeof item === 'string' ? item : (item.name)}
                                     </Text>
                                     {currentModalType === 'Product' && (
-                                        <Ionicons name={isSelected ? "checkbox" : "square-outline"} size={24} color={isSelected ? "#1976d2" : "gray"} />
+                                        <Ionicons name={isSelected ? "checkbox" : "square-outline"} size={24} color={isSelected ? "#1976d2" : "gray"} style={{ width: 24 }} />
                                     )}
                                 </View>
                             )}
