@@ -21,6 +21,7 @@ import {
 } from 'react-native';
 
 import { statesList as allStatesList, districtPincodes, indianStatesAndDistricts } from '../constants/indianStatesData';
+import WebsiteLeadsProfileCard from '../components/WebsiteLeadsProfileCard';
 import { useData } from './context/DataContext';
 
 // 🔥 Phase 10: company profile now lives on the Company row in Postgres via
@@ -478,6 +479,13 @@ export default function CompanyProfileScreen() {
                     <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={saving || uploading}>
                         {saving || uploading ? <ActivityIndicator color="white" /> : <Text style={styles.saveText}>Save Global Settings</Text>}
                     </TouchableOpacity>
+
+                    {/* Website enquiry form → leads (has its own Save; Admin only) */}
+                    {currentUser?.role?.toLowerCase() === 'admin' && (
+                        <View style={{ marginTop: 20 }}>
+                            <WebsiteLeadsProfileCard />
+                        </View>
+                    )}
                     
                     <View style={{height: 100}} /> 
                 </ScrollView>

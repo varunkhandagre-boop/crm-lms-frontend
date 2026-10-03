@@ -40,7 +40,7 @@ export default function WebsiteLeadSettingsModal({ visible, onClose, teamMembers
         setPicking(false);
         setSaving(true);
         try {
-            const updated = await updateWebsiteLeadSettings(id === DEFAULT_ID ? null : id);
+            const updated = await updateWebsiteLeadSettings({ assigneeId: id === DEFAULT_ID ? null : id });
             setSettings(updated);
             Alert.alert('Saved ✅', `New website leads will go to ${updated.effectiveAssignee?.name || 'the Admin'}.`);
         } catch (e: any) {
