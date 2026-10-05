@@ -31,6 +31,18 @@ function todayYmd(): string {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// "Quotation for 25 days" — red once a lead has sat in one stage over 30 days.
+const STUCK_DAYS = 30;
+function stageAge(stage: string | null, since?: string) {
+    if (!since) return null;
+    const ms = Date.now() - new Date(since).getTime();
+    if (isNaN(ms)) return null;
+    const days = Math.max(0, Math.floor(ms / 86_400_000));
+    const name = stage || 'New';
+    const label = days === 0 ? `${name} since today` : `${name} for ${days} day${days === 1 ? '' : 's'}`;
+    return { label, stuck: days > STUCK_DAYS };
+}
+
 function followUpBadge(nextDate: string | null) {
     if (!nextDate) return { label: 'No date', color: '#757575', bg: '#eeeeee' };
     const ymd = nextDate.slice(0, 10); // @db.Date arrives as "YYYY-MM-DDT00:00:00.000Z"
@@ -135,7 +147,7 @@ export default function LeadsBoardScreen() {
         setColumns(prev => prev.map(c => {
             const v = card.dealValue || 0;
             if (c.column === fromColumn) return { ...c, count: c.count - 1, value: c.value - v, leads: c.leads.filter(l => l.id !== card.id) };
-            if (c.column === stage) return { ...c, count: c.count + 1, value: c.value + v, leads: [{ ...card, stage }, ...c.leads] };
+            if (c.column === stage) return { ...c, count: c.count + 1, value: c.value + v, leads: [{ ...card, stage, stageChangedAt: new Date().toISOString() }, ...c.leads] };
             return c;
         }));
         try {
@@ -151,6 +163,7 @@ export default function LeadsBoardScreen() {
 
     const renderCard = (card: PipelineCard) => {
         const badge = followUpBadge(card.nextDate);
+        const age = stageAge(card.stage, card.stageChangedAt);
         return (
             <TouchableOpacity
                 key={card.id}
@@ -174,6 +187,11 @@ export default function LeadsBoardScreen() {
                 )}
                 {card.requirements.length > 0 && (
                     <Text style={styles.cardSub} numberOfLines={1}>📦 {card.requirements.join(', ')}</Text>
+                )}
+                {age && (
+                    <Text style={[styles.stageAge, age.stuck && styles.stageAgeStuck]} numberOfLines={1}>
+                        ⏳ {age.label}
+                    </Text>
                 )}
                 <View style={styles.cardFooter}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -366,6 +384,8 @@ const styles = StyleSheet.create({
     cardFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
     badge: { borderRadius: 5, paddingHorizontal: 6, paddingVertical: 2 },
     owner: { fontSize: 11, color: '#555', flexShrink: 1, marginLeft: 8 },
+    stageAge: { fontSize: 11, color: '#757575', marginTop: 3 },
+    stageAgeStuck: { color: '#d32f2f', fontWeight: 'bold' },
     empty: { textAlign: 'center', color: '#9e9e9e', marginTop: 20, fontStyle: 'italic' },
     moreBtn: { alignItems: 'center', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#c5cae9', backgroundColor: 'white' },
     moreText: { color: '#3b5998', fontWeight: 'bold', fontSize: 12 },

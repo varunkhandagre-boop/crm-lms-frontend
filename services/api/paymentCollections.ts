@@ -21,6 +21,7 @@ export interface ApiPaymentCollection {
   notes: string | null;
   status: string;
   chequeStatus: string | null;
+  chequeImageUrl?: string | null;
   clearedDate: string | null;
   bouncedDate: string | null;
   createdById: string;
@@ -51,6 +52,7 @@ function toLegacyPayment(p: ApiPaymentCollection): any {
     note: p.notes || '',
     status: p.status,
     chequeStatus: p.chequeStatus || 'Pending',
+    chequeImageUrl: p.chequeImageUrl || null,
     clearedDate: p.clearedDate,
     bouncedDate: p.bouncedDate,
     addedBy: undefined,
@@ -125,4 +127,16 @@ export async function markChequeBounced(id: string): Promise<any> {
 
 export async function deletePaymentCollection(id: string): Promise<void> {
   await apiClient.delete(`/payment-collections/${id}`);
+}
+
+// Cheque photo as a base64 data URI; replaces any earlier one.
+export async function uploadChequePhoto(id: string, dataUri: string): Promise<any> {
+  const res = await apiClient.put<{ data: ApiPaymentCollection }>(`/payment-collections/${id}/cheque-photo`, { dataUri });
+  return toLegacyPayment(res.data);
+}
+
+// Also deletes the file from storage.
+export async function deleteChequePhoto(id: string): Promise<any> {
+  const res = await apiClient.delete<{ data: ApiPaymentCollection }>(`/payment-collections/${id}/cheque-photo`);
+  return toLegacyPayment(res.data);
 }

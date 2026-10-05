@@ -68,7 +68,8 @@ export function toLegacyServiceCall(s: ApiServiceCall): any {
     status: s.status,
     remark: s.remark || '',
     resolutionNote: s.resolutionNote || '',
-    imageUri: s.imageUri,
+    // Old records may hold a phone-local path — only show real uploads.
+    imageUri: s.imageUri && /^https?:\/\//i.test(s.imageUri) ? s.imageUri : null,
     partsUsed: s.partsUsed || [],
     partsText: s.partsText || '',
     date: dateOnly,
@@ -98,6 +99,37 @@ export interface ListServiceCallsParams {
   search?: string;
 }
 
+// One page of the Service Calls screen — every filter runs on the server.
+export interface ServiceCallPageParams {
+  page?: number;
+  limit?: number;
+  outcome?: 'open' | 'closed';
+  search?: string;
+  engineerId?: 'me' | string;
+  employeeId?: string;
+  from?: string; // YYYY-MM-DD (IST), on created date
+  to?: string;
+  sortBy?: 'createdAt' | 'date';
+  sortOrder?: 'asc' | 'desc';
+}
+
+export async function listServiceCallsPage(params: ServiceCallPageParams): Promise<{ items: any[]; total: number; totalPages: number }> {
+  const res = await apiClient.get<ListResponse>(`/service-calls${toQueryString({ limit: 20, sortBy: 'createdAt', sortOrder: 'desc', ...params })}`);
+  return { items: res.data.map(toLegacyServiceCall), total: res.meta.total, totalPages: res.meta.totalPages };
+}
+
+export async function getServiceCall(id: string): Promise<any> {
+  const res = await apiClient.get<OneResponse>(`/service-calls/${id}`);
+  return toLegacyServiceCall(res.data);
+}
+
+// Open = Open + Assigned, scoped like the list (field users: their own calls).
+export async function getServiceCallCounts(): Promise<{ open: number; assignedToMe: number }> {
+  const res = await apiClient.get<{ data: { open: number; assignedToMe: number } }>('/service-calls/counts');
+  return res.data;
+}
+
+// Full download (up to 1000) — still used by reports; the Service Calls screen pages instead.
 export async function listServiceCalls(params: ListServiceCallsParams = {}): Promise<any[]> {
   const res = await apiClient.get<ListResponse>(`/service-calls${toQueryString({limit: 1000,  ...params })}`);
   return res.data.map(toLegacyServiceCall);
@@ -170,4 +202,16 @@ export async function getEngineerStats(from?: string, to?: string): Promise<{ en
     `/service-calls/engineer-stats${toQueryString({ from, to })}`
   );
   return res.data;
+}
+
+// Photo as a base64 data URI; replaces any earlier photo.
+export async function uploadServiceCallPhoto(id: string, dataUri: string): Promise<any> {
+  const res = await apiClient.put<OneResponse>(`/service-calls/${id}/photo`, { dataUri });
+  return toLegacyServiceCall(res.data);
+}
+
+// Also deletes the file from storage.
+export async function deleteServiceCallPhoto(id: string): Promise<any> {
+  const res = await apiClient.delete<OneResponse>(`/service-calls/${id}/photo`);
+  return toLegacyServiceCall(res.data);
 }

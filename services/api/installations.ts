@@ -17,6 +17,7 @@ export interface ApiInstallation {
   serialNo: string;
   warrantyExpiry: string | null;
   note: string | null;
+  photoUrl?: string | null;
   status: string;
   date: string;
   location: { latitude: number; longitude: number } | null;
@@ -58,6 +59,7 @@ export function toLegacyInstallation(i: ApiInstallation): any {
     serialNo: i.serialNo,
     warrantyExpiry: i.warrantyExpiry ? i.warrantyExpiry.split('T')[0] : '',
     note: i.note || '',
+    photoUrl: i.photoUrl || null,
     status: i.status,
     date: dateOnly,
     displayDate: dateOnly,
@@ -134,4 +136,16 @@ export async function sendAmcReminder(id: string): Promise<any> {
 
 export async function deleteInstallation(id: string): Promise<void> {
   await apiClient.delete(`/installations/${id}`);
+}
+
+// applyToBatch: put the same photo on every machine of that installation report.
+export async function uploadInstallationPhoto(id: string, dataUri: string, applyToBatch = false): Promise<any> {
+  const res = await apiClient.put<OneResponse>(`/installations/${id}/photo`, { dataUri, applyToBatch });
+  return toLegacyInstallation(res.data);
+}
+
+// Removes the photo from this machine; the file is deleted once no machine uses it.
+export async function deleteInstallationPhoto(id: string): Promise<any> {
+  const res = await apiClient.delete<OneResponse>(`/installations/${id}/photo`);
+  return toLegacyInstallation(res.data);
 }

@@ -24,7 +24,8 @@ function toLegacyExpense(e: ApiExpense): any {
     type: e.type,
     amount: Number(e.amount) || 0,
     remark: e.remark || '',
-    imageUri: e.imageUri,
+    // Old claims may hold a phone-local path — only real uploads are shown.
+    imageUri: e.imageUri && /^https?:\/\//i.test(e.imageUri) ? e.imageUri : null,
     status: e.status,
     settlementDate: e.settlementDate,
     senderId: e.createdById,
@@ -60,4 +61,16 @@ export async function updateExpenseStatus(id: string, status: 'Approved' | 'Reje
 export async function settleExpensesForEmployee(employeeId: string): Promise<{ settledCount: number }> {
   const res = await apiClient.post<{ data: { settledCount: number } }>(`/expenses/settle/${employeeId}`, {});
   return res.data;
+}
+
+// Bill photo as a base64 data URI; replaces any earlier one.
+export async function uploadExpenseBillPhoto(id: string, dataUri: string): Promise<any> {
+  const res = await apiClient.put<{ data: ApiExpense }>(`/expenses/${id}/bill-photo`, { dataUri });
+  return toLegacyExpense(res.data);
+}
+
+// Also deletes the file from storage.
+export async function deleteExpenseBillPhoto(id: string): Promise<any> {
+  const res = await apiClient.delete<{ data: ApiExpense }>(`/expenses/${id}/bill-photo`);
+  return toLegacyExpense(res.data);
 }

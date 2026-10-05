@@ -12,6 +12,8 @@ export interface ApiOrder {
   mobile: string | null;
   email: string | null;
   poNumber: string;
+  poFileUrl?: string | null;
+  poFileName?: string | null;
   amount: string | number;
   advanceAmount: string | number;
   balance: string | number;
@@ -46,8 +48,7 @@ interface OneResponse {
 // Maps an ApiOrder back to the old Firestore `orders` doc shape.
 // Note: senderName/bookedBy aren't stored server-side (only IDs) — the
 // employee-name display/filter falls back gracefully, same known gap as
-// quotations/demos. PO file upload also isn't wired yet (needs Supabase
-// Storage) — poFileUri/poFileName always come back empty.
+// quotations/demos. poFileUri is the uploaded PO (Supabase Storage URL).
 export function toLegacyOrder(o: ApiOrder): any {
   const dateOnly = o.date ? o.date.split('T')[0] : undefined;
   return {
@@ -85,9 +86,9 @@ export function toLegacyOrder(o: ApiOrder): any {
     userId: o.assignedToId || o.createdById,
     createdById: o.createdById,
     bookedBy: undefined,
-    poFileName: '',
-    poFileUri: '',
-    poFileType: '',
+    poFileName: o.poFileName || '',
+    poFileUri: o.poFileUrl || '',
+    poFileType: o.poFileUrl ? (/\.pdf(\?|$)/i.test(o.poFileUrl) ? 'pdf' : 'image') : '',
     createdAt: o.createdAt,
   };
 }
@@ -175,5 +176,17 @@ export async function deleteOrder(id: string): Promise<void> {
 // Phase 6: WhatsApp payment-reminder tracking (records intent only).
 export async function remindOrder(id: string): Promise<any> {
   const res = await apiClient.post<OneResponse>(`/orders/${id}/remind`, {});
+  return toLegacyOrder(res.data);
+}
+
+// PO photo/PDF as a base64 data URI; replaces any earlier PO file.
+export async function uploadOrderPoFile(id: string, dataUri: string, fileName?: string): Promise<any> {
+  const res = await apiClient.put<OneResponse>(`/orders/${id}/po-file`, { dataUri, fileName });
+  return toLegacyOrder(res.data);
+}
+
+// Also deletes the file from storage.
+export async function deleteOrderPoFile(id: string): Promise<any> {
+  const res = await apiClient.delete<OneResponse>(`/orders/${id}/po-file`);
   return toLegacyOrder(res.data);
 }

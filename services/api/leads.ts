@@ -262,6 +262,7 @@ export interface PipelineCard {
   city: string | null;
   status: string;
   stage: string | null;
+  stageChangedAt?: string; // when it entered this stage (set by the server)
   isHot: boolean;
   type: 'HOT' | 'WARM' | 'COLD';
   nextDate: string | null;
