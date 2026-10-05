@@ -43,7 +43,9 @@ import {
     previewPayslip,
     savePayrollSettings,
     DEFAULT_DEDUCTION_RULES,
+    DEFAULT_OVERTIME_RULES,
     DeductionRules,
+    OvertimeRules,
 } from '../services/api/payroll';
 import { fetchTeamMembers } from '../services/api/users';
 import { urlToBase64Image } from '../utils/pdfImageHelper';
@@ -277,6 +279,10 @@ export default function PayrollScreen() {
     const rules: DeductionRules = settings?.deductionRules || DEFAULT_DEDUCTION_RULES;
     const setRule = <K extends keyof DeductionRules>(key: K, value: DeductionRules[K]) =>
         setSettings((prev) => (prev ? { ...prev, deductionRules: { ...(prev.deductionRules || DEFAULT_DEDUCTION_RULES), [key]: value } } : prev));
+    const ot: OvertimeRules = settings?.overtimeRules || DEFAULT_OVERTIME_RULES;
+    const setOt = <K extends keyof OvertimeRules>(key: K, value: OvertimeRules[K]) =>
+        setSettings((prev) => (prev ? { ...prev, overtimeRules: { ...(prev.overtimeRules || DEFAULT_OVERTIME_RULES), [key]: value } } : prev));
+    const num = (t: string, min: number, max: number) => Math.max(min, Math.min(max, Number(t.replace(/[^0-9.]/g, '')) || 0));
 
     const handleSaveSettings = async () => {
         if (!settings) return;
@@ -395,6 +401,8 @@ export default function PayrollScreen() {
                     'Base Salary': Number(p.baseSalary),
                     'Incentive': Number(p.incentiveAmount),
                     'Expenses': Number(p.expenseAmount),
+                    'Overtime Hours': Number(p.overtimeHours || 0),
+                    'Overtime Amount': Number(p.overtimeAmount || 0),
                     'Office Days': p.officeDays,
                     'Field Days': p.fieldDays,
                     'Present Days': p.presentDays,
@@ -518,6 +526,7 @@ const generatePayslipPDF = async (slip: Payslip) => {
                   <tr><td>Base Salary</td><td style="text-align:right;" class="earn">₹${Number(slip.baseSalary).toLocaleString('en-IN')}</td></tr>
                   <tr><td>Incentive</td><td style="text-align:right;" class="earn">₹${Number(slip.incentiveAmount).toLocaleString('en-IN')}</td></tr>
                   <tr><td>Expenses Reimbursed</td><td style="text-align:right;" class="earn">₹${Number(slip.expenseAmount).toLocaleString('en-IN')}</td></tr>
+                  ${Number(slip.overtimeAmount) > 0 ? `<tr><td>Overtime (${Number(slip.overtimeHours)} h)</td><td style="text-align:right;" class="earn">₹${Number(slip.overtimeAmount).toLocaleString('en-IN')}</td></tr>` : ''}
                 </tbody>
               </table>
 
@@ -699,6 +708,57 @@ const generatePayslipPDF = async (slip: Payslip) => {
                         />
                     </View>
 
+                    <Text style={styles.sectionTitle}>Overtime</Text>
+                    <View style={styles.card}>
+                        <View style={styles.switchRow}>
+                            <Text style={styles.label}>Pay overtime</Text>
+                            <Switch value={ot.enabled} onValueChange={(v) => setOt('enabled', v)} />
+                        </View>
+                        {ot.enabled && (
+                            <>
+                                <Text style={styles.hint}>Hours worked on a working day beyond the employee’s shift (or the standard hours below when no shift is set). Work on a weekly off / holiday earns leave instead.</Text>
+                                <Text style={styles.label}>Rate</Text>
+                                <ChoiceChips
+                                    value={ot.mode}
+                                    options={[
+                                        { v: 'x1', t: 'Hourly salary × 1' },
+                                        { v: 'x1_5', t: '× 1.5' },
+                                        { v: 'x2', t: '× 2' },
+                                        { v: 'fixed', t: '₹ per hour' },
+                                    ]}
+                                    onChange={(v) => setOt('mode', v)}
+                                />
+                                <View style={{ flexDirection: 'row', gap: 10 }}>
+                                    {ot.mode === 'fixed' && (
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.label}>₹ per hour</Text>
+                                            <TextInput style={styles.input} keyboardType="numeric" value={String(ot.ratePerHour)} onChangeText={(t) => setOt('ratePerHour', num(t, 0, 100000))} />
+                                        </View>
+                                    )}
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.label}>Standard hours / day</Text>
+                                        <TextInput style={styles.input} keyboardType="numeric" value={String(ot.standardHours)} onChangeText={(t) => setOt('standardHours', num(t, 1, 16))} />
+                                    </View>
+                                </View>
+                                <View style={{ flexDirection: 'row', gap: 10 }}>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.label}>Min. minutes</Text>
+                                        <TextInput style={styles.input} keyboardType="numeric" value={String(ot.minMinutes)} onChangeText={(t) => setOt('minMinutes', Math.round(num(t, 0, 240)))} />
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.label}>Round down to (min)</Text>
+                                        <TextInput style={styles.input} keyboardType="numeric" value={String(ot.roundToMinutes)} onChangeText={(t) => setOt('roundToMinutes', Math.round(num(t, 1, 60)))} />
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.label}>Max hrs / day</Text>
+                                        <TextInput style={styles.input} keyboardType="numeric" value={String(ot.maxHoursPerDay)} onChangeText={(t) => setOt('maxHoursPerDay', num(t, 0.5, 12))} />
+                                    </View>
+                                </View>
+                                <Text style={styles.hint}>Hourly salary = one day’s salary ÷ shift hours. E.g. 1 h 40 min extra with “round down to 30” = 1.5 h.</Text>
+                            </>
+                        )}
+                    </View>
+
                     <Text style={styles.sectionTitle}>Absent & One Day’s Salary</Text>
                     <View style={styles.card}>
                         <Text style={styles.label}>One day’s salary =</Text>
@@ -848,6 +908,7 @@ const generatePayslipPDF = async (slip: Payslip) => {
                             <Row label="Base Salary" value={preview.baseSalary} positive />
                             <Row label="Incentive" value={preview.incentiveAmount} positive />
                             <Row label="Expenses" value={preview.expenseAmount} positive />
+                            {Number(preview.overtimeAmount) > 0 && <Row label={`Overtime (${Number(preview.overtimeHours)} h)`} value={Number(preview.overtimeAmount)} positive />}
                             <Row label={`Late-Coming Deduction${preview.lateDays ? ` (${preview.lateDays} late)` : ''}`} value={-preview.lateDeduction} />
                             <Row label={`Absent Deduction${Number(preview.absentDays) ? ` (${Number(preview.absentDays)} day)` : ''}`} value={-Number(preview.absentDeduction || 0)} />
                             <Row label="Short-Hours Deduction" value={-preview.shortHoursDeduction} />
@@ -958,6 +1019,7 @@ const generatePayslipPDF = async (slip: Payslip) => {
                             <Row label="Base Salary" value={Number(selectedSlip.baseSalary)} positive />
                             <Row label="Incentive" value={Number(selectedSlip.incentiveAmount)} positive />
                             <Row label="Expenses" value={Number(selectedSlip.expenseAmount)} positive />
+                            {Number(selectedSlip.overtimeAmount) > 0 && <Row label={`Overtime (${Number(selectedSlip.overtimeHours)} h)`} value={Number(selectedSlip.overtimeAmount)} positive />}
                             <Row label={`Late-Coming Deduction${selectedSlip.lateDays ? ` (${selectedSlip.lateDays} late)` : ''}`} value={-Number(selectedSlip.lateDeduction)} />
                             <Row label={`Absent Deduction${Number(selectedSlip.absentDays) ? ` (${Number(selectedSlip.absentDays)} day)` : ''}`} value={-Number(selectedSlip.absentDeduction || 0)} />
                             <Row label="Short-Hours Deduction" value={-Number(selectedSlip.shortHoursDeduction)} />

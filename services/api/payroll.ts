@@ -1,4 +1,5 @@
 import { DEFAULT_SCHEDULE, WorkSchedule } from '../../utils/workSchedule';
+import { apiClient } from './client';
 
 // Same rules as the backend (src/lib/deductionRules.ts); defaults = old behaviour.
 export interface DeductionRules {
@@ -11,11 +12,24 @@ export interface DeductionRules {
   missingDayOutHalfDay: boolean;
   leaveExcessMode: 'fixed_penalty' | 'lwp';
 }
+// Overtime (backend src/lib/overtime.ts) — off by default.
+export interface OvertimeRules {
+  enabled: boolean;
+  mode: 'fixed' | 'x1' | 'x1_5' | 'x2';
+  ratePerHour: number;
+  standardHours: number;
+  minMinutes: number;
+  roundToMinutes: number;
+  maxHoursPerDay: number;
+}
+export const DEFAULT_OVERTIME_RULES: OvertimeRules = {
+  enabled: false, mode: 'x1', ratePerHour: 0, standardHours: 9, minMinutes: 30, roundToMinutes: 30, maxHoursPerDay: 4,
+};
+
 export const DEFAULT_DEDUCTION_RULES: DeductionRules = {
   perDayBasis: 'calendar', lateMode: 'half_day_each', lateFree: 0, lateEveryN: 3,
   absentDeduction: false, sandwichRule: false, missingDayOutHalfDay: false, leaveExcessMode: 'fixed_penalty',
 };
-import { apiClient } from './client';
 
 export interface PayrollSettings {
   id: string;
@@ -31,6 +45,7 @@ export interface PayrollSettings {
   leaveExcessPenalty: number;
   workSchedule: WorkSchedule; // company weekly off + shift
   deductionRules: DeductionRules; // late / absent / leave-excess cuts
+  overtimeRules: OvertimeRules;
 }
 
 export interface Payslip {
@@ -55,6 +70,8 @@ export interface Payslip {
   lateDays?: number;
   absentDays?: number | string; // Decimal — may arrive as a string
   absentDeduction?: number | string;
+  overtimeHours?: number | string;
+  overtimeAmount?: number | string;
   netPayable: number;
   generatedAt: string;
   user?: { name: string; empId: string | null };
@@ -79,6 +96,7 @@ function normalizeSettings(d: any): PayrollSettings {
     leaveExcessPenalty: Number(d.leaveExcessPenalty),
     workSchedule: { ...DEFAULT_SCHEDULE, ...(d.workSchedule || {}) },
     deductionRules: { ...DEFAULT_DEDUCTION_RULES, ...(d.deductionRules || {}) },
+    overtimeRules: { ...DEFAULT_OVERTIME_RULES, ...(d.overtimeRules || {}) },
   };
 }
 
