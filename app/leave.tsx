@@ -18,6 +18,8 @@ import {
 // 🔥 SAAS IMPORTS (still used for "users" — user profile master list stays on Firestore until Phase 10)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+import { useWorkSchedules } from '../hooks/useWorkSchedules';
+import { isOffDay } from '../utils/workSchedule';
 
 // 🔥 Phase 7: leaves/attendance/holidays now come from Postgres via these adapters
 import { fetchAttendance } from '../services/api/attendance';
@@ -33,6 +35,8 @@ export default function LeaveApplicationScreen() {
 
   // 🔥 1. Context se sirf user aur notifications
   const { currentUser, addNotification } = useData();
+  // Weekly off per employee (was: Sunday for everyone)
+  const { forUser: scheduleFor } = useWorkSchedules(currentUser?.companyId, currentUser?.id);
 
   // 🔥 2. "users" abhi bhi Firestore se (Phase 10 tak) — baaki sab Postgres se
   const { isDbLoading: isUsersLoading } = useSaaSDB();
@@ -241,7 +245,7 @@ export default function LeaveApplicationScreen() {
       } else if (canManage) {
           usersToProcess = employees.filter(e => e.name === selectedEmployeeName);
       } else {
-          usersToProcess = [{ name: currentUser?.name }];
+          usersToProcess = [{ name: currentUser?.name, id: currentUser?.id }];
       }
 
       const todayObj = new Date();
@@ -251,6 +255,7 @@ export default function LeaveApplicationScreen() {
       usersToProcess.forEach(emp => {
           if (!emp || !emp.name) return;
           const empName = emp.name;
+          const empSchedule = scheduleFor(emp.id);
 
           let d = new Date(fyStart);
           d.setHours(0,0,0,0);
@@ -261,7 +266,7 @@ export default function LeaveApplicationScreen() {
               const dateStr = getStandardDate(d);
               const loopTime = d.getTime();
 
-              const isSunday = d.getDay() === 0;
+              const isWeeklyOff = isOffDay(dateStr, empSchedule);
               const isHoliday = holidayList?.some((h:any) => h.dateIso === dateStr || h.date === dateStr);
               
               const isOnLeave = leaveList?.some((l:any) => {
@@ -300,10 +305,10 @@ export default function LeaveApplicationScreen() {
                           id: `cancel-${dateStr}-${empName}`, isAutoRecord: true, isCancelled: true, senderName: empName, fromDate: displayDate,
                           days: `-${isHalfDay ? 0.5 : 1}`, type: 'Leave Cancelled', status: 'Worked', reason: 'Present on an approved leave day', createdAt: d.toISOString() 
                       });
-                  } else if (isSunday || isHoliday) {
+                  } else if (isWeeklyOff || isHoliday) {
                       generatedRecords.push({
                           id: `earned-${dateStr}-${empName}`, isAutoRecord: true, isEarned: true, senderName: empName, fromDate: displayDate,
-                          days: `+${isHalfDay ? 0.5 : 1}`, type: 'Earned Leave', status: 'Approved', reason: isSunday ? 'Worked on Sunday' : 'Worked on Holiday', createdAt: d.toISOString() 
+                          days: `+${isHalfDay ? 0.5 : 1}`, type: 'Earned Leave', status: 'Approved', reason: isWeeklyOff ? 'Worked on weekly off' : 'Worked on Holiday', createdAt: d.toISOString() 
                       });
                   }
                   
@@ -314,7 +319,7 @@ export default function LeaveApplicationScreen() {
                       });
                   }
               } else {
-                  if (!isSunday && !isHoliday && !isOnLeave && dateStr <= todayStr) {
+                  if (!isWeeklyOff && !isHoliday && !isOnLeave && dateStr <= todayStr) {
                       generatedRecords.push({
                           id: `absent-${dateStr}-${empName}`, isAutoRecord: true, senderName: empName, fromDate: displayDate,
                           days: "1", type: 'Auto-Deduction', status: 'Absent', reason: 'System Auto-Marked Absent', createdAt: d.toISOString() 
@@ -327,7 +332,7 @@ export default function LeaveApplicationScreen() {
       });
 
       setAutoRecords(generatedRecords);
-  }, [leaveList, attendanceList, holidayList, currentUser, selectedEmployeeName, employees]);
+  }, [leaveList, attendanceList, holidayList, currentUser, selectedEmployeeName, employees, scheduleFor]);
 
 
   const changeDate = (dir: number) => {

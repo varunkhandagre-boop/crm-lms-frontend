@@ -22,6 +22,8 @@ import {
 import * as XLSX from 'xlsx';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
+import WorkScheduleEditor, { scheduleHasErrors } from '../components/WorkScheduleEditor';
+import { DEFAULT_SCHEDULE } from '../utils/workSchedule';
 import {
     fetchPayrollSettings,
     fetchBankSheet,
@@ -261,6 +263,10 @@ export default function PayrollScreen() {
 
     const handleSaveSettings = async () => {
         if (!settings) return;
+        if (settings.workSchedule && scheduleHasErrors(settings.workSchedule)) {
+            Alert.alert('Check shift time', 'Shift times must be 24-hour HH:MM, e.g. 09:30 or 18:30.');
+            return;
+        }
         setSaving(true);
         try {
             const saved = await savePayrollSettings(settings);
@@ -630,6 +636,18 @@ const generatePayslipPDF = async (slip: Payslip) => {
                                 <Text style={styles.hint}>Penalty: half a day's salary, automatically calculated per employee.</Text>
                             </>
                         )}
+                    </View>
+
+                    <Text style={styles.sectionTitle}>Weekly Off & Shift (company default)</Text>
+                    <View style={styles.card}>
+                        <Text style={{ fontSize: 12, color: 'gray' }}>
+                            Applies to everyone unless an employee has their own in Manage Team. Used for Day In reminders, attendance, leave balance and late marks.
+                        </Text>
+                        <WorkScheduleEditor
+                            value={settings.workSchedule || DEFAULT_SCHEDULE}
+                            onChange={(ws) => updateSetting('workSchedule', ws)}
+                            showGrace
+                        />
                     </View>
 
                     <Text style={styles.sectionTitle}>Leave Quota</Text>

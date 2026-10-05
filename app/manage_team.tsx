@@ -25,6 +25,9 @@ import { bulkSetTeamMemberStatus } from '../services/api/users';
 
 // 🔥 SAAS IMPORTS (Tracking tab still Firestore — its own turn later)
 import { useData } from './context/DataContext';
+import WorkScheduleEditor, { scheduleHasErrors } from '../components/WorkScheduleEditor';
+import { useWorkSchedules } from '../hooks/useWorkSchedules';
+import { describeSchedule, WorkSchedule } from '../utils/workSchedule';
 
 // 🔥 Phase 10: team members now live in Postgres via these adapters
 import { createTeamMember, fetchTeamMembers, LegacyTeamMember, setTeamMemberStatus, updateTeamMember } from '../services/api/users';
@@ -107,6 +110,8 @@ const ROLE_OPTIONS = [
 const UsersTab = () => {
     const router = useRouter();
     const { currentUser } = useData();
+    // Company weekly off / shift — shown when an employee uses the default
+    const { company: companySchedule } = useWorkSchedules(currentUser?.companyId, currentUser?.id);
     const [selectedForBulk, setSelectedForBulk] = useState<Set<string>>(new Set());
     const [bulkMode, setBulkMode] = useState(false);
     
@@ -121,6 +126,7 @@ const UsersTab = () => {
         name: "", email: "", mobile: "", role: "FIELD_USER",
         empId: "", joiningDate: "", monthlyTarget: "0", baseSalary: "0", yearlyLeaves: "18",
         dailyVisitTarget: "", monthlyVisitTarget: "",
+        workSchedule: null as WorkSchedule | null,
         password: "",
         personalEmail: "", personalMobile: "", bloodGroup: "",
         address: "", city: "", state: "", permanentAddress: "",
@@ -150,6 +156,10 @@ const UsersTab = () => {
     const renderedUsers = users.slice(0, visibleCount);
 
     const handleSave = async () => {
+        if (formData.workSchedule && scheduleHasErrors(formData.workSchedule)) {
+            Alert.alert('Check shift time', 'Shift times must be 24-hour HH:MM, e.g. 09:30 or 18:30.');
+            return;
+        }
         if(!formData.email || !formData.name) return Alert.alert("Missing Info", "Name & Email required");
         if(!editData && !formData.password) return Alert.alert("Missing Info", "Password required for new user");
 
@@ -165,6 +175,7 @@ const UsersTab = () => {
                     monthlyTarget: Number(formData.monthlyTarget) || undefined,
                     // empty / 0 = no visit target (null clears it)
                     dailyVisitTarget: Number(formData.dailyVisitTarget) || null,
+                    workSchedule: formData.workSchedule, // null = company default
                     monthlyVisitTarget: Number(formData.monthlyVisitTarget) || null,
                     baseSalary: Number(formData.baseSalary) || undefined,
                     yearlyLeaves: Number(formData.yearlyLeaves) || undefined,
@@ -205,6 +216,7 @@ const UsersTab = () => {
                     monthlyTarget: Number(formData.monthlyTarget) || undefined,
                     // empty / 0 = no visit target (null clears it)
                     dailyVisitTarget: Number(formData.dailyVisitTarget) || null,
+                    workSchedule: formData.workSchedule, // null = company default
                     monthlyVisitTarget: Number(formData.monthlyVisitTarget) || null,
                     baseSalary: Number(formData.baseSalary) || undefined,
                     yearlyLeaves: Number(formData.yearlyLeaves) || undefined,
@@ -266,6 +278,7 @@ const UsersTab = () => {
             password: "",
             monthlyTarget: String(user.monthlyTarget || 0),
             dailyVisitTarget: user.dailyVisitTarget || "",
+            workSchedule: user.workSchedule ?? null,
             monthlyVisitTarget: user.monthlyVisitTarget || "",
             baseSalary: String(user.baseSalary || 0),
             yearlyLeaves: String(user.yearlyLeaves || 18)
@@ -310,6 +323,7 @@ const handleBulkDeactivate = () => {
             name: "", email: "", mobile: "", role: "FIELD_USER", empId: randomId, joiningDate: new Date().toISOString().split('T')[0],
             password: "", city: "", monthlyTarget: "0", baseSalary: "0", yearlyLeaves: "18",
             dailyVisitTarget: "", monthlyVisitTarget: "",
+        workSchedule: null as WorkSchedule | null,
             personalEmail: "", personalMobile: "", bloodGroup: "", address: "", state: "", permanentAddress: "",
             bankName: "", accountNo: "", ifscCode: "", aadhar: "", pan: "", assetNotes: ""
         });
@@ -467,6 +481,28 @@ const handleBulkDeactivate = () => {
                             <View style={styles.inputRow}>
                                 <View style={{flex:1}}><Text style={styles.label}>Visits / day</Text><TextInput style={styles.input} value={String(formData.dailyVisitTarget ?? '')} onChangeText={t=>setFormData({...formData, dailyVisitTarget:t.replace(/[^0-9]/g, '')})} keyboardType="numeric" placeholder="No target" /></View>
                                 <View style={{flex:1}}><Text style={styles.label}>Visits / month</Text><TextInput style={styles.input} value={String(formData.monthlyVisitTarget ?? '')} onChangeText={t=>setFormData({...formData, monthlyVisitTarget:t.replace(/[^0-9]/g, '')})} keyboardType="numeric" placeholder="No target" /></View>
+                            </View>
+                            <View style={{ marginTop: 6, marginBottom: 10 }}>
+                                <Text style={styles.label}>Weekly off & shift</Text>
+                                <View style={{ flexDirection: 'row', gap: 8 }}>
+                                    {[{ k: 'default', t: 'Company default' }, { k: 'own', t: 'Own schedule' }].map((o) => {
+                                        const on = o.k === 'own' ? !!formData.workSchedule : !formData.workSchedule;
+                                        return (
+                                            <TouchableOpacity
+                                                key={o.k}
+                                                onPress={() => setFormData({ ...formData, workSchedule: o.k === 'own' ? (formData.workSchedule || { ...companySchedule }) : null })}
+                                                style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 14, borderWidth: 1, borderColor: on ? '#3b5998' : '#ccc', backgroundColor: on ? '#3b5998' : '#fff' }}
+                                            >
+                                                <Text style={{ color: on ? '#fff' : '#3b5998', fontWeight: '600', fontSize: 12 }}>{o.t}</Text>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </View>
+                                {formData.workSchedule ? (
+                                    <WorkScheduleEditor value={formData.workSchedule} onChange={(ws) => setFormData({ ...formData, workSchedule: ws })} />
+                                ) : (
+                                    <Text style={{ fontSize: 12, color: 'gray', marginTop: 6 }}>{describeSchedule(companySchedule)} (Payroll → Salary Rules)</Text>
+                                )}
                             </View>
                             <View style={styles.inputRow}>
                                 <View style={{flex:1}}><Text style={styles.label}>Leaves</Text><TextInput style={styles.input} value={String(formData.yearlyLeaves)} onChangeText={t=>setFormData({...formData, yearlyLeaves:t})} keyboardType="numeric" /></View>

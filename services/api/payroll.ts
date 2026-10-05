@@ -1,3 +1,4 @@
+import { DEFAULT_SCHEDULE, WorkSchedule } from '../../utils/workSchedule';
 import { apiClient } from './client';
 
 export interface PayrollSettings {
@@ -12,6 +13,7 @@ export interface PayrollSettings {
   shortHoursThreshold: number;
   shortHoursPenalty: number;
   leaveExcessPenalty: number;
+  workSchedule: WorkSchedule; // company weekly off + shift
 }
 
 export interface Payslip {
@@ -44,23 +46,29 @@ export interface Payslip {
 interface OneResponse<T> { data: T; }
 interface ListResponse<T> { data: T[]; meta: any; }
 
+// Decimals arrive as strings — numbers here, so a second Save doesn't fail validation.
+function normalizeSettings(d: any): PayrollSettings {
+  return {
+    ...d,
+    incentiveTier1Percent: Number(d.incentiveTier1Percent),
+    incentiveTier2Percent: Number(d.incentiveTier2Percent),
+    tier2Multiplier: Number(d.tier2Multiplier),
+    lateComingPenalty: Number(d.lateComingPenalty),
+    shortHoursThreshold: Number(d.shortHoursThreshold),
+    shortHoursPenalty: Number(d.shortHoursPenalty),
+    leaveExcessPenalty: Number(d.leaveExcessPenalty),
+    workSchedule: { ...DEFAULT_SCHEDULE, ...(d.workSchedule || {}) },
+  };
+}
+
 export async function fetchPayrollSettings(): Promise<PayrollSettings> {
   const res = await apiClient.get<OneResponse<PayrollSettings>>('/payroll/settings');
-  return {
-    ...res.data,
-    incentiveTier1Percent: Number(res.data.incentiveTier1Percent),
-    incentiveTier2Percent: Number(res.data.incentiveTier2Percent),
-    tier2Multiplier: Number(res.data.tier2Multiplier),
-    lateComingPenalty: Number(res.data.lateComingPenalty),
-    shortHoursThreshold: Number(res.data.shortHoursThreshold),
-    shortHoursPenalty: Number(res.data.shortHoursPenalty),
-    leaveExcessPenalty: Number(res.data.leaveExcessPenalty),
-  };
+  return normalizeSettings(res.data);
 }
 
 export async function savePayrollSettings(payload: Partial<PayrollSettings>): Promise<PayrollSettings> {
   const res = await apiClient.patch<OneResponse<PayrollSettings>>('/payroll/settings', payload);
-  return res.data;
+  return normalizeSettings(res.data);
 }
 
 export async function previewPayslip(userId: string | undefined, month: number, year: number): Promise<Payslip> {

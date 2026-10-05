@@ -6,6 +6,8 @@ import { ActivityIndicator, Alert, FlatList, Modal, RefreshControl, ScrollView, 
 // 🔥 SAAS IMPORTS ("users" stays on Firestore until Phase 10)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+import { useWorkSchedules } from '../hooks/useWorkSchedules';
+import { isOffDay, offDayLabel } from '../utils/workSchedule';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
@@ -24,6 +26,8 @@ export default function AttendanceScreen() {
   
   // 🔥 1. Context se sirf logged in User
   const { currentUser } = useData();
+  // Weekly off per employee (was: Sunday for everyone)
+  const { forUser: scheduleFor } = useWorkSchedules(currentUser?.companyId, currentUser?.id);
   
   // 🔥 2. "users" still Firestore. isDbLoading previously gated ALL content here
   // (attendance + leave-quota + summary), which meant this screen looked slow
@@ -316,8 +320,6 @@ export default function AttendanceScreen() {
     // CASE A: DAY VIEW
     if (viewMode === 'Day') {
         const targetDateStr = getStandardDate(currentDate);
-        const targetDayObj = new Date(targetDateStr);
-        const isSunday = targetDayObj.getDay() === 0;
         const holidayObj = findHoliday(targetDateStr);
 
         let targetUsers: any[] = [];
@@ -346,8 +348,8 @@ export default function AttendanceScreen() {
                 else if (holidayObj) {
                     finalOutput.push({ id: `hol-${u.id}`, date: targetDateStr, type: 'HOLIDAY', senderName: u.name, outTime: holidayObj.name });
                 } 
-                else if (isSunday) {
-                    finalOutput.push({ id: `sun-${u.id}`, date: targetDateStr, type: 'HOLIDAY', senderName: u.name, outTime: 'Sunday Off' });
+                else if (isOffDay(targetDateStr, scheduleFor(u.id))) {
+                    finalOutput.push({ id: `off-${u.id}`, date: targetDateStr, type: 'HOLIDAY', senderName: u.name, outTime: offDayLabel(targetDateStr) });
                 } 
                 else if (targetDateStr <= todayStr) {
                     if (targetDateStr >= "2026-01-01") {
@@ -360,6 +362,10 @@ export default function AttendanceScreen() {
     // CASE B: MONTH/FY VIEW
     else {
         const targetUserName = (filterUser === 'All' || !canManage) ? currentUser?.name : filterUser;
+        const targetUserId = (filterUser === 'All' || !canManage)
+            ? currentUser?.id
+            : safeUsers.find((u: any) => u.name === filterUser)?.id;
+        const targetSchedule = scheduleFor(targetUserId);
         let loop = new Date(startDate);
 
         while (loop <= endDate) {
@@ -367,7 +373,7 @@ export default function AttendanceScreen() {
             
             if (dStr > todayStr && viewMode !== 'Month') break; 
 
-            const isSunday = loop.getDay() === 0;
+            const isWeeklyOff = isOffDay(dStr, targetSchedule);
             const att = findAttendance(targetUserName, dStr);
             const lv = findLeave(targetUserName, dStr);
             const hol = findHoliday(dStr);
@@ -381,8 +387,8 @@ export default function AttendanceScreen() {
             else if (hol) {
                 finalOutput.push({ id: `hol-${dStr}`, date: dStr, type: 'HOLIDAY', senderName: targetUserName, outTime: hol.name });
             } 
-            else if (isSunday) {
-                finalOutput.push({ id: `sun-${dStr}`, date: dStr, type: 'HOLIDAY', senderName: targetUserName, outTime: 'Sunday Off' });
+            else if (isWeeklyOff) {
+                finalOutput.push({ id: `off-${dStr}`, date: dStr, type: 'HOLIDAY', senderName: targetUserName, outTime: offDayLabel(dStr) });
             } 
             else if (dStr <= todayStr) {
                 if (dStr >= "2026-01-01") {
@@ -459,7 +465,7 @@ export default function AttendanceScreen() {
                 const outTime = item.outTime || '-';
                 const hrs = item.workHrs || '-';
                 const expense = item.expenses?.totalAmount || '0';
-              const note = item.location === 'On Leave' ? 'Leave' : (item.outTime === 'Sunday Off' ? 'Sunday' : '-');
+              const note = item.location === 'On Leave' ? 'Leave' : (/ Off$/.test(item.outTime || '') ? 'Weekly Off' : '-');
               csvRows += `${date},${name},${status},${location},${inTime},${outTime},${hrs},${expense},${note}\n`;
           });
 

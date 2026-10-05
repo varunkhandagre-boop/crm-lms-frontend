@@ -1,6 +1,8 @@
 import * as Device from 'expo-device';
 import { Notifications } from './notificationsModule';
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DEFAULT_SCHEDULE, isOffDay, localYmd, MY_SCHEDULE_KEY, WorkSchedule } from './workSchedule';
 
 // ==========================================
 // 1. Foreground Notification Settings
@@ -80,8 +82,22 @@ const isHoliday = (dateObj: Date, holidayList: any[]) => {
     return holidayList.some((h: any) => h.date === dateStr);
 };
 
+const hoursOf = (hhmm: string) => {
+    const [h, m] = hhmm.split(':').map(Number);
+    return h + m / 60;
+};
+
+async function readMySchedule(): Promise<WorkSchedule> {
+    try {
+        const raw = await AsyncStorage.getItem(MY_SCHEDULE_KEY);
+        return raw ? { ...DEFAULT_SCHEDULE, ...JSON.parse(raw) } : DEFAULT_SCHEDULE;
+    } catch {
+        return DEFAULT_SCHEDULE;
+    }
+}
+
 // ==========================================
-// 5. Local Attendance Reminders (Untouched)
+// 5. Local Attendance Reminders
 // ==========================================
 export const manageAttendanceReminders = async (
     status: 'LOGIN_PENDING' | 'LOGGED_IN' | 'COMPLETED', 
@@ -92,14 +108,21 @@ export const manageAttendanceReminders = async (
     await Notifications.cancelAllScheduledNotificationsAsync();
 
     const now = new Date();
+    // Own weekly off + shift (saved by hooks/useWorkSchedules.ts); Sunday-off default.
+    const schedule = await readMySchedule();
+    // Reminder times follow the shift: start, +30 … +2h; end, +30 … +5h.
+    const startH = schedule.shiftStart ? hoursOf(schedule.shiftStart) : 10;
+    const endH = schedule.shiftEnd ? hoursOf(schedule.shiftEnd) : 18;
+    const loginTimes = [0, 0.5, 1, 1.5, 2].map((x) => startH + x).filter((t) => t < 24);
+    const logoutTimes = [0, 0.5, 1, 1.5, 2, 2.5, 3, 4, 5].map((x) => endH + x).filter((t) => t < 24);
 
-    // 🛑 CHECK 1: Aaj ke liye check (Sunday OR Holiday)
-    if (now.getDay() === 0 || isHoliday(now, holidayList)) {
-        console.log("Aaj Chutti hai (Sunday/Holiday) 🌴, No Reminder today!");
+    // 🛑 CHECK 1: Aaj ke liye check (weekly off OR Holiday)
+    if (isOffDay(localYmd(now), schedule) || isHoliday(now, holidayList)) {
+        console.log("Aaj Chutti hai (weekly off/Holiday) 🌴, No Reminder today!");
     } else {
         // --- CASE A: Login Reminder ---
         if (status === 'LOGIN_PENDING') {
-            const times = [10, 10.5, 11, 11.5, 12]; 
+            const times = loginTimes;
             for (let t of times) {
                 const trigger = new Date();
                 trigger.setHours(Math.floor(t), (t % 1) * 60, 0, 0);
@@ -119,7 +142,7 @@ export const manageAttendanceReminders = async (
 
         // --- CASE B: Logout Reminder ---
         else if (status === 'LOGGED_IN') {
-            const times = [18, 18.5, 19, 19.5, 20, 20.5, 21, 22, 23]; 
+            const times = logoutTimes;
             for (let t of times) {
                 const trigger = new Date();
                 trigger.setHours(Math.floor(t), (t % 1) * 60, 0, 0);
@@ -141,11 +164,11 @@ export const manageAttendanceReminders = async (
     // --- CASE C: Kal subah ka Alarm ---
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(10, 0, 0, 0);
+    tomorrow.setHours(Math.floor(startH), Math.round((startH % 1) * 60), 0, 0);
 
-    // 🛑 CHECK 2: Kal ke liye check (Sunday OR Holiday)
-    if (tomorrow.getDay() === 0 || isHoliday(tomorrow, holidayList)) {
-        console.log("Kal Chutti hai (Sunday/Holiday) 🌴, Alarm skip kiya.");
+    // 🛑 CHECK 2: Kal ke liye check (weekly off OR Holiday)
+    if (isOffDay(localYmd(tomorrow), schedule) || isHoliday(tomorrow, holidayList)) {
+        console.log("Kal Chutti hai (weekly off/Holiday) 🌴, Alarm skip kiya.");
         return; 
     }
     

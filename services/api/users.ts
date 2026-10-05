@@ -1,3 +1,4 @@
+import { WorkSchedule } from '../../utils/workSchedule';
 // 🔥 Users API adapter (Postgres) — real backend user ids, unlike
 // fetchSaaSData("users") which still reads Firestore (whose doc ids are
 // NOT valid Postgres uuids). fetchUsers() (minimal) powers Assign-To /
@@ -22,6 +23,7 @@ export interface LegacyTeamMember {
   joiningDate: string; // YYYY-MM-DD
   monthlyTarget: string;
   dailyVisitTarget: string;   // '' = no target
+  workSchedule: WorkSchedule | null; // null = company default
   monthlyVisitTarget: string;
   baseSalary: string;
   yearlyLeaves: string;
@@ -57,6 +59,7 @@ function toLegacyTeamMember(u: any): LegacyTeamMember {
     joiningDate: (u.joiningDate || '').slice(0, 10),
     monthlyTarget: u.monthlyTarget != null ? String(u.monthlyTarget) : '0',
     dailyVisitTarget: u.dailyVisitTarget != null ? String(u.dailyVisitTarget) : '',
+    workSchedule: u.workSchedule ?? null,
     monthlyVisitTarget: u.monthlyVisitTarget != null ? String(u.monthlyVisitTarget) : '',
     baseSalary: u.baseSalary != null ? String(u.baseSalary) : '0',
     yearlyLeaves: u.yearlyLeaves != null ? String(u.yearlyLeaves) : '18',
@@ -117,6 +120,7 @@ export async function createTeamMember(payload: {
   name: string; email: string; password: string; mobile?: string; role: string;
   empId?: string; joiningDate?: string; monthlyTarget?: number; baseSalary?: number; yearlyLeaves?: number;
   dailyVisitTarget?: number | null; monthlyVisitTarget?: number | null;
+  workSchedule?: WorkSchedule | null;
   personalEmail?: string; personalMobile?: string; bloodGroup?: string;
   address?: string; city?: string; state?: string; permanentAddress?: string;
   bankName?: string; bankAccountNo?: string; bankIfsc?: string;
@@ -129,6 +133,7 @@ export async function createTeamMember(payload: {
 export async function updateTeamMember(id: string, payload: Partial<{
   name: string; mobile: string; empId: string; joiningDate: string; monthlyTarget: number; baseSalary: number; yearlyLeaves: number;
   dailyVisitTarget: number | null; monthlyVisitTarget: number | null;
+  workSchedule: WorkSchedule | null;
   personalEmail: string; personalMobile: string; bloodGroup: string;
   address: string; city: string; state: string; permanentAddress: string;
   bankName: string; bankAccountNo: string; bankIfsc: string;

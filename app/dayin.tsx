@@ -22,6 +22,8 @@ import {
 // 🔥 SAAS IMPORTS ("users" stays on Firestore until Phase 10)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+import { useWorkSchedules } from '../hooks/useWorkSchedules';
+import { isOffDay, offDayLabel } from '../utils/workSchedule';
 
 import { manageAttendanceReminders } from '../utils/notificationHelper';
 
@@ -40,6 +42,8 @@ export default function DayInScreen() {
     
     // 🔥 1. Context se sirf User nikalenge
     const { currentUser } = useData();
+    // Weekly off per employee (was: Sunday for everyone)
+    const { forUser: scheduleFor } = useWorkSchedules(currentUser?.companyId, currentUser?.id);
 
     // 🔥 2. "users" still Firestore; attendance/leaves/holidays are Postgres now
     const { fetchSaaSData, isDbLoading: isUsersLoading } = useSaaSDB();
@@ -323,9 +327,8 @@ export default function DayInScreen() {
                     return;
                 }
 
-                const d = new Date(selectedDateStr);
-                if (d.getDay() === 0) {
-                     finalOutput.push({ id: `sunday-${selectedDateStr}-${emp.id}`, date: selectedDateStr, type: 'HOLIDAY', senderName: emp.name, outTime: 'Sunday Off', workHrs: '0' });
+                if (isOffDay(selectedDateStr, scheduleFor(emp.id))) {
+                     finalOutput.push({ id: `weeklyoff-${selectedDateStr}-${emp.id}`, date: selectedDateStr, type: 'HOLIDAY', senderName: emp.name, outTime: offDayLabel(selectedDateStr), workHrs: '0' });
                      return;
                 }
 
@@ -339,6 +342,9 @@ export default function DayInScreen() {
             let attSource = [...attendanceList];
             let leaveSource = [...leaveList];
             const targetUser = (canManage && filterUser !== 'All') ? filterUser : (canManage ? null : currentUser?.name);
+            const targetUserId = canManage
+                ? userList.find((u: any) => u.name === filterUser)?.id
+                : currentUser?.id;
 
             if (targetUser) {
                 attSource = attSource.filter((item: any) => isSameUser(item.userName, targetUser) || isSameUser(item.senderName, targetUser));
@@ -392,7 +398,7 @@ export default function DayInScreen() {
                     
                     const logs = rawData.filter(item => item.date === dateStr);
                     const holiday = holidayList.find((h:any) => normalizeDate(h.date, h.dateIso) === dateStr);
-                    const isSunday = d.getDay() === 0;
+                    const isWeeklyOff = isOffDay(dateStr, scheduleFor(targetUserId));
 
                     if (logs.length > 0) {
                         fullMonthData.push(...logs); 
@@ -400,8 +406,8 @@ export default function DayInScreen() {
                     else if (holiday) {
                         fullMonthData.push({ id: `holiday-${i}`, date: dateStr, type: 'HOLIDAY', outTime: holiday.name, workHrs: '0', senderName: targetUser || 'N/A' });
                     }
-                    else if (isSunday) {
-                        fullMonthData.push({ id: `sunday-${i}`, date: dateStr, type: 'HOLIDAY', outTime: 'Sunday Off', workHrs: '0', senderName: targetUser || 'N/A' });
+                    else if (isWeeklyOff) {
+                        fullMonthData.push({ id: `weeklyoff-${i}`, date: dateStr, type: 'HOLIDAY', outTime: offDayLabel(dateStr), workHrs: '0', senderName: targetUser || 'N/A' });
                     }
                     else if (targetUser && d <= new Date()) {
                         fullMonthData.push({ id: `absent-${i}`, date: dateStr, type: 'ABSENT', inTime: '-', outTime: '-', workHrs: '0', senderName: targetUser });
@@ -431,8 +437,9 @@ export default function DayInScreen() {
     const todayStrFull = getStandardDateForHoliday(todayObj);
     const tomorrowStrFull = getStandardDateForHoliday(tomorrowObj);
 
-    const todayIsSunday = todayObj.getDay() === 0;
-    const tomorrowIsSunday = tomorrowObj.getDay() === 0;
+    const mySchedule = scheduleFor(currentUser?.id);
+    const todayIsOff = isOffDay(todayStrFull, mySchedule); // own weekly off
+    const tomorrowIsOff = isOffDay(tomorrowStrFull, mySchedule);
 
     const todayHoliday = holidayList?.find((h:any) => normalizeDate(h.date, h.dateIso) === todayStrFull);
     const tomorrowHoliday = holidayList?.find((h:any) => normalizeDate(h.date, h.dateIso) === tomorrowStrFull);
@@ -440,11 +447,11 @@ export default function DayInScreen() {
     let holidayMessage = null;
     let isTodayHoliday = false;
 
-    if (todayHoliday || todayIsSunday) {
+    if (todayHoliday || todayIsOff) {
         isTodayHoliday = true;
-        holidayMessage = `🎉 Today is ${todayHoliday ? todayHoliday.name : 'Sunday'}. Enjoy your day off!`;
-    } else if (tomorrowHoliday || tomorrowIsSunday) {
-        holidayMessage = `💡 Reminder: Tomorrow is ${tomorrowHoliday ? tomorrowHoliday.name : 'Sunday'}.`;
+        holidayMessage = `🎉 Today is ${todayHoliday ? todayHoliday.name : 'your weekly off'}. Enjoy your day off!`;
+    } else if (tomorrowHoliday || tomorrowIsOff) {
+        holidayMessage = `💡 Reminder: Tomorrow is ${tomorrowHoliday ? tomorrowHoliday.name : 'your weekly off'}.`;
     }
 
     const daysPresent = finalData.filter(i => getStatus(i) === 'PRESENT').length;
