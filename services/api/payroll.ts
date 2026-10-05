@@ -231,3 +231,53 @@ export async function fetchBankSheet(month: number, year: number): Promise<{ row
   const res = await apiClient.get<OneResponse<{ rows: BankSheetRow[]; total: number; status: string }>>(`/payroll/bank-sheet?month=${month}&year=${year}`);
   return res.data;
 }
+
+// ── Full & Final settlement ────────────────────────────────────────────────
+export interface FnfLine { key: string; label: string; amount: number; note?: string }
+export interface FnfInput {
+  userId: string;
+  lastWorkingDay: string; // YYYY-MM-DD
+  encashDays?: number | null;
+  noticeShortDays?: number;
+  includeGratuity?: boolean | null;
+  otherAdditions?: { label: string; amount: number }[];
+  otherDeductions?: { label: string; amount: number }[];
+  note?: string;
+}
+export interface FnfSaved {
+  id: string; userId: string; lastWorkingDay: string; status: 'FINAL' | 'PAID';
+  lines: { lines: FnfLine[]; perDaySalary: number }; netAmount: string | number; note: string | null; paidAt: string | null; createdAt: string;
+}
+export interface FnfPreview {
+  employee: {
+    id: string; name: string; empId: string | null; role: string; jobTitle: string | null; joiningDate: string;
+    baseSalary: number; tenureYears: number; bankName: string | null; bankAccountNo: string | null; bankIfsc: string | null;
+  };
+  lastWorkingDay: string;
+  perDaySalary: number;
+  suggestedEncashDays: number;
+  gratuityEligible: boolean;
+  lines: FnfLine[];
+  net: number;
+  existing: FnfSaved | null;
+}
+
+export async function previewFinalSettlement(input: FnfInput): Promise<FnfPreview> {
+  const res = await apiClient.post<OneResponse<FnfPreview>>('/payroll/final-settlement/preview', input);
+  return res.data;
+}
+export async function saveFinalSettlement(input: FnfInput): Promise<FnfPreview> {
+  const res = await apiClient.post<OneResponse<FnfPreview>>('/payroll/final-settlement', input);
+  return res.data;
+}
+export async function fetchFinalSettlement(userId: string): Promise<FnfSaved | null> {
+  const res = await apiClient.get<OneResponse<FnfSaved | null>>(`/payroll/final-settlement/${userId}`);
+  return res.data;
+}
+export async function deleteFinalSettlement(id: string): Promise<void> {
+  await apiClient.delete(`/payroll/final-settlement/${id}`);
+}
+export async function markFinalSettlementPaid(id: string, paidOn: string): Promise<FnfSaved> {
+  const res = await apiClient.post<OneResponse<FnfSaved>>(`/payroll/final-settlement/${id}/paid`, { paidOn });
+  return res.data;
+}

@@ -86,6 +86,7 @@ const GUIDE_SECTIONS = [
             'Go to Sidebar → Admin Control → Users tab.',
             'Tap on the employee whose details you want to change.',
             'From here you can change their Role, Monthly Sales Target, Leave Balance, Mobile Number, and other details.',
+            'Also here: "Visits / day" and "Visits / month" targets, and "Weekly off & shift" (company default or their own schedule). Tap "📊 360" on the card to see everything about the employee.',
             'Tap Save after making changes — the employee will see updated details on their next app open.',
             'To reset or change their password, use the edit option and enter a new password.',
         ],
@@ -414,16 +415,17 @@ const GUIDE_SECTIONS = [
 
     {
         icon: 'cash',
-        color: '#2e7d32',
-        title: 'Payroll',
+        color: '#1565c0',
+        title: 'Payroll — Generate, Lock, Bank Sheet & Paid',
         steps: [
-            'Go to Sidebar → "Payroll".',
-            'Admins/Managers/Accounts: use the "Salary Rules" tab to set incentive commission %, late-coming cutoff time, minimum working hours, and leave-quota penalty — set this up once.',
-            'On the "Generate" tab, pick the Month and Year, then select an employee (or "Calculate All Employees") and tap "Calculate Preview" to see the full breakdown before saving.',
-            'Tap "Generate Payslip" to save it permanently — this also settles any outstanding advances that were deducted.',
-            'Tap any payslip in "Previously Generated" to see its detail and download it as a PDF.',
-            'Select multiple payslips using the checkboxes and tap "Export Excel" to download them as a spreadsheet.',
-            'Employees: open Payroll to see "This Month\'s Attendance" summary and "My Payslips" — only your own records. You also get a push notification when a new payslip is generated for you.',
+            'Go to Sidebar → "Payroll". Admin / Manager / HR / Accounts see the Generate and Salary Rules tabs; employees see only their own payslips.',
+            'Set the rules once in the "Salary Rules" tab (each section has its own colour): Incentive, Late-Coming, Short Hours, Weekly Off & Shift, Overtime, Absent & One Day’s Salary, Leave Quota / Leave Policy. Tap "Save Rules".',
+            'Generate tab: pick Month & Year → select an employee → "Calculate Preview" shows the full breakdown (late, absent, overtime, incentive, advance…). "Generate Payslip" saves it.',
+            'Found a mistake (attendance or leave corrected)? Open the payslip → "↻ Recalculate this payslip". Any advance it recovered is put back and recovered again.',
+            'When every payslip is checked: Status card → "🔒 Finalize & Lock". The month is locked — no new or recalculated payslips. An Admin can "Reopen" it before it is paid.',
+            'After locking: "🏦 Bank Transfer Sheet (Excel)" gives Beneficiary, Account No (as text), IFSC and Amount for NEFT. Employees with missing bank details are listed first.',
+            'After transferring salaries: "💰 Mark Salary as Paid" → choose the date. Every employee gets a "Salary Credited" notification and the payslip shows "Paid on dd/mm/yyyy". This can’t be undone.',
+            'Employees: Payroll → "My Payslips" → tap a month → "📄 Download PDF". A payslip appears only after it is generated.',
         ],
     },
     {
@@ -431,10 +433,11 @@ const GUIDE_SECTIONS = [
         color: '#2196f3',
         title: 'Leave Application & Balance',
         steps: [
-            'Go to "Leaves" in HR & Operations and tap Apply.',
-            'The card at the top shows your leave balance for this financial year, how many days you have used, and how many are waiting for approval.',
-            'Choose the leave type and dates — total days are calculated automatically.',
-            'If you apply for more days than your available balance, the app warns you; the extra days may be treated as Leave Without Pay.',
+            'Go to "Leaves" and tap Apply. Choose the leave type and dates — total days are calculated automatically.',
+            'For a one-day leave, tick "Half day (0.5)" (if your company allows it). The half day is taken from the type you chose (e.g. Casual Leave → 0.5 CL).',
+            'If the company counts only working days, weekly offs and holidays inside the leave are not counted (Fri–Mon = 2 days).',
+            'The card on top shows your balance. With the Leave Policy on you see separate CL / SL / EL / Comp Off balances; working on a weekly off or holiday adds Comp Off.',
+            'If you apply for more than your balance, the app warns you — the extra days may be treated as Leave Without Pay.',
             'Your manager / HR approves or rejects it. Requests pending more than 2 days are reminded to HR / Admin every morning.',
         ],
     },
@@ -471,6 +474,101 @@ const GUIDE_SECTIONS = [
             'Pending Tab: see messages waiting to be approved or sent.',
             'History Tab: view previously sent messages and their delivery status.',
             'Broadcast Tab: send a message to a group of contacts at once.',
+        ],
+    },
+    {
+        icon: 'time',
+        color: '#00897b',
+        title: 'Weekly Off & Shift',
+        steps: [
+            'Company default: Payroll → Salary Rules → "Weekly Off & Shift". Choose the weekly off days (e.g. Sun, or Sat + Sun), extra Saturdays off (e.g. 2nd & 4th), shift start / end (24-hour, e.g. 09:30 – 18:30) and "Late after (min)" grace.',
+            'For one employee: Manage Team → edit the employee → "Weekly off & shift" → "Own schedule". Choose "Company default" to go back.',
+            'This schedule is used everywhere: Day In list ("Monday Off", "2nd Saturday Off"), Attendance Report, leave balance, the 11 AM Day-In alert, phone reminders (they follow the shift time) and late marks in payroll.',
+        ],
+    },
+    {
+        icon: 'alarm',
+        color: '#ef6c00',
+        title: 'Salary Rules — Late, Absent & Overtime',
+        steps: [
+            'Late-Coming: turn it on, then choose how to cut — "½ day per late", "½ day per 3 lates" or "₹ per late" — and how many lates per month are free. Late = Day In after shift start + grace (or after the "late after" time).',
+            'A late mark cuts salary only — it never reduces any leave balance.',
+            'Absent & One Day’s Salary: choose one day’s salary = salary ÷ days in month, ÷ 30 or ÷ working days. Turn on "Cut one day’s salary for absent" to deduct days with no Day In and no approved leave. Optional: sandwich rule, and "Day In without Day Out = ½ day absent".',
+            'Overtime: turn on "Pay overtime", choose the rate (hourly salary × 1 / 1.5 / 2, or fixed ₹ per hour), the minimum minutes, rounding and the maximum hours per day. Only working days count — work on a weekly off earns leave instead.',
+            'Always check with "Calculate Preview" before generating payslips. Rules apply to payslips generated after you save them.',
+        ],
+    },
+    {
+        icon: 'briefcase',
+        color: '#8e24aa',
+        title: 'Leave Policy — CL / SL / EL & Carry Forward',
+        steps: [
+            'Payroll → Salary Rules → "Leave Policy (CL / SL / EL)" → turn on "Separate CL / SL / EL balances". Set the yearly days for each, and whether it carries forward (with a maximum).',
+            'Choose what Marriage / Festival / Others leave does (from CL, paid without balance, or unpaid), whether weekly offs inside a leave count, and whether half-day leave is allowed.',
+            'HR: Leaves → purple 💼 button → "Leave Balances" shows every employee’s CL / SL / EL / Comp Off / LWP for the year. Tap an employee to enter opening balances (e.g. carried over from before the app).',
+            'At the end of the year (after 31 March): "↪ Carry forward" shows a preview of what moves to the next year, then saves it. Balances typed in by hand are not overwritten.',
+            'With the policy off, everything works as before (one yearly leave pool per employee).',
+        ],
+    },
+    {
+        icon: 'analytics',
+        color: '#6a1b9a',
+        title: 'Employee 360',
+        steps: [
+            'Manage Team → Users → tap "📊 360" on an employee card (or Activity & Reports → choose an employee → "📊 360").',
+            'One screen shows: profile and years of service, attendance, this month’s salary estimate (late, absent, overtime, advance), leave balances and recent leaves, advances and expenses, recent payslips, and work (sales, collection, visits, leads, service calls, tasks).',
+            'Use the chips This month / This FY / Last FY / All time to change the period for attendance, work and expenses.',
+        ],
+    },
+    {
+        icon: 'exit',
+        color: '#c62828',
+        title: 'Full & Final Settlement (employee leaving)',
+        steps: [
+            'Employee 360 → "Full & Final settlement" (Admin / HR).',
+            'Choose the last working day; optionally the leave days to encash (blank = balance), notice-period shortfall, gratuity (on automatically after 5 years), and any other addition or deduction. Tap "Calculate".',
+            'Check the lines: salary up to the last day, leave encashment, gratuity, additions, minus advance balance, notice shortfall and deductions → Net payable.',
+            '"Save Full & Final" closes the employee’s advances. Then "📄 Share PDF" and, after paying, "💰 Mark as Paid". Until it is paid, "Delete settlement" undoes it and reopens the advances.',
+            'Disable the employee in Manage Team after they leave. The calculation follows your own rules — check it before paying.',
+        ],
+    },
+    {
+        icon: 'navigate',
+        color: '#0277bd',
+        title: 'Nearby Leads',
+        steps: [
+            'Leads → 🧭 button. "Near me" shows open leads within 5 / 10 / 25 / 50 / 100 km, nearest first. "By city" shows open leads of one city.',
+            'Switch between List and Map. Each lead has Call and Directions (Google Maps).',
+            'A lead has a location when it was created from a visit with GPS, or when a visit with GPS is logged for it. Leads without a location appear only under "By city".',
+        ],
+    },
+    {
+        icon: 'trophy',
+        color: '#ff9800',
+        title: 'Visit Targets',
+        steps: [
+            'Set targets: Manage Team → edit the employee → "Visits / day" and "Visits / month" (blank = no target).',
+            'See progress: Visits DSR → orange 🏆 button, or Team Performance → "Visits". Today x / target, this month y / target with an "expected by today" mark, and "On track" / "Behind pace".',
+            'Salespeople see only their own card.',
+        ],
+    },
+    {
+        icon: 'camera',
+        color: '#5d4037',
+        title: 'Photos — PO, Service, Expense Bill, Installation, Cheque',
+        steps: [
+            'Photos are compressed on the phone (about 200–300 KB) and uploaded when you save: Order PO (photo or PDF), Service Call photo, Expense bill photo, Installation photo (one photo for all machines of the report) and Payment cheque photo (when mode is Cheque).',
+            'Open the saved record to view the photo full size, Replace it or Delete it (deleting also removes the file from storage).',
+            'If an upload fails, the record is still saved — open it and add the photo again.',
+        ],
+    },
+    {
+        icon: 'git-branch',
+        color: '#455a64',
+        title: 'Leads Board — Days in Stage',
+        steps: [
+            'Each card on the Leads Board shows how long the lead has been in its current stage, e.g. "⏳ Quotation for 25 days". It turns red after 30 days.',
+            'Moving a lead to another stage restarts the count ("since today").',
         ],
     },
 ];
@@ -789,6 +887,86 @@ const FAQS = [
         q: 'Where can I see the evening team report?',
         a: `Admin / Manager get it at 8 PM as a notification (also under the bell icon). Tap it to open Sales Calculation for details.`,
     },
+    {
+        category: 'Payroll',
+        q: 'I can’t generate or recalculate a payslip — it says the month is locked',
+        a: `That month was finalized (🔒). Ask an Admin to open Payroll → Generate → that month → Status → "Reopen (Admin)". A month already marked Paid can't be reopened.`,
+    },
+    {
+        category: 'Payroll',
+        q: 'Why did a late deduction appear on the payslip?',
+        a: `Late-Coming is on in Salary Rules. Late = Day In after the shift start + grace (or after the "late after" time). The cut depends on the chosen rule: ½ day per late, ½ day per N lates, or ₹ per late — after the free lates. It never reduces leave balance.`,
+    },
+    {
+        category: 'Payroll',
+        q: 'An employee was absent without leave but no salary was cut',
+        a: `Absent deduction is off by default. Turn on Payroll → Salary Rules → "Absent & One Day's Salary" → "Cut one day's salary for absent". It applies to payslips generated after saving.`,
+    },
+    {
+        category: 'Payroll',
+        q: 'How is overtime calculated?',
+        a: `Hours worked on a working day beyond the employee's shift (or the standard hours you set), at least the minimum minutes, rounded down, up to the maximum per day. Rate = hourly salary × 1 / 1.5 / 2, or a fixed ₹ per hour. Work on a weekly off or holiday earns leave instead of overtime.`,
+    },
+    {
+        category: 'Payroll',
+        q: 'The bank sheet shows long numbers like 1.23E+11',
+        a: `Account numbers are saved as text in the Bank Transfer Sheet. If your Excel still converts them, open the file and set that column to Text before editing.`,
+    },
+    {
+        category: 'Leaves',
+        q: 'Where does a half-day leave go — which balance?',
+        a: `Half day is not a separate type. Choose the leave type (CL / SL / EL / Comp Off) and tick "Half day" — 0.5 is taken from that type. With Leave Without Pay, half a day's salary is cut.`,
+    },
+    {
+        category: 'Leaves',
+        q: 'I don’t see the "Half day" checkbox',
+        a: `It appears only when From and To are the same date and the company allows half-day leave (Payroll → Salary Rules → Leave Policy → "Allow half-day leave").`,
+    },
+    {
+        category: 'Leaves',
+        q: 'Leave days are counting Sundays / holidays',
+        a: `Turn off "Count weekly offs / holidays inside a leave as leave days" in Salary Rules → Leave Policy. Only working days are then counted.`,
+    },
+    {
+        category: 'Leaves',
+        q: 'How do I carry forward leave to the next year?',
+        a: `After 31 March: Leaves → 💼 Leave Balances → choose the year that ended → "↪ Carry forward" → check the preview → Carry forward. Only types marked "Carry" move, up to their maximum.`,
+    },
+    {
+        category: 'Attendance',
+        q: 'Someone has a different weekly off (e.g. Monday)',
+        a: `Manage Team → edit the employee → "Weekly off & shift" → "Own schedule" → choose Mon. Their attendance, leave balance and Day-In alert then treat Monday as off.`,
+    },
+    {
+        category: 'Attendance',
+        q: 'Day In / Day Out reminders come at the wrong time',
+        a: `Reminders follow your shift time. Ask HR to set the shift in Salary Rules (company default) or on your profile in Manage Team. Reopen the app once after it changes.`,
+    },
+    {
+        category: 'Admin Tools',
+        q: 'How do I see everything about one employee?',
+        a: `Manage Team → Users → "📊 360" on their card (or Activity & Reports → choose the employee → "📊 360"). Use the period chips for this month, this FY, last FY or all time.`,
+    },
+    {
+        category: 'Admin Tools',
+        q: 'How do I settle an employee who is leaving?',
+        a: `Employee 360 → "Full & Final settlement" → enter the last working day → Calculate → Save → Share PDF → Mark as Paid after paying. Delete it before it is paid if something is wrong.`,
+    },
+    {
+        category: 'Leads & Sales',
+        q: 'Nearby Leads shows "No open lead has a saved location yet"',
+        a: `Leads get a location when created from a visit with GPS, or when a visit with GPS is logged for them. Meanwhile use the "By city" tab.`,
+    },
+    {
+        category: 'Leads & Sales',
+        q: 'The map is blank in Nearby Leads / live tracking',
+        a: `In Expo Go the map may stay blank; the Play Store app uses the company's Google Maps key. Check that location is on and the internet is working.`,
+    },
+    {
+        category: 'Orders & Payments',
+        q: 'How do I add or change the PO / cheque / bill photo after saving?',
+        a: `Open the saved order, payment, expense, service call or installation. In its details tap Add / Replace / Delete under the photo — it saves immediately.`,
+    },
 ];
 
 const groupedFaqs = FAQS.reduce((acc: Record<string, typeof FAQS>, item) => {
@@ -798,6 +976,7 @@ const groupedFaqs = FAQS.reduce((acc: Record<string, typeof FAQS>, item) => {
 }, {});
 
 const CATEGORY_ICONS: Record<string, any> = {
+    'Payroll': 'cash',
     Attendance: 'calendar',
     Connectivity: 'wifi',
     'Company Profile & PDFs': 'business',

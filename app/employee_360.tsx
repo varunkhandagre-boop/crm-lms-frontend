@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Image, Linking, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { EmployeeOverview, fetchEmployeeOverview, OverviewPeriod } from '../services/api/users';
+import { useData } from './context/DataContext';
 
 // Employee 360: one employee on one screen — profile, attendance, this
 // month's salary estimate, leave, advances, expenses, payslips and work.
@@ -56,6 +57,8 @@ export default function Employee360Screen() {
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [period, setPeriod] = useState<OverviewPeriod>('month');
+    const { currentUser } = useData();
+    const isOffice = ['admin', 'manager', 'hr', 'account', 'accountant', 'superadmin'].some((r) => (currentUser?.role || '').toLowerCase().includes(r));
 
     const load = useCallback(async (isRefresh = false) => {
         if (!id) return;
@@ -262,6 +265,16 @@ export default function Employee360Screen() {
                     <Line label="Tasks pending" value={`${w.tasksPending}${w.tasksOverdue ? `  (${w.tasksOverdue} overdue)` : ''}`} color={w.tasksOverdue ? '#c62828' : undefined} />
                 </Section>
 
+                {isOffice && currentUser?.id !== p.id && (
+                    <TouchableOpacity
+                        style={styles.fnfBtn}
+                        onPress={() => router.push({ pathname: '/final_settlement', params: { userId: p.id, name: p.name } } as any)}
+                    >
+                        <Ionicons name="exit-outline" size={18} color="#c62828" />
+                        <Text style={styles.fnfText}>Full & Final settlement</Text>
+                    </TouchableOpacity>
+                )}
+
                 <Text style={[styles.hint, { textAlign: 'center', marginTop: 14 }]}>As of {dmy(data.asOf)} • pull down to refresh</Text>
             </ScrollView>
         </SafeAreaView>
@@ -311,6 +324,8 @@ const styles = StyleSheet.create({
     listRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#f2f2f2', gap: 6 },
     status: { fontSize: 11, fontWeight: 'bold' },
     small: { fontSize: 12, color: '#555', marginTop: 4 },
+    fnfBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 18, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#ef9a9a', backgroundColor: '#ffebee' },
+    fnfText: { color: '#c62828', fontWeight: 'bold', marginLeft: 6 },
     periodRow: { flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', gap: 6, marginTop: 14 },
     periodChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, backgroundColor: '#fff', borderWidth: 1, borderColor: '#d1c4e9' },
     periodChipOn: { backgroundColor: '#6a1b9a', borderColor: '#6a1b9a' },
