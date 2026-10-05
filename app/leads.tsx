@@ -262,6 +262,9 @@ export default function LeadsScreen() {
                             <Ionicons name="grid-outline" size={16} color="#3b5998" />
                             <Text style={{ color: '#3b5998', fontWeight: 'bold', marginLeft: 3, fontSize: 12 }}>Board</Text>
                         </TouchableOpacity>
+                        <TouchableOpacity style={styles.reassignBtn} onPress={() => router.push('/nearby_leads' as any)} accessibilityLabel="Nearby leads">
+                            <Ionicons name="navigate-outline" size={16} color="#3b5998" />
+                        </TouchableOpacity>
                         <TouchableOpacity style={styles.reassignBtn} onPress={() => router.push('/lead_insights' as any)} accessibilityLabel="Lead insights">
                             <Ionicons name="stats-chart" size={16} color="#3b5998" />
                         </TouchableOpacity>

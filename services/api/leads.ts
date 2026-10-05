@@ -338,3 +338,33 @@ export async function closeStaleLeads(payload: {
   const res = await apiClient.post<{ data: { count: number } }>('/leads/close-stale', payload);
   return res.data.count;
 }
+
+// ── Nearby Leads (open leads near a point, or in one city) ──────────────────
+export interface NearbyLead {
+  id: string;
+  orgName: string;
+  contactPerson: string | null;
+  mobile: string | null;
+  city: string | null;
+  stage: string | null;
+  nextDate: string | null;
+  isHot: boolean;
+  assignedToName: string;
+  latitude: number | null;
+  longitude: number | null;
+  distanceKm: number | null;
+}
+
+export type NearbyParams =
+  | { lat: number; lng: number; radiusKm: number }
+  | { city: string };
+
+export async function getNearbyLeadsPage(params: NearbyParams & { page: number; limit: number }): Promise<{ items: NearbyLead[]; total: number; totalPages: number }> {
+  const res = await apiClient.get<{ data: NearbyLead[]; meta: { total: number; totalPages: number } }>(`/leads/nearby${toQueryString(params as any)}`);
+  return { items: res.data, total: res.meta.total, totalPages: res.meta.totalPages };
+}
+
+export async function getNearbyCities(): Promise<{ cities: { city: string; count: number }[]; leadsWithLocation: number }> {
+  const res = await apiClient.get<{ data: { cities: { city: string; count: number }[]; leadsWithLocation: number } }>('/leads/nearby/cities');
+  return res.data;
+}
