@@ -90,6 +90,10 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
         const loadData = async () => {
+            // Logged out (this re-runs when currentUser becomes null while
+            // Home is still mounted) — no token, so don't call the API.
+            if (!currentUser?.companyId) return;
+
             // Dashboard summary — cache already shows the last-known
             // snapshot instantly; this just triggers a background refresh
             // whenever the home screen regains focus.

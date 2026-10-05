@@ -16,7 +16,7 @@ import { fetchCompanyProfile } from '../services/api/companies';
 import { recordLocationLog } from '../services/api/locationLogs';
 import { fetchTodayAttendance } from '../services/api/attendance';
 import { getLeadCounts } from '../services/api/leads';
-import { listServiceCalls } from '../services/api/serviceCalls';
+import { getServiceCallCounts } from '../services/api/serviceCalls';
 import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTasks } from '../services/api/tasks';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
@@ -181,11 +181,13 @@ function NavigationLayout() {
       getLeadCounts().then(c => setLeadCount(c.open)).catch(() => {});
       // Refreshed when the person lands back on Home, where the badge shows.
   }, [currentUser?.companyId, pathname === '/']);
-  const { data: serviceCallList } = useCachedList({
-      cacheKey: buildCacheKey('service_calls', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: listServiceCalls,
-  });
+  // Service badge = open calls (Open + Assigned) visible to this user — one
+  // COUNT on the server instead of downloading every call at app start.
+  const [serviceCount, setServiceCount] = useState(0);
+  useEffect(() => {
+      if (!currentUser?.companyId) return;
+      getServiceCallCounts().then(c => setServiceCount(c.open)).catch(() => {});
+  }, [currentUser?.companyId, pathname === '/']);
   const { data: orgList } = useCachedList({
       cacheKey: buildCacheKey('organizations', currentUser?.companyId),
       enabled: !!currentUser?.companyId,
@@ -256,10 +258,6 @@ function NavigationLayout() {
   const taskCount = calculateTaskBadge();
 
 
-  const serviceCount = serviceCallList.filter((s: any) => {
-      if (s.status !== 'Open' && s.status !== 'Assigned') return false;
-      return isBoss || s.senderId === currentUser?.uid || s.engineerId === currentUser?.uid || s.engineerId === currentUser?.id;
-  }).length;
 
   const orgCount = orgList.filter((o: any) => {
       const itemDate = o.createdAt ? o.createdAt.split('T')[0] : '';

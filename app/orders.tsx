@@ -9,6 +9,7 @@ import {
     ActivityIndicator,
     Alert,
     FlatList,
+    Image,
     KeyboardAvoidingView,
     Linking,
     Modal,
@@ -22,6 +23,9 @@ import {
     View
 } from 'react-native';
 import { urlToBase64Image } from '../utils/pdfImageHelper';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
+import { compressPhoto, isPdfUrl, isUploadedFile, pdfToDataUri } from '../utils/attachments';
 
 // 🔥 SAAS IMPORTS (payments/users still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
@@ -38,6 +42,8 @@ import {
     updateOrder as apiUpdateOrder,
     updateOrderStatus as apiUpdateOrderStatus,
     listOrders,
+    uploadOrderPoFile,
+    deleteOrderPoFile,
 } from '../services/api/orders';
 
 export default function OrderListScreen() {
@@ -569,6 +575,88 @@ export default function OrderListScreen() {
       ));
   };
 
+  // ── PO attachment (Order Details) — saved to the server immediately ──
+  const [poBusy, setPoBusy] = useState(false);
+
+  const applyOrderUpdate = (updated: any) => {
+      // keep fields the server doesn't send back (names filled in on the list)
+      setSelectedOrder((prev: any) => (prev ? { ...prev, ...pickPoFields(updated) } : prev));
+      setOrderList(prev => prev.map(item => item.id === updated.id ? { ...item, ...pickPoFields(updated) } : item));
+  };
+  const pickPoFields = (o: any) => ({ poFileUri: o.poFileUri, poFileName: o.poFileName, poFileType: o.poFileType });
+
+  const uploadPo = async (dataUri: string, name: string) => {
+      if (!selectedOrder) return;
+      setPoBusy(true);
+      try {
+          applyOrderUpdate(await uploadOrderPoFile(selectedOrder.id, dataUri, name));
+      } catch (e: any) {
+          Alert.alert("Upload failed", e?.message || "Could not upload the PO. Please try again.");
+      } finally {
+          setPoBusy(false);
+      }
+  };
+
+  const attachPoPhoto = async (fromCamera: boolean) => {
+      const perm = fromCamera
+          ? await ImagePicker.requestCameraPermissionsAsync()
+          : Platform.OS === 'ios' ? await ImagePicker.requestMediaLibraryPermissionsAsync() : { status: 'granted' };
+      if (perm.status !== 'granted') return Alert.alert("Permission Denied");
+      const result = fromCamera
+          ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.8 })
+          : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+      if (result.canceled) return;
+      setPoBusy(true);
+      try {
+          const photo = await compressPhoto(result.assets[0]);
+          await uploadPo(photo.dataUri, "PO photo.jpg");
+      } catch {
+          setPoBusy(false);
+          Alert.alert("Photo", "Could not prepare this photo. Please try again.");
+      }
+  };
+
+  const attachPoPdf = async () => {
+      const result = await DocumentPicker.getDocumentAsync({ type: 'application/pdf', copyToCacheDirectory: true });
+      if (result.canceled || !result.assets?.length) return;
+      setPoBusy(true);
+      try {
+          const dataUri = await pdfToDataUri(result.assets[0].uri);
+          await uploadPo(dataUri, result.assets[0].name);
+      } catch (e: any) {
+          setPoBusy(false);
+          Alert.alert("PDF", e?.message || "Could not read this PDF.");
+      }
+  };
+
+  const choosePoSource = () => {
+      Alert.alert("Purchase Order", "Choose source", [
+          { text: "Camera", onPress: () => attachPoPhoto(true) },
+          { text: "Gallery", onPress: () => attachPoPhoto(false) },
+          { text: "PDF", onPress: attachPoPdf },
+          { text: "Cancel", style: "cancel" },
+      ]);
+  };
+
+  const removePo = () => {
+      if (!selectedOrder) return;
+      Alert.alert("Delete PO file?", "The file will be removed from the order and from storage.", [
+          { text: "Cancel", style: "cancel" },
+          {
+              text: "Delete", style: "destructive", onPress: async () => {
+                  setPoBusy(true);
+                  try {
+                      applyOrderUpdate(await deleteOrderPoFile(selectedOrder.id));
+                  } catch (e: any) {
+                      Alert.alert("Error", e?.message || "Could not delete the PO file.");
+                  } finally {
+                      setPoBusy(false);
+                  }
+              }
+          },
+      ]);
+  };
+
   const openDetails = (item: any) => {
       setSelectedOrder(item);
       setModalVisible(true);
@@ -992,13 +1080,43 @@ export default function OrderListScreen() {
                               </View>
                           ) : null}
 
-                          {selectedOrder.poFileUri && (
-                              <TouchableOpacity style={styles.fileBox} onPress={() => handleOpenFile(selectedOrder.poFileUri)}>
-                                  <Ionicons name="document-attach" size={20} color="#3b5998" />
-                                  <Text style={{marginLeft:10, flex:1, color:'#3b5998', textDecorationLine:'underline'}}>
-                                      {selectedOrder.poFileName || 'Download Attachment'}
-                                  </Text>
-                                  <Ionicons name="open-outline" size={16} color="green" />
+                          <Text style={styles.sectionHeader}>📎 Purchase Order File</Text>
+                          {poBusy ? (
+                              <View style={[styles.fileBox, {justifyContent:'center'}]}>
+                                  <ActivityIndicator color="#3b5998" />
+                                  <Text style={{marginLeft:10, color:'#3b5998'}}>Please wait...</Text>
+                              </View>
+                          ) : isUploadedFile(selectedOrder.poFileUri) ? (
+                              <View>
+                                  {isPdfUrl(selectedOrder.poFileUri) ? (
+                                      <TouchableOpacity style={styles.fileBox} onPress={() => handleOpenFile(selectedOrder.poFileUri)}>
+                                          <Ionicons name="document-text" size={20} color="#e53935" />
+                                          <Text style={{marginLeft:10, flex:1, color:'#3b5998', textDecorationLine:'underline'}} numberOfLines={1}>
+                                              {selectedOrder.poFileName || 'Purchase Order.pdf'}
+                                          </Text>
+                                          <Ionicons name="open-outline" size={16} color="green" />
+                                      </TouchableOpacity>
+                                  ) : (
+                                      <TouchableOpacity onPress={() => handleOpenFile(selectedOrder.poFileUri)}>
+                                          <Image source={{ uri: selectedOrder.poFileUri }} style={{ width: '100%', height: 200, borderRadius: 8, marginTop: 5, backgroundColor: '#eee' }} resizeMode="cover" />
+                                          <Text style={{fontSize: 11, color: 'gray', marginTop: 4}}>Tap the photo to open it full size</Text>
+                                      </TouchableOpacity>
+                                  )}
+                                  <View style={{flexDirection:'row', marginTop: 8}}>
+                                      <TouchableOpacity style={[styles.fileBox, {flex:1, marginRight:5, justifyContent:'center'}]} onPress={choosePoSource}>
+                                          <Ionicons name="swap-horizontal" size={18} color="#3b5998" />
+                                          <Text style={{marginLeft:6, color:'#3b5998', fontWeight:'bold'}}>Replace</Text>
+                                      </TouchableOpacity>
+                                      <TouchableOpacity style={[styles.fileBox, {flex:1, marginLeft:5, justifyContent:'center', backgroundColor:'#ffebee', borderColor:'#ef9a9a'}]} onPress={removePo}>
+                                          <Ionicons name="trash-outline" size={18} color="#d32f2f" />
+                                          <Text style={{marginLeft:6, color:'#d32f2f', fontWeight:'bold'}}>Delete</Text>
+                                      </TouchableOpacity>
+                                  </View>
+                              </View>
+                          ) : (
+                              <TouchableOpacity style={[styles.fileBox, {justifyContent:'center'}]} onPress={choosePoSource}>
+                                  <Ionicons name="cloud-upload-outline" size={20} color="#3b5998" />
+                                  <Text style={{marginLeft:8, color:'#3b5998', fontWeight:'bold'}}>Attach PO (photo or PDF)</Text>
                               </TouchableOpacity>
                           )}
 

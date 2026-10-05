@@ -80,6 +80,10 @@ export const DataProvider = ({ children }: any) => {
     // --- REFS FOR READ OPTIMIZATION ---
   const isPostgresSession = useRef(false); // true when currentUser came from bridgeLogin(), not Firebase — guards onAuthStateChanged from overwriting it
   const currentUserRef = useRef<User | null>(null);
+  // Bumped on every logout. Async work started for an earlier session
+  // (auth listener, company-settings retries) checks it and stops, so
+  // nothing re-creates the session or calls the API without a token.
+  const sessionGen = useRef(0);
 
   const [appPermissions, setAppPermissions] = useState<Record<string, any>>({});
   const [companyProfile, setCompanyProfile] = useState({
@@ -143,8 +147,8 @@ export const DataProvider = ({ children }: any) => {
       }
   };
   
-    const fetchCompanySettings = async (companyId: string, attempt = 1) => {
-    if (!companyId) return;
+    const fetchCompanySettings = async (companyId: string, attempt = 1, gen = sessionGen.current) => {
+    if (!companyId || gen !== sessionGen.current) return;
 
     try {
         // AsyncStorage cache check — shows something instantly while the
@@ -164,6 +168,7 @@ export const DataProvider = ({ children }: any) => {
         // reflected Storage-uploaded logo/signature URLs (those are written
         // to Postgres only, via the Company Profile edit screen).
         const data = await fetchCompanyProfile();
+        if (gen !== sessionGen.current) return; // logged out meanwhile
 
         const profileData = {
             companyId: companyId,
@@ -180,6 +185,7 @@ export const DataProvider = ({ children }: any) => {
             if (today > expiry) setIsSubscriptionExpired(true);
         }
     } catch (error) {
+        if (gen !== sessionGen.current) return; // logged out — don't retry
         console.log("Error fetching company settings:", error);
         // Was: single attempt, silent fail. If this lost a race with the auth
         // token being ready (cold start / fresh install with no cached profile),
@@ -188,7 +194,7 @@ export const DataProvider = ({ children }: any) => {
         // sender/receiver auto-fill, challans, quotations, ...) came out blank
         // until the app was force-restarted. Retry a few times with backoff.
         if (attempt < 4) {
-            setTimeout(() => fetchCompanySettings(companyId, attempt + 1), 1500 * attempt);
+            setTimeout(() => fetchCompanySettings(companyId, attempt + 1, gen), 1500 * attempt);
         }
     }
 };
@@ -198,6 +204,7 @@ export const DataProvider = ({ children }: any) => {
   // =========================================================
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
+      const gen = sessionGen.current;
       if (user) {
         let finalRole = 'Service Engineer'; 
         let name = user.email?.split('@')[0] || "User";
@@ -307,6 +314,9 @@ export const DataProvider = ({ children }: any) => {
         // Don't let a real Firebase session overwrite an active
         // Postgres-first session (e.g. a new employee who also happens to
         // have an old Firebase account from before).
+        // Logged out while the lookups above were running — drop it.
+        if (gen !== sessionGen.current) return;
+
         if (!isPostgresSession.current) {
             currentUserRef.current = newUser;
             setCurrentUser(newUser);
@@ -328,7 +338,9 @@ export const DataProvider = ({ children }: any) => {
         // callback, sequentially) instead of a separate timed effect
         // avoids a race with index.tsx's own login-redirect check.
         const stored = await getStoredPostgresUser();
-        if (stored) {
+        if (gen !== sessionGen.current) {
+            // This "no user" event came from logout itself — never restore.
+        } else if (stored) {
             const restoredUser = {
                 id: stored.id,
                 name: stored.name,
@@ -403,9 +415,15 @@ export const DataProvider = ({ children }: any) => {
       // to Postgres only. A real-time listener isn't replicated here (REST
       // has no push) — permissions refresh on login and app-restart, which
       // matches how infrequently they change in practice.
+      let cancelled = false;
       fetchPermissions()
-          .then((perms) => setAppPermissions(perms || {}))
-          .catch((e) => { console.log("fetchPermissions failed:", e); setAppPermissions({}); });
+          .then((perms) => { if (!cancelled) setAppPermissions(perms || {}); })
+          .catch((e) => {
+              if (cancelled) return;
+              console.log("fetchPermissions failed:", e);
+              setAppPermissions({});
+          });
+      return () => { cancelled = true; };
   }, [currentUser]);
 
   // ✅ Har 1 ghante mein plan expiry check
@@ -616,7 +634,22 @@ export const DataProvider = ({ children }: any) => {
   };
 
   // 🔥 Logout Ref Reset
+    // Order matters: the Postgres session is cleared BEFORE Firebase
+    // signOut. signOut fires onAuthStateChanged(null), which looks for a
+    // stored Postgres user to restore — if it still found one, it put the
+    // user back and fetched company settings / permissions with the token
+    // already gone (the 401s after logout).
     const logout = async () => { 
+      sessionGen.current += 1;
+      setCurrentUser(null); 
+      currentUserRef.current = null;
+      isPostgresSession.current = false;
+      setAppPermissions({});
+      await bridgeLogout();
+      // Wipe cached list screens (see utils/listCache.ts) so a different
+      // company logging in on this same device never briefly sees this
+      // company's cached data before the network refresh replaces it.
+      await clearAllListCaches();
       try {
           await signOut(auth); 
       } catch (e) {
@@ -624,14 +657,6 @@ export const DataProvider = ({ children }: any) => {
           // on no active session is harmless, but guard anyway just in case.
           console.log("Firebase signOut skipped:", e);
       }
-      setCurrentUser(null); 
-      currentUserRef.current = null;
-      isPostgresSession.current = false;
-      await bridgeLogout();
-      // Wipe cached list screens (see utils/listCache.ts) so a different
-      // company logging in on this same device never briefly sees this
-      // company's cached data before the network refresh replaces it.
-      await clearAllListCaches();
   };
 
   const contextValue = useMemo(() => ({

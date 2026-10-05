@@ -23,7 +23,7 @@ export default function AddQuotationScreen() {
     const insets = useSafeAreaInsets(); 
     
     const { id, mode, leadId, leadOrg, leadPerson, leadMobile, leadCity, leadAddress, leadProduct } = useLocalSearchParams(); 
-    const { companyProfile, currentUser, sendDynamicEmail, sendSystemWhatsApp } = useData();
+    const { companyProfile, currentUser } = useData();
     const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
     // orgList/quotationList now come from useCachedList below (cache-first, shared keys)
@@ -494,7 +494,8 @@ export default function AddQuotationScreen() {
                 docTitle: docTitle,
                 orgName: selectedOrg.name || selectedOrg.orgName || 'Unknown',
                 orgAddress: selectedOrg.address || selectedOrg.city || '',
-                orgPhone: selectedOrg.phone || selectedOrg.mobile || '',
+                // Mobile first: the backend sends the quotation WhatsApp to this number.
+                orgPhone: selectedOrg.mobile || selectedOrg.phone || '',
                 items: items.map(item => ({
                     name: item.name || '', model: item.model || '',
                     specifications: item.specifications || '', qty: item.qty || 0,
@@ -525,20 +526,9 @@ export default function AddQuotationScreen() {
                 Alert.alert("Success", `Estimate ${finalEstimateNo} Created Successfully!`);
             }
 
-            try {
-                const custMobile = selectedOrg.mobile || selectedOrg.phone || "";
-                if (custMobile) {
-                    sendSystemWhatsApp(custMobile, 'quotation_sent', {
-                        customer_name: selectedOrg.name || selectedOrg.orgName || "Customer",
-                        quote_no: finalEstimateNo,
-                        amount: grandTotal.toLocaleString(),
-                        company_name: companyProfile?.companyName || "Our Company"
-                    });
-                }
-            } catch (autoErr) {
-                console.log("Auto-Message Error:", autoErr);
-            }
-            
+            // The "quotation_sent" WhatsApp (and email, if the organization
+            // has one) is sent by the backend when the quotation is created —
+            // same as orders, service calls and leads. Edits don't resend.
             router.back(); 
         } catch (e: any) {
             console.error("Save Error:", e); 

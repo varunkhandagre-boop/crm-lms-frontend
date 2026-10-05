@@ -27,7 +27,8 @@ import { buildCacheKey } from '../utils/listCache';
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: payment collections now via new backend API
-import { deletePaymentCollection, listPaymentCollections, markChequeBounced, markChequeCleared, updatePaymentCollection } from '../services/api/paymentCollections';
+import { deleteChequePhoto, deletePaymentCollection, listPaymentCollections, markChequeBounced, markChequeCleared, updatePaymentCollection, uploadChequePhoto } from '../services/api/paymentCollections';
+import RecordPhotoSection from '../components/RecordPhotoSection';
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
@@ -71,6 +72,12 @@ export default function PaymentCollection() {
     const userRole = currentUser?.role ? currentUser.role.toLowerCase() : '';
     const isAdmin = ['admin', 'manager', 'account', 'accountant', 'hr', 'superadmin'].includes(userRole);
     const isStrictAdmin = ['admin', 'manager', 'superadmin'].includes(userRole);
+    // Same rule as the server: office (not HR) or whoever recorded the payment.
+    const canEditCheque = (p: any) => ['admin', 'manager', 'account', 'accountant', 'superadmin'].includes(userRole) || p?.senderId === currentUser?.id;
+    const applyChequePhoto = (updated: any) => {
+        setSelectedHistoryItem((prev: any) => (prev ? { ...prev, chequeImageUrl: updated.chequeImageUrl } : prev));
+        setPaymentList(prev => prev.map(item => item.id === updated.id ? { ...item, chequeImageUrl: updated.chequeImageUrl } : item));
+    };
 
     useEffect(() => {
         if (viewMode === 'Day') setVisibleCount(500); 
@@ -715,6 +722,17 @@ export default function PaymentCollection() {
                                     </View>
                                 ) : null}
                                 
+                                {!isEditing && (selectedHistoryItem?.mode === 'Cheque' || selectedHistoryItem?.chequeImageUrl) && (
+                                    <RecordPhotoSection
+                                        title="Cheque Photo"
+                                        url={selectedHistoryItem.chequeImageUrl}
+                                        canEdit={canEditCheque(selectedHistoryItem)}
+                                        addLabel="Add Cheque Photo"
+                                        onUpload={async (dataUri) => applyChequePhoto(await uploadChequePhoto(selectedHistoryItem.id, dataUri))}
+                                        onDelete={async () => applyChequePhoto(await deleteChequePhoto(selectedHistoryItem.id))}
+                                    />
+                                )}
+
                                 {!isEditing && (
                                     <TouchableOpacity 
                                         style={{flexDirection:'row', alignItems:'center', justifyContent:'center', backgroundColor:'#e3f2fd', padding:12, borderRadius:8, marginTop:20, borderWidth:1, borderColor:'#2196f3'}}

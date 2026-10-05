@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import { readFileBase64 } from '../utils/readFileBase64';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import React, { useState } from 'react';
@@ -73,7 +74,7 @@ export default function BulkImportUsersScreen() {
 
       setLoading(true);
       const fileUri = result.assets[0].uri;
-      const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
+      const base64 = await readFileBase64(fileUri);
       const wb = XLSX.read(base64, { type: 'base64' });
       const sheetName = wb.SheetNames[0];
       const rawRows: any[] = XLSX.utils.sheet_to_json(wb.Sheets[sheetName]);

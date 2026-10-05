@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -22,7 +22,10 @@ import {
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: service calls now via new backend API
-import { assignServiceCall, closeServiceCall as apiCloseServiceCall, listServiceCalls } from '../services/api/serviceCalls';
+import { assignServiceCall, closeServiceCall as apiCloseServiceCall, deleteServiceCallPhoto, getServiceCall, getServiceCallCounts, listServiceCallsPage, ServiceCallPageParams, uploadServiceCallPhoto } from '../services/api/serviceCalls';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import * as ImagePicker from 'expo-image-picker';
+import { compressPhoto } from '../utils/attachments';
 import EngineerStatsModal, { formatHours } from '../components/EngineerStatsModal';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -34,10 +37,39 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
 import { listInstallations } from '../services/api/installations';
-import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTeamMembers } from '../services/api/users';
 import { listSpareParts } from '../services/api/spareParts';
 import { sortAndFilterParts } from '../utils/sparePartSearch';
+
+const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const fyStart = (d: Date) => (d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1);
+const isSameFy = (a: Date, b: Date) => fyStart(a) === fyStart(b);
+// Calls before this date are hidden in FY view (same rule the screen had on the phone).
+const APP_LAUNCH_YMD = '2026-01-01';
+
+/** Screen state → API params (the filters the screen used to apply on the phone). */
+function buildServiceCallFilters(s: {
+    statusFilter: 'Open' | 'Closed' | 'All'; search: string; viewMode: 'Day' | 'Month' | 'FY' | 'All';
+    currentDate: Date; employeeId?: string; myCallsOnly: boolean;
+}): ServiceCallPageParams {
+    const f: ServiceCallPageParams = {};
+    if (s.statusFilter === 'Open') f.outcome = 'open';
+    else if (s.statusFilter === 'Closed') f.outcome = 'closed';
+    if (s.employeeId) f.employeeId = s.employeeId;
+    if (s.myCallsOnly) f.engineerId = 'me';
+    if (s.search) f.search = s.search;
+    const d = s.currentDate;
+    if (s.viewMode === 'Day') { f.from = ymd(d); f.to = ymd(d); }
+    else if (s.viewMode === 'Month') {
+        f.from = ymd(new Date(d.getFullYear(), d.getMonth(), 1));
+        f.to = ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+    } else if (s.viewMode === 'FY') {
+        const start = `${fyStart(d)}-04-01`;
+        f.from = start < APP_LAUNCH_YMD ? APP_LAUNCH_YMD : start;
+        f.to = `${fyStart(d) + 1}-03-31`;
+    }
+    return f;
+}
 
 export default function ServiceCallScreen() {
   const router = useRouter();
@@ -48,7 +80,7 @@ export default function ServiceCallScreen() {
   // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); service calls no longer go through this
   const { isDbLoading } = useSaaSDB();
 
-  // serviceCallList/orgList/installList now come from useCachedList below (cache-first, shared keys)
+  // Service calls come page by page from the server (useServerPagedList below)
   const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
 
   const [statusFilter, setStatusFilter] = useState<'Open' | 'Closed' | 'All'>('Open');
@@ -73,15 +105,12 @@ export default function ServiceCallScreen() {
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  const [visibleCount, setVisibleCount] = useState(20);
-
+  // Search is sent to the server 400 ms after the last keystroke.
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   useEffect(() => {
-      if (viewMode === 'Day' && statusFilter === 'All' && !searchText) {
-          setVisibleCount(500); 
-      } else {
-          setVisibleCount(20); 
-      }
-  }, [viewMode, currentDate, statusFilter, searchText, selectedEmployee]);
+      const t = setTimeout(() => setDebouncedSearch(searchText.trim()), 400);
+      return () => clearTimeout(t);
+  }, [searchText]);
 
   const isAdmin = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
   const canAssign = ['Admin', 'Manager', 'SuperAdmin'].includes(currentUser?.role || '');
@@ -95,20 +124,49 @@ export default function ServiceCallScreen() {
   const [showPartPicker, setShowPartPicker] = useState(false);
   const [partSearch, setPartSearch] = useState('');
 
-  // 🔥 SERVICE CALLS — cache-first (instant from AsyncStorage, then
-  // background refresh). See hooks/useCachedList.ts.
-  const serviceCallsCacheKey = buildCacheKey('service_calls', currentUser?.companyId);
+  // 🔥 SERVICE CALLS — server-side filtered + paginated (20 per page, Load
+  // more). Only page 1 of the default view is cached for an instant open.
+  const callFilters = useMemo(
+      () => buildServiceCallFilters({
+          statusFilter, search: debouncedSearch, viewMode, currentDate,
+          employeeId: isAdmin && selectedEmployee !== 'All' ? selectedEmployee : undefined,
+          myCallsOnly,
+      }),
+      [statusFilter, debouncedSearch, viewMode, currentDate, isAdmin, selectedEmployee, myCallsOnly]
+  );
+  const isDefaultView = statusFilter === 'Open' && !debouncedSearch && viewMode === 'FY' && selectedEmployee === 'All' && !myCallsOnly
+      && isSameFy(currentDate, new Date());
   const {
-      data: serviceCallList,
-      setData: setServiceCallList,
+      items: pagedCalls,
+      setItems: setServiceCallList,
+      total: callTotal,
       loading: serviceCallsLoading,
+      loadingMore,
+      hasMore,
+      loadMore,
       refresh: refreshServiceCalls,
-  } = useCachedList({
-      cacheKey: serviceCallsCacheKey,
+      reload: reloadServiceCalls,
+  } = useServerPagedList<ServiceCallPageParams, any>({
+      fetchPage: listServiceCallsPage,
+      filters: callFilters,
       enabled: !!currentUser?.companyId,
-      fetcher: listServiceCalls, // was: fetchSaaSData("service_calls")
+      cacheKey: isDefaultView ? buildCacheKey('service_calls_page1', currentUser?.companyId) : null,
   });
-  const openCount = serviceCallList.filter((i: any) => i.status === 'Open' || i.status === 'Assigned').length;
+
+  // "Open (N)" tab — one COUNT on the server, scoped like the list.
+  const [openCount, setOpenCount] = useState(0);
+  const refreshCounts = useCallback(() => {
+      if (!currentUser?.companyId) return;
+      getServiceCallCounts().then(c => setOpenCount(c.open)).catch(() => {});
+  }, [currentUser?.companyId]);
+
+  // Quiet refresh when coming back (e.g. after logging a new call); skips the first focus.
+  const focusedOnce = useRef(false);
+  useFocusEffect(useCallback(() => {
+      refreshCounts();
+      if (focusedOnce.current) reloadServiceCalls();
+      focusedOnce.current = true;
+  }, [refreshCounts, reloadServiceCalls]));
 
   // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
   // as manage_team.tsx/employee_timeline.tsx.
@@ -127,17 +185,12 @@ export default function ServiceCallScreen() {
       }
   }, [teamMembersForServiceCall, isAdmin]);
 
-  // 🔥 senderName was never populated — the API only returns senderId (see
-  // services/api/serviceCalls.ts's comment), so every service call showed
-  // no name (the "Unknown" text seen in the list). Fill it in once team
-  // members are available.
-  useEffect(() => {
-      if (teamMembersForServiceCall.length === 0 || serviceCallList.length === 0) return;
+  // senderName isn't sent by the API (only senderId) — filled from team members.
+  const serviceCallList = useMemo(() => {
+      if (teamMembersForServiceCall.length === 0) return pagedCalls;
       const nameById = new Map(teamMembersForServiceCall.map((u: any) => [u.id, u.name || 'Unknown']));
-      const needsEnrichment = serviceCallList.some((s: any) => s.senderName === undefined);
-      if (!needsEnrichment) return;
-      setServiceCallList(serviceCallList.map((s: any) => ({ ...s, senderName: nameById.get(s.senderId) || 'Unknown' })));
-  }, [serviceCallList, teamMembersForServiceCall]);
+      return pagedCalls.map((c: any) => (c.senderName ? c : { ...c, senderName: nameById.get(c.senderId) || 'Unknown' }));
+  }, [pagedCalls, teamMembersForServiceCall]);
 
   const { data: sparePartsList, refresh: refreshSpareParts } = useCachedList({
       cacheKey: buildCacheKey('spare_parts', currentUser?.companyId),
@@ -156,35 +209,26 @@ export default function ServiceCallScreen() {
 
   // Opened from an "assigned to you" notification: /service_call?id=<callId>
   const openedFromLink = useRef<string | null>(null);
+  // The call may not be on the first page, so it is fetched by id.
   useEffect(() => {
       const id = typeof params.id === 'string' ? params.id : undefined;
-      if (!id || openedFromLink.current === id || serviceCallList.length === 0) return;
-      const call = serviceCallList.find((c: any) => c.id === id);
-      if (call) {
-          openedFromLink.current = id;
-          setSelectedCall(call);
-          setResolutionNote(call.resolutionNote || '');
-          setDetailsModalVisible(true);
-      }
-  }, [params.id, serviceCallList]);
-
-  // 🔥 Organizations/installations — cache-first, sharing the SAME cache
-  // keys as organization.tsx ('organizations') and installation.tsx
-  // ('installations').
-  const { data: orgList, refresh: refreshOrgsForServiceCall } = useCachedList({
-      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 500 }),
-  });
-  const { data: installList, refresh: refreshInstallsForServiceCall } = useCachedList({
-      cacheKey: buildCacheKey('installations', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: listInstallations,
-  });
+      if (!id || openedFromLink.current === id || !currentUser?.companyId) return;
+      openedFromLink.current = id;
+      getServiceCall(id)
+          .then((call) => {
+              const name = teamMembersForServiceCall.find((u: any) => u.id === call.senderId)?.name;
+              setSelectedCall({ ...call, senderName: call.senderName || name || 'Unknown' });
+              setResolutionNote(call.resolutionNote || '');
+              setDetailsModalVisible(true);
+          })
+          .catch(() => Alert.alert('Not found', 'This service call could not be opened.'));
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.id, currentUser?.companyId]);
 
   const onRefresh = async () => {
       setRefreshing(true);
-      await Promise.all([refreshServiceCalls(), refreshTeamMembersForServiceCall(), refreshOrgsForServiceCall(), refreshInstallsForServiceCall()]);
+      refreshCounts();
+      await Promise.all([refreshServiceCalls(), refreshTeamMembersForServiceCall()]);
       setRefreshing(false);
   };
 
@@ -228,7 +272,9 @@ export default function ServiceCallScreen() {
         // Warranty isn't stored on ServiceCall — looked up by matching
         // serialNo against the Installation record.
         let warrantyHTML = '';
-        const matchedInstall = installList.find((i: any) => 
+        // Only installations with this serial are fetched (not the whole list).
+        const candidates = ticketData.serialNo ? await listInstallations({ search: String(ticketData.serialNo).trim() }) : [];
+        const matchedInstall = candidates.find((i: any) => 
             i.serialNo && ticketData.serialNo && 
             String(i.serialNo).trim().toLowerCase() === String(ticketData.serialNo).trim().toLowerCase()
         );
@@ -441,67 +487,6 @@ export default function ServiceCallScreen() {
     }
   };
 
-  const getSortedFilteredData = () => {
-    let data = serviceCallList ? [...serviceCallList] : [];
-    if (isAdmin && selectedEmployee !== 'All') {
-      data = data.filter((item: any) => {
-        if (item.senderId === selectedEmployee) return true;
-        if (item.assignedToId === selectedEmployee) return true;
-        if (item.senderName && item.senderName.toLowerCase() === selectedEmployeeName.toLowerCase()) return true;
-        if (item.userName && item.userName.toLowerCase() === selectedEmployeeName.toLowerCase()) return true;
-        return false;
-      });
-    } else if (!isAdmin) {
-      data = data.filter((item: any) => item.senderId === myId || item.assignedToId === myId);
-    }
-    if (myCallsOnly) data = data.filter((item: any) => item.assignedToId === myId);
-
-    if (statusFilter === 'Open') {
-      data = data.filter((item: any) => item.status === 'Open' || item.status === 'Assigned');
-    } else if (statusFilter === 'Closed') {
-      data = data.filter((item: any) => item.status === 'Resolved' || item.status === 'Closed');
-    }
-
-    if (searchText) {
-      const lowerText = searchText.toLowerCase();
-      data = data.filter((item: any) =>
-        `${item.hospitalName} ${item.scrId} ${item.serialNo} ${item.city} ${item.model}`.toLowerCase().includes(lowerText)
-      );
-    }
-
-    if (viewMode !== 'All') {
-      const tYear = currentDate.getFullYear();
-      const tMonth = currentDate.getMonth();
-      const tDay = currentDate.getDate();
-
-      const fyStartYear = tMonth >= 3 ? tYear : tYear - 1;
-      let fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-      const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
-
-      const APP_LAUNCH_DATE = new Date(2026, 0, 1).getTime(); 
-      if (fyStartDate < APP_LAUNCH_DATE) {
-          fyStartDate = APP_LAUNCH_DATE;
-      }
-
-      data = data.filter((item: any) => {
-        const ts = parseDate(item.createdAt || item.dateIso || item.date);
-        if (!ts) return false;
-        const d = new Date(ts);
-        const itemTime = d.getTime();
-
-        if (viewMode === 'Month') return d.getFullYear() === tYear && d.getMonth() === tMonth;
-        if (viewMode === 'Day') return d.getFullYear() === tYear && d.getMonth() === tMonth && d.getDate() === tDay;
-        if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-        return true;
-      });
-    }
-
-    data.sort((a: any, b: any) => parseDate(b.dateIso || b.date || b.createdAt) - parseDate(a.dateIso || a.date || a.createdAt));
-    return data;
-  };
-
-  const displayList = getSortedFilteredData(); 
-  const renderedList = displayList.slice(0, visibleCount);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -536,11 +521,68 @@ export default function ServiceCallScreen() {
       const merged = { ...selectedCall, ...updated, senderName: selectedCall.senderName };
       setSelectedCall(merged);
       setServiceCallList(prev => prev.map(item => item.id === merged.id ? merged : item));
+      refreshCounts();
     } catch (error: any) {
       Alert.alert('Error', error?.message || 'Could not assign engineer');
     } finally {
       setAssigning(false);
     }
+  };
+
+  // ── Call photo (details) — saved to the server immediately ──
+  const [photoBusy, setPhotoBusy] = useState(false);
+
+  const applyPhoto = (updated: any) => {
+    setSelectedCall((prev: any) => (prev ? { ...prev, imageUri: updated.imageUri } : prev));
+    setServiceCallList(prev => prev.map(item => item.id === updated.id ? { ...item, imageUri: updated.imageUri } : item));
+  };
+
+  const addCallPhoto = async (fromCamera: boolean) => {
+    if (!selectedCall) return;
+    const perm = fromCamera
+      ? await ImagePicker.requestCameraPermissionsAsync()
+      : Platform.OS === 'ios' ? await ImagePicker.requestMediaLibraryPermissionsAsync() : { status: 'granted' };
+    if (perm.status !== 'granted') return Alert.alert('Permission Denied');
+    const result = fromCamera
+      ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.8 })
+      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+    if (result.canceled) return;
+    setPhotoBusy(true);
+    try {
+      const photo = await compressPhoto(result.assets[0]);
+      applyPhoto(await uploadServiceCallPhoto(selectedCall.id, photo.dataUri));
+    } catch (e: any) {
+      Alert.alert('Upload failed', e?.message || 'Could not upload the photo. Please try again.');
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  const chooseCallPhoto = () => {
+    Alert.alert('Photo', 'Choose source', [
+      { text: 'Camera', onPress: () => addCallPhoto(true) },
+      { text: 'Gallery', onPress: () => addCallPhoto(false) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const removeCallPhoto = () => {
+    if (!selectedCall) return;
+    Alert.alert('Delete photo?', 'The photo will be removed from this call and from storage.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive', onPress: async () => {
+          setPhotoBusy(true);
+          try {
+            applyPhoto(await deleteServiceCallPhoto(selectedCall.id));
+          } catch (e: any) {
+            Alert.alert('Error', e?.message || 'Could not delete the photo.');
+          } finally {
+            setPhotoBusy(false);
+          }
+        }
+      },
+    ]);
   };
 
   // 🔥 CLOSE TICKET LOGIC — via new backend API
@@ -554,6 +596,9 @@ export default function ServiceCallScreen() {
       const updated = await apiCloseServiceCall(selectedCall.id, resolutionNote, parts);
       refreshSpareParts();
       setServiceCallList(prev => prev.map(item => item.id === selectedCall.id ? { ...item, ...updated } : item));
+      // A closed call leaves the Open tab — re-read the page and the count.
+      reloadServiceCalls();
+      refreshCounts();
 
       setDetailsModalVisible(false);
       
@@ -718,11 +763,11 @@ export default function ServiceCallScreen() {
           </View>
         </View>
         
-        <Text style={{textAlign:'right', fontSize:12, color:'gray', paddingRight:15}}>Total: {displayList.length}</Text>
+        <Text style={{textAlign:'right', fontSize:12, color:'gray', paddingRight:15}}>Total: {callTotal}</Text>
       </View>
 
       <FlatList
-        data={renderedList}
+        data={serviceCallList}
         keyExtractor={item => item.id}
         renderItem={renderCard}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -739,9 +784,10 @@ export default function ServiceCallScreen() {
         }
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
-                {visibleCount < displayList.length ? (
+                {hasMore ? (
                     <TouchableOpacity 
-                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                        onPress={loadMore}
+                        disabled={loadingMore}
                         style={{
                             padding: 12, 
                             backgroundColor: '#fff', 
@@ -753,12 +799,14 @@ export default function ServiceCallScreen() {
                             elevation: 1
                         }}
                     >
-                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                            👇 Load More Records ({displayList.length - visibleCount} remaining)
-                        </Text>
+                        {loadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                                👇 Load More Records ({callTotal - serviceCallList.length} remaining)
+                            </Text>
+                        )}
                     </TouchableOpacity>
                 ) : (
-                    displayList.length > 0 ? (
+                    serviceCallList.length > 0 ? (
                         <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
                             --- End of List ---
                         </Text>
@@ -931,12 +979,34 @@ export default function ServiceCallScreen() {
                   </View>
                 )}
 
-                {selectedCall.imageUri && (
-                  <View style={{ marginTop: 15 }}>
-                    <Text style={styles.sectionHeader}>PHOTO</Text>
-                    <Image source={{ uri: selectedCall.imageUri }} style={{ width: '100%', height: 200, borderRadius: 10, resizeMode: 'cover' }} />
-                  </View>
-                )}
+                <View style={{ marginTop: 15 }}>
+                  <Text style={styles.sectionHeader}>PHOTO</Text>
+                  {photoBusy ? (
+                    <View style={styles.photoBtn}>
+                      <ActivityIndicator color="#3b5998" />
+                      <Text style={styles.photoBtnText}>Please wait...</Text>
+                    </View>
+                  ) : selectedCall.imageUri ? (
+                    <>
+                      <Image source={{ uri: selectedCall.imageUri }} style={{ width: '100%', height: 200, borderRadius: 10, resizeMode: 'cover', backgroundColor: '#eee' }} />
+                      <View style={{ flexDirection: 'row', marginTop: 8 }}>
+                        <TouchableOpacity style={[styles.photoBtn, { flex: 1, marginRight: 5 }]} onPress={chooseCallPhoto}>
+                          <Ionicons name="swap-horizontal" size={18} color="#3b5998" />
+                          <Text style={styles.photoBtnText}>Replace</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.photoBtn, { flex: 1, marginLeft: 5, backgroundColor: '#ffebee', borderColor: '#ef9a9a' }]} onPress={removeCallPhoto}>
+                          <Ionicons name="trash-outline" size={18} color="#d32f2f" />
+                          <Text style={[styles.photoBtnText, { color: '#d32f2f' }]}>Delete</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  ) : (
+                    <TouchableOpacity style={styles.photoBtn} onPress={chooseCallPhoto}>
+                      <Ionicons name="camera-outline" size={18} color="#3b5998" />
+                      <Text style={styles.photoBtnText}>Add Photo</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
                 <View style={{ height: 30 }} />
               </ScrollView>
             )}
@@ -987,6 +1057,8 @@ const DetailRow = ({ label, value, icon, highlight }: any) => (
 );
 
 const styles = StyleSheet.create({
+  photoBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#e3f2fd', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#90caf9' },
+  photoBtnText: { marginLeft: 6, color: '#3b5998', fontWeight: 'bold' },
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   header: { backgroundColor: 'white', paddingTop: 40, paddingBottom: 0, elevation: 0 },
   headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 15, marginBottom: 10 },

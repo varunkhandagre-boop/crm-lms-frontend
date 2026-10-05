@@ -28,7 +28,10 @@ import {
   updateInstallation as apiUpdateInstallation,
   listInstallations,
   sendAmcReminder,
+  uploadInstallationPhoto,
+  deleteInstallationPhoto,
 } from '../services/api/installations';
+import RecordPhotoSection from '../components/RecordPhotoSection';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
@@ -75,6 +78,12 @@ export default function InstallationListScreen() {
 
   const isAdmin = ['Admin', 'Manager', 'Hr', 'Account', 'Accountant', 'SuperAdmin'].includes(currentUser?.role || '');
   const isStrictAdmin = ['Admin', 'Manager', 'SuperAdmin'].includes(currentUser?.role || '');
+
+  // Photo change on one machine row (details) — saved immediately.
+  const applyInstallPhoto = (updated: any) => {
+      setSelectedItem((prev: any) => (prev ? { ...prev, photoUrl: updated.photoUrl } : prev));
+      setInstallList(prev => prev.map(i => i.id === updated.id ? { ...i, photoUrl: updated.photoUrl } : i));
+  };
 
   useEffect(() => {
       if (viewMode === 'Day') setVisibleCount(500); 
@@ -874,6 +883,15 @@ export default function InstallationListScreen() {
                     <Text style={styles.noteText}>{selectedItem.note}</Text>
                   </View>
                 ) : null}
+
+                <RecordPhotoSection
+                    title="Installation Photo"
+                    url={selectedItem.photoUrl}
+                    canEdit={isStrictAdmin || selectedItem.senderId === currentUser?.id}
+                    onUpload={async (dataUri) => applyInstallPhoto(await uploadInstallationPhoto(selectedItem.id, dataUri))}
+                    onDelete={async () => applyInstallPhoto(await deleteInstallationPhoto(selectedItem.id))}
+                />
+                <View style={{ height: 12 }} />
 
                                 <TouchableOpacity 
                     style={styles.pdfBtn}

@@ -5,7 +5,6 @@ import {
     ActivityIndicator,
     Alert,
     FlatList,
-    Image,
     Modal,
     RefreshControl,
     ScrollView,
@@ -21,7 +20,8 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: expenses now via new backend API
-import { listExpenses, settleExpensesForEmployee, updateExpenseStatus } from '../services/api/expenses';
+import { deleteExpenseBillPhoto, listExpenses, settleExpensesForEmployee, updateExpenseStatus, uploadExpenseBillPhoto } from '../services/api/expenses';
+import RecordPhotoSection from '../components/RecordPhotoSection';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
@@ -52,6 +52,11 @@ export default function ExpenseScreen() {
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
   const [visibleCount, setVisibleCount] = useState(20);
+
+  const applyBill = (updated: any) => {
+      setSelectedItem((prev: any) => (prev ? { ...prev, imageUri: updated.imageUri } : prev));
+      setExpenseList(prev => prev.map(item => item.id === updated.id ? { ...item, imageUri: updated.imageUri } : item));
+  };
 
   const canManage = ['Admin', 'Manager', 'Hr', 'Account', 'Accountant', 'SuperAdmin'].includes(currentUser?.role || '');
 
@@ -465,12 +470,18 @@ export default function ExpenseScreen() {
                           <Text style={{fontSize:12, color:'gray', marginBottom:5, marginTop:5}}>Remark:</Text>
                           <Text style={{fontSize:14, fontStyle:'italic', marginBottom:15, color:'#333'}}>{selectedItem.remark}</Text>
 
-                          {selectedItem.imageUri ? (
-                              <View>
-                                  <Text style={{fontSize:12, color:'gray', marginBottom:5}}>Attached Bill:</Text>
-                                  <Image source={{ uri: selectedItem.imageUri }} style={styles.billImage} />
-                              </View>
-                          ) : <Text style={{fontSize:12, color:'gray', fontStyle:'italic'}}>No bill attached.</Text>}
+                          <RecordPhotoSection
+                              title="Attached Bill"
+                              url={selectedItem.imageUri}
+                              // Employee: own claim while Pending; office roles: any time (server checks the same).
+                              canEdit={canManage || (selectedItem.senderId === currentUser?.id && selectedItem.status === 'Pending')}
+                              addLabel="Add Bill Photo"
+                              onUpload={async (dataUri) => applyBill(await uploadExpenseBillPhoto(selectedItem.id, dataUri))}
+                              onDelete={async () => applyBill(await deleteExpenseBillPhoto(selectedItem.id))}
+                          />
+                          {!selectedItem.imageUri && !(canManage || (selectedItem.senderId === currentUser?.id && selectedItem.status === 'Pending')) && (
+                              <Text style={{fontSize:12, color:'gray', fontStyle:'italic'}}>No bill attached.</Text>
+                          )}
 
                           {canManage && selectedItem.status === 'Pending' && (
                               <View style={styles.actionContainer}>

@@ -23,7 +23,8 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: orders (Phase 3), payment dues, payment collections now via new backend API
 import { listOrders } from '../services/api/orders';
-import { createPaymentCollection } from '../services/api/paymentCollections';
+import { createPaymentCollection, uploadChequePhoto } from '../services/api/paymentCollections';
+import PhotoPickerField, { PendingPhoto } from '../components/PhotoPickerField';
 import { listPaymentDues } from '../services/api/paymentDues';
 
 import * as FileSystem from 'expo-file-system/legacy';
@@ -64,6 +65,9 @@ export default function AddPaymentScreen() {
     const [amount, setAmount] = useState('');     
     
     const [mode, setMode] = useState('Cash'); 
+    // Cheque photo (only for mode Cheque) — uploaded right after the payment is saved.
+    const [chequePhoto, setChequePhoto] = useState<PendingPhoto | null>(null);
+    const [preparingPhoto, setPreparingPhoto] = useState(false);
     const [bankName, setBankName] = useState('');
     const [refNumber, setRefNumber] = useState(''); 
     const [billRef, setBillRef] = useState('');
@@ -387,6 +391,7 @@ export default function AddPaymentScreen() {
             Alert.alert("Missing Fields", "Please Select Customer and Amount.");
             return;
         }
+        if (preparingPhoto) return Alert.alert("Please wait", "The cheque photo is still being prepared.");
         
         setLoading(true);
         
@@ -419,6 +424,16 @@ export default function AddPaymentScreen() {
                 notes,
             });
 
+            let photoFailed = false;
+            if (mode === 'Cheque' && chequePhoto) {
+                try {
+                    await uploadChequePhoto(saved.id, chequePhoto.dataUri);
+                } catch (e) {
+                    console.log("Cheque photo upload failed:", e);
+                    photoFailed = true;
+                }
+            }
+
             if (addNotification) {
                 await addNotification({
                     title: "Payment Received 💰",
@@ -429,7 +444,9 @@ export default function AddPaymentScreen() {
                 });
             }
 
-            Alert.alert("Success ✅", "Payment Saved & Linked! Share Receipt?", [
+            Alert.alert("Success ✅", "Payment Saved & Linked!" +
+                (photoFailed ? `\n\n⚠️ The cheque photo could not be uploaded. Open the payment in Payment Collections and tap "Add Cheque Photo".` : '') +
+                "\nShare Receipt?", [
                 { text: "No", onPress: () => router.back(), style: 'cancel' },
                 { text: "Yes, Share PDF", onPress: async () => { await generateAndShareReceipt(saved); router.back(); }}
             ]);
@@ -565,6 +582,12 @@ export default function AddPaymentScreen() {
                                     <Text style={{color: '#333'}}>{formatDate(pdcDate)}</Text>
                                 </TouchableOpacity>
                                 {showPdcDatePicker && <DateTimePicker value={pdcDate} mode="date" {...pickerHandlers(onChangePdcDate)} />}
+                                {mode === 'Cheque' && (
+                                    <>
+                                        <Text style={[styles.label, {marginTop:10}]}>Cheque Photo (optional)</Text>
+                                        <PhotoPickerField value={chequePhoto} onChange={setChequePhoto} onBusyChange={setPreparingPhoto} buttonLabel="Take Cheque Photo" />
+                                    </>
+                                )}
                             </View>
                         )}
 

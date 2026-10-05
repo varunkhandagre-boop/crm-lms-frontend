@@ -26,7 +26,8 @@ import {
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 3: orders & products now go through the new backend API
-import { createOrder } from '../services/api/orders';
+import { createOrder, uploadOrderPoFile } from '../services/api/orders';
+import { compressPhoto, pdfToDataUri } from '../utils/attachments';
 import { listProducts } from '../services/api/products';
 
 import * as FileSystem from 'expo-file-system/legacy';
@@ -98,7 +99,9 @@ export default function AddOrderScreen() {
   const [poDate, setPoDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
 
+  // { type: 'image' | 'pdf', uri (preview), name, dataUri (ready to upload), kb? }
   const [selectedFile, setSelectedFile] = useState<any>(null);
+  const [preparingFile, setPreparingFile] = useState(false);
 
   const [modalVisible, setModalVisible] = useState(false);
   const [filteredData, setFilteredData] = useState<any[]>([]);
@@ -398,16 +401,35 @@ export default function AddOrderScreen() {
           const result = await DocumentPicker.getDocumentAsync({ type: 'application/pdf', copyToCacheDirectory: true });
           if (!result.canceled && result.assets && result.assets.length > 0) {
               const file = result.assets[0];
-              setSelectedFile({ type: 'pdf', uri: file.uri, name: file.name });
+              setPreparingFile(true);
+              const dataUri = await pdfToDataUri(file.uri);
+              setSelectedFile({ type: 'pdf', uri: file.uri, name: file.name, dataUri });
           }
-      } catch (err) {}
+      } catch (err: any) {
+          Alert.alert("PDF", err?.message || "Could not read this PDF.");
+      } finally {
+          setPreparingFile(false);
+      }
+  };
+
+  // Shrinks the photo right away so the upload at save time is small.
+  const acceptPhoto = async (asset: ImagePicker.ImagePickerAsset, name: string) => {
+      setPreparingFile(true);
+      try {
+          const photo = await compressPhoto(asset);
+          setSelectedFile({ type: 'image', uri: photo.previewUri, name, dataUri: photo.dataUri, kb: photo.kb });
+      } catch {
+          Alert.alert("Photo", "Could not prepare this photo. Please try again.");
+      } finally {
+          setPreparingFile(false);
+      }
   };
 
   const openCamera = async () => {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') return Alert.alert("Permission Denied");
-      let result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.5 });
-      if (!result.canceled) setSelectedFile({ type: 'image', uri: result.assets[0].uri, name: "camera_img.jpg" });
+      let result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.8 });
+      if (!result.canceled) await acceptPhoto(result.assets[0], "PO photo.jpg");
   };
 
   const openGallery = async () => {
@@ -416,18 +438,21 @@ export default function AddOrderScreen() {
               const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
               if (status !== 'granted') return Alert.alert("Permission Denied", "Please allow gallery access in Settings.");
           }
-          let result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.5 });
-          if (!result.canceled) setSelectedFile({ type: 'image', uri: result.assets[0].uri, name: "gallery_img.jpg" });
+          let result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+          if (!result.canceled) await acceptPhoto(result.assets[0], "PO photo.jpg");
       } catch (error) { Alert.alert("Error", "Could not open gallery."); }
   };
 
   // 🔥 SAVE LOGIC — order via new backend API (auto-generates order ID,
   // auto-closes the lead if leadId given). Advance payment record still
   // goes to Firestore payment_collections until Phase 6.
-  // NOTE: PO file upload is not yet wired to the new backend (needs
-  // Supabase Storage) — the selected file is not persisted anywhere;
-  // flagged here rather than silently dropped.
+  // The PO file is uploaded right after the order is created; if that part
+  // fails the order is still saved and the PO can be attached from Orders.
   const handleSave = async () => {
+      if (preparingFile) {
+          Alert.alert("Please wait", "The PO file is still being prepared.");
+          return;
+      }
       const finalProductString = getSelectedProductsText();
       
       if (!hospitalName || !poNumber || !amount || !finalProductString) {
@@ -473,6 +498,16 @@ if (locationData) {
               assignedToId,
           });
 
+          let poUploadFailed = false;
+          if (selectedFile?.dataUri) {
+              try {
+                  await uploadOrderPoFile(savedOrder.id, selectedFile.dataUri, selectedFile.name);
+              } catch (e) {
+                  console.log("PO upload failed:", e);
+                  poUploadFailed = true;
+              }
+          }
+
           // Record Advance Payment (still Firestore until Phase 6)
           if (cleanAdvance > 0) {
               await addSaaSData("payment_collections", {
@@ -510,7 +545,9 @@ if (locationData) {
 
           Alert.alert(
               "Order Booked! 🎉", 
-              `Order ${savedOrder.orderId} has been saved successfully.\n\nDo you want to share the Order PDF now?`,
+              `Order ${savedOrder.orderId} has been saved successfully.` +
+                  (poUploadFailed ? `\n\n⚠️ The PO file could not be uploaded. Open the order in Orders and tap "Attach PO".` : '') +
+                  `\n\nDo you want to share the Order PDF now?`,
               [
                   { 
                       text: "No", 
@@ -734,9 +771,14 @@ if (locationData) {
                         )}
                         <View style={{flex:1, marginLeft:10}}>
                             <Text style={{fontWeight:'bold', color:'#333'}} numberOfLines={1}>{selectedFile.name}</Text>
-                            <Text style={{fontSize:12, color: 'gray'}}>{selectedFile.type === 'pdf' ? 'PDF Document' : 'Image File'}</Text>
+                            <Text style={{fontSize:12, color: 'gray'}}>{selectedFile.type === 'pdf' ? 'PDF Document' : `Photo${selectedFile.kb ? ` • ${selectedFile.kb} KB` : ''}`} • uploads when you submit</Text>
                         </View>
                         <TouchableOpacity onPress={() => setSelectedFile(null)} style={{padding:5}}><Ionicons name="trash" size={22} color="gray" /></TouchableOpacity>
+                    </View>
+                ) : preparingFile ? (
+                    <View style={styles.uploadBtn}>
+                        <ActivityIndicator color="#3b5998" />
+                        <Text style={{color:'#3b5998', marginTop:5}}>Preparing file...</Text>
                     </View>
                 ) : (
                     <TouchableOpacity style={styles.uploadBtn} onPress={handleUploadOptions}>
@@ -745,11 +787,6 @@ if (locationData) {
                     </TouchableOpacity>
                 )}
             </View>
-            {selectedFile && (
-                <Text style={{fontSize: 10, color: '#e65100', marginTop: -10, marginBottom: 15}}>
-                    ⚠️ Attachment upload isn't wired to the server yet — this file won't be saved with the order.
-                </Text>
-            )}
 
             <Text style={styles.label}>Remarks / Notes</Text>
             <TextInput style={[styles.input, {height: 60, textAlignVertical:'top'}]} multiline placeholder="Any special instructions..." value={notes} onChangeText={setNotes} />

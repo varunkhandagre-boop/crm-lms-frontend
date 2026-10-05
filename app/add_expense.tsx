@@ -1,14 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
-import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
     FlatList,
-    Image,
     KeyboardAvoidingView,
     Modal,
     Platform,
@@ -23,7 +21,8 @@ import {
 // 🔥 SAAS IMPORTS (kept for parity, not used for writes anymore)
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: expenses now via new backend API
-import { createExpense } from '../services/api/expenses';
+import { createExpense, uploadExpenseBillPhoto } from '../services/api/expenses';
+import PhotoPickerField, { PendingPhoto } from '../components/PhotoPickerField';
 
 export default function AddExpenseScreen() {
   const router = useRouter();
@@ -36,7 +35,8 @@ export default function AddExpenseScreen() {
   const [type, setType] = useState('Select Type');
   const [amount, setAmount] = useState('');
   const [remark, setRemark] = useState('');
-  const [image, setImage] = useState<string | null>(null);
+  const [image, setImage] = useState<PendingPhoto | null>(null);
+  const [preparingImage, setPreparingImage] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const [modalVisible, setModalVisible] = useState(false);
@@ -49,28 +49,10 @@ export default function AddExpenseScreen() {
     return `${day}/${month}/${year}`;
   };
 
-  const pickImage = async () => {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-          Alert.alert("Permission Denied", "Camera access is needed to upload bills.");
-          return;
-      }
-
-      let result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ['images'],
-          allowsEditing: false, 
-          quality: 0.5,
-      });
-
-      if (!result.canceled) {
-          setImage(result.assets[0].uri);
-      }
-  };
-
-  // 🔥 SAVE LOGIC — via new backend API. Note: imageUri is passed through as
-  // a local file URI only — it isn't uploaded to Supabase Storage yet, same
-  // known gap as Order PO files and Service Call photos.
+  // 🔥 SAVE LOGIC — claim via the backend API, then the bill photo is
+  // uploaded to it (the claim stays saved even if the photo upload fails).
   const handleSave = async () => {
+      if (preparingImage) return Alert.alert("Please wait", "The bill photo is still being prepared.");
       if (type === 'Select Type' || !amount) {
           Alert.alert("Missing Fields", "Please select Type and enter Amount.");
           return;
@@ -78,13 +60,22 @@ export default function AddExpenseScreen() {
 
       setLoading(true);
       try {
-          await createExpense({
+          const saved = await createExpense({
               date: date.toISOString(),
               type,
               amount: parseFloat(amount) || 0,
               remark,
-              imageUri: image || undefined,
           });
+
+          let photoFailed = false;
+          if (image) {
+              try {
+                  await uploadExpenseBillPhoto(saved.id, image.dataUri);
+              } catch (e) {
+                  console.log("Bill photo upload failed:", e);
+                  photoFailed = true;
+              }
+          }
 
           if (addNotification) {
               await addNotification({
@@ -96,7 +87,11 @@ export default function AddExpenseScreen() {
               });
           }
 
-          Alert.alert("Success", "Expense Claim Submitted & Admin Notified!");
+          Alert.alert(
+              "Success",
+              "Expense Claim Submitted & Admin Notified!" +
+                  (photoFailed ? `\n\n⚠️ The bill photo could not be uploaded. Open the claim in Expenses and tap "Add Bill Photo".` : '')
+          );
           router.back();
       } catch (e: any) {
           Alert.alert("Error", e?.message || "Could not submit claim.");
@@ -164,20 +159,7 @@ export default function AddExpenseScreen() {
 
             <Text style={styles.label}>Upload Bill / Ticket</Text>
             <View style={styles.uploadContainer}>
-                {image ? (
-                    <View>
-                        <Image source={{ uri: image }} style={styles.previewImage} />
-                        <TouchableOpacity style={styles.removeBtn} onPress={() => setImage(null)}>
-                            <Ionicons name="trash" size={18} color="white" />
-                            <Text style={{color:'white', fontSize:12, marginLeft:5}}>Remove</Text>
-                        </TouchableOpacity>
-                    </View>
-                ) : (
-                    <TouchableOpacity style={styles.cameraBtn} onPress={pickImage}>
-                        <Ionicons name="camera" size={30} color="#3b5998" />
-                        <Text style={{color:'#3b5998', fontWeight:'bold', marginTop:5}}>Take Photo</Text>
-                    </TouchableOpacity>
-                )}
+                <PhotoPickerField value={image} onChange={setImage} onBusyChange={setPreparingImage} buttonLabel="Take Bill Photo" />
             </View>
 
             <TouchableOpacity 

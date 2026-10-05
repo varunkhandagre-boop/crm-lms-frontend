@@ -31,7 +31,8 @@ import { listInstallations } from '../services/api/installations';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
-import { createServiceCall } from '../services/api/serviceCalls';
+import { createServiceCall, uploadServiceCallPhoto } from '../services/api/serviceCalls';
+import { compressPhoto } from '../utils/attachments';
 import { listSpareParts } from '../services/api/spareParts';
 import { sortAndFilterParts } from '../utils/sparePartSearch';
 import { buildCacheKey } from '../utils/listCache';
@@ -69,7 +70,9 @@ export default function AddServiceCallScreen() {
   const [installDate, setInstallDate] = useState('');
 
   const [remark, setRemark] = useState('');
-  const [image, setImage] = useState<string | null>(null);
+  // Preview path + compressed data, ready to upload right after the call is created.
+  const [image, setImage] = useState<{ uri: string; dataUri: string; kb: number } | null>(null);
+  const [preparingImage, setPreparingImage] = useState(false);
   const [callDate, setCallDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
 
@@ -460,6 +463,7 @@ export default function AddServiceCallScreen() {
 
   // 🔥 SAVE LOGIC — via new backend API (server auto-generates ticket ID)
   const handleSave = async () => {
+      if (preparingImage) return Alert.alert("Please wait", "The photo is still being prepared.");
       if (!org || !serialNo || !remark) {
           Alert.alert("Error", "Organization, Serial No, and Problem are required.");
           return;
@@ -495,7 +499,6 @@ recordLocationLog({
           status: (status === 'Closed' ? 'Resolved' : 'Open') as 'Open' | 'Resolved',
           resolutionNote: status === 'Closed' ? resolutionNote : '',
           remark: remark,
-          imageUri: image || undefined,
           partsUsed: usedParts, 
           partsText: partsSummary,
           location: locationData ? { latitude: locationData.lat, longitude: locationData.lng } : null,
@@ -503,6 +506,16 @@ recordLocationLog({
 
       try {
           const saved = await createServiceCall(payload as any);
+
+          let photoFailed = false;
+          if (image) {
+              try {
+                  await uploadServiceCallPhoto(saved.id, image.dataUri);
+              } catch (e) {
+                  console.log("Service photo upload failed:", e);
+                  photoFailed = true;
+              }
+          }
 
           if (addNotification) {
               await addNotification({
@@ -522,7 +535,9 @@ recordLocationLog({
           
           Alert.alert(
               "Success ✅", 
-              `Ticket #${saved.scrId} Created!\nShare PDF?`,
+              `Ticket #${saved.scrId} Created!` +
+                  (photoFailed ? `\n\n⚠️ The photo could not be uploaded. Open the call in Service Calls and tap "Add Photo".` : '') +
+                  `\nShare PDF?`,
               [
                   { text: "No", onPress: () => router.back(), style: 'cancel' },
                   { text: "Yes, Share PDF", onPress: async () => { 
@@ -548,8 +563,17 @@ recordLocationLog({
   const pickImage = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') return Alert.alert("Permission Denied");
-    let result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], allowsEditing: false, quality: 0.5 });
-    if (!result.canceled) setImage(result.assets[0].uri);
+    let result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], allowsEditing: false, quality: 0.8 });
+    if (result.canceled) return;
+    setPreparingImage(true);
+    try {
+        const photo = await compressPhoto(result.assets[0]);
+        setImage({ uri: photo.previewUri, dataUri: photo.dataUri, kb: photo.kb });
+    } catch {
+        Alert.alert("Photo", "Could not prepare this photo. Please try again.");
+    } finally {
+        setPreparingImage(false);
+    }
   };
 
   return (
@@ -642,17 +666,21 @@ recordLocationLog({
 
             <Text style={styles.label}>Upload Photo</Text>
             <View style={styles.cameraContainer}>
-                <TouchableOpacity style={styles.cameraBtn} onPress={pickImage}>
-                    <Ionicons name="camera" size={24} color="#3b5998" />
-                    <Text style={{color:'#3b5998', marginLeft:10}}>Take Photo</Text>
+                <TouchableOpacity style={styles.cameraBtn} onPress={pickImage} disabled={preparingImage}>
+                    {preparingImage ? <ActivityIndicator color="#3b5998" /> : <Ionicons name="camera" size={24} color="#3b5998" />}
+                    <Text style={{color:'#3b5998', marginLeft:10}}>{preparingImage ? 'Preparing photo...' : image ? 'Retake Photo' : 'Take Photo'}</Text>
                 </TouchableOpacity>
-                {image && <Image source={{ uri: image }} style={styles.previewImage} />}
+                {image && <Image source={{ uri: image.uri }} style={styles.previewImage} />}
+                {image && (
+                    <View style={{flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginTop: 6}}>
+                        <Text style={{fontSize: 11, color: 'gray'}}>{image.kb} KB • uploads when you save</Text>
+                        <TouchableOpacity onPress={() => setImage(null)} style={{flexDirection:'row', alignItems:'center', padding: 4}}>
+                            <Ionicons name="trash-outline" size={16} color="#d32f2f" />
+                            <Text style={{color:'#d32f2f', marginLeft: 4, fontSize: 12}}>Remove</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
             </View>
-            {image && (
-                <Text style={{fontSize: 10, color: '#e65100', marginTop: -5, marginBottom: 10}}>
-                    ⚠️ Photo upload isn't wired to the server yet — this image won't be saved with the ticket.
-                </Text>
-            )}
 
             <Text style={styles.label}>Problem Reported *</Text>
             <TextInput style={[styles.inputGray, {height: 60}, errors.remark && styles.errorBorder]} multiline placeholder="Describe issue..." value={remark} onChangeText={setRemark} />

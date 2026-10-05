@@ -25,7 +25,8 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: installations & products now via new backend API
 import { completeActivityPlan } from '../services/api/activityPlans';
-import { createInstallationBatch } from '../services/api/installations';
+import { createInstallationBatch, uploadInstallationPhoto } from '../services/api/installations';
+import PhotoPickerField, { PendingPhoto } from '../components/PhotoPickerField';
 import { fetchOrganizations } from '../services/api/organizations';
 import { listProducts } from '../services/api/products';
 
@@ -80,6 +81,10 @@ export default function AddInstallationScreen() {
   const [showManualExpiryPicker, setShowManualExpiryPicker] = useState(false);
 
   const [addedMachines, setAddedMachines] = useState<any[]>([]);
+
+  // One photo for the whole report; uploaded after the machines are saved.
+  const [sitePhoto, setSitePhoto] = useState<PendingPhoto | null>(null);
+  const [preparingPhoto, setPreparingPhoto] = useState(false);
 
   const [modalVisible, setModalVisible] = useState(false);
   const [currentModalType, setCurrentModalType] = useState('');
@@ -559,6 +564,7 @@ export default function AddInstallationScreen() {
 
   // 🔥 SAVE LOGIC — one batch API call for all machines (server auto-generates installId)
   const handleFinalSubmit = async () => {
+      if (preparingPhoto) return Alert.alert("Please wait", "The photo is still being prepared.");
       if (!hospital || !department) return Alert.alert("Missing", "Select Hospital and enter Department.");
       if (addedMachines.length === 0) return Alert.alert("Empty", "Add at least one machine.");
 
@@ -574,7 +580,7 @@ export default function AddInstallationScreen() {
 }
 
       try {
-        const { installId } = await createInstallationBatch({
+        const { installId, installations } = await createInstallationBatch({
             orgId: orgId || undefined,
             orgName: hospital,
             city, address, contactPerson, mobile, department, engineer,
@@ -588,6 +594,17 @@ export default function AddInstallationScreen() {
                 note: m.note,
             })),
         });
+
+        // One photo for the whole report — set on every machine row.
+        let photoFailed = false;
+        if (sitePhoto && installations.length > 0) {
+            try {
+                await uploadInstallationPhoto(installations[0].id, sitePhoto.dataUri, true);
+            } catch (e) {
+                console.log("Installation photo upload failed:", e);
+                photoFailed = true;
+            }
+        }
 
         if (addNotification) {
             await addNotification({
@@ -605,7 +622,9 @@ export default function AddInstallationScreen() {
 
         Alert.alert(
             "Success ✅", 
-            `Installation Report ${installId} Saved!\nDo you want to share PDF?`,
+            `Installation Report ${installId} Saved!` +
+                (photoFailed ? `\n\n⚠️ The photo could not be uploaded. Open the installation and tap "Add Photo".` : '') +
+                `\nDo you want to share PDF?`,
             [
                 { text: "No", onPress: () => router.back(), style: 'cancel' },
                 { text: "Yes, Share PDF", onPress: async () => { await generateInstallationPDF(installId); router.back(); }}
@@ -618,7 +637,7 @@ export default function AddInstallationScreen() {
       }
   };
 
-  const isSubmitDisabled = !hospital || !department || addedMachines.length === 0 || isSaving;
+  const isSubmitDisabled = preparingPhoto || !hospital || !department || addedMachines.length === 0 || isSaving;
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
@@ -752,6 +771,9 @@ export default function AddInstallationScreen() {
                     ))}
                 </View>
             )}
+
+            <Text style={styles.sectionHeader}>3. Installation Photo (optional)</Text>
+            <PhotoPickerField value={sitePhoto} onChange={setSitePhoto} onBusyChange={setPreparingPhoto} buttonLabel="Take Photo of Installed Machine" />
 
             <TouchableOpacity 
                 style={[styles.saveBtn, { backgroundColor: isSubmitDisabled ? '#ccc' : '#3b5998' }]} 
