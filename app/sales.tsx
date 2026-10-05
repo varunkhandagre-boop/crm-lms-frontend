@@ -395,6 +395,9 @@ export default function SalesReportScreen() {
             <Text style={styles.headerTitle}>Visits DSR</Text>
         </View>
         <View style={{flexDirection:'row'}}>
+            <TouchableOpacity style={[styles.addBtn, {backgroundColor:'#ff9800', marginRight:10}]} onPress={() => router.push('/visit_targets' as any)} accessibilityLabel="Visit targets">
+                <Ionicons name="trophy" size={20} color="white" />
+            </TouchableOpacity>
             <TouchableOpacity style={[styles.addBtn, {backgroundColor:'#4caf50', marginRight:10}]} onPress={shareDailyReport}>
                 <Ionicons name="share-social" size={20} color="white" />
             </TouchableOpacity>

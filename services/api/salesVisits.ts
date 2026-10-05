@@ -125,3 +125,28 @@ export async function createSalesVisit(payload: CreateSalesVisitPayload): Promis
 export async function deleteSalesVisit(id: string): Promise<void> {
   await apiClient.delete(`/sales-visits/${id}`);
 }
+
+// ── Visit Targets: target vs visits logged, per salesperson ────────────────
+export interface VisitTargetRow {
+  userId: string;
+  name: string;
+  jobTitle: string | null;
+  dailyTarget: number | null;
+  monthlyTarget: number | null;
+  today: number | null;       // null for a past month
+  month: number;
+  expectedByNow: number | null; // monthly target pro-rated to today
+}
+
+export interface VisitTargets {
+  month: string; // YYYY-MM
+  isCurrentMonth: boolean;
+  daysInMonth: number;
+  dayOfMonth: number;
+  rows: VisitTargetRow[];
+}
+
+export async function getVisitTargets(month?: string): Promise<VisitTargets> {
+  const res = await apiClient.get<{ data: VisitTargets }>(`/sales-visits/targets${month ? `?month=${month}` : ''}`);
+  return res.data;
+}

@@ -379,6 +379,10 @@ export default function SalesTeamReport() {
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                     {isLoading && <ActivityIndicator size="small" color="white" style={{ marginRight: 10 }} />}
+                    <TouchableOpacity onPress={() => router.push('/visit_targets' as any)} style={{ marginRight: 16, alignItems: 'center' }}>
+                        <Ionicons name="trophy" size={22} color="white" />
+                        <Text style={{ color: 'white', fontSize: 9, fontWeight: 'bold' }}>Visits</Text>
+                    </TouchableOpacity>
                     {/* Day-by-day team activity (same numbers as the 8 PM notification) */}
                     {(userRole.includes('admin') || userRole.includes('manager')) && (
                         <TouchableOpacity onPress={() => router.push('/team_today' as any)} style={{ marginRight: 16, alignItems: 'center' }}>

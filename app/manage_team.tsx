@@ -120,6 +120,7 @@ const UsersTab = () => {
     const [formData, setFormData] = useState({
         name: "", email: "", mobile: "", role: "FIELD_USER",
         empId: "", joiningDate: "", monthlyTarget: "0", baseSalary: "0", yearlyLeaves: "18",
+        dailyVisitTarget: "", monthlyVisitTarget: "",
         password: "",
         personalEmail: "", personalMobile: "", bloodGroup: "",
         address: "", city: "", state: "", permanentAddress: "",
@@ -162,6 +163,9 @@ const UsersTab = () => {
                     empId: formData.empId,
                     joiningDate: formData.joiningDate || undefined,
                     monthlyTarget: Number(formData.monthlyTarget) || undefined,
+                    // empty / 0 = no visit target (null clears it)
+                    dailyVisitTarget: Number(formData.dailyVisitTarget) || null,
+                    monthlyVisitTarget: Number(formData.monthlyVisitTarget) || null,
                     baseSalary: Number(formData.baseSalary) || undefined,
                     yearlyLeaves: Number(formData.yearlyLeaves) || undefined,
                     personalEmail: formData.personalEmail,
@@ -199,6 +203,9 @@ const UsersTab = () => {
                     empId: formData.empId,
                     joiningDate: formData.joiningDate || undefined,
                     monthlyTarget: Number(formData.monthlyTarget) || undefined,
+                    // empty / 0 = no visit target (null clears it)
+                    dailyVisitTarget: Number(formData.dailyVisitTarget) || null,
+                    monthlyVisitTarget: Number(formData.monthlyVisitTarget) || null,
                     baseSalary: Number(formData.baseSalary) || undefined,
                     yearlyLeaves: Number(formData.yearlyLeaves) || undefined,
                     personalEmail: formData.personalEmail,
@@ -258,6 +265,8 @@ const UsersTab = () => {
             ...user,
             password: "",
             monthlyTarget: String(user.monthlyTarget || 0),
+            dailyVisitTarget: user.dailyVisitTarget || "",
+            monthlyVisitTarget: user.monthlyVisitTarget || "",
             baseSalary: String(user.baseSalary || 0),
             yearlyLeaves: String(user.yearlyLeaves || 18)
         });
@@ -300,6 +309,7 @@ const handleBulkDeactivate = () => {
         setFormData({
             name: "", email: "", mobile: "", role: "FIELD_USER", empId: randomId, joiningDate: new Date().toISOString().split('T')[0],
             password: "", city: "", monthlyTarget: "0", baseSalary: "0", yearlyLeaves: "18",
+            dailyVisitTarget: "", monthlyVisitTarget: "",
             personalEmail: "", personalMobile: "", bloodGroup: "", address: "", state: "", permanentAddress: "",
             bankName: "", accountNo: "", ifscCode: "", aadhar: "", pan: "", assetNotes: ""
         });
@@ -453,6 +463,10 @@ const handleBulkDeactivate = () => {
                             <View style={styles.inputRow}>
                                 <View style={{flex:1}}><Text style={styles.label}>Target</Text><TextInput style={styles.input} value={String(formData.monthlyTarget)} onChangeText={t=>setFormData({...formData, monthlyTarget:t})} keyboardType="numeric" /></View>
                                 <View style={{flex:1}}><Text style={styles.label}>Base Salary</Text><TextInput style={styles.input} value={String(formData.baseSalary)} onChangeText={t=>setFormData({...formData, baseSalary:t})} keyboardType="numeric" /></View>
+                            </View>
+                            <View style={styles.inputRow}>
+                                <View style={{flex:1}}><Text style={styles.label}>Visits / day</Text><TextInput style={styles.input} value={String(formData.dailyVisitTarget ?? '')} onChangeText={t=>setFormData({...formData, dailyVisitTarget:t.replace(/[^0-9]/g, '')})} keyboardType="numeric" placeholder="No target" /></View>
+                                <View style={{flex:1}}><Text style={styles.label}>Visits / month</Text><TextInput style={styles.input} value={String(formData.monthlyVisitTarget ?? '')} onChangeText={t=>setFormData({...formData, monthlyVisitTarget:t.replace(/[^0-9]/g, '')})} keyboardType="numeric" placeholder="No target" /></View>
                             </View>
                             <View style={styles.inputRow}>
                                 <View style={{flex:1}}><Text style={styles.label}>Leaves</Text><TextInput style={styles.input} value={String(formData.yearlyLeaves)} onChangeText={t=>setFormData({...formData, yearlyLeaves:t})} keyboardType="numeric" /></View>
