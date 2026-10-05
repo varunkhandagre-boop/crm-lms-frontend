@@ -24,7 +24,7 @@ import { isOffDay } from '../utils/workSchedule';
 // 🔥 Phase 7: leaves/attendance/holidays now come from Postgres via these adapters
 import { fetchAttendance } from '../services/api/attendance';
 import { fetchHolidays } from '../services/api/holidays';
-import { fetchLeaves, fetchLeaveSummary, updateLeaveStatus as updateLeaveStatusApi } from '../services/api/leaves';
+import { fetchLeaves, fetchLeaveSummary, LeaveTypeBalance, updateLeaveStatus as updateLeaveStatusApi } from '../services/api/leaves';
 import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -58,7 +58,8 @@ export default function LeaveApplicationScreen() {
   // Note: this card is always FY-scoped now, regardless of the Day/Month/FY/All tabs below —
   // those tabs still filter the *list* of leave records, just not this balance summary.
   const [stats, setStats] = useState({ 
-      baseTotal: 0, earned: 0, total: 0, used: 0, absents: 0, shortDays: 0, balance: 0, lwp: 0 
+      baseTotal: 0, earned: 0, total: 0, used: 0, absents: 0, shortDays: 0, balance: 0, lwp: 0,
+      typed: null as LeaveTypeBalance[] | null, // Leave Policy on: CL / SL / EL / Comp Off
   });
   const [summaryLoading, setSummaryLoading] = useState(false);
   
@@ -180,7 +181,7 @@ export default function LeaveApplicationScreen() {
               // "All employees" selected by a manager: summary card doesn't make sense for
               // a whole company at once, so we skip the call and zero it out.
               if (canManage && selectedEmployeeName === 'All') {
-                  setStats({ baseTotal: 0, earned: 0, total: 0, used: 0, absents: 0, shortDays: 0, balance: 0, lwp: 0 });
+                  setStats({ baseTotal: 0, earned: 0, total: 0, used: 0, absents: 0, shortDays: 0, balance: 0, lwp: 0, typed: null });
                   return;
               }
 
@@ -194,6 +195,7 @@ export default function LeaveApplicationScreen() {
                   shortDays: summary.shortDays,
                   balance: summary.balance,
                   lwp: summary.lwp,
+                  typed: summary.policy?.enabled && summary.balances ? summary.balances : null,
               });
           } catch (e) {
               console.log('Leave summary fetch failed', e);
@@ -517,12 +519,42 @@ export default function LeaveApplicationScreen() {
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
         <Text style={styles.headerTitle}>Leave & Absents</Text>
+        {canManage && (
+            <TouchableOpacity style={[styles.addBtn, { backgroundColor: '#6a1b9a', marginRight: 8 }]} onPress={() => router.push('/leave_balances' as any)} accessibilityLabel="Leave balances">
+                <Ionicons name="wallet-outline" size={18} color="white" />
+            </TouchableOpacity>
+        )}
         <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_leave' as any)}>
             <Ionicons name="add" size={20} color="white" />
             <Text style={{color:'white', fontWeight:'bold', marginLeft:5}}>Apply</Text>
         </TouchableOpacity>
       </View>
 
+      {stats.typed ? (
+      <View style={styles.balanceContainer}>
+          <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems:'center'}}>
+              {stats.typed.map((b, i) => (
+                  <React.Fragment key={b.type}>
+                      {i > 0 && <View style={styles.vDivider}/>}
+                      <View style={styles.statBox}>
+                          <Text style={styles.statLabel}>{b.type === 'COMP' ? 'Comp Off' : b.type}</Text>
+                          <Text style={[styles.statValue, {color:'#27ae60'}]}>{summaryLoading ? '...' : b.balance}</Text>
+                          <Text style={{fontSize:9, color:'gray'}}>used {b.used} / {b.quota + b.opening}</Text>
+                      </View>
+                  </React.Fragment>
+              ))}
+              {stats.lwp > 0 && (
+                <>
+                  <View style={styles.vDivider}/>
+                  <View style={styles.statBox}>
+                      <Text style={[styles.statLabel, {color: '#c62828'}]}>LWP</Text>
+                      <Text style={[styles.statValue, {color:'#c62828'}]}>{stats.lwp}</Text>
+                  </View>
+                </>
+              )}
+          </View>
+      </View>
+      ) : (
       <View style={styles.balanceContainer}>
           <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems:'center'}}>
               <View style={styles.statBox}>
@@ -564,6 +596,7 @@ export default function LeaveApplicationScreen() {
               )}
           </View>
       </View>
+      )}
       
       {pendingCount > 0 && (
         <View style={{backgroundColor:'#ffebee', padding:10, marginHorizontal:15, borderRadius:8, marginBottom:10, flexDirection:'row', alignItems:'center'}}>

@@ -184,3 +184,43 @@ export async function commitBulkUserImport(rows: BulkUserRow[]): Promise<{ creat
   const res = await apiClient.post<{ data: { created: number; skipped: number; defaultPassword: string; errors: string[] } }>('/users/bulk-import/commit', { rows });
   return res.data;
 }
+// ── Employee 360 (GET /users/:id/overview) ─────────────────────────────────
+export interface EmployeeOverview {
+  asOf: string;
+  profile: {
+    id: string; name: string; email: string | null; mobile: string | null; role: string; jobTitle: string | null;
+    empId: string | null; isActive: boolean; joiningDate: string | null; city: string | null; profileImage: string | null;
+    monthlyTarget: number | null; dailyVisitTarget: number | null; monthlyVisitTarget: number | null;
+    baseSalary: number | null; yearlyLeaves: number; tenure: { years: number; months: number } | null; schedule: string;
+  };
+  period: { key: OverviewPeriod; label: string; from: string; to: string };
+  attendance: AttendanceCounts; // for the chosen period
+  salaryThisMonth: {
+    perDaySalary: number; lateDays: number; lateDeduction: number; absentDays: number; absentDeduction: number;
+    overtimeHours: number; overtimeAmount: number; incentiveAmount: number; expenseAmount: number;
+    advanceDeduction: number; netPayable: number;
+  } | null;
+  leave: {
+    summary: Awaited<ReturnType<typeof import('./leaves').fetchLeaveSummary>>;
+    recent: { id: string; type: string; fromDate: string; toDate: string; days: number; halfDay: boolean; status: string }[];
+  };
+  advances: {
+    outstanding: number;
+    items: { id: string; date: string; amount: number; recoveredAmount: number; remaining: number; status: string; monthlyDeductionAmount: number | null }[];
+  };
+  expenses: { inPeriod: number; pendingCount: number; pendingAmount: number };
+  payslips: { id: string; month: number; year: number; netPayable: number; runStatus: string; paidAt: string | null }[];
+  work: {
+    sales: number; orders: number; collection: number; collections: number; visits: number;
+    monthlyVisitTarget: number | null; salesTarget: number | null; // "This month" only
+    openLeads: number; serviceCallsOpen: number; serviceCallsClosed: number; tasksPending: number; tasksOverdue: number;
+  };
+}
+export interface AttendanceCounts { present: number; absent: number; leave: number; holiday: number; short?: number; [k: string]: any }
+
+export type OverviewPeriod = 'month' | 'fy' | 'lastfy' | 'all';
+
+export async function fetchEmployeeOverview(id: string, period: OverviewPeriod = 'month'): Promise<EmployeeOverview> {
+  const res = await apiClient.get<{ data: EmployeeOverview }>(`/users/${id}/overview?period=${period}`);
+  return res.data;
+}

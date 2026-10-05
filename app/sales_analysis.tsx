@@ -221,9 +221,9 @@ export default function SalesAnalysisScreen() {
           }
       } else {
           data = data.filter((o: any) => 
-              o.senderId === currentUser?.uid || 
-              o.senderId === currentUser?.id || 
-              o.userName === currentUser?.name
+              // guard: undefined === undefined must not count as "mine"
+              (!!o.senderId && (o.senderId === currentUser?.uid || o.senderId === currentUser?.id)) || 
+              (!!o.userName && o.userName === currentUser?.name)
           );
       }
 
@@ -279,9 +279,9 @@ export default function SalesAnalysisScreen() {
           }
       } else {
           pData = pData.filter((p: any) => 
-              p.senderId === currentUser?.uid || 
-              p.senderId === currentUser?.id || 
-              p.userName === currentUser?.name
+              // guard: undefined === undefined must not count as "mine"
+              (!!p.senderId && (p.senderId === currentUser?.uid || p.senderId === currentUser?.id)) || 
+              (!!p.userName && p.userName === currentUser?.name)
           );
       }
 

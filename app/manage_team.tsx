@@ -376,7 +376,20 @@ const handleBulkDeactivate = () => {
                                         <Text style={styles.cardSubtitle}>{item.role} • {item.empId}</Text>
                                     </View>
                                 </View>
-                                {!bulkMode && <Ionicons name="create-outline" size={20} color="#3b5998" />}
+                                {!bulkMode && (
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                        {/* Employee 360 — everything about this person on one screen */}
+                                        <TouchableOpacity
+                                            onPress={() => router.push({ pathname: '/employee_360', params: { id: item.id } } as any)}
+                                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 6 }}
+                                            style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#ede7f6', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, marginRight: 10 }}
+                                        >
+                                            <Ionicons name="analytics" size={15} color="#6a1b9a" />
+                                            <Text style={{ color: '#6a1b9a', fontWeight: 'bold', fontSize: 12, marginLeft: 3 }}>360</Text>
+                                        </TouchableOpacity>
+                                        <Ionicons name="create-outline" size={20} color="#3b5998" />
+                                    </View>
+                                )}
                             </View>
                             <View style={{marginTop:8, flexDirection:'row', justifyContent:'space-between', alignItems:'center'}}>
                                 <Text style={{fontSize:12, color:'#555'}}>{item.mobile} | {item.city}</Text>

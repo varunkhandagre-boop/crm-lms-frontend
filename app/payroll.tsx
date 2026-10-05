@@ -44,6 +44,9 @@ import {
     savePayrollSettings,
     DEFAULT_DEDUCTION_RULES,
     DEFAULT_OVERTIME_RULES,
+    DEFAULT_LEAVE_POLICY,
+    LeavePolicy,
+    LeaveQuota,
     DeductionRules,
     OvertimeRules,
 } from '../services/api/payroll';
@@ -55,6 +58,16 @@ import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+// Coloured header for each Salary Rules section (colour also used as the card's left stripe).
+function RuleHeader({ color, icon, title }: { color: string; icon: keyof typeof Ionicons.glyphMap; title: string }) {
+    return (
+        <View style={[styles.ruleHeader, { backgroundColor: color }]}>
+            <Ionicons name={icon} size={16} color="#fff" />
+            <Text style={styles.ruleHeaderText}>{title}</Text>
+        </View>
+    );
+}
 
 function ChoiceChips<T extends string>({ value, options, onChange }: { value: T; options: { v: T; t: string }[]; onChange: (v: T) => void }) {
     return (
@@ -282,6 +295,10 @@ export default function PayrollScreen() {
     const ot: OvertimeRules = settings?.overtimeRules || DEFAULT_OVERTIME_RULES;
     const setOt = <K extends keyof OvertimeRules>(key: K, value: OvertimeRules[K]) =>
         setSettings((prev) => (prev ? { ...prev, overtimeRules: { ...(prev.overtimeRules || DEFAULT_OVERTIME_RULES), [key]: value } } : prev));
+    const lp: LeavePolicy = settings?.leavePolicy || DEFAULT_LEAVE_POLICY;
+    const setLp = <K extends keyof LeavePolicy>(key: K, value: LeavePolicy[K]) =>
+        setSettings((prev) => (prev ? { ...prev, leavePolicy: { ...(prev.leavePolicy || DEFAULT_LEAVE_POLICY), [key]: value } } : prev));
+    const setQuota = (t: 'CL' | 'SL' | 'EL', patch: Partial<LeaveQuota>) => setLp('quotas', { ...lp.quotas, [t]: { ...lp.quotas[t], ...patch } });
     const num = (t: string, min: number, max: number) => Math.max(min, Math.min(max, Number(t.replace(/[^0-9.]/g, '')) || 0));
 
     const handleSaveSettings = async () => {
@@ -628,8 +645,8 @@ const generatePayslipPDF = async (slip: Payslip) => {
 
             {activeTab === 'Settings' && settings && (
                 <ScrollView contentContainerStyle={styles.content}>
-                    <Text style={styles.sectionTitle}>Incentive</Text>
-                    <View style={styles.card}>
+                    <RuleHeader color="#2e7d32" icon="trending-up" title="Incentive (on sales above target)" />
+                    <View style={[styles.card, styles.ruleCard, { borderLeftColor: '#2e7d32' }]}>
                         <Text style={styles.label}>Tier 1 Commission (%) — on sales above target</Text>
                         <TextInput style={styles.input} keyboardType="numeric" value={String(settings.incentiveTier1Percent)} onChangeText={(t) => updateSetting('incentiveTier1Percent', Number(t) || 0)} />
                         <Text style={styles.label}>Tier 2 Commission (%) — beyond boost threshold</Text>
@@ -638,8 +655,8 @@ const generatePayslipPDF = async (slip: Payslip) => {
                         <TextInput style={styles.input} keyboardType="numeric" value={String(settings.tier2Multiplier)} onChangeText={(t) => updateSetting('tier2Multiplier', Number(t) || 1)} />
                     </View>
 
-                    <Text style={styles.sectionTitle}>Late-Coming</Text>
-                    <View style={styles.card}>
+                    <RuleHeader color="#ef6c00" icon="alarm" title="Late-Coming" />
+                    <View style={[styles.card, styles.ruleCard, { borderLeftColor: '#ef6c00' }]}>
                         <View style={styles.switchRow}>
                             <Text style={styles.label}>Enable</Text>
                             <Switch value={settings.lateComingEnabled} onValueChange={(v) => updateSetting('lateComingEnabled', v)} />
@@ -681,8 +698,8 @@ const generatePayslipPDF = async (slip: Payslip) => {
                         )}
                     </View>
 
-                    <Text style={styles.sectionTitle}>Short Hours</Text>
-                    <View style={styles.card}>
+                    <RuleHeader color="#f9a825" icon="hourglass" title="Short Hours" />
+                    <View style={[styles.card, styles.ruleCard, { borderLeftColor: '#f9a825' }]}>
                         <View style={styles.switchRow}>
                             <Text style={styles.label}>Enable</Text>
                             <Switch value={settings.shortHoursEnabled} onValueChange={(v) => updateSetting('shortHoursEnabled', v)} />
@@ -696,8 +713,8 @@ const generatePayslipPDF = async (slip: Payslip) => {
                         )}
                     </View>
 
-                    <Text style={styles.sectionTitle}>Weekly Off & Shift (company default)</Text>
-                    <View style={styles.card}>
+                    <RuleHeader color="#00897b" icon="calendar" title="Weekly Off & Shift (company default)" />
+                    <View style={[styles.card, styles.ruleCard, { borderLeftColor: '#00897b' }]}>
                         <Text style={{ fontSize: 12, color: 'gray' }}>
                             Applies to everyone unless an employee has their own in Manage Team. Used for Day In reminders, attendance, leave balance and late marks.
                         </Text>
@@ -708,8 +725,8 @@ const generatePayslipPDF = async (slip: Payslip) => {
                         />
                     </View>
 
-                    <Text style={styles.sectionTitle}>Overtime</Text>
-                    <View style={styles.card}>
+                    <RuleHeader color="#1565c0" icon="flash" title="Overtime" />
+                    <View style={[styles.card, styles.ruleCard, { borderLeftColor: '#1565c0' }]}>
                         <View style={styles.switchRow}>
                             <Text style={styles.label}>Pay overtime</Text>
                             <Switch value={ot.enabled} onValueChange={(v) => setOt('enabled', v)} />
@@ -759,8 +776,8 @@ const generatePayslipPDF = async (slip: Payslip) => {
                         )}
                     </View>
 
-                    <Text style={styles.sectionTitle}>Absent & One Day’s Salary</Text>
-                    <View style={styles.card}>
+                    <RuleHeader color="#c62828" icon="person-remove" title="Absent & One Day’s Salary" />
+                    <View style={[styles.card, styles.ruleCard, { borderLeftColor: '#c62828' }]}>
                         <Text style={styles.label}>One day’s salary =</Text>
                         <ChoiceChips
                             value={rules.perDayBasis}
@@ -788,8 +805,8 @@ const generatePayslipPDF = async (slip: Payslip) => {
                         <Text style={styles.hint}>Absent = a past working day with no Day In and no approved leave (weekly offs and holidays don’t count). Days before joining are never absent.</Text>
                     </View>
 
-                    <Text style={styles.sectionTitle}>Leave Quota</Text>
-                    <View style={styles.card}>
+                    <RuleHeader color="#6a1b9a" icon="document-text" title="Leave Quota (single pool)" />
+                    <View style={[styles.card, styles.ruleCard, { borderLeftColor: '#6a1b9a' }]}>
                         <Text style={styles.label}>Leave beyond the allowed quota</Text>
                         <ChoiceChips
                             value={rules.leaveExcessMode}
@@ -805,6 +822,58 @@ const generatePayslipPDF = async (slip: Payslip) => {
                                 <TextInput style={styles.input} keyboardType="numeric" value={String(settings.leaveExcessPenalty)} onChangeText={(t) => updateSetting('leaveExcessPenalty', Number(t) || 0)} />
                             </>
                         )}
+                    </View>
+
+                    <RuleHeader color="#8e24aa" icon="briefcase" title="Leave Policy (CL / SL / EL)" />
+                    <View style={[styles.card, styles.ruleCard, { borderLeftColor: '#8e24aa' }]}>
+                        <View style={styles.switchRow}>
+                            <Text style={[styles.label, { flex: 1 }]}>Separate CL / SL / EL balances</Text>
+                            <Switch value={lp.enabled} onValueChange={(v) => setLp('enabled', v)} />
+                        </View>
+                        <Text style={styles.hint}>
+                            {lp.enabled
+                                ? 'Each employee gets these yearly quotas (Apr–Mar). Working on a weekly off / holiday adds Comp Off. Unplanned absence is NOT taken from leave — use “Absent” above to cut salary. The per-employee “Leaves” number and the ₹ leave penalty are not used.'
+                                : 'Off: one yearly leave pool per employee (Manage Team → Leaves), as before.'}
+                        </Text>
+                        {lp.enabled && (
+                            <>
+                                {(['CL', 'SL', 'EL'] as const).map((t) => (
+                                    <View key={t} style={styles.quotaRow}>
+                                        <Text style={styles.quotaType}>{t}</Text>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.label}>Days / year</Text>
+                                            <TextInput style={styles.input} keyboardType="numeric" value={String(lp.quotas[t].days)} onChangeText={(v) => setQuota(t, { days: num(v, 0, 365) })} />
+                                        </View>
+                                        <View style={{ alignItems: 'center', marginHorizontal: 6 }}>
+                                            <Text style={styles.label}>Carry</Text>
+                                            <Switch value={lp.quotas[t].carryForward} onValueChange={(v) => setQuota(t, { carryForward: v })} />
+                                        </View>
+                                        <View style={{ flex: 1, opacity: lp.quotas[t].carryForward ? 1 : 0.35 }}>
+                                            <Text style={styles.label}>Max carry</Text>
+                                            <TextInput style={styles.input} keyboardType="numeric" editable={lp.quotas[t].carryForward} value={String(lp.quotas[t].maxCarry)} onChangeText={(v) => setQuota(t, { maxCarry: num(v, 0, 365) })} />
+                                        </View>
+                                    </View>
+                                ))}
+                                <Text style={styles.label}>Marriage / Festival / Others leave</Text>
+                                <ChoiceChips
+                                    value={lp.otherTypesMode}
+                                    options={[
+                                        { v: 'cl', t: 'From CL balance' },
+                                        { v: 'paid', t: 'Paid, no balance' },
+                                        { v: 'lwp', t: 'Unpaid (LWP)' },
+                                    ]}
+                                    onChange={(v) => setLp('otherTypesMode', v)}
+                                />
+                            </>
+                        )}
+                        <View style={styles.switchRow}>
+                            <Text style={[styles.label, { flex: 1 }]}>Count weekly offs / holidays inside a leave as leave days</Text>
+                            <Switch value={lp.countOffDays} onValueChange={(v) => setLp('countOffDays', v)} />
+                        </View>
+                        <View style={styles.switchRow}>
+                            <Text style={[styles.label, { flex: 1 }]}>Allow half-day leave</Text>
+                            <Switch value={lp.halfDayAllowed} onValueChange={(v) => setLp('halfDayAllowed', v)} />
+                        </View>
                     </View>
 
                     <TouchableOpacity style={styles.saveBtn} onPress={handleSaveSettings} disabled={saving}>
@@ -1060,6 +1129,11 @@ function Row({ label, value, positive = false }: { label: string; value: number;
 
 const styles = StyleSheet.create({
     runText: { fontSize: 13, color: '#333', lineHeight: 19 },
+    ruleHeader: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 6, borderTopLeftRadius: 10, borderTopRightRadius: 10, marginTop: 14 },
+    ruleHeaderText: { color: '#fff', fontWeight: 'bold', fontSize: 13, marginLeft: 6 },
+    ruleCard: { borderLeftWidth: 5, borderTopLeftRadius: 0 },
+    quotaRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginTop: 6 },
+    quotaType: { width: 30, fontWeight: 'bold', color: '#3b5998', paddingBottom: 12 },
     runBadge: { alignSelf: 'flex-start', marginTop: 6, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 10, fontSize: 12, fontWeight: 'bold', overflow: 'hidden' },
     runOpen: { backgroundColor: '#fff8e1', color: '#ef6c00' },
     runFinal: { backgroundColor: '#ede7f6', color: '#6a1b9a' },

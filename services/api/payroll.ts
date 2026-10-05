@@ -12,6 +12,27 @@ export interface DeductionRules {
   missingDayOutHalfDay: boolean;
   leaveExcessMode: 'fixed_penalty' | 'lwp';
 }
+// Leave Policy (backend src/lib/leavePolicy.ts) — off = old single yearly pool.
+export interface LeaveQuota { days: number; carryForward: boolean; maxCarry: number }
+export interface LeavePolicy {
+  enabled: boolean;
+  quotas: { CL: LeaveQuota; SL: LeaveQuota; EL: LeaveQuota };
+  otherTypesMode: 'cl' | 'paid' | 'lwp';
+  countOffDays: boolean;
+  halfDayAllowed: boolean;
+}
+export const DEFAULT_LEAVE_POLICY: LeavePolicy = {
+  enabled: false,
+  quotas: {
+    CL: { days: 8, carryForward: false, maxCarry: 0 },
+    SL: { days: 6, carryForward: false, maxCarry: 0 },
+    EL: { days: 12, carryForward: true, maxCarry: 30 },
+  },
+  otherTypesMode: 'cl',
+  countOffDays: true,
+  halfDayAllowed: true,
+};
+
 // Overtime (backend src/lib/overtime.ts) — off by default.
 export interface OvertimeRules {
   enabled: boolean;
@@ -46,6 +67,7 @@ export interface PayrollSettings {
   workSchedule: WorkSchedule; // company weekly off + shift
   deductionRules: DeductionRules; // late / absent / leave-excess cuts
   overtimeRules: OvertimeRules;
+  leavePolicy: LeavePolicy;
 }
 
 export interface Payslip {
@@ -97,6 +119,11 @@ function normalizeSettings(d: any): PayrollSettings {
     workSchedule: { ...DEFAULT_SCHEDULE, ...(d.workSchedule || {}) },
     deductionRules: { ...DEFAULT_DEDUCTION_RULES, ...(d.deductionRules || {}) },
     overtimeRules: { ...DEFAULT_OVERTIME_RULES, ...(d.overtimeRules || {}) },
+    leavePolicy: {
+      ...DEFAULT_LEAVE_POLICY,
+      ...(d.leavePolicy || {}),
+      quotas: { ...DEFAULT_LEAVE_POLICY.quotas, ...((d.leavePolicy && d.leavePolicy.quotas) || {}) },
+    },
   };
 }
 

@@ -716,6 +716,16 @@ const [selectedDate, setSelectedDate] = useState(new Date());
                     <Ionicons name="person" size={18} color="#3b5998" />
                     <Text style={styles.filterText} numberOfLines={1}>{selectedUser ? selectedUser.name : 'All Employees'}</Text>
                 </TouchableOpacity>
+                {/* Employee 360 for the selected person */}
+                {selectedUser?.id && (
+                    <TouchableOpacity
+                        onPress={() => router.push({ pathname: '/employee_360', params: { id: selectedUser.id } } as any)}
+                        style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#ede7f6', paddingHorizontal: 10, borderRadius: 8, marginLeft: 8 }}
+                    >
+                        <Ionicons name="analytics" size={16} color="#6a1b9a" />
+                        <Text style={{ color: '#6a1b9a', fontWeight: 'bold', marginLeft: 4 }}>360</Text>
+                    </TouchableOpacity>
+                )}
             </View>
 
             <FlatList 

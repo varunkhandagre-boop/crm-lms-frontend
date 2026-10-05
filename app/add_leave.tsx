@@ -21,13 +21,16 @@ import {
 import { useData } from './context/DataContext';
 
 // 🔥 Phase 7: leaves now go to Postgres via this adapter instead of addSaaSData("leaves", ...)
-import { applyLeave, fetchLeaves, fetchLeaveSummary } from '../services/api/leaves';
+import { applyLeave, fetchLeaves, fetchLeaveSummary, leaveBucket } from '../services/api/leaves';
+import { useWorkSchedules } from '../hooks/useWorkSchedules';
+import { isOffDay, localYmd } from '../utils/workSchedule';
 
 export default function AddLeaveScreen() {
   const router = useRouter();
   
   // 🔥 1. Context se Current User aur Notification Engine nikala
   const { currentUser, addNotification } = useData();
+  const { forUser: scheduleFor } = useWorkSchedules(currentUser?.companyId, currentUser?.id);
 
   // States
   const [fromDate, setFromDate] = useState(new Date());
@@ -45,8 +48,11 @@ export default function AddLeaveScreen() {
   const [modalVisible, setModalVisible] = useState(false);
 
   // Leave balance for this FY (server-computed) and days already waiting for approval
-  const [balanceInfo, setBalanceInfo] = useState<{ fyLabel: string; balance: number; used: number; totalQuota: number } | null>(null);
+  const [balanceInfo, setBalanceInfo] = useState<Awaited<ReturnType<typeof fetchLeaveSummary>> | null>(null);
   const [pendingDays, setPendingDays] = useState(0);
+  const [pendingList, setPendingList] = useState<any[]>([]);
+  const [halfDay, setHalfDay] = useState(false);
+  const policy = balanceInfo?.policy;
   useEffect(() => {
       let cancelled = false;
       Promise.all([fetchLeaveSummary(), fetchLeaves({ status: 'Pending' })])
@@ -54,15 +60,26 @@ export default function AddLeaveScreen() {
               if (cancelled) return;
               setBalanceInfo(summary);
               setPendingDays(pending.reduce((n, l) => n + (parseFloat(l.days) || 0), 0));
+              setPendingList(pending);
           })
           .catch(() => {}); // the form still works without the balance
       return () => { cancelled = true; };
   }, []);
 
-  const requested = parseInt(days) || 0;
-  const available = balanceInfo ? Math.max(0, balanceInfo.balance - pendingDays) : null;
-  // Leave Without Pay doesn't use the balance, so no warning for it
+  const requested = parseFloat(days) || 0;
+  // Leave Policy on: the balance of the selected type (CL / SL / EL / Comp Off);
+  // LWP and "paid, no balance" types never warn.
+  const bucket = policy?.enabled && type !== 'Select Leave Type' ? leaveBucket(type, policy.otherTypesMode) : null;
+  const typedBalance = bucket ? balanceInfo?.balances?.find((b) => b.type === bucket) : undefined;
+  const pendingSameBucket = bucket && policy
+      ? pendingList.filter((l) => leaveBucket(l.type, policy.otherTypesMode) === bucket).reduce((n, l) => n + (parseFloat(l.days) || 0), 0)
+      : 0;
+  const available = policy?.enabled
+      ? (typedBalance ? Math.max(0, typedBalance.balance - pendingSameBucket) : null)
+      : balanceInfo ? Math.max(0, balanceInfo.balance - pendingDays) : null;
   const overBy = available !== null && type !== 'Leave Without Pay' ? Math.max(0, requested - available) : 0;
+  const sameDay = localYmd(fromDate) === localYmd(toDate);
+  const canHalfDay = !!policy?.halfDayAllowed && sameDay;
   
   const leaveTypes = [
       "Compensatory Off", "Leave Without Pay", "Sick Leave", 
@@ -87,15 +104,20 @@ export default function AddLeaveScreen() {
         const diffTime = end.getTime() - start.getTime();
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
         
-        const total = diffDays + 1; // Include start date
-
-        if(total > 0) {
-            setDays(total.toString());
-        } else {
-            setDays('Invalid'); // End date before Start date
+        let total = diffDays + 1; // Include start date
+        if (total > 0 && policy && !policy.countOffDays) {
+            // Weekly offs don't count (holidays are also left out when saved)
+            const sched = scheduleFor(currentUser?.id);
+            total = 0;
+            for (let t = new Date(start); t <= end; t.setDate(t.getDate() + 1)) {
+                if (!isOffDay(localYmd(t), sched)) total++;
+            }
         }
+        if (diffDays + 1 <= 0) setDays('Invalid'); // End date before Start date
+        else if (halfDay && canHalfDay) setDays(total > 0 ? '0.5' : '0');
+        else setDays(total.toString());
     }
-  }, [fromDate, toDate]);
+  }, [fromDate, toDate, halfDay, canHalfDay, policy, scheduleFor, currentUser?.id]);
 
   // 🔥 3. SAAS SAVE LOGIC (Phase 7: now calls the Postgres API adapter directly)
   const handleSave = async () => {
@@ -103,7 +125,7 @@ export default function AddLeaveScreen() {
           Alert.alert("Missing Fields", "Please select Type and enter Reason.");
           return;
       }
-      if (days === 'Invalid' || parseInt(days) <= 0) {
+      if (days === 'Invalid' || requested <= 0) {
           Alert.alert("Invalid Dates", "To Date must be same or after From Date.");
           return;
       }
@@ -128,10 +150,13 @@ export default function AddLeaveScreen() {
           // user_id and role from the authenticated request; it also recalculates `days`
           // server-side, so this is treated as a display-only echo of the local calc.
           const result = await applyLeave({
-              fromDate: fromDate.toISOString().split('T')[0],
-              toDate: toDate.toISOString().split('T')[0],
+              // Local calendar date — toISOString() is UTC and gave the previous
+              // day for leaves applied between midnight and 5:30 AM IST.
+              fromDate: localYmd(fromDate),
+              toDate: localYmd(toDate),
               type: type,
               reason: reason,
+              halfDay: halfDay && canHalfDay,
           });
           
           if (result.success) {
@@ -178,6 +203,20 @@ export default function AddLeaveScreen() {
             {/* Leave balance */}
             {balanceInfo && (
                 <View style={styles.balanceCard}>
+                    {policy?.enabled && balanceInfo.balances ? (
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.balanceLabel}>Leave balance ({balanceInfo.fyLabel})</Text>
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                                {balanceInfo.balances.map((b) => (
+                                    <View key={b.type} style={[styles.typeChip, bucket === b.type && styles.typeChipOn]}>
+                                        <Text style={[styles.typeChipText, bucket === b.type && { color: '#fff' }]}>{b.type === 'COMP' ? 'Comp Off' : b.type} {b.balance}</Text>
+                                    </View>
+                                ))}
+                            </View>
+                            {available !== null && <Text style={styles.balanceSub}>{type}: {available} day(s) available{pendingSameBucket ? ` (${pendingSameBucket} pending)` : ''}</Text>}
+                        </View>
+                    ) : (
+                    <>
                     <View style={{ flex: 1 }}>
                         <Text style={styles.balanceLabel}>Leave balance ({balanceInfo.fyLabel})</Text>
                         <Text style={styles.balanceValue}>{available} <Text style={{ fontSize: 13, fontWeight: 'normal' }}>day(s) available</Text></Text>
@@ -186,6 +225,8 @@ export default function AddLeaveScreen() {
                         <Text style={styles.balanceSub}>Used: {balanceInfo.used}</Text>
                         {pendingDays > 0 && <Text style={styles.balanceSub}>Pending approval: {pendingDays}</Text>}
                     </View>
+                    </>
+                    )}
                 </View>
             )}
 
@@ -234,6 +275,13 @@ export default function AddLeaveScreen() {
                 </Text>
                 <Text style={{fontSize:12, color:'gray'}}>Days</Text>
             </View>
+            {canHalfDay && (
+                <TouchableOpacity style={styles.halfRow} onPress={() => setHalfDay(!halfDay)}>
+                    <Ionicons name={halfDay ? 'checkbox' : 'square-outline'} size={22} color="#3b5998" />
+                    <Text style={{ marginLeft: 8, color: '#333', fontWeight: '600' }}>Half day (0.5)</Text>
+                </TouchableOpacity>
+            )}
+            {policy && !policy.countOffDays && <Text style={{ fontSize: 11, color: 'gray', marginTop: -6, marginBottom: 8 }}>Weekly offs and holidays inside the leave are not counted.</Text>}
             {overBy > 0 && (
                 <View style={styles.overBox}>
                     <Ionicons name="warning" size={16} color="#c62828" />
@@ -292,6 +340,10 @@ export default function AddLeaveScreen() {
 }
 
 const styles = StyleSheet.create({
+  typeChip: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, backgroundColor: '#e8f5e9' },
+  typeChipOn: { backgroundColor: '#2e7d32' },
+  typeChipText: { fontSize: 12, fontWeight: 'bold', color: '#2e7d32' },
+  halfRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   balanceCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e3f2fd', borderRadius: 10, padding: 14, marginBottom: 10 },
   balanceLabel: { fontSize: 12, color: '#1565c0', fontWeight: '600' },
   balanceValue: { fontSize: 22, color: '#0d47a1', fontWeight: 'bold', marginTop: 2 },

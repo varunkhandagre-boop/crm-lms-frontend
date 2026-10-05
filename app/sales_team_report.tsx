@@ -225,7 +225,10 @@ export default function SalesTeamReport() {
                 return hasManagementRole || hasSalesActivity;
             });
         } else {
-            eligibleStaff = userList.filter((u: any) => u.id === activeUser?.id || u.uid === activeUser?.uid);
+            // Only their own card. (Was `u.uid === activeUser.uid` — both undefined
+            // on the new backend, so every employee matched and was listed.)
+            const myIds = [activeUser?.id, activeUser?.uid].filter(Boolean);
+            eligibleStaff = userList.filter((u: any) => myIds.includes(u.id) || (u.uid && myIds.includes(u.uid)));
         }
         if (selectedUserId !== 'All') {
             eligibleStaff = eligibleStaff.filter((u: any) => (u.id === selectedUserId || u.uid === selectedUserId));
