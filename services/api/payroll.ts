@@ -36,6 +36,9 @@ export interface Payslip {
   netPayable: number;
   generatedAt: string;
   user?: { name: string; empId: string | null };
+  // Month state: OPEN (can regenerate) → FINALIZED (locked) → PAID
+  runStatus?: 'OPEN' | 'FINALIZED' | 'PAID';
+  paidAt?: string | null; // YYYY-MM-DD…
 }
 
 interface OneResponse<T> { data: T; }
@@ -110,5 +113,47 @@ export async function previewAllPayslips(month: number, year: number): Promise<P
 
 export async function generateAllPayslips(month: number, year: number): Promise<{ created: number; skipped: number; total: number }> {
   const res = await apiClient.post<OneResponse<{ created: number; skipped: number; total: number }>>('/payroll/generate-all', { month, year });
+  return res.data;
+}
+// ── Month lock / paid / regenerate / bank sheet ─────────────────────────────
+export interface PayrollRun {
+  id: string;
+  month: number;
+  year: number;
+  status: 'FINALIZED' | 'PAID';
+  finalizedAt: string;
+  paidAt: string | null;
+  paidNote: string | null;
+}
+
+export async function fetchPayrollRun(month: number, year: number): Promise<PayrollRun | null> {
+  const res = await apiClient.get<OneResponse<PayrollRun | null>>(`/payroll/run?month=${month}&year=${year}`);
+  return res.data;
+}
+
+export async function finalizePayroll(month: number, year: number): Promise<PayrollRun> {
+  const res = await apiClient.post<OneResponse<PayrollRun>>('/payroll/finalize', { month, year });
+  return res.data;
+}
+
+export async function reopenPayroll(month: number, year: number): Promise<void> {
+  await apiClient.post('/payroll/reopen', { month, year });
+}
+
+export async function markPayrollPaid(month: number, year: number, paidOn: string, note?: string): Promise<PayrollRun> {
+  const res = await apiClient.post<OneResponse<PayrollRun>>('/payroll/mark-paid', { month, year, paidOn, note });
+  return res.data;
+}
+
+export async function regeneratePayslip(payslipId: string): Promise<Payslip> {
+  const res = await apiClient.post<OneResponse<Payslip>>(`/payroll/payslips/${payslipId}/regenerate`, {});
+  return res.data;
+}
+
+export interface BankSheetRow {
+  name: string; empId: string; bankName: string; accountNo: string; ifsc: string; amount: number; missingBank: boolean;
+}
+export async function fetchBankSheet(month: number, year: number): Promise<{ rows: BankSheetRow[]; total: number; status: string }> {
+  const res = await apiClient.get<OneResponse<{ rows: BankSheetRow[]; total: number; status: string }>>(`/payroll/bank-sheet?month=${month}&year=${year}`);
   return res.data;
 }

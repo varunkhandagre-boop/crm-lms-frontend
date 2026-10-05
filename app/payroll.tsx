@@ -20,9 +20,18 @@ import {
     View,
 } from 'react-native';
 import * as XLSX from 'xlsx';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import {
     fetchPayrollSettings,
+    fetchBankSheet,
+    fetchPayrollRun,
     fetchPayslips,
+    finalizePayroll,
+    markPayrollPaid,
+    PayrollRun,
+    regeneratePayslip,
+    reopenPayroll,
     generateAllPayslips,
     generatePayslip,
     PayrollSettings,
@@ -70,7 +79,10 @@ export default function PayrollScreen() {
     // refresh). Both the manager and self-view branches call
     // fetchPayslips({}) with identical (no) params — the server scopes the
     // result by role via the JWT — so this one hook covers both.
-    const payslipsCacheKey = buildCacheKey('payslips', currentUser?.companyId);
+    // Managers load one month at a time (server-filtered); employees load their own.
+    const payslipsCacheKey = isManager
+        ? buildCacheKey(`payslips_${selectedYear}_${selectedMonth}`, currentUser?.companyId)
+        : buildCacheKey('payslips', currentUser?.companyId);
     const {
         data: payslips,
         loading: payslipsLoading,
@@ -79,8 +91,134 @@ export default function PayrollScreen() {
     } = useCachedList({
         cacheKey: payslipsCacheKey,
         enabled: !!currentUser?.companyId,
-        fetcher: () => fetchPayslips({}),
+        fetcher: () => (isManager ? fetchPayslips({ month: selectedMonth, year: selectedYear }) : fetchPayslips({})),
     });
+
+    // ── Month lock: OPEN (no row) → FINALIZED → PAID ──
+    const [run, setRun] = useState<PayrollRun | null>(null);
+    const [showPaidPicker, setShowPaidPicker] = useState(false);
+    const isAdminRole = myRole.includes('admin');
+    const monthLabel = `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`;
+
+    const loadRun = () => {
+        if (!isManager || !currentUser?.companyId) return;
+        fetchPayrollRun(selectedMonth, selectedYear).then(setRun).catch(() => setRun(null));
+    };
+    useEffect(loadRun, [selectedMonth, selectedYear, isManager, currentUser?.companyId]);
+
+    const afterChange = async () => {
+        loadRun();
+        await refreshPayslips();
+    };
+
+    const handleFinalize = () => {
+        Alert.alert(
+            `Finalize ${monthLabel}?`,
+            `This locks ${monthLabel}: no more payslips can be generated or recalculated for this month. Use it once every payslip is checked.`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Finalize & Lock', onPress: async () => {
+                    try { await finalizePayroll(selectedMonth, selectedYear); await afterChange(); }
+                    catch (e: any) { Alert.alert('Error', e?.message || 'Could not finalize.'); }
+                }},
+            ]
+        );
+    };
+
+    const handleReopen = () => {
+        Alert.alert(`Reopen ${monthLabel}?`, 'Payslips of this month can be recalculated again until you finalize it once more.', [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Reopen', style: 'destructive', onPress: async () => {
+                try { await reopenPayroll(selectedMonth, selectedYear); await afterChange(); }
+                catch (e: any) { Alert.alert('Error', e?.message || 'Could not reopen.'); }
+            }},
+        ]);
+    };
+
+    const onPaidDatePicked = (event: any, date?: Date) => {
+        setShowPaidPicker(false);
+        if (event?.type !== 'set' || !date) return;
+        const ymd = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+        Alert.alert(
+            'Mark salary as paid?',
+            `${monthLabel} salary transferred on ${date.toLocaleDateString('en-GB')}. Every employee gets a "Salary Credited" notification.`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Mark Paid', onPress: async () => {
+                    try { await markPayrollPaid(selectedMonth, selectedYear, ymd); await afterChange(); Alert.alert('Done ✅', 'Marked as paid and employees notified.'); }
+                    catch (e: any) { Alert.alert('Error', e?.message || 'Could not mark paid.'); }
+                }},
+            ]
+        );
+    };
+
+    // NEFT / bank transfer sheet for the finalized month.
+    const handleBankSheet = async () => {
+        try {
+            const sheet = await fetchBankSheet(selectedMonth, selectedYear);
+            if (sheet.rows.length === 0) return Alert.alert('Nothing to pay', `No payslip with an amount for ${monthLabel}.`);
+            const exportSheet = async () => {
+                const narration = `Salary ${MONTH_NAMES[selectedMonth - 1].slice(0, 3)} ${selectedYear}`;
+                const rows = sheet.rows.map((r, i) => ({
+                    'Sr No': i + 1,
+                    'Beneficiary Name': r.name,
+                    'Account Number': r.accountNo,
+                    'IFSC': r.ifsc,
+                    'Amount': r.amount,
+                    'Bank Name': r.bankName,
+                    'Emp ID': r.empId,
+                    'Narration': narration,
+                }));
+                rows.push({ 'Sr No': '' as any, 'Beneficiary Name': 'TOTAL', 'Account Number': '', 'IFSC': '', 'Amount': sheet.total, 'Bank Name': '', 'Emp ID': '', 'Narration': '' });
+                const wb = XLSX.utils.book_new();
+                const ws = XLSX.utils.json_to_sheet(rows);
+                // Account numbers as text, so Excel doesn't turn them into 1.23E+11.
+                rows.forEach((_, i) => { const c = ws[XLSX.utils.encode_cell({ r: i + 1, c: 2 })]; if (c) { c.t = 's'; c.v = String(c.v ?? ''); } });
+                ws['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 20 }, { wch: 14 }, { wch: 12 }, { wch: 22 }, { wch: 12 }, { wch: 18 }];
+                XLSX.utils.book_append_sheet(wb, ws, 'Bank Transfer');
+                const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+                const uri = FileSystem.cacheDirectory + `Salary_Bank_Sheet_${MONTH_NAMES[selectedMonth - 1]}_${selectedYear}.xlsx`;
+                await FileSystem.writeAsStringAsync(uri, wbout, { encoding: FileSystem.EncodingType.Base64 });
+                await Sharing.shareAsync(uri, {
+                    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    dialogTitle: `Bank sheet — ${monthLabel}`,
+                });
+            };
+            const missing = sheet.rows.filter((r) => r.missingBank).map((r) => r.name);
+            if (missing.length) {
+                Alert.alert(
+                    'Bank details missing',
+                    `${missing.length} employee(s) have no account number / IFSC:\n\n${missing.join(', ')}\n\nAdd them in Manage Team, or export anyway and fill those rows by hand.`,
+                    [{ text: 'Cancel', style: 'cancel' }, { text: 'Export anyway', onPress: exportSheet }]
+                );
+            } else {
+                await exportSheet();
+            }
+        } catch (e: any) {
+            Alert.alert('Error', e?.message || 'Could not create the bank sheet.');
+        }
+    };
+
+    // Recalculate one payslip (attendance / leave corrected) — only while the month is open.
+    const handleRegenerate = (slip: Payslip) => {
+        Alert.alert(
+            'Recalculate payslip?',
+            `${slip.user?.name || 'This employee'} — ${MONTH_NAMES[slip.month - 1]} ${slip.year} will be calculated again from current attendance, leave, expenses and advances.`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Recalculate', onPress: async () => {
+                    try {
+                        const fresh = await regeneratePayslip(slip.id);
+                        await afterChange();
+                        setSelectedSlip({ ...fresh, user: slip.user, runStatus: 'OPEN', paidAt: null });
+                        Alert.alert('Done ✅', `New net payable: ₹${Number(fresh.netPayable).toLocaleString('en-IN')}`);
+                    } catch (e: any) {
+                        Alert.alert('Error', e?.message || 'Could not recalculate.');
+                    }
+                }},
+            ]
+        );
+    };
 
     // 🔥 Team members — cache-first, shares the SAME 'team_members' cache
     // key as manage_team.tsx/employee_timeline.tsx.
@@ -154,7 +292,7 @@ export default function PayrollScreen() {
         setSaving(true);
         try {
             await generatePayslip(selectedUserId, selectedMonth, selectedYear);
-            await refreshPayslips();
+            await afterChange();
             setPreview(null);
             Alert.alert('Success ✅', 'Payslip generated!');
         } catch (e: any) {
@@ -187,7 +325,7 @@ export default function PayrollScreen() {
                     setSaving(true);
                     try {
                         const result = await generateAllPayslips(selectedMonth, selectedYear);
-                        await refreshPayslips();
+                        await afterChange();
                         setAllPreview(null);
                         Alert.alert('Done ✅', `Generated: ${result.created}, Skipped: ${result.skipped} (already existed)`);
                     } catch (e: any) {
@@ -369,7 +507,7 @@ const generatePayslipPDF = async (slip: Payslip) => {
               </table>
 
               <div class="doc-footer">
-                This is a system-generated salary slip from ${companyProfile?.companyName || 'our company'} • Generated on ${genDate}
+                This is a system-generated salary slip from ${companyProfile?.companyName || 'our company'} • Generated on ${genDate}${slip.runStatus === 'PAID' && slip.paidAt ? ` • Paid on ${new Date(slip.paidAt).toLocaleDateString('en-GB', { timeZone: 'UTC' })}` : ''}
               </div>
             </div>
           </body>
@@ -429,7 +567,11 @@ const generatePayslipPDF = async (slip: Payslip) => {
                             <TouchableOpacity key={item.id} style={styles.payslipRow} onPress={() => setSelectedSlip(item)}>
                                 <View style={{ flex: 1 }}>
                                     <Text style={styles.payslipName}>{MONTH_NAMES[item.month - 1]} {item.year}</Text>
-                                    <Text style={styles.payslipMeta}>Net Payable</Text>
+                                    <Text style={styles.payslipMeta}>
+                                        {item.runStatus === 'PAID' && item.paidAt
+                                            ? `✅ Paid on ${new Date(item.paidAt).toLocaleDateString('en-GB', { timeZone: 'UTC' })}`
+                                            : 'Net Payable'}
+                                    </Text>
                                 </View>
                                 <Text style={styles.payslipAmount}>₹{Number(item.netPayable).toLocaleString('en-IN')}</Text>
                             </TouchableOpacity>
@@ -526,6 +668,42 @@ const generatePayslipPDF = async (slip: Payslip) => {
                         <TextInput style={styles.input} keyboardType="numeric" value={String(selectedYear)} onChangeText={(t) => setSelectedYear(Number(t) || 2026)} />
                     </View>
 
+                    <Text style={styles.sectionTitle}>Status — {monthLabel}</Text>
+                    <View style={styles.card}>
+                        {!run ? (
+                            <>
+                                <Text style={styles.runText}>🟡 Open — payslips can still be generated or recalculated.</Text>
+                                {payslips.length > 0 && (
+                                    <TouchableOpacity style={[styles.saveBtn, { backgroundColor: '#6a1b9a', marginTop: 10 }]} onPress={handleFinalize}>
+                                        <Text style={styles.saveBtnText}>🔒 Finalize & Lock {monthLabel}</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </>
+                        ) : (
+                            <>
+                                <Text style={styles.runText}>
+                                    {run.status === 'PAID'
+                                        ? `✅ Paid on ${run.paidAt ? new Date(run.paidAt).toLocaleDateString('en-GB', { timeZone: 'UTC' }) : '-'} — locked.`
+                                        : '🔒 Finalized — locked. Download the bank sheet, transfer salaries, then mark as paid.'}
+                                </Text>
+                                <TouchableOpacity style={[styles.saveBtn, { backgroundColor: '#2e7d32', marginTop: 10 }]} onPress={handleBankSheet}>
+                                    <Text style={styles.saveBtnText}>🏦 Bank Transfer Sheet (Excel)</Text>
+                                </TouchableOpacity>
+                                {run.status === 'FINALIZED' && (
+                                    <TouchableOpacity style={[styles.saveBtn, { backgroundColor: '#1565c0', marginTop: 10 }]} onPress={() => setShowPaidPicker(true)}>
+                                        <Text style={styles.saveBtnText}>💰 Mark Salary as Paid</Text>
+                                    </TouchableOpacity>
+                                )}
+                                {run.status === 'FINALIZED' && isAdminRole && (
+                                    <TouchableOpacity onPress={handleReopen} style={{ marginTop: 10, alignSelf: 'center' }}>
+                                        <Text style={{ color: '#c62828', fontWeight: 'bold' }}>Reopen (Admin)</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </>
+                        )}
+                        {showPaidPicker && <DateTimePicker value={new Date()} mode="date" maximumDate={new Date()} {...pickerHandlers(onPaidDatePicked)} />}
+                    </View>
+
                     <Text style={styles.sectionTitle}>Single Employee</Text>
                     <View style={styles.card}>
                         <Text style={styles.label}>Employee</Text>
@@ -598,7 +776,7 @@ const generatePayslipPDF = async (slip: Payslip) => {
                     )}
 
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
-                        <Text style={styles.sectionTitle}>Previously Generated</Text>
+                        <Text style={styles.sectionTitle}>Payslips — {monthLabel}</Text>
                         <View style={{ flexDirection: 'row', gap: 8 }}>
                             <TouchableOpacity onPress={toggleSelectAll} style={styles.selectAllBtn}>
                                 <Text style={styles.selectAllBtnText}>Select All</Text>
@@ -628,47 +806,6 @@ const generatePayslipPDF = async (slip: Payslip) => {
                 </ScrollView>
             )}
 
-            {selectedSlip && (
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalBox}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                            <Text style={styles.modalTitle}>{selectedSlip.user?.name}</Text>
-                            <TouchableOpacity onPress={() => setSelectedSlip(null)}>
-                                <Ionicons name="close" size={24} color="#333" />
-                            </TouchableOpacity>
-                        </View>
-                        <Text style={styles.modalSub}>{MONTH_NAMES[selectedSlip.month - 1]} {selectedSlip.year}</Text>
-
-                        <Text style={[styles.sectionTitle, { marginTop: 15 }]}>Attendance Summary</Text>
-                        <View style={styles.attSummaryGrid}>
-                            <AttBox label="Present" value={selectedSlip.presentDays} />
-                            <AttBox label="Short Days" value={selectedSlip.shortDaysCount} />
-                            <AttBox label="Holidays" value={selectedSlip.holidaysThisMonth} />
-                            <AttBox label="Leaves Taken" value={selectedSlip.leaveDaysThisMonth} />
-                            <AttBox label="Leave Balance" value={selectedSlip.leaveBalance} />
-                            <AttBox label="Office / Field" value={`${selectedSlip.officeDays}/${selectedSlip.fieldDays}`} />
-                        </View>
-
-                        <TouchableOpacity style={[styles.saveBtn, { backgroundColor: '#1565c0', marginTop: 15 }]} onPress={() => generatePayslipPDF(selectedSlip)}>
-                            <Text style={styles.saveBtnText}>📄 Download PDF</Text>
-                        </TouchableOpacity>
-
-                        <View style={{ marginTop: 15 }}>
-                            <Row label="Base Salary" value={Number(selectedSlip.baseSalary)} positive />
-                            <Row label="Incentive" value={Number(selectedSlip.incentiveAmount)} positive />
-                            <Row label="Expenses" value={Number(selectedSlip.expenseAmount)} positive />
-                            <Row label="Late-Coming Deduction" value={-Number(selectedSlip.lateDeduction)} />
-                            <Row label="Short-Hours Deduction" value={-Number(selectedSlip.shortHoursDeduction)} />
-                            <Row label="Leave Deduction" value={-Number(selectedSlip.leaveDeduction)} />
-                            <Row label="Advance Deduction" value={-Number(selectedSlip.advanceDeduction)} />
-                            <View style={styles.netRow}>
-                                <Text style={styles.netLabel}>Net Payable</Text>
-                                <Text style={styles.netValue}>₹{Number(selectedSlip.netPayable).toLocaleString('en-IN')}</Text>
-                            </View>
-                        </View>
-                    </View>
-                  </View>
-                          )}
               </>
               )}
 
@@ -682,6 +819,16 @@ const generatePayslipPDF = async (slip: Payslip) => {
                             </TouchableOpacity>
                         </View>
                         <Text style={styles.modalSub}>{MONTH_NAMES[selectedSlip.month - 1]} {selectedSlip.year}</Text>
+                        <Text style={[styles.runBadge, selectedSlip.runStatus === 'PAID' ? styles.runPaid : selectedSlip.runStatus === 'FINALIZED' ? styles.runFinal : styles.runOpen]}>
+                            {selectedSlip.runStatus === 'PAID'
+                                ? `✅ Paid on ${selectedSlip.paidAt ? new Date(selectedSlip.paidAt).toLocaleDateString('en-GB', { timeZone: 'UTC' }) : '-'}`
+                                : selectedSlip.runStatus === 'FINALIZED' ? '🔒 Final' : '🟡 Draft — may still change'}
+                        </Text>
+                        {isManager && (selectedSlip.runStatus ?? 'OPEN') === 'OPEN' && (
+                            <TouchableOpacity onPress={() => handleRegenerate(selectedSlip)} style={{ marginTop: 8 }}>
+                                <Text style={{ color: '#1565c0', fontWeight: 'bold' }}>↻ Recalculate this payslip</Text>
+                            </TouchableOpacity>
+                        )}
 
                         <Text style={[styles.sectionTitle, { marginTop: 15 }]}>Attendance Summary</Text>
                         <View style={styles.attSummaryGrid}>
@@ -739,6 +886,11 @@ function Row({ label, value, positive = false }: { label: string; value: number;
 }
 
 const styles = StyleSheet.create({
+    runText: { fontSize: 13, color: '#333', lineHeight: 19 },
+    runBadge: { alignSelf: 'flex-start', marginTop: 6, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 10, fontSize: 12, fontWeight: 'bold', overflow: 'hidden' },
+    runOpen: { backgroundColor: '#fff8e1', color: '#ef6c00' },
+    runFinal: { backgroundColor: '#ede7f6', color: '#6a1b9a' },
+    runPaid: { backgroundColor: '#e8f5e9', color: '#2e7d32' },
     attSummaryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
     attBox: { backgroundColor: '#f5f7fa', borderRadius: 8, padding: 10, minWidth: '30%', alignItems: 'center' },
     attBoxValue: { fontSize: 16, fontWeight: 'bold', color: '#3b5998' },
