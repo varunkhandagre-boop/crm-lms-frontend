@@ -42,6 +42,8 @@ import {
     previewAllPayslips,
     previewPayslip,
     savePayrollSettings,
+    DEFAULT_DEDUCTION_RULES,
+    DeductionRules,
 } from '../services/api/payroll';
 import { fetchTeamMembers } from '../services/api/users';
 import { urlToBase64Image } from '../utils/pdfImageHelper';
@@ -51,6 +53,18 @@ import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+function ChoiceChips<T extends string>({ value, options, onChange }: { value: T; options: { v: T; t: string }[]; onChange: (v: T) => void }) {
+    return (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+            {options.map((o) => (
+                <TouchableOpacity key={o.v} onPress={() => onChange(o.v)} style={[styles.chip, value === o.v && styles.chipActive]}>
+                    <Text style={[styles.chipText, value === o.v && styles.chipTextActive]}>{o.t}</Text>
+                </TouchableOpacity>
+            ))}
+        </View>
+    );
+}
 
 export default function PayrollScreen() {
     const router = useRouter();
@@ -260,6 +274,9 @@ export default function PayrollScreen() {
     const updateSetting = (key: keyof PayrollSettings, value: any) => {
         setSettings((prev) => (prev ? { ...prev, [key]: value } : prev));
     };
+    const rules: DeductionRules = settings?.deductionRules || DEFAULT_DEDUCTION_RULES;
+    const setRule = <K extends keyof DeductionRules>(key: K, value: DeductionRules[K]) =>
+        setSettings((prev) => (prev ? { ...prev, deductionRules: { ...(prev.deductionRules || DEFAULT_DEDUCTION_RULES), [key]: value } } : prev));
 
     const handleSaveSettings = async () => {
         if (!settings) return;
@@ -385,7 +402,10 @@ export default function PayrollScreen() {
                     'Holidays': p.holidaysThisMonth,
                     'Leaves Taken': p.leaveDaysThisMonth,
                     'Leave Balance': p.leaveBalance,
+                    'Late Days': p.lateDays ?? 0,
                     'Late Deduction': Number(p.lateDeduction),
+                    'Absent Days': Number(p.absentDays || 0),
+                    'Absent Deduction': Number(p.absentDeduction || 0),
                     'Short-Hours Deduction': Number(p.shortHoursDeduction),
                     'Leave Deduction': Number(p.leaveDeduction),
                     'Advance Deduction': Number(p.advanceDeduction),
@@ -504,7 +524,8 @@ const generatePayslipPDF = async (slip: Payslip) => {
               <table class="table">
                 <thead><tr><th style="width:60%;">Deductions</th><th style="width:40%; text-align:right;">Amount</th></tr></thead>
                 <tbody>
-                  <tr><td>Late-Coming</td><td style="text-align:right;" class="ded">₹${Number(slip.lateDeduction).toLocaleString('en-IN')}</td></tr>
+                  <tr><td>Late-Coming${slip.lateDays ? ` (${slip.lateDays} late)` : ''}</td><td style="text-align:right;" class="ded">₹${Number(slip.lateDeduction).toLocaleString('en-IN')}</td></tr>
+                  <tr><td>Absent${Number(slip.absentDays) ? ` (${Number(slip.absentDays)} day)` : ''}</td><td style="text-align:right;" class="ded">₹${Number(slip.absentDeduction || 0).toLocaleString('en-IN')}</td></tr>
                   <tr><td>Short Working-Hours</td><td style="text-align:right;" class="ded">₹${Number(slip.shortHoursDeduction).toLocaleString('en-IN')}</td></tr>
                   <tr><td>Leave (Beyond Quota)</td><td style="text-align:right;" class="ded">₹${Number(slip.leaveDeduction).toLocaleString('en-IN')}</td></tr>
                   <tr><td>Advance Recovery</td><td style="text-align:right;" class="ded">₹${Number(slip.advanceDeduction).toLocaleString('en-IN')}</td></tr>
@@ -618,7 +639,35 @@ const generatePayslipPDF = async (slip: Payslip) => {
                             <>
                                 <Text style={styles.label}>Late After (24hr, e.g. 10:00)</Text>
                                 <TextInput style={styles.input} placeholder="10:00" value={settings.lateComingAfterTime || ''} onChangeText={(t) => updateSetting('lateComingAfterTime', t)} />
-                                <Text style={styles.hint}>Penalty: half a day's salary, automatically calculated per employee.</Text>
+                                <Text style={styles.hint}>An employee with a shift (Weekly Off & Shift below) is late after shift start + {'"late after (min)"'} instead.</Text>
+                                <Text style={styles.label}>How to cut for late</Text>
+                                <ChoiceChips
+                                    value={rules.lateMode}
+                                    options={[
+                                        { v: 'half_day_each', t: '½ day per late' },
+                                        { v: 'every_n', t: `½ day per ${rules.lateEveryN} lates` },
+                                        { v: 'fixed', t: '₹ per late' },
+                                    ]}
+                                    onChange={(v) => setRule('lateMode', v)}
+                                />
+                                <View style={{ flexDirection: 'row', gap: 10 }}>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.label}>Free lates / month</Text>
+                                        <TextInput style={styles.input} keyboardType="numeric" value={String(rules.lateFree)} onChangeText={(t) => setRule('lateFree', Math.min(31, Number(t.replace(/[^0-9]/g, '')) || 0))} />
+                                    </View>
+                                    {rules.lateMode === 'every_n' && (
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.label}>Lates per ½ day</Text>
+                                            <TextInput style={styles.input} keyboardType="numeric" value={String(rules.lateEveryN)} onChangeText={(t) => setRule('lateEveryN', Math.max(1, Math.min(31, Number(t.replace(/[^0-9]/g, '')) || 1)))} />
+                                        </View>
+                                    )}
+                                    {rules.lateMode === 'fixed' && (
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.label}>₹ per late</Text>
+                                            <TextInput style={styles.input} keyboardType="numeric" value={String(settings.lateComingPenalty)} onChangeText={(t) => updateSetting('lateComingPenalty', Number(t) || 0)} />
+                                        </View>
+                                    )}
+                                </View>
                             </>
                         )}
                     </View>
@@ -650,10 +699,52 @@ const generatePayslipPDF = async (slip: Payslip) => {
                         />
                     </View>
 
+                    <Text style={styles.sectionTitle}>Absent & One Day’s Salary</Text>
+                    <View style={styles.card}>
+                        <Text style={styles.label}>One day’s salary =</Text>
+                        <ChoiceChips
+                            value={rules.perDayBasis}
+                            options={[
+                                { v: 'calendar', t: 'Salary ÷ days in month' },
+                                { v: 'fixed30', t: 'Salary ÷ 30' },
+                                { v: 'working', t: 'Salary ÷ working days' },
+                            ]}
+                            onChange={(v) => setRule('perDayBasis', v)}
+                        />
+                        <View style={styles.switchRow}>
+                            <Text style={[styles.label, { flex: 1 }]}>Cut one day’s salary for absent without leave</Text>
+                            <Switch value={rules.absentDeduction} onValueChange={(v) => setRule('absentDeduction', v)} />
+                        </View>
+                        {rules.absentDeduction && (
+                            <View style={styles.switchRow}>
+                                <Text style={[styles.label, { flex: 1 }]}>Sandwich rule — weekly off / holiday between two absent days is also absent</Text>
+                                <Switch value={rules.sandwichRule} onValueChange={(v) => setRule('sandwichRule', v)} />
+                            </View>
+                        )}
+                        <View style={styles.switchRow}>
+                            <Text style={[styles.label, { flex: 1 }]}>Day In without Day Out = ½ day absent</Text>
+                            <Switch value={rules.missingDayOutHalfDay} onValueChange={(v) => setRule('missingDayOutHalfDay', v)} />
+                        </View>
+                        <Text style={styles.hint}>Absent = a past working day with no Day In and no approved leave (weekly offs and holidays don’t count). Days before joining are never absent.</Text>
+                    </View>
+
                     <Text style={styles.sectionTitle}>Leave Quota</Text>
                     <View style={styles.card}>
-                        <Text style={styles.label}>Penalty (₹ per extra day beyond monthly quota)</Text>
-                        <TextInput style={styles.input} keyboardType="numeric" value={String(settings.leaveExcessPenalty)} onChangeText={(t) => updateSetting('leaveExcessPenalty', Number(t) || 0)} />
+                        <Text style={styles.label}>Leave beyond the allowed quota</Text>
+                        <ChoiceChips
+                            value={rules.leaveExcessMode}
+                            options={[
+                                { v: 'fixed_penalty', t: '₹ per day beyond monthly quota' },
+                                { v: 'lwp', t: "One day's salary (LWP) beyond yearly balance" },
+                            ]}
+                            onChange={(v) => setRule('leaveExcessMode', v)}
+                        />
+                        {rules.leaveExcessMode === 'fixed_penalty' && (
+                            <>
+                                <Text style={styles.label}>Penalty (₹ per extra day beyond monthly quota)</Text>
+                                <TextInput style={styles.input} keyboardType="numeric" value={String(settings.leaveExcessPenalty)} onChangeText={(t) => updateSetting('leaveExcessPenalty', Number(t) || 0)} />
+                            </>
+                        )}
                     </View>
 
                     <TouchableOpacity style={styles.saveBtn} onPress={handleSaveSettings} disabled={saving}>
@@ -757,7 +848,8 @@ const generatePayslipPDF = async (slip: Payslip) => {
                             <Row label="Base Salary" value={preview.baseSalary} positive />
                             <Row label="Incentive" value={preview.incentiveAmount} positive />
                             <Row label="Expenses" value={preview.expenseAmount} positive />
-                            <Row label="Late-Coming Deduction" value={-preview.lateDeduction} />
+                            <Row label={`Late-Coming Deduction${preview.lateDays ? ` (${preview.lateDays} late)` : ''}`} value={-preview.lateDeduction} />
+                            <Row label={`Absent Deduction${Number(preview.absentDays) ? ` (${Number(preview.absentDays)} day)` : ''}`} value={-Number(preview.absentDeduction || 0)} />
                             <Row label="Short-Hours Deduction" value={-preview.shortHoursDeduction} />
                             <Row label="Leave Deduction" value={-preview.leaveDeduction} />
                             <Row label="Advance Deduction" value={-preview.advanceDeduction} />
@@ -866,7 +958,8 @@ const generatePayslipPDF = async (slip: Payslip) => {
                             <Row label="Base Salary" value={Number(selectedSlip.baseSalary)} positive />
                             <Row label="Incentive" value={Number(selectedSlip.incentiveAmount)} positive />
                             <Row label="Expenses" value={Number(selectedSlip.expenseAmount)} positive />
-                            <Row label="Late-Coming Deduction" value={-Number(selectedSlip.lateDeduction)} />
+                            <Row label={`Late-Coming Deduction${selectedSlip.lateDays ? ` (${selectedSlip.lateDays} late)` : ''}`} value={-Number(selectedSlip.lateDeduction)} />
+                            <Row label={`Absent Deduction${Number(selectedSlip.absentDays) ? ` (${Number(selectedSlip.absentDays)} day)` : ''}`} value={-Number(selectedSlip.absentDeduction || 0)} />
                             <Row label="Short-Hours Deduction" value={-Number(selectedSlip.shortHoursDeduction)} />
                             <Row label="Leave Deduction" value={-Number(selectedSlip.leaveDeduction)} />
                             <Row label="Advance Deduction" value={-Number(selectedSlip.advanceDeduction)} />

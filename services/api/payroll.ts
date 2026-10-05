@@ -1,4 +1,20 @@
 import { DEFAULT_SCHEDULE, WorkSchedule } from '../../utils/workSchedule';
+
+// Same rules as the backend (src/lib/deductionRules.ts); defaults = old behaviour.
+export interface DeductionRules {
+  perDayBasis: 'calendar' | 'fixed30' | 'working';
+  lateMode: 'half_day_each' | 'every_n' | 'fixed';
+  lateFree: number;
+  lateEveryN: number;
+  absentDeduction: boolean;
+  sandwichRule: boolean;
+  missingDayOutHalfDay: boolean;
+  leaveExcessMode: 'fixed_penalty' | 'lwp';
+}
+export const DEFAULT_DEDUCTION_RULES: DeductionRules = {
+  perDayBasis: 'calendar', lateMode: 'half_day_each', lateFree: 0, lateEveryN: 3,
+  absentDeduction: false, sandwichRule: false, missingDayOutHalfDay: false, leaveExcessMode: 'fixed_penalty',
+};
 import { apiClient } from './client';
 
 export interface PayrollSettings {
@@ -14,6 +30,7 @@ export interface PayrollSettings {
   shortHoursPenalty: number;
   leaveExcessPenalty: number;
   workSchedule: WorkSchedule; // company weekly off + shift
+  deductionRules: DeductionRules; // late / absent / leave-excess cuts
 }
 
 export interface Payslip {
@@ -35,6 +52,9 @@ export interface Payslip {
   shortHoursDeduction: number;
   leaveDeduction: number;
   advanceDeduction: number;
+  lateDays?: number;
+  absentDays?: number | string; // Decimal — may arrive as a string
+  absentDeduction?: number | string;
   netPayable: number;
   generatedAt: string;
   user?: { name: string; empId: string | null };
@@ -58,6 +78,7 @@ function normalizeSettings(d: any): PayrollSettings {
     shortHoursPenalty: Number(d.shortHoursPenalty),
     leaveExcessPenalty: Number(d.leaveExcessPenalty),
     workSchedule: { ...DEFAULT_SCHEDULE, ...(d.workSchedule || {}) },
+    deductionRules: { ...DEFAULT_DEDUCTION_RULES, ...(d.deductionRules || {}) },
   };
 }
 
