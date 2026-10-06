@@ -46,7 +46,8 @@ import { useHeaderTop } from '../hooks/useHeaderTop';
 
 /** Address text if we have one, else "lat, lng", else the fallback. Locations can arrive as plain text or as {address, latitude, longitude}. */
 function locationText(text: unknown, loc: unknown, fallback = 'Unknown'): string {
-  if (typeof text === 'string' && text.trim()) return text;
+  // Day Out saves "Unknown" when reverse-geocoding fails; coordinates are more useful then.
+  if (typeof text === 'string' && text.trim() && text.trim() !== 'Unknown') return text;
   const l = (loc && typeof loc === 'object' ? loc : null) as { address?: string; latitude?: number; longitude?: number } | null;
   if (l?.address) return l.address;
   if (typeof l?.latitude === 'number' && typeof l?.longitude === 'number') return `${l.latitude.toFixed(5)}, ${l.longitude.toFixed(5)}`;
@@ -1034,6 +1035,9 @@ const [selectedDate, setSelectedDate] = useState(new Date());
                                   <DetailRow label="Total Hrs" value={selectedEvent.rawData.workHrs || 'N/A'} />
                                   <DetailRow label="Day Expense" value={`₹ ${Number(selectedEvent.rawData.expenses?.totalAmount || selectedEvent.rawData.dayExpense || selectedEvent.rawData.expense || 0).toLocaleString()}`} />
                                   <View style={styles.infoBox}><Text style={styles.infoLabel}>Login Location:</Text><Text style={styles.infoValue}>{locationText(selectedEvent.rawData.inLocation, selectedEvent.rawData.location, '-')}</Text></View>
+                                  {selectedEvent.rawData.outTime && selectedEvent.rawData.outTime !== '--' ? (
+                                      <View style={styles.infoBox}><Text style={styles.infoLabel}>Logout Location:</Text><Text style={styles.infoValue}>{locationText(selectedEvent.rawData.outAddress, selectedEvent.rawData.outLocation, '-')}</Text></View>
+                                  ) : null}
                               </>
                           )}
 

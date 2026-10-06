@@ -40,7 +40,7 @@ export async function fetchOutboundMessages(filters: { channel?: MessageChannel;
 
 // One page of Sent History — channel/status/search filtered on the server.
 export async function fetchOutboundMessagesPage(params: {
-    channel?: MessageChannel; status?: MessageStatus; search?: string; page: number; limit: number;
+    channel?: MessageChannel; status?: MessageStatus; search?: string; dueOnly?: boolean; page: number; limit: number;
 }): Promise<{ items: OutboundMessage[]; total: number; totalPages: number }> {
     const q = new URLSearchParams();
     Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== '') q.set(k, String(v)); });

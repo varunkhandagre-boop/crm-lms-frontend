@@ -29,7 +29,6 @@ import {
     cancelMessage,
     fetchAudiencePage,
     fetchAudienceTypes,
-    fetchOutboundMessages,
     fetchOutboundMessagesPage,
     markEmailSent,
     MessageChannel,
@@ -99,23 +98,26 @@ const PendingEmailsTab = () => {
     const { currentUser } = useData();
     const [processingId, setProcessingId] = useState<string | null>(null);
 
-    // 🔥 PENDING EMAILS + TEMPLATES — cache-first. See hooks/useCachedList.ts.
-    const pendingCacheKey = buildCacheKey('pending_emails', currentUser?.companyId);
+    // Pending emails: due ones only, 20 per page, filtered on the server.
+    const [handledCount, setHandledCount] = useState(0);
+    const pendingFilters = useMemo(() => ({ channel: 'email' as MessageChannel, status: 'PENDING' as MessageStatus, dueOnly: true }), []);
     const {
-        data: pendingList,
-        setData: setPendingList,
+        items: pendingList,
+        setItems: setPendingList,
+        total: pendingTotal,
         loading,
+        loadingMore: pendingLoadingMore,
+        hasMore: pendingHasMore,
+        loadMore: loadMorePending,
         refreshing: pendingRefreshing,
         refresh: refreshPending,
-    } = useCachedList({
-        cacheKey: pendingCacheKey,
+    } = useServerPagedList<{ channel: MessageChannel; status: MessageStatus; dueOnly: boolean }, OutboundMessage>({
+        fetchPage: fetchOutboundMessagesPage,
+        filters: pendingFilters,
         enabled: !!currentUser?.companyId,
-        fetcher: async () => {
-            const messages = await fetchOutboundMessages({ channel: 'email', status: 'PENDING' });
-            const now = Date.now();
-            return messages.filter((m) => !m.scheduledFor || new Date(m.scheduledFor).getTime() <= now);
-        },
+        cacheKey: buildCacheKey('pending_emails_page1', currentUser?.companyId),
     });
+    // 🔥 TEMPLATES — cache-first. See hooks/useCachedList.ts.
     const templatesCacheKey = buildCacheKey('email_templates', currentUser?.companyId);
     const {
         data: templates,
@@ -128,6 +130,7 @@ const PendingEmailsTab = () => {
     });
 
     const onRefresh = async () => {
+        setHandledCount(0);
         await Promise.all([refreshPending(), refreshTemplates()]);
     };
 
@@ -162,6 +165,7 @@ const PendingEmailsTab = () => {
             await Linking.openURL(url);
             await markEmailSent(msg.id);
             setPendingList((prev) => prev.filter((m) => m.id !== msg.id));
+            setHandledCount((n) => n + 1);
         } catch (e: any) {
             Alert.alert('Error', e.message || 'Could not open email app.');
         } finally {
@@ -177,6 +181,7 @@ const PendingEmailsTab = () => {
                     try {
                         await cancelMessage(id);
                         setPendingList((prev) => prev.filter((m) => m.id !== id));
+                        setHandledCount((n) => n + 1);
                     } catch (e: any) {
                         Alert.alert('Error', e.message || 'Could not cancel.');
                     }
@@ -199,6 +204,12 @@ const PendingEmailsTab = () => {
                 refreshControl={
                     <RefreshControl refreshing={pendingRefreshing} onRefresh={onRefresh} colors={['#1565c0']} tintColor="#1565c0" />
                 }
+                ListHeaderComponent={pendingTotal - handledCount > 0 ? <Text style={{ textAlign: 'right', fontSize: 12, color: 'gray', marginBottom: 6 }}>Pending: {pendingTotal - handledCount}</Text> : null}
+                ListFooterComponent={pendingHasMore ? (
+                    <TouchableOpacity style={styles.loadMoreBtn} onPress={loadMorePending} disabled={pendingLoadingMore}>
+                        {pendingLoadingMore ? <ActivityIndicator color="#3b5998" /> : <Text style={styles.loadMoreText}>Load more ({pendingTotal - handledCount - pendingList.length} remaining)</Text>}
+                    </TouchableOpacity>
+                ) : null}
                 ListEmptyComponent={
                     <View style={{ alignItems: 'center', marginTop: 50 }}>
                         <Ionicons name="checkmark-done-circle" size={60} color="#ccc" />

@@ -34,6 +34,7 @@ import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { scanTextFromImage } from '../services/api/ocr';
 
 export default function AddOrganizationScreen() {
   const headerTop = useHeaderTop();
@@ -214,35 +215,15 @@ export default function AddOrganizationScreen() {
 
           if (!result.canceled && result.assets[0].base64) {
               setIsScanning(true);
-              const base64Image = `data:image/jpeg;base64,${result.assets[0].base64}`;
-
-              const formData = new FormData();
-              formData.append('base64Image', base64Image);
-              formData.append('language', 'eng');
-              formData.append('isOverlayRequired', 'false');
-
-              const response = await fetch('https://api.ocr.space/parse/image', {
-                  method: 'POST',
-                  headers: { 'apikey': 'helloworld' },
-                  body: formData,
-              });
-
-              const data = await response.json();
-
-              if (data.IsErroredOnProcessing) {
-                  Alert.alert('API Error', data.ErrorMessage?.[0] || 'Image size might be too large.');
-                  return;
-              }
-
-              if (data.ParsedResults && data.ParsedResults.length > 0) {
-                  const extractedText = data.ParsedResults[0].ParsedText;
+              const extractedText = await scanTextFromImage(result.assets[0].base64);
+              if (extractedText) {
                   processOCRText(extractedText);
               } else {
                   Alert.alert('Scan Failed', 'Could not read text clearly. Please hold the phone steady and try again.');
               }
           }
-      } catch (error) {
-          Alert.alert('Error', 'Failed to scan the card. Check your internet connection.');
+      } catch (error: any) {
+          Alert.alert('Scan Failed', error?.message || 'Failed to scan the card. Check your internet connection.');
       } finally {
           setIsScanning(false);
       }
