@@ -913,9 +913,9 @@ const styles = StyleSheet.create({
     monthSelector: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'white', padding: 8, borderRadius: 8, marginBottom: 10 },
     monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
 
-    tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', borderRadius: 8, padding: 3, marginBottom: 10 },
-    tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-    activeTab: { backgroundColor: 'white', elevation: 2 },
+    tabContainer: { flexDirection: 'row', backgroundColor: '#eceff1', borderRadius: 8, padding: 2, marginBottom: 8},
+    tab: { flex: 1, paddingVertical: 5, alignItems: 'center', borderRadius: 6 },
+    activeTab: { backgroundColor: 'white', elevation: 1},
     tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
     activeTabText: { color: '#3b5998', fontWeight: 'bold' },
 

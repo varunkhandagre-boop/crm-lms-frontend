@@ -34,6 +34,7 @@ import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
 import { fetchOrganizations } from '../services/api/organizations';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
 
 export default function CourierScreen() {
   const headerTop = useHeaderTop();
@@ -679,20 +680,12 @@ export default function CourierScreen() {
       </View>
 
       <View style={{backgroundColor:'white', paddingBottom:5, marginBottom:0}}>
-          <View style={styles.tabContainer}>
-              {['Day', 'Month', 'FY', 'All'].map((m) => (
-                  <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
-                      <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
-                  </TouchableOpacity>
-              ))}
-          </View>
-          {viewMode !== 'All' && (
-              <View style={styles.dateNav}>
-                  <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-                  <Text style={styles.monthText}>{getHeaderDate()}</Text>
-                  <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-              </View>
-          )}
+          <PeriodTabs value={viewMode} onChange={setViewMode} />
+          <StaffPeriodRow
+              periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+              onPrev={() => changeDate(-1)}
+              onNext={() => changeDate(1)}
+          />
           <View style={styles.searchBar}>
               {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
               <TextInput style={styles.input} placeholder="Search Docket, Name..." value={searchText} onChangeText={setSearchText} />
@@ -705,7 +698,7 @@ export default function CourierScreen() {
                   </TouchableOpacity>
               ))}
           </ScrollView>
-          <Text style={{textAlign:'right', fontSize:11, color:'gray', paddingRight:15, marginTop:2}}>Total: {fullList.length}</Text>
+          <TotalBar label="Total" count={fullList.length} />
       </View>
 
       <FlatList 
@@ -942,22 +935,7 @@ const styles = StyleSheet.create({
   activeMainTabText: { color: '#3b5998', fontWeight: 'bold' },
   badge: { backgroundColor: '#d32f2f', borderRadius: 10, paddingHorizontal: 6, marginLeft: 5, paddingVertical:1 },
   badgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
-  tabContainer: { 
-      flexDirection: 'row', 
-      backgroundColor: '#e0e0e0', 
-      marginHorizontal: 15, 
-      marginTop: 10,      
-      marginBottom: 5,      
-      borderRadius: 8, 
-      padding: 2            
-  },
-  tab: { flex: 1, paddingVertical: 4, alignItems: 'center', borderRadius: 6 },
-  activeTab: { backgroundColor: 'white', elevation: 2 },
-  tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-  activeTabText: { color: '#3b5998', fontWeight: 'bold' },
-  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 6, marginHorizontal: 15, borderRadius: 8, marginBottom: 5, borderWidth:1, borderColor:'#eee' },
-  monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
-  searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', paddingHorizontal: 10, borderRadius: 8, alignItems: 'center', height: 36, marginHorizontal: 15, marginBottom: 5 },
+  searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', paddingHorizontal: 10, borderRadius: 8, alignItems: 'center', height: 36, marginHorizontal: 12, marginTop: 6 },
   input: { flex:1, marginLeft:5, fontSize:15, color:'black' },
   filterChip: { paddingHorizontal:15, paddingVertical:6, backgroundColor:'#eee', borderRadius:20, marginRight:10 },
   activeChip: { backgroundColor:'#3b5998' },

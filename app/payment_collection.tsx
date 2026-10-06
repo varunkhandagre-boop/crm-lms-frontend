@@ -37,6 +37,7 @@ import { sharePdfFromHtml } from '../utils/sharePdf';
 import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTeamMembers } from '../services/api/users';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
 
 export default function PaymentCollection() {
     const headerTop = useHeaderTop();
@@ -575,30 +576,16 @@ export default function PaymentCollection() {
             </View>
 
             <View style={styles.filterBox}>
-                {isAdmin && (
-                    <TouchableOpacity style={styles.empDropdown} onPress={() => setShowEmployeeModal(true)}>
-                        <View style={{flexDirection:'row', alignItems:'center'}}>
-                            <Ionicons name="people" size={18} color="#3b5998" /><Text style={{marginLeft:8, fontWeight:'bold', color:'#333'}}>Filter: {selectedEmployee === 'All' ? 'All Employees' : selectedEmployee}</Text>
-                        </View>
-                        <Ionicons name="caret-down" size={16} color="gray" />
-                    </TouchableOpacity>
-                )}
+                <PeriodTabs value={viewMode} onChange={setViewMode} />
 
-                <View style={styles.tabContainer}>
-                    {['Day', 'Month', 'FY', 'All'].map((m) => (
-                        <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
-                            <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
-                        </TouchableOpacity>
-                    ))}
-                </View>
-
-                {viewMode !== 'All' && (
-                    <View style={styles.navRow}>
-                        <TouchableOpacity onPress={() => changeHistoryDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-                        <Text style={styles.navText}>{getHistoryHeaderDate()}</Text>
-                        <TouchableOpacity onPress={() => changeHistoryDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-                    </View>
-                )}
+                <StaffPeriodRow
+                    showStaff={isAdmin}
+                    staffLabel={selectedEmployee === 'All' ? 'All Staff' : selectedEmployee}
+                    onStaffPress={() => setShowEmployeeModal(true)}
+                    periodLabel={viewMode !== 'All' ? getHistoryHeaderDate() : undefined}
+                    onPrev={() => changeHistoryDate(-1)}
+                    onNext={() => changeHistoryDate(1)}
+                />
 
                 <View style={styles.searchBar}>
                     {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={18} color="gray" />}
@@ -606,10 +593,7 @@ export default function PaymentCollection() {
                     {historySearch.length > 0 && <TouchableOpacity onPress={() => setHistorySearch('')}><Ionicons name="close-circle" size={18} color="gray" /></TouchableOpacity>}
                 </View>
                 
-                <View style={styles.summaryRow}>
-                    <Text style={styles.totalLabel}>Total Collected:</Text>
-                    <Text style={styles.totalValue}>₹{totalCollected.toLocaleString('en-IN')}</Text>
-                </View>
+                <TotalBar label="Total Collected" count={fullFilteredList.length} amount={totalCollected} accent="#27ae60" />
             </View>
 
             <FlatList 
@@ -951,21 +935,10 @@ const styles = StyleSheet.create({
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
     backBtn: { paddingRight: 10 },
     addBtn: { flexDirection:'row', backgroundColor:'#3b5998', paddingVertical:6, paddingHorizontal:12, borderRadius:20, alignItems:'center' },
-    filterBox: { backgroundColor:'white', padding:15, paddingBottom:10, marginBottom:5 },
-    empDropdown: { flexDirection:'row', justifyContent:'space-between', alignItems:'center', backgroundColor:'#e3f2fd', padding:10, borderRadius:8, marginBottom:15, borderWidth:1, borderColor:'#bbdefb' },
-    tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', borderRadius: 8, padding: 2, marginBottom: 5 },
-    tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-    activeTab: { backgroundColor: 'white', elevation: 2 },
-    tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-    activeTabText: { color: '#3b5998', fontWeight: 'bold' },
-    navRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 8, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#eee' },
-    navText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
-    searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f0f0', borderRadius: 8, paddingHorizontal: 10, height: 36 },
+    filterBox: { backgroundColor:'white', paddingBottom:6, marginBottom:4 },
+    searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f0f0', borderRadius: 8, paddingHorizontal: 10, height: 36, marginHorizontal: 12, marginTop: 6 },
     searchInput: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
-    summaryRow: { flexDirection:'row', justifyContent:'space-between', marginTop:15, borderTopWidth:1, borderTopColor:'#eee', paddingTop:10 },
-    totalLabel: { fontWeight:'bold', color:'#555' },
-    totalValue: { fontWeight:'bold', color:'#27ae60', fontSize:16 },
-    historyCard: { backgroundColor: 'white', padding: 15, borderRadius: 12, marginBottom: 10, flexDirection: 'row', alignItems: 'center', elevation: 2, marginHorizontal:15 },
+    historyCard: { backgroundColor: 'white', padding: 11, borderRadius: 12, marginBottom: 8, flexDirection: 'row', alignItems: 'center', elevation: 2, marginHorizontal:12 },
     hOrg: { fontWeight: 'bold', fontSize: 15, color: '#333' },
     modeBadge: { flexDirection:'row', alignItems:'center', paddingHorizontal:6, paddingVertical:2, borderRadius:4, marginRight:5 },
     modeText: { fontSize: 10, fontWeight: 'bold', marginLeft: 3, textTransform:'uppercase' },

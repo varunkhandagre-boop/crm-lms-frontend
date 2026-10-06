@@ -9,6 +9,7 @@ import { useData } from './context/DataContext';
 // 🔥 Phase 5: projects now via new backend API
 import { listProjects } from '../services/api/projects';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
 
 export default function ProjectsScreen() {
   const headerTop = useHeaderTop();
@@ -221,21 +222,12 @@ export default function ProjectsScreen() {
 
           {!searchText && (
             <>
-              <View style={styles.tabContainer}>
-                  {['Day', 'Month', 'FY', 'All'].map((m) => (
-                      <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
-                          <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
-                      </TouchableOpacity>
-                  ))}
-              </View>
-
-              {viewMode !== 'All' && (
-                  <View style={styles.dateNav}>
-                      <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-                      <Text style={styles.monthText}>{getHeaderDate()}</Text>
-                      <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-                  </View>
-              )}
+              <PeriodTabs value={viewMode} onChange={setViewMode} />
+              <StaffPeriodRow
+                  periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+                  onPrev={() => changeDate(-1)}
+                  onNext={() => changeDate(1)}
+              />
             </>
           )}
 
@@ -254,9 +246,7 @@ export default function ProjectsScreen() {
               </View>
           </View>
 
-          <Text style={{textAlign:'right', paddingHorizontal: 15, fontSize:12, color:'gray', marginBottom: 5}}>
-              Total Projects: <Text style={{fontWeight:'bold', color:'#333'}}>{fullList.length}</Text>
-          </Text>
+          <TotalBar label="Total Projects" count={fullList.length} />
       </View>
 
       <FlatList 
@@ -319,20 +309,13 @@ const styles = StyleSheet.create({
   searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e3f2fd', marginHorizontal: 15, marginTop: 10, marginBottom: 5, paddingHorizontal: 15, borderRadius: 10, height: 45, borderWidth: 1, borderColor: '#90caf9' },
   searchInput: { flex: 1, fontSize: 15, color: '#1565c0', fontWeight: '500' },
 
-  tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', marginHorizontal: 15, borderRadius: 8, padding: 2, marginBottom: 5 },
-  tab: { flex: 1, paddingVertical: 5, alignItems: 'center', borderRadius: 6 },
-  activeTab: { backgroundColor: 'white', elevation: 2 },
-  tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-  activeTabText: { color: '#3b5998', fontWeight: 'bold' },
-  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 5, marginHorizontal: 15, borderRadius: 8, marginBottom: 5, borderWidth: 1, borderColor: '#eee' },
-  monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
 
   summaryContainer: { flexDirection: 'row', paddingHorizontal: 15, justifyContent: 'space-between', marginBottom: 5, marginTop: 5 },
   summaryCard: { flex: 1, padding: 10, borderRadius: 10, alignItems: 'center', marginHorizontal: 5, elevation: 1 },
   summaryLabel: { fontSize: 12, color: '#555', fontWeight:'bold' },
   summaryValue: { fontSize: 20, fontWeight: 'bold', color: '#333', marginTop: 2 },
 
-  card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 15, elevation: 2, marginHorizontal: 2 },
+  card: { backgroundColor: 'white', borderRadius: 10, padding: 11, marginBottom: 8, elevation: 2, marginHorizontal: 2 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
   projectName: { fontSize: 18, fontWeight: 'bold', color: '#333', flex:1 },
   badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, marginLeft:5 },
@@ -340,7 +323,7 @@ const styles = StyleSheet.create({
   clientName: { fontSize: 14, color: '#555', marginTop: 2 },
   location: { fontSize: 13, color: '#777', marginTop: 2 },
   
-  divider: { height: 1, backgroundColor: '#eee', marginVertical: 10 },
+  divider: { height: 1, backgroundColor: '#eee', marginVertical: 7},
   row: { flexDirection: 'row', justifyContent: 'space-between' },
   label: { fontSize: 11, color: 'gray' },
   value: { fontSize: 16, fontWeight: 'bold', color: '#333' }

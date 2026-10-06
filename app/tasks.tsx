@@ -28,6 +28,7 @@ import { completeTask as completeTaskApi, fetchTasks } from '../services/api/tas
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
 
 export default function TaskScreen() {
   const headerTop = useHeaderTop();
@@ -372,22 +373,13 @@ export default function TaskScreen() {
         </View>
       </View>
 
-      <View style={{backgroundColor:'white', paddingBottom:10, marginBottom:5}}>
-          <View style={styles.tabContainer}>
-              {['Day', 'Month', 'FY', 'All'].map((m) => (
-                  <TouchableOpacity key={m} style={[styles.dateTab, dateViewMode === m && styles.activeDateTab]} onPress={() => setDateViewMode(m as any)}>
-                      <Text style={[styles.dateTabText, dateViewMode === m && styles.activeDateTabText]}>{m}</Text>
-                  </TouchableOpacity>
-              ))}
-          </View>
-
-          {dateViewMode !== 'All' && (
-              <View style={styles.dateNav}>
-                  <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-                  <Text style={styles.monthText}>{getHeaderDate()}</Text>
-                  <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-              </View>
-          )}
+      <View style={{backgroundColor:'white', paddingBottom:6, marginBottom:4}}>
+          <PeriodTabs value={dateViewMode} onChange={setDateViewMode} />
+          <StaffPeriodRow
+              periodLabel={dateViewMode !== 'All' ? getHeaderDate() : undefined}
+              onPrev={() => changeDate(-1)}
+              onNext={() => changeDate(1)}
+          />
 
           <View style={styles.searchRow}>
               <View style={styles.searchBar}>
@@ -427,9 +419,7 @@ export default function TaskScreen() {
               ))}
           </View>
           
-          <Text style={{textAlign:'right', fontSize:12, color:'gray', paddingRight:15, marginTop:5}}>
-              Total: <Text style={{fontWeight:'bold', color:'#3b5998'}}>{displayList.length}</Text>
-          </Text>
+          <TotalBar label="Total" count={displayList.length} />
       </View>
 
       <FlatList 
@@ -663,47 +653,40 @@ export default function TaskScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8F9FA' },
-  header: { backgroundColor: 'white', padding: 15, elevation: 0 },
+  header: { backgroundColor: 'white', padding: 15, elevation: 0, paddingBottom: 6 },
   headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   backCircle: { backgroundColor: '#F0F0F0', padding: 6, borderRadius: 20 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#1A237E', marginLeft: 10 },
   addBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#3B5998', borderRadius:8, paddingHorizontal:12, paddingVertical:8 },
   addBtnText: { color:'white', fontWeight:'bold', marginLeft:4, fontSize:13 },
   
-  toggleContainer: { flexDirection: 'row', backgroundColor: '#F1F3F4', borderRadius: 10, padding: 4, marginBottom: 5 },
-  toggleBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8, flexDirection:'row', justifyContent:'center' },
+  toggleContainer: { flexDirection: 'row', backgroundColor: '#F1F3F4', borderRadius: 10, padding: 3, marginBottom: 0},
+  toggleBtn: { flex: 1, paddingVertical: 7, alignItems: 'center', borderRadius: 8, flexDirection:'row', justifyContent:'center' },
   activeToggleBtn: { backgroundColor: 'white', elevation: 2 },
   toggleText: { color: '#777', fontWeight: '600', fontSize:12 },
   activeToggleText: { color: '#3B5998', fontWeight: 'bold' },
   badge: { backgroundColor: '#D32F2F', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1, marginLeft: 5, minWidth: 20, alignItems: 'center' },
   badgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
 
-  tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', margin: 2, borderRadius: 8, padding: 2, marginBottom: 5 },
-  dateTab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-  activeDateTab: { backgroundColor: 'white', elevation: 2 },
-  dateTabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-  activeDateTabText: { color: '#3b5998', fontWeight: 'bold' },
 
-  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 6, marginHorizontal: 15, borderRadius: 8, marginBottom: 5, borderWidth:1, borderColor:'#eee' },
-  monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
 
-  searchRow: { flexDirection: 'row', paddingHorizontal: 15, justifyContent: 'space-between', marginBottom:10 },
-  searchBar: { flex: 1, backgroundColor: '#f0f0f0', borderRadius: 10, flexDirection:'row', alignItems:'center', paddingHorizontal: 10, height: 42 },
+  searchRow: { flexDirection: 'row', paddingHorizontal: 12, justifyContent: 'space-between', marginBottom: 6, marginTop: 6 },
+  searchBar: { flex: 1, backgroundColor: '#f0f0f0', borderRadius: 8, flexDirection:'row', alignItems:'center', paddingHorizontal: 10, height: 36},
   input: { flex: 1, marginLeft: 8, fontSize: 14 },
   
-  adminFilterBtn: { height: 42, backgroundColor: '#E3F2FD', borderRadius: 10, marginLeft: 8, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', justifyContent:'space-between', borderWidth: 1, borderColor: '#90CAF9', minWidth: 80 },
+  adminFilterBtn: { height: 36, backgroundColor: '#E3F2FD', borderRadius: 8, marginLeft: 8, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', justifyContent:'space-between', borderWidth: 1, borderColor: '#90CAF9', minWidth: 80 },
   adminFilterText: { color: '#1565C0', fontWeight: 'bold', fontSize: 12, marginRight: 4, maxWidth: 70 },
   
-  filterBtn: { width: 42, height: 42, backgroundColor: 'white', borderRadius: 10, marginLeft: 8, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#DDD' },
+  filterBtn: { width: 36, height: 36, backgroundColor: 'white', borderRadius: 8, marginLeft: 8, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#DDD' },
 
-  statusTabContainer: { flexDirection: 'row', gap: 10, paddingHorizontal:15 },
-  statusTab: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 8, backgroundColor: '#F1F3F4' },
+  statusTabContainer: { flexDirection: 'row', gap: 10, paddingHorizontal: 12},
+  statusTab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 8, backgroundColor: '#F1F3F4' },
   activeStatusTab: { backgroundColor: '#3B5998' },
   statusTabText: { color: '#777', fontWeight: 'bold', fontSize: 12 },
   activeStatusTabText: { color: 'white' },
 
   listPadding: { padding: 15, paddingBottom: 100 },
-  card: { backgroundColor: 'white', borderRadius: 12, padding: 15, marginBottom: 12, elevation: 2, borderLeftWidth: 5 },
+  card: { backgroundColor: 'white', borderRadius: 12, padding: 11, marginBottom: 8, elevation: 2, borderLeftWidth: 5 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
   taskTitle: { fontWeight: 'bold', fontSize: 15, color: '#333', flex: 1 },
   priorityBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },

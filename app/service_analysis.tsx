@@ -30,6 +30,7 @@ import { listInstallations } from '../services/api/installations';
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { PeriodTabs, StaffPeriodRow } from '../components/compact';
 
 const parseDateOnly = (dateStr: any) => {
     if (!dateStr) return 0;
@@ -396,34 +397,17 @@ export default function AnalysisScreen() {
                 </View>
 
                 <View style={styles.controlsContainer}>
-                    <View style={styles.toggleRow}>
-                        {['Day', 'Month', 'FY', 'All'].map((m) => (
-                            <TouchableOpacity key={m} style={[styles.toggleBtn, viewMode === m && styles.activeToggle]} onPress={() => setViewMode(m as any)}>
-                                <Text style={[styles.toggleText, viewMode === m && {color:'#333', fontWeight:'bold'}]}>{m}</Text>
-                            </TouchableOpacity>
-                        ))}
+                    <PeriodTabs value={viewMode} onChange={setViewMode} style={{ marginHorizontal: 0, marginTop: 0 }} />
+                    <View style={{ marginHorizontal: -12 }}>
+                        <StaffPeriodRow
+                            showStaff={isAdmin}
+                            staffLabel={selectedEmployee === 'All' ? 'All Staff' : selectedEmployeeName}
+                            onStaffPress={() => setShowEmployeePicker(true)}
+                            periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+                            onPrev={() => changeDate(-1)}
+                            onNext={() => changeDate(1)}
+                        />
                     </View>
-
-                    {isAdmin && (
-                        <TouchableOpacity 
-                            style={styles.employeeFilterBtn} 
-                            onPress={() => setShowEmployeePicker(true)}
-                        >
-                            <Ionicons name="people" size={18} color="#2e7d32" />
-                            <Text style={{fontSize:13, marginLeft:8, color:'#2e7d32', fontWeight:'600'}}>
-                                {selectedEmployee === 'All' ? 'View All Staff' : selectedEmployeeName}
-                            </Text>
-                            <Ionicons name="chevron-down" size={16} color="#2e7d32" style={{marginLeft:'auto'}}/>
-                        </TouchableOpacity>
-                    )}
-
-                    {viewMode !== 'All' && (
-                        <View style={styles.dateNav}>
-                            <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={20} color="#555" /></TouchableOpacity>
-                            <Text style={styles.dateNavText}>{getHeaderDate()}</Text>
-                            <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={20} color="#555" /></TouchableOpacity>
-                        </View>
-                    )}
 
                     <View style={styles.searchBox}>
                         {isDbLoading ? <ActivityIndicator size="small" color="#1565c0" /> : <Ionicons name="search" size={18} color="gray" />}
@@ -599,16 +583,9 @@ const styles = StyleSheet.create({
     typeBtn: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20, backgroundColor: '#f0f0f0', marginRight: 8, borderWidth:1, borderColor:'#eee' },
     typeBtnText: { fontWeight: 'bold', fontSize: 13, color: '#555' },
 
-    controlsContainer: { padding: 15, backgroundColor: 'white' },
-    toggleRow: { flexDirection: 'row', backgroundColor: '#e0e0e0', borderRadius: 8, padding: 3, marginBottom: 10 },
-    toggleBtn: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-    activeToggle: { backgroundColor: 'white', elevation: 2 },
-    toggleText: { color: 'gray', fontSize: 12, fontWeight: '600' },
+    controlsContainer: { padding: 12, backgroundColor: 'white' },
 
-    employeeFilterBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#e8f5e9', paddingHorizontal:12, paddingVertical:10, borderRadius:8, borderWidth:1, borderColor:'#2e7d32', marginBottom:10 },
 
-    dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'white', padding: 8, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#ddd' },
-    dateNavText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
 
     searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', borderRadius: 8, paddingHorizontal: 10, height: 40, borderWidth:1, borderColor:'#ddd' },
     input: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },

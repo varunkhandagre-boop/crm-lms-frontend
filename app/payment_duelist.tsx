@@ -27,6 +27,7 @@ import { listPaymentDues, remindPaymentDue } from '../services/api/paymentDues';
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
 
 export default function PaymentDueList() {
     const headerTop = useHeaderTop();
@@ -430,29 +431,18 @@ export default function PaymentDueList() {
             </View>
 
             <View style={styles.filterBox}>
-                <View style={styles.tabContainer}>
-                    {['Day', 'Month', 'FY', 'All'].map((m) => (
-                        <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
-                            <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
-                        </TouchableOpacity>
-                    ))}
-                </View>
-                {viewMode !== 'All' && (
-                    <View style={styles.navRow}>
-                        <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-                        <Text style={styles.navText}>{getHeaderDate()}</Text>
-                        <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-                    </View>
-                )}
+                <PeriodTabs value={viewMode} onChange={setViewMode} />
+                <StaffPeriodRow
+                    periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+                    onPrev={() => changeDate(-1)}
+                    onNext={() => changeDate(1)}
+                />
                 <View style={styles.searchBar}>
                     {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={18} color="gray" />}
                     <TextInput style={styles.searchInput} placeholder="Search Party, Bill No..." value={searchTerm} onChangeText={setSearchTerm} />
                     {searchTerm.length > 0 && <TouchableOpacity onPress={()=>setSearchTerm('')}><Ionicons name="close-circle" size={18} color="gray"/></TouchableOpacity>}
                 </View>
-                <View style={styles.summaryRow}>
-                    <Text style={styles.totalLabel}>Total Pending:</Text>
-                    <Text style={[styles.totalValue, {color: '#d32f2f'}]}>₹{totalPending.toLocaleString('en-IN')}</Text>
-                </View>
+                <TotalBar label="Total Pending" count={fullFilteredList.length} amount={totalPending} accent="#d32f2f" />
             </View>
 
             <FlatList 
@@ -622,20 +612,10 @@ const styles = StyleSheet.create({
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
     backBtn: { paddingRight: 10 },
     addBtn: { flexDirection:'row', backgroundColor:'#3b5998', paddingVertical:6, paddingHorizontal:12, borderRadius:20, alignItems:'center' },
-    filterBox: { backgroundColor:'white', padding:15, paddingBottom:10, marginBottom:5 },
-    tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', borderRadius: 8, padding: 2, marginBottom: 5 },
-    tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-    activeTab: { backgroundColor: 'white', elevation: 2 },
-    tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-    activeTabText: { color: '#3b5998', fontWeight: 'bold' },
-    navRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 8, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#eee' },
-    navText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
-    searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f0f0', borderRadius: 8, paddingHorizontal: 10, height: 36 },
+    filterBox: { backgroundColor:'white', paddingBottom:6, marginBottom:4 },
+    searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f0f0', borderRadius: 8, paddingHorizontal: 10, height: 36, marginHorizontal: 12, marginTop: 6 },
     searchInput: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
-    summaryRow: { flexDirection:'row', justifyContent:'space-between', marginTop:15, borderTopWidth:1, borderTopColor:'#eee', paddingTop:10 },
-    totalLabel: { fontWeight:'bold', color:'#555' },
-    totalValue: { fontWeight:'bold', fontSize:16 },
-    historyCard: { backgroundColor: 'white', padding: 15, borderRadius: 12, marginBottom: 10, flexDirection: 'row', alignItems: 'center', elevation: 2, marginHorizontal:15, borderLeftWidth: 5 },
+    historyCard: { backgroundColor: 'white', padding: 11, borderRadius: 12, marginBottom: 8, flexDirection: 'row', alignItems: 'center', elevation: 2, marginHorizontal:12, borderLeftWidth: 5 },
     normalCard: { borderLeftColor: '#f39c12' },
     overdueCard: { borderLeftColor: '#d32f2f' },
     hOrg: { fontWeight: 'bold', fontSize: 15, color: '#333' },

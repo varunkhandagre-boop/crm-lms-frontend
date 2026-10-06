@@ -41,6 +41,7 @@ import { fetchTeamMembers } from '../services/api/users';
 import { listSpareParts } from '../services/api/spareParts';
 import { sortAndFilterParts } from '../utils/sparePartSearch';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
 
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const fyStart = (d: Date) => (d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1);
@@ -713,16 +714,10 @@ export default function ServiceCallScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={{ backgroundColor: 'white', paddingBottom: 10, marginBottom: 5 }}>
-        <View style={styles.dateTabRow}>
-          {['Day', 'Month', 'FY', 'All'].map((m) => (
-            <TouchableOpacity key={m} style={[styles.dateTab, viewMode === m && styles.activeDateTab]} onPress={() => setViewMode(m as any)}>
-              <Text style={[styles.dateTabText, viewMode === m && styles.activeDateTabText]}>{m}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+      <View style={{ backgroundColor: 'white', paddingBottom: 6, marginBottom: 4 }}>
+        <PeriodTabs value={viewMode} onChange={setViewMode} />
 
-        <View style={{ flexDirection: 'row', paddingHorizontal: 10, marginBottom: 6 }}>
+        <View style={{ flexDirection: 'row', paddingHorizontal: 12, marginTop: 6 }}>
           <TouchableOpacity
             style={[styles.myCallsChip, myCallsOnly && styles.myCallsChipActive]}
             onPress={() => setMyCallsOnly(!myCallsOnly)}
@@ -732,28 +727,14 @@ export default function ServiceCallScreen() {
           </TouchableOpacity>
         </View>
 
-        {isAdmin && (
-          <View style={{ paddingHorizontal: 10, marginBottom: 5 }}>
-            <TouchableOpacity
-              style={styles.employeeFilterBtn}
-              onPress={() => setShowEmployeePicker(true)}
-            >
-              <Ionicons name="people" size={18} color="#2e7d32" />
-              <Text style={{ fontSize: 13, marginLeft: 8, color: '#2e7d32', fontWeight: '600' }}>
-                {selectedEmployee === 'All' ? 'View All Staff' : selectedEmployeeName}
-              </Text>
-              <Ionicons name="chevron-down" size={16} color="#2e7d32" style={{ marginLeft: 'auto' }} />
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {viewMode !== 'All' && (
-          <View style={styles.dateNav}>
-            <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-            <Text style={styles.monthText}>{getHeaderDate()}</Text>
-            <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-          </View>
-        )}
+        <StaffPeriodRow
+          showStaff={isAdmin}
+          staffLabel={selectedEmployee === 'All' ? 'All Staff' : selectedEmployeeName}
+          onStaffPress={() => setShowEmployeePicker(true)}
+          periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+          onPrev={() => changeDate(-1)}
+          onNext={() => changeDate(1)}
+        />
 
         <View style={styles.searchRow}>
           <View style={styles.searchBar}>
@@ -765,7 +746,7 @@ export default function ServiceCallScreen() {
           </View>
         </View>
         
-        <Text style={{textAlign:'right', fontSize:12, color:'gray', paddingRight:15}}>Total: {callTotal}</Text>
+        <TotalBar label="Total" count={callTotal} />
       </View>
 
       <FlatList
@@ -1074,11 +1055,6 @@ const styles = StyleSheet.create({
   activeTabAll: { backgroundColor: '#3b5998' },
   tabText: { fontSize: 13, fontWeight: 'bold', color: '#555' },
 
-  dateTabRow: { flexDirection: 'row', backgroundColor: '#e0e0e0', margin: 10, borderRadius: 8, padding: 3 },
-  dateTab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-  activeDateTab: { backgroundColor: 'white', elevation: 2 },
-  dateTabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-  activeDateTabText: { color: '#3b5998', fontWeight: 'bold' },
 
   ageChip: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, marginTop: 4, marginBottom: 2 },
   ageText: { fontSize: 11, fontWeight: 'bold', marginLeft: 4 },
@@ -1091,10 +1067,7 @@ const styles = StyleSheet.create({
   assignBtn: { backgroundColor: '#e3f2fd', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14 },
   assignBtnText: { color: '#1565c0', fontWeight: 'bold', fontSize: 12 },
   assignList: { backgroundColor: '#f5f9ff', borderRadius: 8, padding: 10, marginBottom: 10, borderWidth: 1, borderColor: '#bbdefb' },
-  employeeFilterBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e8f5e9', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2e7d32' },
 
-  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 4, marginHorizontal: 10, borderRadius: 8, marginBottom: 5, borderWidth: 1, borderColor: '#eee' },
-  monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
 
   searchRow: { flexDirection: 'row', paddingHorizontal: 10, marginBottom: 5 },
   searchBar: { flex: 1, backgroundColor: '#e0e0e0', paddingHorizontal: 10, borderRadius: 5, flexDirection: 'row', alignItems: 'center', height: 36 },

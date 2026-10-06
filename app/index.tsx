@@ -10,7 +10,6 @@ import {
     Modal,
     Platform,
     ScrollView,
-    StatusBar,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -411,7 +410,7 @@ const saveTokenToDatabase = async (token: string) => {
 
   return (
       <View style={styles.container}>
-          <View style={styles.header}>
+          <View style={[styles.header, { paddingTop: headerTop }]}>
               <TouchableOpacity onPress={() => setSidebarVisible(true)}><Ionicons name="menu" size={28} color="#333" /></TouchableOpacity>
               <View style={{flexDirection:'row', alignItems:'center'}}>
                   {branding.logo ? (
@@ -593,7 +592,7 @@ const MenuItem = ({ title, icon, color, onPress, count }: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 15 : 50, backgroundColor: 'white', elevation: 4 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, paddingBottom: 12, backgroundColor: 'white', elevation: 4 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
   headerAvatar: { width: 35, height: 35, borderRadius: 20, backgroundColor:'#3b5998', justifyContent:'center', alignItems:'center', overflow:'hidden' },
   bellBtn: { marginRight: 15, position: 'relative' },

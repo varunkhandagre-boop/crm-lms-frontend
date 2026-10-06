@@ -32,6 +32,7 @@ import { sharePdfFromHtml } from '../utils/sharePdf';
 import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTeamMembers } from '../services/api/users';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { PeriodTabs, StaffPeriodRow } from '../components/compact';
 
 export default function PMSScheduleScreen() {
   const headerTop = useHeaderTop();
@@ -615,36 +616,15 @@ export default function PMSScheduleScreen() {
       </View>
 
       <View style={{ backgroundColor: 'white', paddingBottom: 10, marginBottom: 5 }}>
-        <View style={styles.tabContainer}>
-          {['Day', 'Month', 'FY', 'All'].map((m) => (
-            <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
-              <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {isAdmin && (
-          <View style={{ paddingHorizontal: 15, marginBottom: 10 }}>
-            <TouchableOpacity
-              style={styles.employeeFilterBtn}
-              onPress={() => setShowEmployeePicker(true)}
-            >
-              <Ionicons name="people" size={18} color="#2e7d32" />
-              <Text style={{ fontSize: 13, marginLeft: 8, color: '#2e7d32', fontWeight: '600' }}>
-                {selectedEmployee === 'All' ? 'View All Staff' : selectedEmployeeName}
-              </Text>
-              <Ionicons name="chevron-down" size={16} color="#2e7d32" style={{ marginLeft: 'auto' }} />
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {viewMode !== 'All' && (
-          <View style={styles.dateNav}>
-            <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-            <Text style={styles.monthText}>{getHeaderDate()}</Text>
-            <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-          </View>
-        )}
+        <PeriodTabs value={viewMode} onChange={setViewMode} />
+        <StaffPeriodRow
+            showStaff={isAdmin}
+            staffLabel={selectedEmployee === 'All' ? 'All Staff' : selectedEmployeeName}
+            onStaffPress={() => setShowEmployeePicker(true)}
+            periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+            onPrev={() => changeDate(-1)}
+            onNext={() => changeDate(1)}
+        />
 
         <View style={styles.searchBar}>
           {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
@@ -827,22 +807,14 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
   addBtn: { flexDirection:'row', backgroundColor:'#3b5998', paddingVertical:6, paddingHorizontal:12, borderRadius:20, alignItems:'center' },
   filterBox: { backgroundColor:'white', padding:15, paddingBottom:10, marginBottom:5 },
-  tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', margin: 10, borderRadius: 8, padding: 2, marginBottom: 5 },
-  tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-  activeTab: { backgroundColor: 'white', elevation: 2 },
-  tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-  activeTabText: { color: '#3b5998', fontWeight: 'bold' },
   navRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 8, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#eee' },
   navText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
-  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f0f0', marginHorizontal: 15, paddingHorizontal: 10, borderRadius: 8, height: 36, marginBottom: 5 },
+  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f0f0', marginHorizontal: 12, paddingHorizontal: 10, borderRadius: 8, height: 36, marginBottom: 0, marginTop: 6 },
   input: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
   filterChip: { paddingHorizontal: 15, paddingVertical: 6, backgroundColor: '#eee', borderRadius: 20, marginRight: 10 },
   activeChip: { backgroundColor: '#3b5998' },
   chipText: { fontSize: 12, color: '#555' },
-  employeeFilterBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e8f5e9', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2e7d32' },
-  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 4, marginHorizontal: 15, borderRadius: 8, marginBottom: 5, borderWidth: 1, borderColor: '#eee' },
-  monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
-  card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 15, elevation: 2, borderLeftWidth: 4, borderLeftColor: '#2196f3' },
+  card: { backgroundColor: 'white', borderRadius: 10, padding: 11, marginBottom: 8, elevation: 2, borderLeftWidth: 4, borderLeftColor: '#2196f3' },
   cardOverdue: { borderLeftColor: '#d32f2f' },
   cardDone: { borderLeftColor: '#4caf50' },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },

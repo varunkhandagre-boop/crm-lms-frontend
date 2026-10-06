@@ -43,6 +43,7 @@ import { sharePdfFromHtml } from '../utils/sharePdf';
 import { fetchTeamMembers } from '../services/api/users';
 import { urlToBase64Image } from '../utils/pdfImageHelper';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { PeriodTabs, StaffPeriodRow } from '../components/compact';
 
 export default function InstallationListScreen() {
   const headerTop = useHeaderTop();
@@ -666,38 +667,17 @@ export default function InstallationListScreen() {
       </View>
 
       <View style={{ backgroundColor: 'white', paddingBottom: 10 }}>
-        <View style={styles.tabContainer}>
-          {['Day', 'Month', 'FY', 'All'].map((m) => (
-            <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
-              <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        <PeriodTabs value={viewMode} onChange={setViewMode} />
+        <StaffPeriodRow
+            showStaff={isAdmin}
+            staffLabel={selectedEmployee === 'All' ? 'All Staff' : selectedEmployeeName}
+            onStaffPress={() => setShowEmployeePicker(true)}
+            periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+            onPrev={() => changeDate(-1)}
+            onNext={() => changeDate(1)}
+        />
 
-        {isAdmin && (
-          <View style={{ paddingHorizontal: 15, marginBottom: 10 }}>
-            <TouchableOpacity
-              style={styles.employeeFilterBtn}
-              onPress={() => setShowEmployeePicker(true)}
-            >
-              <Ionicons name="people" size={18} color="#2e7d32" />
-              <Text style={{ fontSize: 13, marginLeft: 8, color: '#2e7d32', fontWeight: '600' }}>
-                {selectedEmployee === 'All' ? 'View All Staff' : selectedEmployeeName}
-              </Text>
-              <Ionicons name="chevron-down" size={16} color="#2e7d32" style={{ marginLeft: 'auto' }} />
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {viewMode !== 'All' && (
-          <View style={styles.dateNav}>
-            <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-            <Text style={styles.monthText}>{getHeaderDate()}</Text>
-            <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-          </View>
-        )}
-
-        <View style={{ paddingHorizontal: 15 }}>
+        <View style={{ paddingHorizontal: 12, marginTop: 6 }}>
           <View style={styles.searchBar}>
             {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
             <TextInput
@@ -1008,21 +988,13 @@ const styles = StyleSheet.create({
   addBtn: { flexDirection: 'row', backgroundColor: '#3b5998', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, alignItems: 'center' },
   addBtnText: { color: 'white', fontWeight: 'bold', marginLeft: 5 },
 
-  tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', margin: 10, borderRadius: 8, padding: 2, marginBottom: 5 },
-  tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-  activeTab: { backgroundColor: 'white', elevation: 2 },
-  tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-  activeTabText: { color: '#3b5998', fontWeight: 'bold' },
 
-  employeeFilterBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e8f5e9', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2e7d32' },
 
-  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 4, marginHorizontal: 15, borderRadius: 8, marginBottom: 5, borderWidth: 1, borderColor: '#eee' },
-  monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
 
   searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', paddingHorizontal: 10, borderRadius: 8, alignItems: 'center', height: 36 },
   input: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
 
-  card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 15, elevation: 2 },
+  card: { backgroundColor: 'white', borderRadius: 10, padding: 11, marginBottom: 8, elevation: 2 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   hospitalName: { fontSize: 16, fontWeight: 'bold', color: '#333' },
   productName: { fontSize: 13, color: '#3b5998', marginTop: 2, fontWeight: '600' },
@@ -1031,7 +1003,7 @@ const styles = StyleSheet.create({
   newBadge: { backgroundColor: '#ffeb3b', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8 },
   newBadgeText: { fontSize: 10, fontWeight: 'bold', color: '#f57f17' },
 
-  divider: { height: 1, backgroundColor: '#eee', marginVertical: 10 },
+  divider: { height: 1, backgroundColor: '#eee', marginVertical: 7},
   row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
   infoBox: { width: '48%' },
   label: { fontSize: 11, color: 'gray', marginBottom: 2 },

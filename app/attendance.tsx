@@ -890,9 +890,9 @@ const styles = StyleSheet.create({
   compactCard: { backgroundColor: 'white', marginHorizontal: 15, marginTop: 10, padding: 10, borderRadius: 8, elevation: 1, borderLeftWidth:4, borderLeftColor:'#3b5998' },
   progressBarBackground: { height: 6, backgroundColor: '#f0f0f0', borderRadius: 3, marginVertical: 5, overflow:'hidden' },
   progressBarFill: { height: '100%', borderRadius: 3 },
-  tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', marginHorizontal: 15, borderRadius: 8, padding: 3, marginVertical: 15 },
-  tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-  activeTab: { backgroundColor: 'white', elevation: 2 },
+  tabContainer: { flexDirection: 'row', backgroundColor: '#eceff1', marginHorizontal: 12, borderRadius: 8, padding: 2, marginVertical: 8},
+  tab: { flex: 1, paddingVertical: 5, alignItems: 'center', borderRadius: 6 },
+  activeTab: { backgroundColor: 'white', elevation: 1},
   tabText: { color: 'gray', fontWeight: '600', fontSize:12 },
   activeTabText: { color: '#3b5998', fontWeight: 'bold' },
   summaryBox: { 

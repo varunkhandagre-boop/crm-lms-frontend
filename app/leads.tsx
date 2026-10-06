@@ -32,6 +32,7 @@ import WebsiteLeadSettingsModal from '../components/WebsiteLeadSettingsModal';
 import { isWebsiteLead } from '../services/api/websiteLeads';
 import { formatInr } from '../constants/leadStatus';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { PeriodTabs, StaffPeriodRow } from '../components/compact';
 
 export default function LeadsScreen() {
     const headerTop = useHeaderTop();
@@ -341,20 +342,12 @@ export default function LeadsScreen() {
 
                 {!searchText && !quickFilter && (
                     <>
-                        <View style={styles.tabContainer}>
-                            {['Day', 'Month', 'FY', 'All'].map((m) => (
-                                <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
-                                    <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                        {viewMode !== 'All' && (
-                            <View style={styles.dateNav}>
-                                <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-                                <Text style={styles.monthText}>{getHeaderDate()}</Text>
-                                <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-                            </View>
-                        )}
+                        <PeriodTabs value={viewMode} onChange={setViewMode} />
+                        <StaffPeriodRow
+                            periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+                            onPrev={() => changeDate(-1)}
+                            onNext={() => changeDate(1)}
+                        />
                     </>
                 )}
                 {websiteOnly && (searchText || quickFilter) ? (
@@ -628,13 +621,6 @@ const styles = StyleSheet.create({
     tagText: { fontSize: 10, color: '#006064', fontWeight: 'bold' },
     divider: { height: 1, backgroundColor: '#eee', marginVertical: 10 },
 
-    tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', marginHorizontal: 15, borderRadius: 8, padding: 2, marginBottom: 5 },
-    tab: { flex: 1, paddingVertical: 5, alignItems: 'center', borderRadius: 6 },
-    activeTab: { backgroundColor: 'white', elevation: 2 },
-    tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-    activeTabText: { color: '#3b5998', fontWeight: 'bold' },
-    dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 5, marginHorizontal: 15, borderRadius: 8, marginBottom: 5, borderWidth: 1, borderColor: '#eee' },
-    monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
 
     loadMoreBtn: { padding: 12, backgroundColor: '#fff', alignItems: 'center', marginVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ddd' },
 
