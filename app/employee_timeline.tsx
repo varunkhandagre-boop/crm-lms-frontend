@@ -42,8 +42,10 @@ import { useData } from './context/DataContext';
 // 🔥 Phase 7: attendance/leaves now come from Postgres via these adapters
 import { fetchAttendance } from '../services/api/attendance';
 import { fetchLeaves } from '../services/api/leaves';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function CombinedActivityScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   const [activeTab, setActiveTab] = useState<'timeline' | 'employee' | 'download'>('timeline');
@@ -676,7 +678,7 @@ const [selectedDate, setSelectedDate] = useState(new Date());
 
   return (
     <View style={{flex:1, backgroundColor:'#f4f6f8'}}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={{flexDirection: 'row', alignItems: 'center'}}>
             <TouchableOpacity onPress={() => router.back()} style={{marginRight: 10}}>
                 <Ionicons name="arrow-back" size={24} color="#333" />
@@ -1153,7 +1155,7 @@ const DetailRow = ({label, value}: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 2 },
+  header: { padding: 15, backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 10 },
   
   // Tabs

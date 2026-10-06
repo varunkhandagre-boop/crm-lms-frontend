@@ -31,8 +31,10 @@ import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
 import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTeamMembers } from '../services/api/users';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function PMSScheduleScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   const { currentUser, companyProfile } = useData(); 
@@ -599,7 +601,7 @@ export default function PMSScheduleScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#333" />
@@ -821,7 +823,7 @@ const DetailRow = ({ label, value, highlight, color }: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 10, paddingTop: 50, backgroundColor: 'white', elevation: 4, alignItems:'center' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 10, backgroundColor: 'white', elevation: 4, alignItems:'center' },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
   addBtn: { flexDirection:'row', backgroundColor:'#3b5998', paddingVertical:6, paddingHorizontal:12, borderRadius:20, alignItems:'center' },
   filterBox: { backgroundColor:'white', padding:15, paddingBottom:10, marginBottom:5 },

@@ -27,8 +27,10 @@ import { fetchOrganizations } from '../services/api/organizations';
 import { useCachedList } from '../hooks/useCachedList';
 import { createPaymentDue } from '../services/api/paymentDues';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddPaymentDueScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     
     const { currentUser, addNotification } = useData();
@@ -124,7 +126,7 @@ export default function AddPaymentDueScreen() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
                     <Ionicons name="arrow-back" size={24} color="#333" />
                 </TouchableOpacity>
@@ -225,7 +227,7 @@ export default function AddPaymentDueScreen() {
             </KeyboardAvoidingView>
 
             <Modal visible={modalVisible} animationType="slide">
-                <View style={styles.modalContainer}>
+                <View style={[styles.modalContainer, { paddingTop: headerTop }]}>
                     <View style={styles.modalHeader}>
                         <TouchableOpacity onPress={() => setModalVisible(false)}>
                             <Ionicons name="arrow-back" size={24} color="#333" />
@@ -272,7 +274,7 @@ export default function AddPaymentDueScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 4, alignItems:'center' },
+    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, backgroundColor: 'white', elevation: 4, alignItems:'center' },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
     backBtn: { paddingRight: 10 },
     
@@ -290,7 +292,7 @@ const styles = StyleSheet.create({
     submitBtn: { backgroundColor: '#d32f2f', padding: 15, borderRadius: 10, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 30, elevation: 3 },
     submitBtnText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
 
-    modalContainer: { flex: 1, backgroundColor: 'white', paddingTop: 40 },
+    modalContainer: { flex: 1, backgroundColor: 'white' },
     modalHeader: { flexDirection: 'row', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#eee', backgroundColor:'#f9f9f9' },
     searchInput: { flex: 1, marginLeft: 10, fontSize: 16, backgroundColor: '#fff', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#ddd' },
     orgItem: { flexDirection: 'row', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },

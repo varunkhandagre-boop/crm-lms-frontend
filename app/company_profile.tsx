@@ -27,10 +27,12 @@ import { useData } from './context/DataContext';
 // 🔥 Phase 10: company profile now lives on the Company row in Postgres via
 // this adapter — replaces the Firestore "company_profile" + "companies" collections.
 import { fetchCompanyProfile, updateCompanyProfile } from '../services/api/companies';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 const USE_STORAGE_BUCKET = false; 
 
 export default function CompanyProfileScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     
     const { companyProfile, setCompanyProfile, currentUser } = useData();
@@ -231,9 +233,9 @@ export default function CompanyProfileScreen() {
     // ✅ MODALS + MAIN UI sab return() ke ANDAR hain
     return (
         <View style={styles.container}>
-            <StatusBar barStyle="light-content" />
+            <StatusBar barStyle="light-content" backgroundColor="#3b5998" />
             
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}>
                     <Ionicons name="arrow-back" size={24} color="white" />
                 </TouchableOpacity>
@@ -583,7 +585,7 @@ const InputLabel = ({label}: {label: string}) => (
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
     center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    header: { backgroundColor: '#3b5998', paddingTop: 50, padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', elevation:4 },
+    header: { backgroundColor: '#3b5998', padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', elevation:4 },
     headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },
     section: { backgroundColor: 'white', padding: 15, borderRadius: 10, marginBottom: 15, elevation: 1 },
     sectionHeader: { fontSize: 16, fontWeight: 'bold', color: '#3b5998', marginBottom: 15, borderBottomWidth: 1, borderBottomColor: '#eee', paddingBottom: 5 },

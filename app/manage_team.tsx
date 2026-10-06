@@ -42,8 +42,10 @@ import { useCachedList } from '../hooks/useCachedList';
 import { useCachedObject } from '../hooks/useCachedObject';
 import { buildCacheKey } from '../utils/listCache';
 import AlertSettingsTab from '../components/AlertSettingsTab';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function ManageTeamScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     const { currentUser } = useData();
     const [activeTab, setActiveTab] = useState<'Users' | 'Permissions' | 'Holidays' | 'Tracking' | 'History' | 'Alerts'>('Users'); 
@@ -52,9 +54,9 @@ export default function ManageTeamScreen() {
     
     return (
         <View style={styles.container}>
-            <StatusBar barStyle="light-content" />
+            <StatusBar barStyle="light-content" backgroundColor="#2c3e50" />
             
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity 
                     onPress={() => {
                         if (router.canGoBack()) router.back();
@@ -1083,7 +1085,7 @@ const HistoryTab = () => {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { backgroundColor: '#2c3e50', padding: 15, paddingTop: 50, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    header: { backgroundColor: '#2c3e50', padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },
     
     tabContainer: { flexDirection: 'row', backgroundColor: 'white', elevation: 2 },

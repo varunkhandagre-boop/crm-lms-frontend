@@ -33,6 +33,7 @@ import {
     UsageAnalyticsResponse,
     UsageAnalyticsRow,
 } from '../../services/api/superadminCompanies';
+import { useHeaderTop } from '../../hooks/useHeaderTop';
 
 type MainTab = 'companies' | 'analytics';
 
@@ -57,6 +58,7 @@ const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
 const PAGE_LIMIT = 30;
 
 export default function SuperAdminDashboard() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
 
     const [companies, setCompanies] = useState<Company[]>([]);
@@ -370,7 +372,7 @@ export default function SuperAdminDashboard() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <View style={styles.headerTop}>
                     <TouchableOpacity onPress={() => router.replace('/' as any)}>
                         <Ionicons name="arrow-back" size={24} color="white" />
@@ -662,7 +664,7 @@ export default function SuperAdminDashboard() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { backgroundColor: '#d32f2f', paddingHorizontal: 20, paddingTop: 50, paddingBottom: 0 },
+    header: { backgroundColor: '#d32f2f', paddingHorizontal: 20, paddingBottom: 0 },
     headerTop: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
     headerBottom: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
     headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold', flex: 1 },

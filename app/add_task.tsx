@@ -28,8 +28,10 @@ import { fetchTeamMembers, LegacyTeamMember } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddTaskScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   const { currentUser, addNotification } = useData(); 
@@ -160,7 +162,7 @@ export default function AddTaskScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
@@ -299,7 +301,7 @@ export default function AddTaskScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 4 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 4 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   contentContainer: { padding: 20 },
   

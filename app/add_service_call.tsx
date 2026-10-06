@@ -43,8 +43,10 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
 import { recordLocationLog } from '../services/api/locationLogs';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddServiceCallScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   const params = useLocalSearchParams();
   
@@ -582,7 +584,7 @@ recordLocationLog({
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={styles.container}>
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: headerTop }]}>
           <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
           <Text style={styles.headerTitle}>New Service Call</Text>
           <View style={{width:24}} /> 
@@ -839,7 +841,7 @@ recordLocationLog({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   label: { marginBottom: 5, color:'#333', fontWeight:'600', fontSize:13, marginTop:10 },
   sectionHeader: { fontSize: 16, fontWeight: 'bold', color: '#3b5998', marginTop: 25, marginBottom: 5 },

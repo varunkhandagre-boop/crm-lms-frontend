@@ -26,8 +26,10 @@ import { bulkDeleteProducts, createProduct, deleteProduct, listProducts, updateP
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function ProductMasterScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     
     const { currentUser } = useData();
@@ -330,7 +332,7 @@ const handleBulkDelete = () => {
 
     return (
         <View style={styles.container}>
-                        <View style={styles.header}>
+                        <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={28} color="#333" /></TouchableOpacity>
                 <Text style={styles.headerTitle}>Product Master</Text>
                 {canEdit ? (
@@ -496,7 +498,7 @@ const handleBulkDelete = () => {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f5f5f5' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 2, alignItems:'center' },
+    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, backgroundColor: 'white', elevation: 2, alignItems:'center' },
     headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
     addIconBtn: { backgroundColor:'#3b5998', padding:10, borderRadius:25 },
 

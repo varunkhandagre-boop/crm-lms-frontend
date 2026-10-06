@@ -5,6 +5,7 @@ import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, Toucha
 
 import { formatInr } from '../constants/leadStatus';
 import { getTeamDay, TeamDay } from '../services/api/teamDay';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 // Opened from the 8 PM "Team today" notification (or Sales Calculation).
 // Shows the same numbers as the notification, per salesperson, for any day.
@@ -18,6 +19,7 @@ const label = (s: string) => {
 };
 
 export default function TeamTodayScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     const params = useLocalSearchParams<{ date?: string }>();
     const [date, setDate] = useState<string>(typeof params.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(params.date) ? params.date : ymd(new Date()));
@@ -51,7 +53,7 @@ export default function TeamTodayScreen() {
     const t = data?.totals;
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
                 <Text style={styles.headerTitle}>Team Day Report</Text>
                 <View style={{ width: 24 }} />
@@ -121,7 +123,7 @@ function Small({ label, value, extra }: { label: string; value: number; extra?: 
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 2 },
+    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, backgroundColor: 'white', elevation: 2 },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
     dateRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'white', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#eee' },
     arrow: { padding: 6, marginHorizontal: 10 },

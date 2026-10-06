@@ -21,11 +21,13 @@ import { useData } from './context/DataContext';
 // server-enforced — the old client-side name/id/role string-matching
 // (getMyNotifications) is gone, it's just the fetched list now.
 import { fetchNotifications, markNotificationRead as markNotificationReadApi, markAllNotificationsRead } from '../services/api/notifications';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 // Tab State Memory
 let savedTabState = 'Unread'; 
 
 export default function NotificationScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   // 🔥 1. Context se sirf current user nikala
@@ -193,7 +195,7 @@ export default function NotificationScreen() {
   return (
     <View style={styles.container}>
       {/* HEADER */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={styles.headerLeft}>
             <TouchableOpacity onPress={() => router.back()} style={styles.backCircle}>
                 <Ionicons name="arrow-back" size={22} color="white" />
@@ -339,7 +341,7 @@ export default function NotificationScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F0F2F5' },
-  header: { backgroundColor: '#1A237E', padding: 20, paddingTop: 55, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomLeftRadius: 25, borderBottomRightRadius: 25, elevation: 8 },
+  header: { backgroundColor: '#1A237E', padding: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomLeftRadius: 25, borderBottomRightRadius: 25, elevation: 8 },
   headerLeft: { flexDirection: 'row', alignItems: 'center' },
   backCircle: { backgroundColor: 'rgba(255,255,255,0.2)', padding: 8, borderRadius: 20 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: 'white', marginLeft: 12 },

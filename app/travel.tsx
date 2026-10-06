@@ -25,8 +25,10 @@ import { fetchTravelNotes, settleTravelNotesForUser } from '../services/api/trav
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function TravelNoteScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
 
   // 🔥 1. Context se current user nikala
@@ -351,7 +353,7 @@ export default function TravelNoteScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={{flexDirection:'row', alignItems:'center'}}>
             <TouchableOpacity onPress={() => router.back()}>
                 <Ionicons name="arrow-back" size={24} color="#333" />
@@ -557,7 +559,7 @@ const DetailRow = ({label, value, icon}: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 4 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, backgroundColor: 'white', elevation: 4 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#333', marginLeft: 10 },
   addBtn: { flexDirection:'row', backgroundColor:'#3b5998', paddingHorizontal:12, paddingVertical:6, borderRadius:5, alignItems:'center' },
   

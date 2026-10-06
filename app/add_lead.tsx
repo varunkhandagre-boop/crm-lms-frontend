@@ -30,6 +30,7 @@ import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 type ChoiceButton = { key: string; text: string; style?: 'cancel' | 'destructive' };
 
@@ -46,6 +47,7 @@ function askChoice(title: string, message: string, buttons: ChoiceButton[]): Pro
 }
 
 export default function AddLeadScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   // 🔥 1. Context se sirf user aur notification nikala
@@ -399,7 +401,7 @@ export default function AddLeadScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
@@ -648,7 +650,7 @@ export default function AddLeadScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
   contentContainer: { padding: 20 },
   sectionTitle: { fontSize: 14, fontWeight: 'bold', marginTop: 10, marginBottom: 15, color:'#3b5998', textTransform:'uppercase', letterSpacing:1 },

@@ -38,6 +38,7 @@ import {
     listProjectPayments,
     updateProject,
 } from '../services/api/projects';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 const CloseButton = ({onPress}: any) => (
     <TouchableOpacity onPress={onPress}>
@@ -53,6 +54,7 @@ const DetailRow = ({label, value}:any) => (
 );
 
 export default function ProjectDetailsScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   const params = useLocalSearchParams();
   
@@ -399,7 +401,7 @@ export default function ProjectDetailsScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={{flexDirection:'row', alignItems:'center'}}>
             <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="white" /></TouchableOpacity>
             <View style={{marginLeft:15}}>
@@ -551,7 +553,7 @@ export default function ProjectDetailsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   center: { flex:1, justifyContent:'center', alignItems:'center' },
-  header: { flexDirection: 'row', alignItems: 'center', padding: 15, backgroundColor: '#1565c0', paddingTop: 50, elevation: 4 },
+  header: { flexDirection: 'row', alignItems: 'center', padding: 15, backgroundColor: '#1565c0', elevation: 4 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: 'white' },
   headerSub: { fontSize: 12, color: '#bbdefb' },
   headerContact: { fontSize: 11, color: '#bbdefb', fontWeight: 'bold' },

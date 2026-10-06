@@ -42,8 +42,10 @@ import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
 import { fetchTeamMembers } from '../services/api/users';
 import { urlToBase64Image } from '../utils/pdfImageHelper';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function InstallationListScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   const { currentUser, companyProfile } = useData(); 
@@ -650,7 +652,7 @@ export default function InstallationListScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#333" />
@@ -1001,7 +1003,7 @@ const DetailRow = ({ label, value, icon, highlight, color }: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 10, paddingTop: 50, backgroundColor: 'white', elevation: 0 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 10, backgroundColor: 'white', elevation: 0 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
   addBtn: { flexDirection: 'row', backgroundColor: '#3b5998', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, alignItems: 'center' },
   addBtnText: { color: 'white', fontWeight: 'bold', marginLeft: 5 },

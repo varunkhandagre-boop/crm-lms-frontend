@@ -10,8 +10,10 @@ import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function ActivityPlanScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   const { currentUser } = useData();
@@ -199,7 +201,7 @@ export default function ActivityPlanScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={styles.headerTop}>
              <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
              <Text style={styles.headerTitle}>Activity Plans</Text>
@@ -248,7 +250,7 @@ export default function ActivityPlanScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { backgroundColor: 'white', padding: 15, paddingTop: 50, elevation: 4 },
+  header: { backgroundColor: 'white', padding: 15, elevation: 4 },
   headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom:15 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
   tabContainer: { flexDirection: 'row', backgroundColor:'#f0f0f0', borderRadius:8, padding:3 },

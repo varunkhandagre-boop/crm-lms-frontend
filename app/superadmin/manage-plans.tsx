@@ -23,6 +23,7 @@ import {
     saveBillingSettings,
     updatePlan,
 } from '../../services/api/superadminPlans';
+import { useHeaderTop } from '../../hooks/useHeaderTop';
 
 type PlanForm = {
     id: string; // '' for a new plan, real uuid when editing
@@ -45,6 +46,7 @@ const EMPTY_FORM: PlanForm = {
 };
 
 export default function ManagePlansScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
 
     const [loading, setLoading] = useState(true);
@@ -247,7 +249,7 @@ export default function ManagePlansScreen() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}>
                     <Ionicons name="arrow-back" size={24} color="white" />
                 </TouchableOpacity>
@@ -459,7 +461,7 @@ export default function ManagePlansScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { backgroundColor: '#3b5998', padding: 20, paddingTop: 50, flexDirection: 'row', alignItems: 'center', gap: 12 },
+    header: { backgroundColor: '#3b5998', padding: 20, flexDirection: 'row', alignItems: 'center', gap: 12 },
     headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold', flex: 1 },
     addBtn: { backgroundColor: 'rgba(255,255,255,0.2)', padding: 8, borderRadius: 8 },
 

@@ -56,6 +56,7 @@ import { useData } from './context/DataContext';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -82,6 +83,7 @@ function ChoiceChips<T extends string>({ value, options, onChange }: { value: T;
 }
 
 export default function PayrollScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     const { currentUser, companyProfile } = useData();
     const myRole = (currentUser?.role || '').toLowerCase();
@@ -581,7 +583,7 @@ const generatePayslipPDF = async (slip: Payslip) => {
     return (
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="white" /></TouchableOpacity>
                 <Text style={styles.headerTitle}>Payroll</Text>
                 <View style={{ width: 24 }} />
@@ -1147,7 +1149,7 @@ const styles = StyleSheet.create({
     modalTitle: { fontSize: 17, fontWeight: 'bold', color: '#333' },
     modalSub: { fontSize: 13, color: '#999' },
     container: { flex: 1, backgroundColor: '#f5f5f5' },
-    header: { backgroundColor: '#3b5998', paddingTop: 50, padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 4 },
+    header: { backgroundColor: '#3b5998', padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 4 },
     headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },
     centerLoading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     tabBar: { flexDirection: 'row', backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#eee' },

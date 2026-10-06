@@ -17,8 +17,10 @@ import {
 // 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddProductScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     
     // 🔥 1. Context se Notification Engine nikala
@@ -89,7 +91,7 @@ export default function AddProductScreen() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}>
                     <Ionicons name="arrow-back" size={24} color="#333" />
                 </TouchableOpacity>
@@ -145,7 +147,7 @@ export default function AddProductScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f8f9fa' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 2, alignItems:'center' },
+    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, backgroundColor: 'white', elevation: 2, alignItems:'center' },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
     card: { backgroundColor: 'white', padding: 20, borderRadius: 15, elevation: 3 },
     label: { fontSize: 13, fontWeight: 'bold', color: '#555', marginBottom: 8, marginTop: 10 },

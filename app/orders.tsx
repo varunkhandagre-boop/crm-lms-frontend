@@ -45,8 +45,12 @@ import {
     uploadOrderPoFile,
     deleteOrderPoFile,
 } from '../services/api/orders';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { PeriodTabs, StaffPeriodRow, StatusChip, TotalBar } from '../components/compact';
+import { formatInr } from '../constants/leadStatus';
 
 export default function OrderListScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
 
   const { currentUser, addNotification, companyProfile } = useData();
@@ -751,7 +755,7 @@ export default function OrderListScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
         <Text style={styles.headerTitle}>Order Bookings</Text>
         <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_order' as any)}>
@@ -759,34 +763,17 @@ export default function OrderListScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={{backgroundColor:'white', paddingBottom:10, marginBottom:5}}>
-          <View style={styles.tabContainer}>
-              {['Day', 'Month', 'FY', 'All'].map((m) => (
-                  <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
-                      <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
-                  </TouchableOpacity>
-              ))}
-          </View>
+      <View style={{backgroundColor:'white', paddingBottom:4, marginBottom:4}}>
+          <PeriodTabs value={viewMode} onChange={setViewMode} />
 
-          {isStrictAdmin && (
-            <View style={{paddingHorizontal: 15, marginBottom: 10}}>
-               <TouchableOpacity style={styles.employeeFilterBtn} onPress={() => setShowEmployeePicker(true)}>
-                   <Ionicons name="people" size={18} color="#2e7d32" />
-                   <Text style={{fontSize:13, marginLeft:8, color:'#2e7d32', fontWeight:'600'}}>
-                       {selectedEmployee === 'All' ? 'View All Staff' : selectedEmployeeName}
-                   </Text>
-                   <Ionicons name="chevron-down" size={16} color="#2e7d32" style={{marginLeft:'auto'}}/>
-               </TouchableOpacity>
-            </View>
-          )}
-
-          {viewMode !== 'All' && (
-              <View style={styles.dateNav}>
-                  <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-                  <Text style={styles.monthText}>{getHeaderDate()}</Text>
-                  <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-              </View>
-          )}
+          <StaffPeriodRow
+              showStaff={isStrictAdmin}
+              staffLabel={selectedEmployee === 'All' ? 'All Staff' : selectedEmployeeName}
+              onStaffPress={() => setShowEmployeePicker(true)}
+              periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+              onPrev={() => changeDate(-1)}
+              onNext={() => changeDate(1)}
+          />
 
           <View style={styles.searchBar}>
               {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
@@ -796,20 +783,14 @@ export default function OrderListScreen() {
               )}
           </View>
 
-                    {/* Total for whatever is currently filtered — same idea as "Total Pending" /
-              "Total Collected" on the Dues/Payments screens, but respects the
-              selected status chip (All/Pending/Approved/Billed/...) and employee. */}
-          <View style={{ flexDirection:'row', justifyContent:'space-between', alignItems:'center', paddingHorizontal:15, paddingVertical:10, backgroundColor:'#f8f9fa', marginHorizontal:15, borderRadius:8, marginBottom:8, borderWidth:1, borderColor:'#e0e0e0' }}>
-              <Text style={{ fontWeight:'bold', color:'#555', fontSize:13 }}>
-                  {statusFilter === 'All' ? 'Total' : `Total (${statusFilter})`}
-                  {selectedEmployee !== 'All' ? ` — ${selectedEmployeeName}` : ''}:
-              </Text>
-              <Text style={{ fontWeight:'bold', fontSize:16, color:'#3b5998' }}>
-                  {fullList.length} • ₹{fullList.reduce((sum: number, o: any) => sum + (parseFloat(o.amount) || 0), 0).toLocaleString('en-IN')}
-              </Text>
-          </View>
+          {/* Respects the selected status chip and employee, like "Total Pending" on Dues/Payments. */}
+          <TotalBar
+              label={`${statusFilter === 'All' ? 'Total' : `Total (${statusFilter})`}${selectedEmployee !== 'All' ? ` — ${selectedEmployeeName}` : ''}`}
+              count={fullList.length}
+              amount={fullList.reduce((sum: number, o: any) => sum + (parseFloat(o.amount) || 0), 0)}
+          />
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingLeft:15, paddingVertical:10}}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingLeft:12, paddingRight:4, paddingTop:6, paddingBottom:2}}>
     {['All', 'Pending', 'Approved', 'Dispatched', 'Billed', 'Rejected'].map(s => {
         
         const chipData = (() => {
@@ -869,30 +850,14 @@ export default function OrderListScreen() {
             return { count, amount };
         })();
 
-        const isActive = statusFilter === s;
-
         return (
-            <TouchableOpacity
+            <StatusChip
                 key={s}
-                style={[
-                    styles.filterChip,
-                    isActive && styles.activeChip,
-                    { minWidth: 90, paddingVertical: 8, alignItems: 'center' }
-                ]}
+                label={s}
+                active={statusFilter === s}
                 onPress={() => setStatusFilter(s)}
-            >
-                <Text style={[styles.chipText, isActive && { color: 'white' }, { fontWeight: 'bold' }]}>
-                    {s}
-                </Text>
-                <Text style={[
-                    { fontSize: 11, marginTop: 2 },
-                    isActive ? { color: 'white' } : { color: '#3b5998' }
-                ]}>
-                    {chipData.count} • ₹{chipData.amount >= 100000
-                        ? (chipData.amount / 100000).toFixed(1) + 'L'
-                        : chipData.amount.toLocaleString('en-IN')}
-                </Text>
-            </TouchableOpacity>
+                detail={`${chipData.count} • ${formatInr(chipData.amount)}`}
+            />
         );
     })}
 </ScrollView>
@@ -1215,41 +1180,26 @@ const DetailRow = ({label, value, icon, highlight}: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 10, paddingTop: 50, backgroundColor: 'white', elevation: 4, alignItems:'center' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 10, backgroundColor: 'white', elevation: 4, alignItems:'center' },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   addBtn: { backgroundColor:'#3b5998', padding:8, borderRadius:20 },
-  
-  tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', margin: 10, borderRadius: 8, padding: 2, marginBottom: 5 },
-  tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-  activeTab: { backgroundColor: 'white', elevation: 2 },
-  tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-  activeTabText: { color: '#3b5998', fontWeight: 'bold' },
 
-  employeeFilterBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#e8f5e9', paddingHorizontal:12, paddingVertical:10, borderRadius:8, borderWidth:1, borderColor:'#2e7d32', marginBottom:10 },
-
-  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 6, marginHorizontal: 15, borderRadius: 8, marginBottom: 5, borderWidth:1, borderColor:'#eee' },
-  monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
-
-  searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', marginHorizontal: 15, paddingHorizontal: 10, borderRadius: 8, height:36, alignItems:'center', marginBottom:10 },
+  searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', marginHorizontal: 12, marginTop: 6, paddingHorizontal: 10, borderRadius: 8, height:36, alignItems:'center' },
   searchInput: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
 
-  filterChip: { paddingHorizontal:15, paddingVertical:6, backgroundColor:'#eee', borderRadius:20, marginRight:10, minWidth: 90, alignItems: 'center' },
-  activeChip: { backgroundColor:'#3b5998' },
-  chipText: { fontSize:12, color:'#555' },
-  
-  card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 10, elevation: 2, borderLeftWidth:4, borderLeftColor:'#ff9800' },
+  card: { backgroundColor: 'white', borderRadius: 10, padding: 11, marginBottom: 8, elevation: 2, borderLeftWidth:4, borderLeftColor:'#ff9800' },
   cardApproved: { borderLeftColor: '#4caf50' },
   cardBilled: { borderLeftColor: '#1976d2' },
   cardRejected: { borderLeftColor: '#f44336' },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  hospitalName: { fontWeight: 'bold', fontSize: 16, color: '#333', flex:1 },
+  hospitalName: { fontWeight: 'bold', fontSize: 15, color: '#333', flex:1 },
   poNumber: { fontSize: 12, color: 'gray' },
   statusBadge: { paddingHorizontal:8, paddingVertical:3, borderRadius:4, marginLeft: 10 },
-  productText: { fontSize: 13, color: '#555', marginTop: 8, fontStyle: 'italic' },
-  row: { flexDirection:'row', justifyContent:'space-between', marginTop:10 },
-  amount: { fontWeight:'bold', fontSize:16, color:'#333' },
+  productText: { fontSize: 13, color: '#555', marginTop: 4, fontStyle: 'italic' },
+  row: { flexDirection:'row', justifyContent:'space-between', marginTop:6 },
+  amount: { fontWeight:'bold', fontSize:15, color:'#333' },
   date: { color:'gray', fontSize:12 },
-  divider: { height:1, backgroundColor:'#eee', marginVertical:10 },
+  divider: { height:1, backgroundColor:'#eee', marginVertical:7 },
   footer: { flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
   
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end', padding: 10 },

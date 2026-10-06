@@ -24,8 +24,10 @@ import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function SalesTeamReport() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     // The 8 PM "Team today" notification links here with ?view=today (older app
     // builds just open this screen); the new app shows the day view instead.
@@ -375,7 +377,7 @@ export default function SalesTeamReport() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                     <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="white" /></TouchableOpacity>
                     <Text style={styles.headerTitle}>{isAdmin ? 'Team Performance' : 'My Performance'} 🚀</Text>
@@ -649,7 +651,7 @@ export default function SalesTeamReport() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f5f5f5' },
-    header: { backgroundColor: '#3b5998', paddingTop: 50, padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    header: { backgroundColor: '#3b5998', padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold', marginLeft: 10 },
 
     controlBar: { flexDirection: 'row', justifyContent: 'space-between', padding: 10, backgroundColor: 'white', elevation: 2 },

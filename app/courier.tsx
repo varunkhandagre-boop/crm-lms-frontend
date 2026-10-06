@@ -33,8 +33,10 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
 import { fetchOrganizations } from '../services/api/organizations';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function CourierScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   // 🔥 1. Context se sirf Profile, User & Notifications Nikala
@@ -653,7 +655,7 @@ export default function CourierScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={styles.headerTop}>
              <View style={{flexDirection:'row', alignItems:'center'}}>
                  <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
@@ -929,7 +931,7 @@ const DetailRow = ({label, value, icon}: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { backgroundColor: 'white',paddingHorizontal: 15, paddingTop: 50,paddingBottom: 0, elevation: 2 },
+  header: { backgroundColor: 'white',paddingHorizontal: 15,paddingBottom: 0, elevation: 2 },
   headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom:10 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
   addBtn: { flexDirection:'row', alignItems:'center', borderWidth:1, borderColor:'#3b5998', borderRadius:5, paddingHorizontal:10, paddingVertical:5 },

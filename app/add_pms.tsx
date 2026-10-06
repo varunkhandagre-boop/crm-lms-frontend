@@ -38,8 +38,10 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddPMSScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   const params = useLocalSearchParams();
   
@@ -445,7 +447,7 @@ recordLocationLog({
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={styles.container}>
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: headerTop }]}>
           <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
           <Text style={styles.headerTitle}>New PMS Report</Text>
           <View style={{width:24}} /> 
@@ -607,7 +609,7 @@ recordLocationLog({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   label: { marginBottom: 5, color:'#333', fontWeight:'600', fontSize:13, marginTop:10 },
   dropdown: { backgroundColor: '#f9f9f9', borderWidth:1, borderColor:'#ddd', borderRadius: 8, padding: 15, marginBottom: 5, flexDirection:'row', justifyContent:'space-between', alignItems:'center' },

@@ -27,8 +27,10 @@ import { dispatchVisitingCardRequest, fetchVisitingCards, receiveVisitingCardReq
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function VisitingCardScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   // 🔥 1. Context se sirf Current User lenge
@@ -310,7 +312,7 @@ export default function VisitingCardScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={styles.headerTop}>
              <View style={{flexDirection:'row', alignItems:'center'}}>
                  <TouchableOpacity onPress={() => router.back()} style={styles.backCircle}>
@@ -558,7 +560,7 @@ const DetailRow = ({label, value, color}: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { backgroundColor: 'white', paddingTop: 50, padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 4 },
+  header: { backgroundColor: 'white', padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 4 },
   headerTop: { flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom:10 },
   backCircle: { backgroundColor: '#F0F0F0', padding: 8, borderRadius: 20 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#1A237E', marginLeft: 12 },

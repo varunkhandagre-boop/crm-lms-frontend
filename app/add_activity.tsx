@@ -28,8 +28,10 @@ import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddActivityScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   const { currentUser, addNotification } = useData();
@@ -213,7 +215,7 @@ export default function AddActivityScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
         <Text style={styles.headerTitle}>New Activity Plan</Text>
         <View style={{width:24}} />
@@ -369,7 +371,7 @@ export default function AddActivityScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 4 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 4 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   contentContainer: { padding: 20 },
   sectionHeader: { fontSize: 16, fontWeight: 'bold', color: '#3b5998', marginTop: 20, marginBottom: 5, borderBottomWidth: 1, borderBottomColor: '#ddd', paddingBottom: 5 },

@@ -24,8 +24,10 @@ import { useData } from './context/DataContext';
 import { applyLeave, fetchLeaves, fetchLeaveSummary, leaveBucket } from '../services/api/leaves';
 import { useWorkSchedules } from '../hooks/useWorkSchedules';
 import { isOffDay, localYmd } from '../utils/workSchedule';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddLeaveScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   // 🔥 1. Context se Current User aur Notification Engine nikala
@@ -186,7 +188,7 @@ export default function AddLeaveScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
@@ -351,7 +353,7 @@ const styles = StyleSheet.create({
   overBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ffebee', borderRadius: 8, padding: 10, marginTop: 8 },
   overText: { color: '#c62828', fontSize: 12, fontWeight: 'bold', marginLeft: 6, flex: 1 },
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   contentContainer: { padding: 20 },
   label: { marginBottom: 5, color:'#555', fontWeight:'600', fontSize:13, marginTop:15 },

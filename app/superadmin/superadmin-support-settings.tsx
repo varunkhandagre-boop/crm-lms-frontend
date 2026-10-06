@@ -14,6 +14,7 @@ import {
     View,
 } from 'react-native';
 import { fetchSupportSettings, saveSupportSettings, SupportSettings } from '../../services/api/superadminSettings';
+import { useHeaderTop } from '../../hooks/useHeaderTop';
 
 const EMPTY_CONFIG: SupportSettings = {
     supportPhone: '',
@@ -23,6 +24,7 @@ const EMPTY_CONFIG: SupportSettings = {
 };
 
 export default function SuperAdminSupportSettings() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     const [config, setConfig] = useState<SupportSettings>(EMPTY_CONFIG);
     const [original, setOriginal] = useState<SupportSettings>(EMPTY_CONFIG);
@@ -132,7 +134,7 @@ export default function SuperAdminSupportSettings() {
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
             {/* HEADER */}
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}>
                     <Ionicons name="arrow-back" size={24} color="white" />
                 </TouchableOpacity>
@@ -285,7 +287,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 20,
-        paddingTop: 50,
         paddingBottom: 16,
     },
     headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },

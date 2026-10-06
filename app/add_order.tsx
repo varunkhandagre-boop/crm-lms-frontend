@@ -41,6 +41,7 @@ import { urlToBase64Image } from '../utils/pdfImageHelper';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 // Legacy organizations sometimes carry a placeholder/malformed value in
 // their email field from the old Firestore data (blank isn't the only bad
@@ -54,6 +55,7 @@ import { buildCacheKey } from '../utils/listCache';
 const looksLikeEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 
 export default function AddOrderScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
 
   const { currentUser, addNotification, companyProfile } = useData();
@@ -606,7 +608,7 @@ if (locationData) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
@@ -895,7 +897,7 @@ if (locationData) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   content: { padding: 20, paddingBottom: 50 },
   label: { marginBottom: 5, color:'#555', fontWeight:'600', fontSize:13 },

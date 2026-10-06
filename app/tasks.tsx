@@ -27,8 +27,10 @@ import { completeTask as completeTaskApi, fetchTasks } from '../services/api/tas
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function TaskScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   // 🔥 1. Context se sirf current user nikala gaya hai
@@ -336,7 +338,7 @@ export default function TaskScreen() {
   return (
     <View style={styles.container}>
       
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={styles.headerTop}>
              <View style={{flexDirection:'row', alignItems:'center'}}>
                  <TouchableOpacity onPress={() => router.back()} style={styles.backCircle}>
@@ -661,7 +663,7 @@ export default function TaskScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8F9FA' },
-  header: { backgroundColor: 'white', padding: 15, paddingTop: 50, elevation: 0 },
+  header: { backgroundColor: 'white', padding: 15, elevation: 0 },
   headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   backCircle: { backgroundColor: '#F0F0F0', padding: 6, borderRadius: 20 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#1A237E', marginLeft: 10 },

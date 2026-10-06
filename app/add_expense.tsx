@@ -23,8 +23,10 @@ import { useData } from './context/DataContext';
 // 🔥 Phase 6: expenses now via new backend API
 import { createExpense, uploadExpenseBillPhoto } from '../services/api/expenses';
 import PhotoPickerField, { PendingPhoto } from '../components/PhotoPickerField';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddExpenseScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   const { currentUser, addNotification } = useData();
@@ -102,7 +104,7 @@ export default function AddExpenseScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
@@ -200,7 +202,7 @@ export default function AddExpenseScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   contentContainer: { padding: 20 },
   label: { marginBottom: 5, color:'#555', fontWeight:'600', fontSize:13, marginTop:15 },

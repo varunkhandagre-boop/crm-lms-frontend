@@ -20,6 +20,7 @@ import { ActivePlan, listActivePlans } from '../services/api/plans';
 import { fetchPublicBillingSettings, fetchPublicGatewayConfig, PublicGatewayConfig } from '../services/api/settings';
 import { submitSubscriptionRequest } from '../services/api/subscriptionRequests';
 import { useData } from './context/DataContext';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 const DEFAULT_AUTOMATION_ADDON_PRICE = 3000;
 
@@ -45,6 +46,7 @@ function friendlyRazorpayError(error: any): string {
 }
 
 export default function SubscriptionScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     const { currentUser } = useData();
 
@@ -248,7 +250,7 @@ export default function SubscriptionScreen() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.replace('/' as any)} style={{ position: 'absolute', left: 20, bottom: 15 }}>
                     <Ionicons name="arrow-back" size={24} color="#3b5998" />
                 </TouchableOpacity>
@@ -430,7 +432,7 @@ export default function SubscriptionScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f9f9f9' },
-    header: { padding: 20, backgroundColor: '#fff', paddingTop: 50, elevation: 2, alignItems: 'center' },
+    header: { padding: 20, backgroundColor: '#fff', elevation: 2, alignItems: 'center' },
     headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
     scroll: { padding: 20, paddingBottom: 60 },
     sectionTitle: { fontSize: 15, fontWeight: 'bold', color: '#333', marginTop: 18, marginBottom: 10 },

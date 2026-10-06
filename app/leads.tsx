@@ -31,8 +31,10 @@ import CloseStaleLeadsModal from '../components/CloseStaleLeadsModal';
 import WebsiteLeadSettingsModal from '../components/WebsiteLeadSettingsModal';
 import { isWebsiteLead } from '../services/api/websiteLeads';
 import { formatInr } from '../constants/leadStatus';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function LeadsScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     
     // 🔥 1. Context se sirf user
@@ -251,7 +253,7 @@ export default function LeadsScreen() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <View style={styles.headerTop}>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
@@ -512,7 +514,7 @@ export default function LeadsScreen() {
 
             {/* "+ Lead" — both ways a lead gets created */}
             <Modal visible={showAddMenu} transparent animationType="fade" onRequestClose={() => setShowAddMenu(false)}>
-                <TouchableOpacity style={styles.menuOverlay} activeOpacity={1} onPress={() => setShowAddMenu(false)}>
+                <TouchableOpacity style={[styles.menuOverlay, { paddingTop: headerTop + 35 }]} activeOpacity={1} onPress={() => setShowAddMenu(false)}>
                     <View style={styles.menuBox}>
                         <TouchableOpacity style={styles.menuItem} onPress={() => { setShowAddMenu(false); router.push('/add_sales' as any); }}>
                             <Ionicons name="location-outline" size={20} color="#3b5998" />
@@ -534,7 +536,7 @@ export default function LeadsScreen() {
 
             {canBulkReassign && (
                 <Modal visible={showAdminMenu} transparent animationType="fade" onRequestClose={() => setShowAdminMenu(false)}>
-                    <TouchableOpacity style={styles.menuOverlay} activeOpacity={1} onPress={() => setShowAdminMenu(false)}>
+                    <TouchableOpacity style={[styles.menuOverlay, { paddingTop: headerTop + 35 }]} activeOpacity={1} onPress={() => setShowAdminMenu(false)}>
                         <View style={styles.menuBox}>
                             <TouchableOpacity style={styles.menuItem} onPress={() => { setShowAdminMenu(false); setShowReassign(true); }}>
                                 <Ionicons name="swap-horizontal" size={20} color="#3b5998" />
@@ -595,11 +597,11 @@ export default function LeadsScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { backgroundColor: 'white', paddingTop: 55, paddingBottom: 2, elevation: 2 },
+    header: { backgroundColor: 'white', paddingBottom: 2, elevation: 2 },
     headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 15, marginBottom: 5 },
     headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
     addBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#3b5998', borderRadius: 5, paddingHorizontal: 8, paddingVertical: 6 },
-    menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.25)', justifyContent: 'flex-start', alignItems: 'flex-end', paddingTop: 90, paddingRight: 12 },
+    menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.25)', justifyContent: 'flex-start', alignItems: 'flex-end', paddingRight: 12 },
     menuBox: { width: 270, backgroundColor: 'white', borderRadius: 10, elevation: 8, paddingVertical: 4 },
     menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
     menuTitle: { fontSize: 14, fontWeight: 'bold', color: '#333' },

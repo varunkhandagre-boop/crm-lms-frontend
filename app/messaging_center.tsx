@@ -43,17 +43,19 @@ import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 
 import { TemplatesTab } from '../components/TemplatesTab';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function MessagingCenterScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     const [activeTab, setActiveTab] = useState<'Templates' | 'Pending' | 'History' | 'Broadcast'>('Templates');
 
         return (
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
             <View style={styles.container}>
-                <StatusBar barStyle="light-content" />
+                <StatusBar barStyle="light-content" backgroundColor="#3b5998" />
 
-                <View style={styles.header}>
+                <View style={[styles.header, { paddingTop: headerTop }]}>
                     <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} style={{ padding: 5 }}>
                         <Ionicons name="arrow-back" size={24} color="white" />
                     </TouchableOpacity>
@@ -566,7 +568,7 @@ const styles = StyleSheet.create({
     loadMoreBtn: { padding: 12, backgroundColor: '#fff', alignItems: 'center', marginVertical: 12, borderRadius: 8, borderWidth: 1, borderColor: '#ddd' },
     loadMoreText: { fontWeight: 'bold', color: '#3b5998' },
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { backgroundColor: '#3b5998', padding: 15, paddingTop: 50, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    header: { backgroundColor: '#3b5998', padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },
     tabContainer: { flexDirection: 'row', backgroundColor: 'white', elevation: 2 },
     tabBtn: { paddingVertical: 15, paddingHorizontal: 16, alignItems: 'center', borderBottomWidth: 3, borderBottomColor: 'transparent', minWidth: 100 },

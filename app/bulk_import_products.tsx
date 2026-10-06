@@ -18,6 +18,7 @@ import {
 import * as XLSX from 'xlsx';
 
 import { BulkImportPreviewItem, BulkProductRow, commitBulkImport, previewBulkImport } from '../services/api/products';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 const TEMPLATE_COLUMNS = [
   'Product Name', 'Model', 'Series', 'Description', 'Specifications',
@@ -37,6 +38,7 @@ const SAMPLE_ROW = {
 };
 
 export default function BulkImportProductsScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
 
   const [step, setStep] = useState<'start' | 'preview' | 'done'>('start');
@@ -147,7 +149,7 @@ export default function BulkImportProductsScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
@@ -263,7 +265,7 @@ export default function BulkImportProductsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { backgroundColor: '#3b5998', paddingTop: 50, padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 4 },
+  header: { backgroundColor: '#3b5998', padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 4 },
   headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },
   content: { padding: 20 },
   loadingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255,255,255,0.7)', justifyContent: 'center', alignItems: 'center', zIndex: 10 },

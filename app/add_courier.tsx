@@ -32,8 +32,10 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddCourierScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   const { currentUser, companyProfile, addNotification } = useData();
 
@@ -441,7 +443,7 @@ export default function AddCourierScreen() {
   return (
     <View style={styles.container}>
       
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
         <Text style={styles.headerTitle}>Log New Courier</Text>
         <View style={{width:24}} /> 
@@ -607,7 +609,7 @@ export default function AddCourierScreen() {
       </KeyboardAvoidingView>
 
       <Modal visible={showOrgModal} animationType="slide">
-        <View style={styles.modalContainer}>
+        <View style={[styles.modalContainer, { paddingTop: headerTop }]}>
             <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Select {type === 'Outward' ? 'Receiver' : 'Sender'}</Text>
                 <TouchableOpacity onPress={() => setShowOrgModal(false)}><Ionicons name="close-circle" size={30} color="#d32f2f"/></TouchableOpacity>
@@ -642,7 +644,7 @@ export default function AddCourierScreen() {
       </Modal>
 
       <Modal visible={showProductModal} animationType="slide">
-        <View style={styles.modalContainer}>
+        <View style={[styles.modalContainer, { paddingTop: headerTop }]}>
             <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Select Item</Text>
                 <TouchableOpacity onPress={() => setShowProductModal(false)}><Ionicons name="close-circle" size={30} color="#d32f2f"/></TouchableOpacity>
@@ -675,7 +677,7 @@ export default function AddCourierScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8f9fa' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   content: { padding: 15, paddingBottom: 50 },
   topRow: { flexDirection:'row', justifyContent:'space-between', marginBottom: 20 },
@@ -695,7 +697,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row' },
   saveBtn: { backgroundColor: '#3b5998', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 20, elevation: 3 },
   saveText: { color: 'white', fontWeight: 'bold', fontSize: 18 },
-  modalContainer: { flex: 1, backgroundColor: 'white', padding: 20, paddingTop: 50 },
+  modalContainer: { flex: 1, backgroundColor: 'white', padding: 20 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#333' },
   searchBox: { flexDirection:'row', alignItems:'center', backgroundColor: '#f0f2f5', paddingHorizontal: 10, borderRadius: 10, marginBottom: 15, height: 50 },

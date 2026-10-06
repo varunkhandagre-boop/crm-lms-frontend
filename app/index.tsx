@@ -23,6 +23,7 @@ import { MENU_TAG_BUCKET } from '../constants/modules';
 import { fetchCompanyProfile } from '../services/api/companies';
 import { fetchHomeSummary } from '../services/api/homeSummary';
 import { useData } from './context/DataContext';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 // Sensible starting permissions per role, used ONLY for a role Admin has
 // never touched in Manage Team → Permissions (i.e. no key for it exists yet
@@ -62,6 +63,7 @@ Notifications.setNotificationHandler({
 });
 
 export default function HomeScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   const { 
@@ -518,7 +520,7 @@ const saveTokenToDatabase = async (token: string) => {
 
           <Modal visible={sidebarVisible} transparent={true} animationType="slide">
               <View style={styles.modalOverlay}>
-                  <View style={styles.sidebarContainer}>
+                  <View style={[styles.sidebarContainer, { paddingTop: headerTop }]}>
                       <View style={styles.sidebarHeader}>
                           <TouchableOpacity onPress={() => { setSidebarVisible(false); router.push('/profile'); }}>
                               <View style={styles.sidebarAvatar}>
@@ -635,7 +637,7 @@ const styles = StyleSheet.create({
   },
   menuBadgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
   modalOverlay: { flex: 1, flexDirection: 'row' },
-  sidebarContainer: { width: '75%', backgroundColor: 'white', padding: 20, paddingTop: 50, elevation: 5, justifyContent: 'space-between' },
+  sidebarContainer: { width: '75%', backgroundColor: 'white', padding: 20, elevation: 5, justifyContent: 'space-between' },
   modalTransparent: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
   sidebarHeader: { alignItems: 'center', marginBottom: 20, borderBottomWidth: 1, borderBottomColor: '#eee', paddingBottom: 20 },
   sidebarAvatar: { width: 70, height: 70, borderRadius: 35, backgroundColor:'#3b5998', justifyContent:'center', alignItems:'center', marginBottom: 10, overflow:'hidden' },

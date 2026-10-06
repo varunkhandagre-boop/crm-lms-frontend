@@ -21,8 +21,10 @@ import { useData } from './context/DataContext';
 
 // 🔥 Phase 8: visiting card requests now go to Postgres via this adapter
 import { createVisitingCardRequest } from '../services/api/visitingCards';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddVisitingCardScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   // 🔥 1. Context se User aur Notification engine (cardRequestList ab zaroori nahi —
@@ -129,7 +131,7 @@ export default function AddVisitingCardScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
@@ -259,7 +261,7 @@ export default function AddVisitingCardScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   contentContainer: { padding: 20, paddingBottom: 100 },
   label: { marginBottom: 5, color:'#aaa', fontWeight:'600', fontSize:13 },

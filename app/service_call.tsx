@@ -40,6 +40,7 @@ import { listInstallations } from '../services/api/installations';
 import { fetchTeamMembers } from '../services/api/users';
 import { listSpareParts } from '../services/api/spareParts';
 import { sortAndFilterParts } from '../utils/sparePartSearch';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const fyStart = (d: Date) => (d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1);
@@ -72,6 +73,7 @@ function buildServiceCallFilters(s: {
 }
 
 export default function ServiceCallScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   const params = useLocalSearchParams();
   
@@ -677,7 +679,7 @@ export default function ServiceCallScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={styles.headerTop}>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 10 }}>
@@ -1060,7 +1062,7 @@ const styles = StyleSheet.create({
   photoBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#e3f2fd', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#90caf9' },
   photoBtnText: { marginLeft: 6, color: '#3b5998', fontWeight: 'bold' },
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { backgroundColor: 'white', paddingTop: 40, paddingBottom: 0, elevation: 0 },
+  header: { backgroundColor: 'white', paddingBottom: 0, elevation: 0 },
   headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 15, marginBottom: 10 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998', marginLeft: 10 },
   addBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#3b5998', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 },

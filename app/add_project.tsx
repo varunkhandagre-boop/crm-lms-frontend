@@ -25,8 +25,10 @@ import { fetchOrganizations } from '../services/api/organizations';
 import { useCachedList } from '../hooks/useCachedList';
 import { createProject } from '../services/api/projects';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddProjectScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   const { currentUser, addNotification } = useData(); 
@@ -139,7 +141,7 @@ export default function AddProjectScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
@@ -226,7 +228,7 @@ export default function AddProjectScreen() {
       </KeyboardAvoidingView>
 
       <Modal visible={modalVisible} animationType="slide">
-          <View style={styles.modalContainer}>
+          <View style={[styles.modalContainer, { paddingTop: headerTop }]}>
               <View style={styles.modalHeader}>
                   <TouchableOpacity onPress={() => setModalVisible(false)}>
                       <Ionicons name="arrow-back" size={24} color="#333" />
@@ -267,7 +269,7 @@ export default function AddProjectScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
   
   label: { marginTop: 15, marginBottom: 5, color: '#555', fontWeight: '600' },
@@ -284,7 +286,7 @@ const styles = StyleSheet.create({
   btn: { backgroundColor: '#3b5998', padding: 15, borderRadius: 8, alignItems: 'center', marginTop: 30, marginBottom: 50, elevation: 3 },
   btnText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
 
-  modalContainer: { flex: 1, backgroundColor: 'white', paddingTop: 40 },
+  modalContainer: { flex: 1, backgroundColor: 'white' },
   modalHeader: { flexDirection: 'row', alignItems: 'center', padding: 10, borderBottomWidth: 1, borderBottomColor: '#eee' },
   searchInput: { flex: 1, marginLeft: 10, fontSize: 16, backgroundColor: '#f0f0f0', padding: 8, borderRadius: 8 },
   orgItem: { padding: 15, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },

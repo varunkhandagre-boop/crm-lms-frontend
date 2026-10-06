@@ -38,8 +38,10 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddDemoScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   const params = useLocalSearchParams(); 
   // 🔥 Edit mode: demo.tsx passes editId + the existing field values via
@@ -577,7 +579,7 @@ export default function AddDemoScreen() {
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <View style={styles.container}>
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: headerTop }]}>
             <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="white" />
             </TouchableOpacity>
@@ -744,7 +746,7 @@ export default function AddDemoScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { backgroundColor: '#3b5998', paddingTop: 50, padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation:4 },
+  header: { backgroundColor: '#3b5998', padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation:4 },
   headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },
   content: { padding: 15, paddingBottom: 50 },
   sectionHeader: { fontSize: 14, fontWeight: 'bold', color: '#555', marginBottom: 8, marginTop: 15, textTransform:'uppercase' },

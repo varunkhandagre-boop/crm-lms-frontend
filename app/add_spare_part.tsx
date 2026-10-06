@@ -15,8 +15,10 @@ import {
 import { useData } from './context/DataContext';
 // 🔥 Phase 3: spare parts now go through the new backend API
 import { createSparePart } from '../services/api/spareParts';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddSparePartScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   const { addNotification } = useData();
@@ -69,7 +71,7 @@ export default function AddSparePartScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
           <TouchableOpacity onPress={() => router.back()}>
               <Ionicons name="arrow-back" size={24} color="#333" />
           </TouchableOpacity>
@@ -107,7 +109,7 @@ export default function AddSparePartScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
-  header: { flexDirection: 'row', alignItems: 'center', padding: 15, paddingTop: 50, borderBottomWidth: 1, borderColor: '#eee' },
+  header: { flexDirection: 'row', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderColor: '#eee' },
   headerTitle: { fontSize: 18, fontWeight: 'bold', marginLeft: 15, color: '#333' },
   form: { padding: 20 },
   label: { fontSize: 13, color: '#555', marginBottom: 5, fontWeight: '600', marginTop: 10 },

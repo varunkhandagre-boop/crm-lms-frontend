@@ -24,8 +24,10 @@ import { fetchOrganizations, deleteOrganization } from '../services/api/organiza
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function OrganizationScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   // 🔥 Context se Sirf User (Baaki SaaS engine handle karega)
@@ -187,7 +189,7 @@ export default function OrganizationScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={styles.headerTop}>
              <View style={{flexDirection:'row', alignItems:'center'}}>
                  <TouchableOpacity onPress={() => router.back()} style={{marginRight:10}}>
@@ -361,7 +363,7 @@ const DetailRow = ({label, value, icon, highlight}: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { backgroundColor: 'white', paddingTop: 40, paddingBottom: 10, elevation: 4 },
+  header: { backgroundColor: 'white', paddingBottom: 10, elevation: 4 },
   headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 15, marginBottom: 15 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
   iconBtn: { borderWidth:1, borderColor:'#3b5998', borderRadius:5, padding:6, marginRight:10 },

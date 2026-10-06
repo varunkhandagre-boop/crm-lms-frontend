@@ -16,6 +16,7 @@ import {
     View,
 } from 'react-native';
 import { fetchGatewaySettings, GatewaySettings, saveGatewaySettings } from '../../services/api/superadminSettings';
+import { useHeaderTop } from '../../hooks/useHeaderTop';
 
 type GatewayForm = {
     isEnabled: boolean;
@@ -42,6 +43,7 @@ const EMPTY_FORM: GatewayForm = {
 };
 
 export default function PaymentGatewaySettings() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     const [config, setConfig] = useState<GatewayForm>(EMPTY_FORM);
     const [original, setOriginal] = useState<GatewayForm>(EMPTY_FORM);
@@ -189,7 +191,7 @@ export default function PaymentGatewaySettings() {
 
     return (
         <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}>
                     <Ionicons name="arrow-back" size={24} color="white" />
                 </TouchableOpacity>
@@ -396,7 +398,7 @@ function PreviewRow({ icon, color, label, value }: { icon: any; color: string; l
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { backgroundColor: '#d32f2f', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 50, paddingBottom: 16 },
+    header: { backgroundColor: '#d32f2f', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 16 },
     headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },
     content: { padding: 16 },
     statusBanner: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, padding: 14, borderWidth: 1.5, marginBottom: 12 },

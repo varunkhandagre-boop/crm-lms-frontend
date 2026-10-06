@@ -27,8 +27,11 @@ import { deleteSalesVisit as apiDeleteSalesVisit, listSalesVisits } from '../ser
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
 
 export default function SalesReportScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   const { currentUser } = useData();
@@ -387,7 +390,7 @@ export default function SalesReportScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={{flexDirection:'row', alignItems:'center'}}>
             <TouchableOpacity onPress={() => router.back()} style={{padding:5}}>
                 <Ionicons name="arrow-back" size={24} color="#333" />
@@ -419,9 +422,9 @@ export default function SalesReportScreen() {
           </TouchableOpacity>
       </View>
 
-      <View style={{backgroundColor:'white', padding:10, marginBottom:5}}>
+      <View style={{backgroundColor:'white', paddingTop:6, paddingBottom:6, marginBottom:2}}>
           <View style={styles.searchBar}>
-              {isDbLoading ? <ActivityIndicator size="small" color="#1565c0" style={{marginRight: 5}}/> : <Ionicons name="search" size={24} color="#1565c0" />} 
+              {isDbLoading ? <ActivityIndicator size="small" color="#1565c0" style={{marginRight: 5}}/> : <Ionicons name="search" size={20} color="#1565c0" />} 
               <TextInput style={styles.input} placeholder="Search: Hospital, City..." value={searchText} onChangeText={setSearchText} />
               {searchText.length > 0 && (
                   <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={20} color="#d32f2f" /></TouchableOpacity>
@@ -430,46 +433,20 @@ export default function SalesReportScreen() {
 
           {!searchText && (
             <>
-              <View style={styles.dateTabContainer}>
-                  {['Day', 'Month', 'FY', 'All'].map((m) => (
-                      <TouchableOpacity key={m} style={[styles.dateTab, viewMode === m && styles.activeDateTab]} onPress={() => setViewMode(m as any)}>
-                          <Text style={[styles.dateTabText, viewMode === m && styles.activeDateTabText]}>{m}</Text>
-                      </TouchableOpacity>
-                  ))}
-              </View>
+              <PeriodTabs value={viewMode} onChange={setViewMode} />
 
-              {isAdmin && (
-                <View style={{flexDirection:'row', justifyContent:'space-between', paddingHorizontal:15, marginBottom:10}}>
-                    <TouchableOpacity style={styles.employeeFilterBtn} onPress={() => setShowEmployeePicker(true)}>
-                        <Ionicons name="people" size={18} color="#2e7d32" />
-                        <Text style={{fontSize:13, marginLeft:8, color:'#2e7d32', fontWeight:'600'}}>
-                            {selectedEmployee === 'All' ? 'View All Staff' : selectedEmployeeName}
-                        </Text>
-                        <Ionicons name="chevron-down" size={16} color="#2e7d32" style={{marginLeft:5}}/>
-                    </TouchableOpacity>
-                    {viewMode !== 'All' && (
-                        <View style={styles.miniDateNav}>
-                            <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={20} color="#555" /></TouchableOpacity>
-                            <Text style={{fontWeight:'bold', color:'#3b5998', fontSize:12, marginHorizontal:5}}>{getHeaderDate()}</Text>
-                            <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={20} color="#555" /></TouchableOpacity>
-                        </View>
-                    )}
-                </View>
-              )}
-
-              {(!isAdmin && viewMode !== 'All') && (
-                  <View style={styles.dateNav}>
-                      <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-                      <Text style={styles.monthText}>{getHeaderDate()}</Text>
-                      <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-                  </View>
-              )}
+              <StaffPeriodRow
+                  showStaff={isAdmin}
+                  staffLabel={selectedEmployee === 'All' ? 'All Staff' : selectedEmployeeName}
+                  onStaffPress={() => setShowEmployeePicker(true)}
+                  periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+                  onPrev={() => changeDate(-1)}
+                  onNext={() => changeDate(1)}
+              />
             </>
           )}
           
-          <Text style={{textAlign:'right', fontSize:12, color:'gray', paddingRight:15, marginTop:5}}>
-              Total: <Text style={{fontWeight:'bold', color:'green'}}>{displayList.length}</Text> Records
-          </Text>
+          <TotalBar label="Total" count={displayList.length} accent="#2e7d32" />
       </View>
 
       <FlatList 
@@ -594,40 +571,29 @@ export default function SalesReportScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 0, zIndex: 10 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, paddingBottom: 10, alignItems: 'center', backgroundColor: 'white', elevation: 0, zIndex: 10 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
-  addBtn: { flexDirection:'row', backgroundColor:'#3b5998', paddingHorizontal:12, paddingVertical:8, borderRadius:20, alignItems:'center' },
+  addBtn: { flexDirection:'row', backgroundColor:'#3b5998', paddingHorizontal:11, paddingVertical:7, borderRadius:20, alignItems:'center' },
   addBtnText: { color:'white', fontWeight:'bold', marginLeft:5 },
-  
+
   subTabContainer: { flexDirection: 'row', padding: 5, backgroundColor: 'white', justifyContent:'space-between', borderTopWidth:1, borderTopColor:'#eee' },
-  subTab: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 8, marginHorizontal: 4, backgroundColor: '#f0f0f0' },
+  subTab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 8, marginHorizontal: 4, backgroundColor: '#f0f0f0' },
   activeSubTabColdCall: { backgroundColor: '#1976d2' },
   activeSubTabFollow: { backgroundColor: '#f57f17' },
   activeSubTabAll: { backgroundColor: '#3b5998' },
   subTabText: { fontSize: 12, fontWeight: 'bold', color: '#555' },
-  
-  dateTabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', margin: 5, borderRadius: 8, padding: 3, marginBottom: 5 },
-  dateTab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-  activeDateTab: { backgroundColor: 'white', elevation: 2 },
-  dateTabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-  activeDateTabText: { color: '#3b5998', fontWeight: 'bold' },
-  
-  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 10, marginHorizontal: 15, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#eee' },
-  miniDateNav: { flexDirection:'row', alignItems:'center', backgroundColor:'#f0f0f0', borderRadius:15, paddingHorizontal:5, paddingVertical:5 },
-  employeeFilterBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#e8f5e9', paddingHorizontal:12, paddingVertical:8, borderRadius:20, borderWidth:1, borderColor:'#2e7d32' },
-  monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
-  
-  searchBar: { backgroundColor: '#e3f2fd', borderRadius: 10, flexDirection:'row', alignItems:'center', paddingHorizontal: 15, height: 40, marginHorizontal: 15, marginBottom: 0, borderWidth: 1, borderColor: '#90caf9', elevation: 0 },
-  input: { flex:1, marginLeft:10, fontSize:16, color:'#1565c0', fontWeight:'500' },
-  
-  listContent: { paddingHorizontal: 15, paddingBottom: 20 },
-  card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 5, elevation: 2, marginTop: 10 },
+
+  searchBar: { backgroundColor: '#e3f2fd', borderRadius: 8, flexDirection:'row', alignItems:'center', paddingHorizontal: 10, height: 36, marginHorizontal: 12, borderWidth: 1, borderColor: '#90caf9', elevation: 0 },
+  input: { flex:1, marginLeft:8, fontSize:14, color:'#1565c0', fontWeight:'500' },
+
+  listContent: { paddingHorizontal: 12, paddingBottom: 20 },
+  card: { backgroundColor: 'white', borderRadius: 10, padding: 11, marginBottom: 2, elevation: 2, marginTop: 6 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  hospitalName: { fontSize: 16, fontWeight: 'bold', color: '#333' },
+  hospitalName: { fontSize: 15, fontWeight: 'bold', color: '#333' },
   subText: { fontSize: 13, color: '#555', marginTop: 2 }, 
   badge: { paddingHorizontal:8, paddingVertical:4, borderRadius:4 },
   badgeText: { fontSize:10, fontWeight:'bold' },
-  divider: { height: 1, backgroundColor: '#eee', marginVertical: 8 },
+  divider: { height: 1, backgroundColor: '#eee', marginVertical: 6 },
   dateText: { fontSize: 12, color: '#555' },
   noteText: { fontSize: 13, color: '#444', marginTop:5, fontStyle:'italic' },
   

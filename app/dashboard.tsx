@@ -24,6 +24,7 @@ import { useData } from './context/DataContext';
 // already had this pattern applied everywhere else).
 import { useCachedObject } from '../hooks/useCachedObject';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 const SCREEN_WIDTH = Dimensions.get('window').width - 36;
 
@@ -43,6 +44,7 @@ const PIE_COLORS_ORDER = ['#1A237E', '#2E7D32', '#F57C00', '#D32F2F', '#607D8B']
 const PIE_COLORS_LEAD = ['#1976D2', '#F57C00', '#2E7D32', '#D32F2F', '#9C27B0'];
 
 export default function UpdatedDashboard() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     const { currentUser, companyProfile } = useData();
 
@@ -117,7 +119,7 @@ export default function UpdatedDashboard() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <View>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <Text style={styles.welcomeText}>{isAdmin ? 'Admin Dashboard' : 'Employee Dashboard'}</Text>
@@ -412,7 +414,7 @@ const QuickLink = ({ icon, label, count, color, onPress, showBadge }: any) => (
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#F0F2F5' },
-    header: { backgroundColor: '#1A237E', padding: 20, paddingTop: 60, borderBottomLeftRadius: 30, borderBottomRightRadius: 30, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 10 },
+    header: { backgroundColor: '#1A237E', padding: 20, borderBottomLeftRadius: 30, borderBottomRightRadius: 30, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 10 },
     welcomeText: { color: 'rgba(255,255,255,0.6)', fontSize: 13 },
     headerTitle: { color: 'white', fontSize: 22, fontWeight: 'bold' },
     statusPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12, marginLeft: 10, borderWidth: 1 },

@@ -29,9 +29,11 @@ import { useData } from './context/DataContext';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 
 export default function SalesAnalysisScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   // 🔥 Context se SaaS User
@@ -642,7 +644,7 @@ export default function SalesAnalysisScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={{flexDirection:'row', alignItems:'center'}}>
             <TouchableOpacity onPress={() => router.back()}>
                 <Ionicons name="arrow-back" size={24} color="#333" />
@@ -1115,7 +1117,7 @@ export default function SalesAnalysisScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
   downloadBtn: { padding: 5, backgroundColor: '#f0f4f8', borderRadius: 8, marginRight: 5 },
   filterBox: { backgroundColor: 'white', padding: 10, paddingBottom:5, marginBottom: 10, elevation: 1 },

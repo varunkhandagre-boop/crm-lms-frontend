@@ -33,8 +33,10 @@ import * as ImagePicker from 'expo-image-picker';
 // 🔥 DATE PICKER IMPORT
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddOrganizationScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   const params = useLocalSearchParams(); 
   const isEditMode = params.editId ? true : false;
@@ -469,7 +471,7 @@ export default function AddOrganizationScreen() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 20}
     >
       <View style={styles.container}>
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: headerTop }]}>
           <TouchableOpacity onPress={() => router.back()}>
               <Ionicons name="arrow-back" size={24} color="#333" />
           </TouchableOpacity>
@@ -727,7 +729,7 @@ export default function AddOrganizationScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white' },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   scrollContent: { padding: 20, paddingBottom: 10 }, 
   scannerBtn: { flexDirection: 'row', backgroundColor: '#e65100', padding: 15, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, elevation: 3 },

@@ -29,6 +29,7 @@ import { listInstallations } from '../services/api/installations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 const parseDateOnly = (dateStr: any) => {
     if (!dateStr) return 0;
@@ -53,6 +54,7 @@ const parseDateOnly = (dateStr: any) => {
 };
 
 export default function AnalysisScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     
     const { currentUser } = useData(); 
@@ -371,7 +373,7 @@ export default function AnalysisScreen() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="white" /></TouchableOpacity>
                 <Text style={styles.headerTitle}>Master Reports</Text>
                 <View style={{width:24}} /> 
@@ -590,7 +592,7 @@ const DetailRow = ({label, value}: any) => (
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f5f5f5' },
-    header: { backgroundColor: '#3b5998', paddingTop: 50, padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    header: { backgroundColor: '#3b5998', padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     headerTitle: { color: 'white', fontSize: 20, fontWeight: 'bold' },
 
     filterContainer: { backgroundColor: 'white', paddingVertical: 12, paddingHorizontal: 10, elevation: 2 },

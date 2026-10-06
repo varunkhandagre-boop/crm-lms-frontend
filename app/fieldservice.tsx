@@ -17,10 +17,12 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: service calls now via new backend API
 import { listServiceCalls } from '../services/api/serviceCalls';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 const ITEMS_PER_PAGE = 20; 
 
 export default function FieldServiceScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
 
   const { currentUser } = useData();
@@ -118,7 +120,7 @@ export default function FieldServiceScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
@@ -233,7 +235,7 @@ const DetailRow = ({ label, value, icon, highlight, color }: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
 
   searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', margin: 15, marginBottom: 10, padding: 10, borderRadius: 8, elevation: 2 },

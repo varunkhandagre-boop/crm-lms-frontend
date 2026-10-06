@@ -42,8 +42,10 @@ import { listPmsReports } from '../services/api/pmsReports';
 import { listSalesVisits } from '../services/api/salesVisits';
 import { listServiceCalls } from '../services/api/serviceCalls';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function SerialNumberScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   const { currentUser } = useData();
@@ -485,7 +487,7 @@ export default function SerialNumberScreen() {
     <TouchableWithoutFeedback onPress={() => { setShowSuggestions(false); Keyboard.dismiss(); }}>
         <View style={styles.container}>
         
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: headerTop }]}>
             <TouchableOpacity onPress={() => ['DETAILS', 'ORG_DETAILS'].includes(viewMode) ? setViewMode('IDLE') : router.back()}>
                 <Ionicons name="arrow-back" size={24} color="#333" />
             </TouchableOpacity>
@@ -831,7 +833,7 @@ const DetailRow = ({label, value}: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 0, zIndex: 10 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 0, zIndex: 10 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
   toggleContainer: { flexDirection: 'row', backgroundColor: 'white', paddingHorizontal: 15, paddingBottom: 10, elevation: 2 },
   toggleBtn: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingVertical: 8, borderWidth: 1, borderColor: '#eee', backgroundColor: '#f9f9f9' },

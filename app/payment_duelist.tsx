@@ -26,8 +26,10 @@ import { listPaymentDues, remindPaymentDue } from '../services/api/paymentDues';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function PaymentDueList() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     
     const { currentUser, companyProfile } = useData(); 
@@ -412,7 +414,7 @@ export default function PaymentDueList() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <View style={{flexDirection:'row', alignItems:'center'}}>
                     <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
                     <Text style={styles.headerTitle}>Pending Dues</Text>
@@ -616,7 +618,7 @@ const DetailRow = ({label, value}: any) => (
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 4, alignItems:'center' },
+    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, backgroundColor: 'white', elevation: 4, alignItems:'center' },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
     backBtn: { paddingRight: 10 },
     addBtn: { flexDirection:'row', backgroundColor:'#3b5998', paddingVertical:6, paddingHorizontal:12, borderRadius:20, alignItems:'center' },

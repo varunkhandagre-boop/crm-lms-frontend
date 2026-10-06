@@ -36,8 +36,10 @@ import { fetchOrganizations } from '../services/api/organizations';
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import { urlToBase64Image } from '../utils/pdfImageHelper';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddPaymentScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     const params = useLocalSearchParams(); 
     
@@ -490,7 +492,7 @@ export default function AddPaymentScreen() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
                 <Text style={styles.headerTitle}>Add New Payment</Text>
                 <View style={{ width: 24 }} />
@@ -602,7 +604,7 @@ export default function AddPaymentScreen() {
             </KeyboardAvoidingView>
 
             <Modal visible={showOrgModal} animationType="slide">
-                <View style={styles.modalContainer}>
+                <View style={[styles.modalContainer, { paddingTop: headerTop }]}>
                     <View style={styles.modalHeader}>
                         <Text style={styles.modalTitle}>Select Party</Text>
                         <TouchableOpacity onPress={() => setShowOrgModal(false)}><Ionicons name="close-circle" size={30} color="#d32f2f"/></TouchableOpacity>
@@ -674,7 +676,7 @@ export default function AddPaymentScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 2, alignItems:'center' },
+    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, backgroundColor: 'white', elevation: 2, alignItems:'center' },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
     formCard: { backgroundColor: 'white', padding: 20, borderRadius: 15, elevation: 2 },
     label: { fontSize: 12, fontWeight: 'bold', color: '#777', marginTop: 15, marginBottom: 5 },
@@ -698,7 +700,7 @@ const styles = StyleSheet.create({
     calcBox: { flexDirection:'row', justifyContent:'space-between', backgroundColor:'#ffebee', padding:10, borderRadius:8, marginTop:5 },
     calcText: { fontSize:12, color:'#333' },
     
-    modalContainer: { flex: 1, backgroundColor: 'white', padding: 20, paddingTop: 50 },
+    modalContainer: { flex: 1, backgroundColor: 'white', padding: 20 },
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
     modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#333' },
     searchBox: { flexDirection:'row', alignItems:'center', backgroundColor: '#f0f2f5', paddingHorizontal: 10, borderRadius: 10, marginBottom: 15, height: 50 },

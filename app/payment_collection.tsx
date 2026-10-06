@@ -36,8 +36,10 @@ import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
 import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTeamMembers } from '../services/api/users';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function PaymentCollection() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
 
     const { currentUser, companyProfile } = useData();
@@ -557,7 +559,7 @@ export default function PaymentCollection() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <View style={{flexDirection:'row', alignItems:'center'}}>
                     <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
                     <Text style={styles.headerTitle}>Collections</Text>
@@ -945,7 +947,7 @@ const ReceiptRow = ({label, value, highlight, color, small}: any) => (
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 0, alignItems:'center' },
+    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, backgroundColor: 'white', elevation: 0, alignItems:'center' },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
     backBtn: { paddingRight: 10 },
     addBtn: { flexDirection:'row', backgroundColor:'#3b5998', paddingVertical:6, paddingHorizontal:12, borderRadius:20, alignItems:'center' },

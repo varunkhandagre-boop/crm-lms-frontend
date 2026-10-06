@@ -35,8 +35,10 @@ import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function DayInScreen() {
+    const headerTop = useHeaderTop();
     useKeepAwake();
     const router = useRouter();
     
@@ -650,7 +652,7 @@ export default function DayInScreen() {
 
     return (
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="white" /></TouchableOpacity>
                 <Text style={styles.headerTitle}>Attendance</Text>
                 <View style={{width:24}} />
@@ -893,7 +895,7 @@ export default function DayInScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f5f5f5' },
-    header: { backgroundColor: '#3b5998', paddingTop: 50, padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    header: { backgroundColor: '#3b5998', padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     headerTitle: { color: 'white', fontSize: 20, fontWeight: 'bold' },
     
     card: { backgroundColor: 'white', margin: 15, padding: 20, borderRadius: 15, alignItems: 'center', elevation: 3 },

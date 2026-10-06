@@ -20,8 +20,10 @@ import { fetchAttendance } from '../services/api/attendance';
 import { fetchHolidays } from '../services/api/holidays';
 import { fetchLeaves } from '../services/api/leaves';
 import { fetchTeamMembers } from '../services/api/users';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AttendanceScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   // 🔥 1. Context se sirf logged in User
@@ -586,7 +588,7 @@ export default function AttendanceScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={{flexDirection:'row', alignItems:'center'}}>
             <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
             <Text style={styles.headerTitle}>Attendance Log</Text>
@@ -877,7 +879,7 @@ const DetailRow = ({label, value, highlight, color, icon}: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8f9fa' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 4 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, backgroundColor: 'white', elevation: 4 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 10 },
   backBtn: { padding: 5 }, 
   holidayBtn: { padding: 8, backgroundColor:'#fff3e0', borderRadius:20 },

@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import { fetchPublicSupportSettings } from '../services/api/settings';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 // =========================================================
 // 🔥 DEFAULT FALLBACK
@@ -996,6 +997,7 @@ const CATEGORY_ICONS: Record<string, any> = {
 type TabKey = 'contact' | 'guide' | 'faq';
 
 export default function HelpSupportScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
 
     const [activeTab, setActiveTab] = useState<TabKey>('contact');
@@ -1050,7 +1052,7 @@ export default function HelpSupportScreen() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}>
                     <Ionicons name="arrow-back" size={24} color="#333" />
                 </TouchableOpacity>
@@ -1251,7 +1253,6 @@ const styles = StyleSheet.create({
         padding: 15,
         alignItems: 'center',
         backgroundColor: 'white',
-        paddingTop: 50,
         elevation: 2,
     },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },

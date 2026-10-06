@@ -38,8 +38,10 @@ import { listProjects } from '../services/api/projects';
 import { listServiceCalls } from '../services/api/serviceCalls';
 import { fetchTasks } from '../services/api/tasks';
 import { fetchTravelNotes } from '../services/api/travelNotes';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function DownloadDetailsScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
 
     const { currentUser } = useData();
@@ -318,7 +320,7 @@ export default function DownloadDetailsScreen() {
 
     return (
         <View style={{ flex: 1, backgroundColor: '#f4f6f8' }}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
                 <Text style={styles.headerTitle}>Download Reports 📊</Text>
                 <View style={{ width: 24 }} />
@@ -455,7 +457,7 @@ export default function DownloadDetailsScreen() {
 
 const styles = StyleSheet.create({
     container: { padding: 15 },
-    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, paddingTop: 50, backgroundColor: 'white', alignItems: 'center', elevation: 2 },
+    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, backgroundColor: 'white', alignItems: 'center', elevation: 2 },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
     card: { backgroundColor: 'white', padding: 15, borderRadius: 12, marginBottom: 15, elevation: 1 },
     cardHeader: { fontSize: 14, fontWeight: 'bold', color: '#555', borderBottomWidth: 1, borderBottomColor: '#eee', paddingBottom: 5 },

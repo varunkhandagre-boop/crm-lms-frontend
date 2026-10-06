@@ -8,8 +8,10 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 5: projects now via new backend API
 import { listProjects } from '../services/api/projects';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function ProjectsScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   const { currentUser } = useData(); 
@@ -188,7 +190,7 @@ export default function ProjectsScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={{flexDirection:'row', alignItems:'center'}}>
             <TouchableOpacity onPress={() => router.back()}>
                 <Ionicons name="arrow-back" size={24} color="#333" />
@@ -309,7 +311,7 @@ export default function ProjectsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 3 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 3 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginLeft: 10 },
   addBtn: { flexDirection:'row', backgroundColor:'#212121', paddingHorizontal:12, paddingVertical:8, borderRadius:5, alignItems:'center' },
   addBtnText: { color:'white', fontWeight:'bold', marginLeft:5 },
