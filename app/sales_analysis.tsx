@@ -686,7 +686,7 @@ export default function SalesAnalysisScreen() {
               )}
           </View>
 
-          <View style={{flexDirection:'row', justifyContent:'space-between', paddingHorizontal:5, marginTop:5}}>
+          <View style={{flexDirection:'row', justifyContent:'space-between', paddingHorizontal:14, marginTop:4}}>
               <Text style={{fontSize:11, color:'gray'}}>Records: {listData.length}</Text>
               {selectedEmployee && <Text style={{fontSize:11, color:'#3b5998', fontWeight:'bold'}}>Filter: {getSelectedEmployeeName()}</Text>}
           </View>
@@ -789,7 +789,7 @@ export default function SalesAnalysisScreen() {
 
         {/* LIST */}
         <View style={styles.listSection}>
-            <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom: 10}}>
+            <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom: 6}}>
                 <Text style={styles.sectionHeader}>
                     {saleTypeFilter === 'Collection' ? 'Payment Collections' : 'Confirmed Orders'} 
                     {saleTypeFilter !== 'All' ? <Text style={{color:'#d32f2f', fontSize:12}}> ({saleTypeFilter} Only)</Text> : ''}
@@ -1109,26 +1109,26 @@ export default function SalesAnalysisScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2, paddingBottom: 10 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
   downloadBtn: { padding: 5, backgroundColor: '#f0f4f8', borderRadius: 8, marginRight: 5 },
-  filterBox: { backgroundColor: 'white', padding: 10, paddingBottom:5, marginBottom: 10, elevation: 1 },
-  searchRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  searchBar: { flex: 1, backgroundColor: '#f0f0f0', borderRadius: 8, flexDirection:'row', alignItems:'center', paddingHorizontal: 10, height: 40 },
+  filterBox: { backgroundColor: 'white', padding: 0, paddingBottom: 6, marginBottom: 4, elevation: 1 },
+  searchRow: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 12, marginTop: 6 },
+  searchBar: { flex: 1, backgroundColor: '#f0f0f0', borderRadius: 8, flexDirection:'row', alignItems:'center', paddingHorizontal: 10, height: 36},
   input: { flex:1, marginLeft:5, fontSize:14 },
-  filterBtn: { width:40, height:40, marginLeft:10, backgroundColor:'white', borderRadius:8, justifyContent:'center', alignItems:'center', borderWidth:1, borderColor:'#ddd' },
-  cardsContainer: { padding: 15, paddingBottom:0 },
-  targetCard: { backgroundColor: 'white', padding: 15, borderRadius: 12, marginBottom: 15, elevation: 2 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
+  filterBtn: { width: 36, height: 36, marginLeft: 8, backgroundColor:'white', borderRadius:8, justifyContent:'center', alignItems:'center', borderWidth:1, borderColor:'#ddd' },
+  cardsContainer: { padding: 12, paddingBottom:0, paddingTop: 8 },
+  targetCard: { backgroundColor: 'white', padding: 13, borderRadius: 12, marginBottom: 8, elevation: 2 },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6},
   cardTitle: { color: 'gray', fontWeight: 'bold', fontSize:12, textTransform:'uppercase' },
   achievedText: { fontSize: 24, fontWeight: 'bold', color: '#333' },
   progressBg: { height: 10, backgroundColor: '#f0f0f0', borderRadius: 5, overflow: 'hidden', marginBottom: 5, marginTop:10, position:'relative' },
   progressFill: { height: '100%', borderRadius: 5 },
   percentText: { fontSize: 12, fontWeight: 'bold', alignSelf: 'flex-end', color: '#555' },
-  listSection: { padding: 15, paddingTop: 5 },
+  listSection: { padding: 12, paddingTop: 0},
   sectionHeader: { fontSize: 16, fontWeight: 'bold', color: '#333' },
   
-  card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 10, elevation: 1 },
+  card: { backgroundColor: 'white', borderRadius: 10, padding: 11, marginBottom: 8, elevation: 1 },
   hospitalName: { fontWeight: 'bold', fontSize: 15, color:'#333', marginTop:5 },
   amount: { fontSize: 16, fontWeight: 'bold', color: '#333' },
   dateText: { fontSize: 11, color: '#999' },

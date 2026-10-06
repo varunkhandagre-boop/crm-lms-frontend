@@ -44,6 +44,15 @@ import { fetchAttendance } from '../services/api/attendance';
 import { fetchLeaves } from '../services/api/leaves';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 
+/** Address text if we have one, else "lat, lng", else the fallback. Locations can arrive as plain text or as {address, latitude, longitude}. */
+function locationText(text: unknown, loc: unknown, fallback = 'Unknown'): string {
+  if (typeof text === 'string' && text.trim()) return text;
+  const l = (loc && typeof loc === 'object' ? loc : null) as { address?: string; latitude?: number; longitude?: number } | null;
+  if (l?.address) return l.address;
+  if (typeof l?.latitude === 'number' && typeof l?.longitude === 'number') return `${l.latitude.toFixed(5)}, ${l.longitude.toFixed(5)}`;
+  return fallback;
+}
+
 export default function CombinedActivityScreen() {
   const headerTop = useHeaderTop();
   const router = useRouter();
@@ -277,9 +286,9 @@ const [selectedDate, setSelectedDate] = useState(new Date());
           if (getStandardDate(a.date) === targetDate && checkUser(a.userId, a.userName)) {
               if(!processedAtt.has(a.userId)) {
                   processedAtt.add(a.userId);
-                  events.push({ id: `in_${a.id}`, time: a.inTime || '09:00 AM', title: `${a.userName} Logged In`, desc: `Location: ${a.inLocation || a.location?.address || 'Unknown'}`, icon: 'log-in', color: '#4caf50', rawData: a, type: 'Attendance' });
+                  events.push({ id: `in_${a.id}`, time: a.inTime || '09:00 AM', title: `${a.userName} Logged In`, desc: `Location: ${locationText(a.inLocation, a.location)}`, icon: 'log-in', color: '#4caf50', rawData: a, type: 'Attendance' });
                   if (a.outTime && a.outTime !== '--') {
-                      events.push({ id: `out_${a.id}`, time: a.outTime, title: `${a.userName} Logged Out`, desc: `Location: ${a.outLocation || a.outAddress || 'Unknown'}`, icon: 'log-out', color: '#f44336', rawData: a, type: 'Attendance' });
+                      events.push({ id: `out_${a.id}`, time: a.outTime, title: `${a.userName} Logged Out`, desc: `Location: ${locationText(a.outAddress, a.outLocation)}`, icon: 'log-out', color: '#f44336', rawData: a, type: 'Attendance' });
                   }
               }
           }
@@ -1024,7 +1033,7 @@ const [selectedDate, setSelectedDate] = useState(new Date());
                                   <DetailRow label="Out Time" value={selectedEvent.rawData.outTime || 'N/A'} />
                                   <DetailRow label="Total Hrs" value={selectedEvent.rawData.workHrs || 'N/A'} />
                                   <DetailRow label="Day Expense" value={`₹ ${Number(selectedEvent.rawData.expenses?.totalAmount || selectedEvent.rawData.dayExpense || selectedEvent.rawData.expense || 0).toLocaleString()}`} />
-                                  <View style={styles.infoBox}><Text style={styles.infoLabel}>Login Location:</Text><Text style={styles.infoValue}>{selectedEvent.rawData.inLocation || selectedEvent.rawData.location?.address || '-'}</Text></View>
+                                  <View style={styles.infoBox}><Text style={styles.infoLabel}>Login Location:</Text><Text style={styles.infoValue}>{locationText(selectedEvent.rawData.inLocation, selectedEvent.rawData.location, '-')}</Text></View>
                               </>
                           )}
 
@@ -1155,18 +1164,18 @@ const DetailRow = ({label, value}: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { padding: 15, backgroundColor: 'white', elevation: 2 },
+  header: { padding: 15, backgroundColor: 'white', elevation: 0, paddingBottom: 6 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 10 },
   
   // Tabs
-  tabContainer: { flexDirection: 'row', padding: 10, backgroundColor: 'white', paddingBottom: 15 },
-  tabButton: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingVertical: 8, borderRadius: 25, backgroundColor: '#f0f0f0', marginHorizontal: 5 },
+  tabContainer: { flexDirection: 'row', padding: 7, backgroundColor: 'white', paddingBottom: 8, paddingTop: 2 },
+  tabButton: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingVertical: 7, borderRadius: 25, backgroundColor: '#f0f0f0', marginHorizontal: 5 },
   activeTab: { backgroundColor: '#3b5998' },
   tabText: { marginLeft: 5, fontWeight: 'bold', color: '#666', fontSize: 13 },
 
   // Timeline UI
-  filterContainer: { flexDirection: 'row', padding: 15, backgroundColor: 'white', borderBottomWidth: 1, borderColor: '#eee' },
-  filterBox: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#e3f2fd', padding: 10, borderRadius: 8, marginHorizontal: 5, justifyContent: 'center' },
+  filterContainer: { flexDirection: 'row', padding: 10, backgroundColor: 'white', borderBottomWidth: 1, borderColor: '#eee', paddingTop: 4 },
+  filterBox: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#e3f2fd', padding: 8, borderRadius: 8, marginHorizontal: 5, justifyContent: 'center' },
   filterText: { marginLeft: 8, color: '#1565c0', fontWeight: 'bold', fontSize: 13 },
   timelineRow: { flexDirection: 'row', width: '100%' },
   timeBox: { width: 75, alignItems: 'flex-end', paddingRight: 10, paddingTop: 15 },

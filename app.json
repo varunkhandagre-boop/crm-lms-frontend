@@ -86,9 +86,7 @@
       "expo-status-bar",
       [
         "react-native-maps",
-        {
-          "androidGoogleMapsApiKey": "AIzaSyBbxDXM6ZcX25yyciCrSJLJso2g1HuHTjk"
-        }
+        {}
       ]
     ],
     "experiments": {
