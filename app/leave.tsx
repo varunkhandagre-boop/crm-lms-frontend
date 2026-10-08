@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -18,18 +18,16 @@ import {
 // 🔥 SAAS IMPORTS (still used for "users" — user profile master list stays on Firestore until Phase 10)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
-import { useWorkSchedules } from '../hooks/useWorkSchedules';
-import { isOffDay } from '../utils/workSchedule';
 
 // 🔥 Phase 7: leaves/attendance/holidays now come from Postgres via these adapters
-import { fetchAttendance } from '../services/api/attendance';
-import { fetchHolidays } from '../services/api/holidays';
-import { fetchLeaves, fetchLeaveSummary, LeaveTypeBalance, updateLeaveStatus as updateLeaveStatusApi } from '../services/api/leaves';
+import { fetchLeaveSummary, getLeave, LeaveFeedFilters, listLeaveFeedPage, LeaveTypeBalance, updateLeaveStatus as updateLeaveStatusApi } from '../services/api/leaves';
 import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { periodRange, useDebounced } from '../utils/periodRange';
 import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
 
 export default function LeaveApplicationScreen() {
@@ -38,18 +36,8 @@ export default function LeaveApplicationScreen() {
 
   // 🔥 1. Context se sirf user aur notifications
   const { currentUser, addNotification } = useData();
-  // Weekly off per employee (was: Sunday for everyone)
-  const { forUser: scheduleFor } = useWorkSchedules(currentUser?.companyId, currentUser?.id);
-
   // 🔥 2. "users" abhi bhi Firestore se (Phase 10 tak) — baaki sab Postgres se
   const { isDbLoading: isUsersLoading } = useSaaSDB();
-  // isDbLoading (leave-specific) is computed below, once leaveLoading is available from useCachedList
-
-  // 🔥 3. Lazy Loaded Master States
-  // leaveList now comes from useCachedList below (cache-first)
-  const [attendanceList, setAttendanceList] = useState<any[]>([]);
-  const [holidayList, setHolidayList] = useState<any[]>([]);
-  // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
 
   // STATES
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All'); 
@@ -66,7 +54,6 @@ export default function LeaveApplicationScreen() {
   });
   const [summaryLoading, setSummaryLoading] = useState(false);
   
-  const [autoRecords, setAutoRecords] = useState<any[]>([]);
 
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [modalVisible, setModalVisible] = useState(false);
@@ -76,15 +63,8 @@ export default function LeaveApplicationScreen() {
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All'); 
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  const [visibleCount, setVisibleCount] = useState(20);
-
   const userRole = (currentUser?.role || '').toLowerCase().trim();
   const canManage = ['admin', 'manager', 'account', 'accountant', 'hr', 'superadmin'].includes(userRole);
-
-  useEffect(() => {
-      if (viewMode === 'Day') setVisibleCount(500); 
-      else setVisibleCount(20); 
-  }, [viewMode, currentDate, searchText, selectedEmployeeName]);
 
   const currentFyStartYear = () => {
       const m = currentDate.getMonth();
@@ -92,57 +72,47 @@ export default function LeaveApplicationScreen() {
       return m >= 3 ? y : y - 1;
   };
 
-  const fyBounds = (fyStartYear: number) => ({
-      fyStart: new Date(fyStartYear, 3, 1),
-      fyEnd: new Date(fyStartYear + 1, 2, 31),
-  });
-
-  // 🔥 4a. LEAVES — cache-first, parameterized by FY + employee filter (same
-  // pattern as attendance.tsx/travel.tsx). See hooks/useCachedList.ts.
+  // 🔥 LEAVES — 20 per page from the server: leave requests + Absent / Half Day /
+  // Earned rows (worked out on the server from attendance), date range,
+  // employee and search. Field staff always get only their own (server-enforced).
   const usersReady = !(canManage && selectedEmployeeName !== 'All' && employees.length === 0);
-  const fyStartYear = currentFyStartYear();
-  const { fyStart, fyEnd } = fyBounds(fyStartYear);
-  const fromDate = fyStart.toISOString().split('T')[0];
-  const toDate = (fyEnd < new Date() ? fyEnd : new Date()).toISOString().split('T')[0];
   const resolveTargetUserId = (): string | undefined => {
-      if (!canManage) return undefined; // self, enforced server-side
+      if (!canManage) return undefined;
       if (selectedEmployeeName === 'All') return 'all';
       return employees.find(e => e.name === selectedEmployeeName)?.id;
   };
   const targetUserId = resolveTargetUserId();
-  const leaveCacheKey = buildCacheKey(`leaves:${fyStartYear}:${targetUserId || 'self'}`, currentUser?.companyId);
+  const debouncedSearch = useDebounced(searchText.trim());
+  const leaveFilters = useMemo<LeaveFeedFilters>(() => ({
+      ...periodRange(viewMode, currentDate),
+      userId: targetUserId,
+      search: debouncedSearch || undefined,
+  }), [viewMode, currentDate, targetUserId, debouncedSearch]);
+  const [pendingCount, setPendingCount] = useState(0);
+  const fetchLeavePage = useCallback(async (p: LeaveFeedFilters & { page: number; limit: number }) => {
+      const r = await listLeaveFeedPage(p);
+      if (p.page === 1) setPendingCount(r.pending);
+      return r;
+  }, []);
+  const isDefaultView = viewMode === 'All' && selectedEmployeeName === 'All' && !debouncedSearch;
   const {
-      data: leaveList,
-      setData: setLeaveList,
+      items: leaveList,
+      setItems: setLeaveList,
+      total: leaveTotal,
       loading: leaveLoading,
+      loadingMore: leaveLoadingMore,
+      hasMore: leaveHasMore,
+      loadMore: loadMoreLeaves,
       refreshing: leaveRefreshing,
       refresh: refreshLeaves,
-  } = useCachedList<any>({
-      cacheKey: leaveCacheKey,
+      error: leaveError,
+  } = useServerPagedList<LeaveFeedFilters, any>({
+      fetchPage: fetchLeavePage,
+      filters: leaveFilters,
       enabled: !!currentUser?.companyId && usersReady,
-      fetcher: () => fetchLeaves({ userId: targetUserId, limit: 200 }),
+      cacheKey: isDefaultView ? buildCacheKey('leave_feed_page1_v1', currentUser?.companyId) : null,
   });
   const isDbLoading = isUsersLoading || leaveLoading;
-
-  // 🔥 4b. Attendance/holidays — same FY + employee dependency, feeds the
-  // Earned/Absent/Half-Day autoRecords card. Left as a plain (uncached)
-  // fetch for now, same as leave/holiday secondary data on other screens.
-  useEffect(() => {
-      const loadAttendanceAndHolidays = async () => {
-          if (!currentUser?.companyId || !usersReady) return;
-          try {
-              const [attendance, holidays] = await Promise.all([
-                  fetchAttendance({ userId: targetUserId, fromDate, toDate, limit: 500 }),
-                  fetchHolidays(fromDate, toDate),
-              ]);
-              setAttendanceList(attendance);
-              setHolidayList(holidays);
-          } catch (e) {
-              // keep showing last-known attendance/holidays on a transient error
-          }
-      };
-      loadAttendanceAndHolidays();
-  }, [currentUser, selectedEmployeeName, employees]);
 
   // 🔥 Users list (+ derived employee picker options) — cache-first, shares
   // the SAME 'team_members' cache key as manage_team.tsx/employee_timeline.tsx.
@@ -209,135 +179,6 @@ export default function LeaveApplicationScreen() {
       loadSummary();
   }, [currentUser, selectedEmployeeName, employees, currentDate]);
 
-  // DATE HELPERS
-  const getTimestampFromDDMMYYYY = (dateStr: string) => {
-      if (!dateStr) return 0;
-      if (dateStr.includes('/')) {
-          const parts = dateStr.split('/');
-          return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0])).getTime();
-      }
-      return new Date(dateStr).getTime();
-  };
-
-  const getStandardDate = (dateObj: Date) => {
-      const offset = dateObj.getTimezoneOffset() * 60000;
-      return new Date(dateObj.getTime() - offset).toISOString().split('T')[0];
-  };
-
-  const parseDate = (dateStr: any) => {
-      if (!dateStr) return new Date();
-      if (dateStr instanceof Date) return dateStr;
-      if (typeof dateStr === 'string' && dateStr.includes('/')) {
-          const parts = dateStr.split('/');
-          if (parts.length === 3) return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-      }
-      return new Date(dateStr);
-  };
-
-  // ==========================================
-  // 🔥 AUTO-RECORDS FEED (Earned / Half-Day / Cancelled rows shown in the list)
-  // Bounded to the current FY window fetched above — NOT the balance card anymore
-  // (that comes from the server summary in the effect above).
-  // ==========================================
-  useEffect(() => {
-      if (leaveList.length === 0 && attendanceList.length === 0) return;
-
-      let generatedRecords: any[] = [];
-
-      let usersToProcess: any[] = [];
-      if (canManage && selectedEmployeeName === 'All') {
-          usersToProcess = employees.filter(e => e.name !== 'All');
-      } else if (canManage) {
-          usersToProcess = employees.filter(e => e.name === selectedEmployeeName);
-      } else {
-          usersToProcess = [{ name: currentUser?.name, id: currentUser?.id }];
-      }
-
-      const todayObj = new Date();
-      const todayStr = getStandardDate(todayObj);
-      const { fyStart } = fyBounds(currentFyStartYear());
-
-      usersToProcess.forEach(emp => {
-          if (!emp || !emp.name) return;
-          const empName = emp.name;
-          const empSchedule = scheduleFor(emp.id);
-
-          let d = new Date(fyStart);
-          d.setHours(0,0,0,0);
-          const todayLimit = new Date();
-          todayLimit.setHours(0,0,0,0);
-
-          while (d <= todayLimit) {
-              const dateStr = getStandardDate(d);
-              const loopTime = d.getTime();
-
-              const isWeeklyOff = isOffDay(dateStr, empSchedule);
-              const isHoliday = holidayList?.some((h:any) => h.dateIso === dateStr || h.date === dateStr);
-              
-              const isOnLeave = leaveList?.some((l:any) => {
-                  if (l.senderName !== empName || l.status !== 'Approved') return false;
-                  const startLeave = getTimestampFromDDMMYYYY(l.fromDateIso || l.fromDate);
-                  const endLeave = getTimestampFromDDMMYYYY(l.toDateIso || l.toDate || l.fromDateIso || l.fromDate);
-                  return loopTime >= startLeave && loopTime <= endLeave;
-              });
-
-              const attRecord = attendanceList?.find((a:any) => 
-                  (a.userName === empName || a.senderName === empName) && (a.dateIso === dateStr || a.date === dateStr) && a.inTime && a.inTime !== '-'
-              );
-
-              const isToday = (dateStr === todayStr);
-              let isPresent = false;
-              let isHalfDay = false;
-
-              if (attRecord) {
-                  isPresent = true;
-                  const hasLoggedOut = attRecord.outTime && attRecord.outTime !== '--';
-                  let hours = 0;
-                  if (attRecord.workHrs && String(attRecord.workHrs).includes(':')) {
-                      const p = String(attRecord.workHrs).split(':');
-                      hours = parseInt(p[0]) + (parseInt(p[1])/60);
-                  }
-                  if (isToday) { if (hasLoggedOut && hours < 4) isHalfDay = true; } 
-                  else { if ((hasLoggedOut && hours < 4) || !hasLoggedOut) isHalfDay = true; }
-              }
-
-              const parts = dateStr.split('-');
-              const displayDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
-
-              if (isPresent) {
-                  if (isOnLeave) {
-                      generatedRecords.push({
-                          id: `cancel-${dateStr}-${empName}`, isAutoRecord: true, isCancelled: true, senderName: empName, fromDate: displayDate,
-                          days: `-${isHalfDay ? 0.5 : 1}`, type: 'Leave Cancelled', status: 'Worked', reason: 'Present on an approved leave day', createdAt: d.toISOString() 
-                      });
-                  } else if (isWeeklyOff || isHoliday) {
-                      generatedRecords.push({
-                          id: `earned-${dateStr}-${empName}`, isAutoRecord: true, isEarned: true, senderName: empName, fromDate: displayDate,
-                          days: `+${isHalfDay ? 0.5 : 1}`, type: 'Earned Leave', status: 'Approved', reason: isWeeklyOff ? 'Worked on weekly off' : 'Worked on Holiday', createdAt: d.toISOString() 
-                      });
-                  }
-                  
-                  if (isHalfDay) {
-                      generatedRecords.push({
-                          id: `half-${dateStr}-${empName}`, isAutoRecord: true, senderName: empName, fromDate: displayDate,
-                          days: "0.5", type: 'Half Day', status: 'Absent', reason: isToday ? 'Short Working Hours' : 'Short Hours / Forgot Day-Out', createdAt: d.toISOString() 
-                      });
-                  }
-              } else {
-                  if (!isWeeklyOff && !isHoliday && !isOnLeave && dateStr <= todayStr) {
-                      generatedRecords.push({
-                          id: `absent-${dateStr}-${empName}`, isAutoRecord: true, senderName: empName, fromDate: displayDate,
-                          days: "1", type: 'Auto-Deduction', status: 'Absent', reason: 'System Auto-Marked Absent', createdAt: d.toISOString() 
-                      });
-                  }
-              }
-
-              d.setDate(d.getDate() + 1);
-          }
-      });
-
-      setAutoRecords(generatedRecords);
-  }, [leaveList, attendanceList, holidayList, currentUser, selectedEmployeeName, employees, scheduleFor]);
 
 
   const changeDate = (dir: number) => {
@@ -360,76 +201,6 @@ export default function LeaveApplicationScreen() {
       return "All Time";
   };
 
-  const getFilteredData = () => {
-    let combinedData = Array.isArray(leaveList) ? [...leaveList] : [];
-    
-    combinedData = [...combinedData, ...autoRecords];
-
-    let filtered = combinedData;
-
-    if (canManage) {
-        if(selectedEmployeeName !== 'All') {
-            filtered = filtered.filter((item: any) => item.senderName === selectedEmployeeName);
-        }
-    } else {
-        if(currentUser?.id || currentUser?.uid) {
-            const myId = currentUser.id || currentUser.uid;
-            filtered = filtered.filter((item: any) => item.senderId === myId || (item.isAutoRecord && item.senderName === currentUser.name));
-        }
-    }
-
-    if (viewMode !== 'All') {
-        const targetYear = currentDate.getFullYear();
-        const targetMonth = currentDate.getMonth();
-        const targetDay = currentDate.getDate();
-
-        const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-        const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-        const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
-
-        filtered = filtered.filter(item => {
-            if (item.isAutoRecord) return true; 
-            
-            const dStr = item.fromDateIso || item.fromDate || item.createdAt;
-            if(!dStr) return false;
-            
-            const itemDate = parseDate(dStr);
-            const itemTime = itemDate.getTime();
-
-            if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-            if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-            if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-            return true;
-        });
-    }
-
-    if (searchText) {
-        const text = searchText.toLowerCase();
-        filtered = filtered.filter((item: any) => {
-            const row = `${item.fromDate} ${item.type} ${item.status} ${item.senderName} ${item.reason}`.toLowerCase();
-            return row.includes(text);
-        });
-    }
-
-    filtered.sort((a: any, b: any) => {
-        const aIsPending = a.status === 'Pending';
-        const bIsPending = b.status === 'Pending';
-
-        if (aIsPending && !bIsPending) return -1; 
-        if (!aIsPending && bIsPending) return 1;  
-
-        const dateA = a.isAutoRecord ? new Date(a.createdAt).getTime() : parseDate(a.createdAt || a.fromDate).getTime();
-        const dateB = b.isAutoRecord ? new Date(b.createdAt).getTime() : parseDate(b.createdAt || b.fromDate).getTime();
-        
-        return dateB - dateA; 
-    });
-
-    return filtered;
-  };
-
-  const fullList = getFilteredData(); 
-  const renderedList = fullList.slice(0, visibleCount);
-  const pendingCount = fullList.filter(i => i.status === 'Pending' && !i.isAutoRecord).length;
 
   // 🔥 5. SAAS STATUS UPDATE LOGIC — Phase 7: now calls PATCH /api/v1/leaves/:id/status
   const handleStatusChange = async (status: string) => {
@@ -456,6 +227,7 @@ export default function LeaveApplicationScreen() {
               
               // Silent local reload
               setLeaveList(prev => prev.map(item => item.id === selectedItem.id ? { ...item, status: status } : item));
+              refreshLeaves(); // pending count + system rows change with an approval
 
               setModalVisible(false);
               Alert.alert("Updated", `Leave marked as ${status}`);
@@ -477,20 +249,23 @@ export default function LeaveApplicationScreen() {
   useEffect(() => {
       const id = typeof linkParams.id === 'string' ? linkParams.id : undefined;
       if (!id || openedFromLink.current === id) return;
-      const item = fullList.find((x: any) => x.id === id) || (leaveList || []).find((x: any) => x.id === id);
-      if (item) {
-          openedFromLink.current = id;
-          openDetails(item);
-      }
-  }, [linkParams.id, fullList, leaveList]);
+      openedFromLink.current = id;
+      const item = leaveList.find((x: any) => x.id === id);
+      if (item) { openDetails(item); return; }
+      // Not on the loaded page — fetch just that request.
+      getLeave(id).then(openDetails).catch(() => {});
+  }, [linkParams.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const renderItem = ({ item }: any) => {
     const isAbsentRecord = item.status === 'Absent';
     const isEarnedRecord = item.isEarned;
     const isCancelledRecord = item.isCancelled;
 
+    // Half Day counts in the SHORT card (0.5), not in ABSENT — label it the same way.
+    const isShortRecord = item.isAutoRecord && item.type === 'Half Day';
     let statusInfo = getStatusColor(item.status);
-    if (isCancelledRecord) statusInfo = { bg: '#e3f2fd', text: '#1565c0' }; 
+    if (isCancelledRecord) statusInfo = { bg: '#e3f2fd', text: '#1565c0' };
+    if (isShortRecord) statusInfo = { bg: '#fff3e0', text: '#e65100' };
 
     let cardBorderColor = 'transparent';
     if (isAbsentRecord) cardBorderColor = item.type === 'Half Day' ? '#ff9800' : '#d32f2f';
@@ -505,7 +280,7 @@ export default function LeaveApplicationScreen() {
           <View style={styles.cardHeader}>
               <Text style={styles.date}>{item.fromDate} ({item.days} Day)</Text>
               <View style={[styles.statusBadge, { backgroundColor: isEarnedRecord ? '#e8f5e9' : statusInfo.bg }]}>
-                  <Text style={[styles.statusText, {color: isEarnedRecord ? 'green' : statusInfo.text}]}>{item.status}</Text>
+                  <Text style={[styles.statusText, {color: isEarnedRecord ? 'green' : statusInfo.text}]}>{isShortRecord ? 'Short' : item.status}</Text>
               </View>
           </View>
           <Text style={[styles.type, isAbsentRecord && {color: item.type === 'Half Day' ? '#e65100' : '#d32f2f'}, isEarnedRecord && {color: '#2e7d32'}, isCancelledRecord && {color: '#1565c0'}]}>
@@ -626,11 +401,11 @@ export default function LeaveApplicationScreen() {
                   {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={20} color="gray" /></TouchableOpacity>}
               </View>
           </View>
-          <TotalBar label="Found" count={fullList.length} accent="#2e7d32" />
+          <TotalBar label="Found" count={leaveTotal} accent="#2e7d32" />
       </View>
 
       <FlatList 
-        data={renderedList} 
+        data={leaveList} 
         keyExtractor={(item, index) => item.id || index.toString()} 
         renderItem={renderItem}
         contentContainerStyle={{padding: 12}}
@@ -639,17 +414,19 @@ export default function LeaveApplicationScreen() {
         }
         ListEmptyComponent={
             <View style={{alignItems: 'center', marginTop: 50}}>
-                {leaveLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{color:'gray'}}>No leave records found.</Text>}
+                {leaveLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{color:'gray'}}>{leaveError ? 'Could not load leaves — pull down to retry.' : 'No leave records found.'}</Text>}
             </View>
         }
         
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
-                {visibleCount < fullList.length ? (
-                    <TouchableOpacity onPress={() => setVisibleCount(prev => prev + 20)} style={styles.loadMoreBtn}>
-                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({fullList.length - visibleCount} remaining)</Text>
+                {leaveHasMore ? (
+                    <TouchableOpacity onPress={loadMoreLeaves} disabled={leaveLoadingMore} style={styles.loadMoreBtn}>
+                        {leaveLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({leaveTotal - leaveList.length} remaining)</Text>
+                        )}
                     </TouchableOpacity>
-                ) : (fullList.length > 0 ? <Text style={styles.endListText}>--- End of List ---</Text> : null)}
+                ) : (leaveList.length > 0 ? <Text style={styles.endListText}>--- End of List ---</Text> : null)}
             </View>
         }
       />
@@ -660,7 +437,7 @@ export default function LeaveApplicationScreen() {
               <View style={styles.modalContent}>
                   <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:15}}>
                       <Text style={styles.modalTitle}>
-                          {selectedItem?.isCancelled ? 'Cancelled Leave' : (selectedItem?.isAutoRecord ? (selectedItem?.isEarned ? 'Earned Leave Details' : 'Absent Details') : 'Leave Details')}
+                          {selectedItem?.isCancelled ? 'Cancelled Leave' : (selectedItem?.isAutoRecord ? (selectedItem?.isEarned ? 'Earned Leave Details' : (selectedItem?.type === 'Half Day' ? 'Short Day Details' : 'Absent Details')) : 'Leave Details')}
                       </Text>
                       <TouchableOpacity onPress={() => setModalVisible(false)}><Ionicons name="close-circle" size={28} color="#d32f2f" /></TouchableOpacity>
                   </View>
@@ -672,7 +449,11 @@ export default function LeaveApplicationScreen() {
                           {!selectedItem.isAutoRecord && <DetailRow label="To" value={selectedItem.toDate} />}
                           <DetailRow label={selectedItem.isEarned ? "Days Earned" : (selectedItem.isCancelled ? "Days Refunded" : "Days Deducted")} value={selectedItem.days} highlight />
                           <DetailRow label="Type" value={selectedItem.type} color={selectedItem.isCancelled ? '#1565c0' : (selectedItem.isAutoRecord ? (selectedItem.isEarned ? '#2e7d32' : (selectedItem.type === 'Half Day' ? '#e65100' : '#d32f2f')) : undefined)} />
-                          <DetailRow label="Status" value={selectedItem.status} color={selectedItem.isCancelled ? '#1565c0' : (selectedItem.isEarned ? 'green' : getStatusColor(selectedItem.status).text)} />
+                          <DetailRow
+                              label="Status"
+                              value={selectedItem.isAutoRecord && selectedItem.type === 'Half Day' ? 'Short (0.5 day)' : selectedItem.status}
+                              color={selectedItem.isCancelled ? '#1565c0' : (selectedItem.isEarned ? 'green' : (selectedItem.isAutoRecord && selectedItem.type === 'Half Day' ? '#e65100' : getStatusColor(selectedItem.status).text))}
+                          />
                           <View style={styles.divider}/>
                           <Text style={{fontSize:12, color:'gray'}}>Reason/Note:</Text>
                           <Text style={{fontSize:14, color:'#333', marginTop:2}}>{selectedItem.reason}</Text>
