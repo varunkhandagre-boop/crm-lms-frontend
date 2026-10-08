@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -21,7 +21,9 @@ import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 
 // 🔥 Phase 8: travel notes now come from Postgres via these adapters
-import { fetchTravelNotes, settleTravelNotesForUser } from '../services/api/travelNotes';
+import { listTravelNotesPage, settleTravelNotesForUser, TravelPageFilters } from '../services/api/travelNotes';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { periodRange, useDebounced } from '../utils/periodRange';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
@@ -39,7 +41,6 @@ export default function TravelNoteScreen() {
   const { isDbLoading } = useSaaSDB();
 
   // 🔥 3. Lazy Loaded States for DB
-  // travelList now comes from useCachedList below (cache-first)
   // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
 
   // --- STATES ---
@@ -49,7 +50,6 @@ export default function TravelNoteScreen() {
   
   const [selectedItem, setSelectedItem] = useState<any>(null); 
   const [modalVisible, setModalVisible] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   
   // SETTLEMENT LOADING STATE
   const [isSettling, setIsSettling] = useState(false);
@@ -59,32 +59,8 @@ export default function TravelNoteScreen() {
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All'); 
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  const [visibleCount, setVisibleCount] = useState(20);
 
   const canManage = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
-
-  useEffect(() => {
-      if (viewMode === 'Day') {
-          setVisibleCount(500); 
-      } else {
-          setVisibleCount(20); 
-      }
-  }, [viewMode, currentDate, searchText, selectedEmployeeName]);
-
-  function getFetchRange(): { fromDate?: string; toDate?: string } {
-      const toIso = (d: Date) => d.toISOString().split('T')[0];
-      if (viewMode === 'All') return {};
-      if (viewMode === 'Day') return { fromDate: toIso(currentDate), toDate: toIso(currentDate) };
-      if (viewMode === 'Month') {
-          const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-          const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-          return { fromDate: toIso(start), toDate: toIso(end) };
-      }
-      const m = currentDate.getMonth();
-      const y = currentDate.getFullYear();
-      const fyStartYear = m >= 3 ? y : y - 1;
-      return { fromDate: toIso(new Date(fyStartYear, 3, 1)), toDate: toIso(new Date(fyStartYear + 1, 2, 31)) };
-  }
 
   // 🔥 4a. Users list — cache-first, shares the SAME 'team_members' cache
   // key as manage_team.tsx/employee_timeline.tsx.
@@ -101,52 +77,45 @@ export default function TravelNoteScreen() {
       }
   }, [userList, canManage]);
 
-  // 🔥 TRAVEL NOTES — cache-first, but like attendance.tsx this screen's data
-  // is parameterized by date-range + employee filter, not a flat "whole
-  // company" list — so the cache key includes those params. A repeat visit
-  // to the same view/date/filter (the common case) is instant; a genuinely
-  // new range still goes to the network. See hooks/useCachedList.ts.
+  // 🔥 TRAVEL NOTES — 20 per page from the server: date range (local days, not
+  // UTC), employee, search, and Outstanding / Total for the whole filter.
   const usersReady = !(canManage && selectedEmployeeName !== 'All' && employees.length === 0);
-  const { fromDate, toDate } = getFetchRange();
   const resolveTargetUserId = (): string | undefined => {
       if (!canManage) return undefined; // self, enforced server-side
       if (selectedEmployeeName === 'All') return 'all';
       return employees.find(e => e.name === selectedEmployeeName)?.id;
   };
   const targetUserId = resolveTargetUserId();
-  const travelCacheKey = buildCacheKey(
-      `travel:${viewMode}:${fromDate || 'none'}:${toDate || 'none'}:${targetUserId || 'self'}`,
-      currentUser?.companyId
-  );
+  const debouncedSearch = useDebounced(searchText.trim());
+  const travelFilters = useMemo<TravelPageFilters>(() => ({
+      ...periodRange(viewMode, currentDate),
+      userId: targetUserId,
+      search: debouncedSearch || undefined,
+  }), [viewMode, currentDate, targetUserId, debouncedSearch]);
+  const [outstandingAmount, setOutstandingAmount] = useState(0);
+  const [totalHistoryAmount, setTotalHistoryAmount] = useState(0);
+  const fetchTravelPage = useCallback(async (p: TravelPageFilters & { page: number; limit: number }) => {
+      const r = await listTravelNotesPage(p);
+      if (p.page === 1) { setOutstandingAmount(r.outstanding); setTotalHistoryAmount(r.totalAmount); }
+      return r;
+  }, []);
+  const isDefaultView = viewMode === 'All' && selectedEmployeeName === 'All' && !debouncedSearch;
   const {
-      data: travelList,
+      items: travelList,
+      total: travelTotal,
       loading: travelLoading,
+      loadingMore: travelLoadingMore,
+      hasMore: travelHasMore,
+      loadMore: loadMoreTravel,
       refreshing: travelRefreshing,
       refresh: refreshTravel,
-  } = useCachedList({
-      cacheKey: travelCacheKey,
+      error: travelError,
+  } = useServerPagedList<TravelPageFilters, any>({
+      fetchPage: fetchTravelPage,
+      filters: travelFilters,
       enabled: !!currentUser?.companyId && usersReady,
-      fetcher: () => fetchTravelNotes({ userId: targetUserId, fromDate, toDate, limit: 500 }),
+      cacheKey: isDefaultView ? buildCacheKey('travel_page1_v1', currentUser?.companyId) : null,
   });
-
-  const onRefresh = async () => {
-      setRefreshing(true);
-      await refreshTravel();
-      setRefreshing(false);
-  };
-
-  const parseDate = (dateStr: any) => {
-      if (!dateStr) return new Date();
-      if (dateStr instanceof Date) return dateStr;
-      
-      if (typeof dateStr === 'string' && dateStr.includes('/')) {
-          const parts = dateStr.split('/');
-          if (parts.length === 3) {
-              return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-          }
-      }
-      return new Date(dateStr);
-  };
 
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
@@ -168,66 +137,6 @@ export default function TravelNoteScreen() {
       return "All Time";
   };
 
-  // --- FILTER LOGIC ---
-  const getFilteredData = () => {
-      let data = Array.isArray(travelList) ? [...travelList] : [];
-
-      // employee + date-range already applied server-side (see the useCachedList fetcher above);
-      // search stays client-side over the bounded fetched set.
-
-      if (searchText) {
-          const term = searchText.toLowerCase();
-          data = data.filter((item: any) => {
-             const fullString = `
-                ${item.dateIso || item.date || ''} 
-                ${item.amount ? item.amount.toString() : ''} 
-                ${item.from || ''} 
-                ${item.to || ''} 
-                ${item.senderName || item.userName || ''} 
-                ${item.mode || ''} 
-                ${item.status || ''}
-             `.toLowerCase();
-             return fullString.includes(term);
-          });
-      }
-
-      if (viewMode !== 'All') {
-          const targetYear = currentDate.getFullYear();
-          const targetMonth = currentDate.getMonth();
-          const targetDay = currentDate.getDate();
-
-          const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime();
-
-          data = data.filter(item => {
-              const dateField = item.dateIso || item.date || item.createdAt;
-              if(!dateField) return false;
-              
-              const itemDate = parseDate(dateField);
-              const itemTime = itemDate.getTime();
-              
-              if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-              if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-              if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-              return true;
-          });
-      }
-
-      data.sort((a: any, b: any) => parseDate(b.dateIso || b.date).getTime() - parseDate(a.dateIso || a.date).getTime());
-      return data;
-  };
-
-  const displayList = getFilteredData(); 
-  const renderedList = displayList.slice(0, visibleCount);
-  
-  const outstandingAmount = displayList
-      .filter((item: any) => item.status === 'Pending' || item.status === 'Approved')
-      .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
-
-  const totalHistoryAmount = displayList
-      .filter((item: any) => item.status !== 'Rejected')
-      .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
 
   // --- 🔥 SAAS ENGINE: SETTLEMENT LOGIC ---
   const handleSettlement = async () => {
@@ -418,7 +327,7 @@ export default function TravelNoteScreen() {
           />
           <View style={{paddingHorizontal:12, marginTop:6}}>
               <View style={styles.searchBar}>
-                  {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+                  {(isDbLoading || travelLoading) ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
                   <TextInput 
                       style={styles.searchInput}
                       placeholder="Search..."
@@ -431,31 +340,32 @@ export default function TravelNoteScreen() {
       </View>
 
       <FlatList 
-          data={renderedList}
+          data={travelList}
           keyExtractor={(item: any) => item.id}
           renderItem={renderItem}
           contentContainerStyle={{padding: 12}}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          refreshControl={<RefreshControl refreshing={travelRefreshing} onRefresh={refreshTravel} colors={['#3b5998']} tintColor="#3b5998" />}
           ListEmptyComponent={
               <View style={{alignItems: 'center', marginTop: 50}}>
-                {travelLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{textAlign:'center', color:'gray'}}>No travel records found.</Text>}
+                {travelLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{textAlign:'center', color:'gray'}}>{travelError ? 'Could not load travel notes — pull down to retry.' : 'No travel records found.'}</Text>}
               </View>
           }
           ListFooterComponent={
               <View style={{ paddingBottom: 80 }}>
-                  {visibleCount < displayList.length ? (
+                  {travelHasMore ? (
                       <TouchableOpacity 
-                          onPress={() => setVisibleCount(prev => prev + 20)} 
+                          onPress={loadMoreTravel}
+                          disabled={travelLoadingMore}
                           style={{
                               padding: 12, backgroundColor: '#fff', alignItems: 'center', marginVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ddd', elevation: 1
                           }}
                       >
-                          <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                              👇 Load More Records ({displayList.length - visibleCount} remaining)
-                          </Text>
+                          {travelLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                              <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({travelTotal - travelList.length} remaining)</Text>
+                          )}
                       </TouchableOpacity>
                   ) : (
-                      displayList.length > 0 ? (
+                      travelList.length > 0 ? (
                           <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
                               --- End of List ---
                           </Text>

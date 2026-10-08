@@ -86,6 +86,30 @@ export async function fetchLeaves(opts: {
   return (res.data ?? []).map(toLegacyLeave);
 }
 
+export interface LeaveFeedFilters { userId?: string; fromDate?: string; toDate?: string; search?: string }
+
+/**
+ * One page of the Leave screen: leave requests plus system rows (Absent /
+ * Half Day / Earned / Leave Cancelled), built on the server. Pending first.
+ */
+export async function listLeaveFeedPage(
+  params: LeaveFeedFilters & { page: number; limit: number },
+): Promise<{ items: any[]; total: number; totalPages: number; pending: number }> {
+  const res = await apiClient.get<ListResponse<any> & { totals?: { pending: number } }>(`/leaves/feed${buildQuery({ ...params })}`);
+  return {
+    items: (res.data ?? []).map((x: any) => (x.isAutoRecord ? x : toLegacyLeave(x))),
+    total: res.meta.total,
+    totalPages: res.meta.totalPages,
+    pending: res.totals?.pending ?? 0,
+  };
+}
+
+/** One request by id — for opening it from a notification when it isn't on the loaded page. */
+export async function getLeave(id: string): Promise<LegacyLeave> {
+  const res = await apiClient.get<OneResponse<any>>(`/leaves/${id}`);
+  return toLegacyLeave(res.data);
+}
+
 export async function fetchLeaveSummary(opts: { userId?: string; fyStartYear?: number } = {}) {
   const qs = buildQuery({ userId: opts.userId, fyStartYear: opts.fyStartYear });
   const res = await apiClient.get<OneResponse<any>>(`/leaves/summary${qs}`);

@@ -74,6 +74,24 @@ export async function fetchTravelNotes(opts: {
   return (res.data ?? []).map(toLegacyTravelNote);
 }
 
+export interface TravelPageFilters { userId?: string; fromDate?: string; toDate?: string; search?: string }
+
+/** One page (newest date first) + Outstanding / Total for the whole filter on page 1. */
+export async function listTravelNotesPage(
+  params: TravelPageFilters & { page: number; limit: number },
+): Promise<{ items: LegacyTravelNote[]; total: number; totalPages: number; outstanding: number; totalAmount: number }> {
+  const res = await apiClient.get<ListResponse<any> & { totals?: { outstanding: number; total: number } }>(
+    `/travel-notes${buildQuery({ ...params, withTotals: params.page === 1 ? "true" : undefined })}`,
+  );
+  return {
+    items: (res.data ?? []).map(toLegacyTravelNote),
+    total: res.meta.total,
+    totalPages: res.meta.totalPages,
+    outstanding: res.totals?.outstanding ?? 0,
+    totalAmount: res.totals?.total ?? 0,
+  };
+}
+
 export async function createTravelNote(payload: {
   date: string; // YYYY-MM-DD
   fromLocation: string;
