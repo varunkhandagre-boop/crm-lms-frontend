@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     FlatList,
@@ -21,11 +21,10 @@ import { useData } from './context/DataContext';
 // 🔥 Phase 4: this screen is now FULLY migrated — all four data sources
 // (service calls, PMS, demos, installations) come from the new backend API.
 // demos was already migrated in Phase 2; the other three complete in Phase 4.
-import { listServiceCalls } from '../services/api/serviceCalls';
-import { listPmsReports } from '../services/api/pmsReports';
-import { listDemos } from '../services/api/demos';
+import { listServiceAnalysisPage, ServiceAnalysisFilters, ServiceReportType } from '../services/api/serviceAnalysis';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
 import { fetchTeamMembers } from '../services/api/users';
-import { listInstallations } from '../services/api/installations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
@@ -61,18 +60,15 @@ export default function AnalysisScreen() {
     const { currentUser } = useData(); 
     const { isDbLoading } = useSaaSDB();
 
-    // serviceList/pmsList/demoList/installationList now come from useCachedList
     // below, sharing cache keys with service_call.tsx / pms_schedule.tsx /
     // demo.tsx / installation.tsx respectively.
     const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
-    const [refreshing, setRefreshing] = useState(false);
 
     const [reportType, setReportType] = useState('All'); 
     const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY'); 
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [searchText, setSearchText] = useState('');
 
-    const [filteredData, setFilteredData] = useState<any[]>([]);
     const [selectedItem, setSelectedItem] = useState<any>(null);
     const [detailModalVisible, setDetailModalVisible] = useState(false);
 
@@ -80,58 +76,37 @@ export default function AnalysisScreen() {
     const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
     const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-    const [visibleCount, setVisibleCount] = useState(20);
 
     const userRole = currentUser?.role ? currentUser.role.toLowerCase() : 'unknown';
     const isAdmin = ['admin', 'manager', 'account', 'superadmin'].includes(userRole);
 
-    useEffect(() => {
-        if (viewMode === 'Day') setVisibleCount(500);
-        else setVisibleCount(20);
-    }, [reportType, viewMode, selectedDate, searchText, selectedEmployee]);
 
-    // 🔥 SERVICE CALLS + PMS + DEMOS + INSTALLATIONS — cache-first, each
-    // deliberately sharing the SAME cache key as its primary screen
-    // (service_call.tsx / pms_schedule.tsx / demo.tsx / installation.tsx),
-    // so visiting any of those warms this screen's cache too (and vice
-    // versa). See hooks/useCachedList.ts.
+    // 🔥 INSTALLATIONS + PMS + BREAKDOWNS + DEMOS — merged, filtered and paged on
+    // the server (20 at a time), with the engineer's name on each record.
+    const debouncedSearch = useDebounced(searchText.trim());
+    const analysisFilters = useMemo<ServiceAnalysisFilters>(() => ({
+        type: reportType as ServiceReportType,
+        ...periodRange(viewMode, selectedDate),
+        userId: isAdmin && selectedEmployee !== 'All' ? selectedEmployee : undefined,
+        search: debouncedSearch || undefined,
+    }), [reportType, viewMode, selectedDate, isAdmin, selectedEmployee, debouncedSearch]);
+    const isDefaultView = reportType === 'All' && isCurrentFy(viewMode, selectedDate) && selectedEmployee === 'All' && !debouncedSearch;
     const {
-        data: serviceList,
-        loading: serviceLoading,
-        refresh: refreshService,
-    } = useCachedList({
-        cacheKey: buildCacheKey('service_calls', currentUser?.companyId),
+        items: filteredData,
+        total: analysisTotal,
+        loading: isAnalysisLoading,
+        loadingMore: analysisLoadingMore,
+        hasMore: analysisHasMore,
+        loadMore: loadMoreAnalysis,
+        refreshing,
+        refresh: onRefresh,
+        error: analysisError,
+    } = useServerPagedList<ServiceAnalysisFilters, any>({
+        fetchPage: listServiceAnalysisPage,
+        filters: analysisFilters,
         enabled: !!currentUser?.companyId,
-        fetcher: listServiceCalls,
+        cacheKey: isDefaultView ? buildCacheKey('service_analysis_page1_v1', currentUser?.companyId) : null,
     });
-    const {
-        data: pmsList,
-        loading: pmsLoading,
-        refresh: refreshPms,
-    } = useCachedList({
-        cacheKey: buildCacheKey('pms_reports', currentUser?.companyId),
-        enabled: !!currentUser?.companyId,
-        fetcher: listPmsReports,
-    });
-    const {
-        data: demoList,
-        loading: demosLoading,
-        refresh: refreshDemos,
-    } = useCachedList({
-        cacheKey: buildCacheKey('demos', currentUser?.companyId),
-        enabled: !!currentUser?.companyId,
-        fetcher: listDemos,
-    });
-    const {
-        data: installationList,
-        loading: installsLoading,
-        refresh: refreshInstalls,
-    } = useCachedList({
-        cacheKey: buildCacheKey('installations', currentUser?.companyId),
-        enabled: !!currentUser?.companyId,
-        fetcher: listInstallations,
-    });
-    const isAnalysisLoading = serviceLoading || pmsLoading || demosLoading || installsLoading;
 
     // 🔥 Team members — cache-first, shares the SAME 'team_members' cache
     // key as manage_team.tsx/employee_timeline.tsx. Was previously calling
@@ -153,143 +128,6 @@ export default function AnalysisScreen() {
         }
     }, [teamMembersForServiceAnalysis, isAdmin]);
 
-    const onRefresh = async () => {
-        setRefreshing(true);
-        await Promise.all([refreshService(), refreshPms(), refreshDemos(), refreshInstalls()]);
-        setRefreshing(false);
-    };
-
-    useEffect(() => {
-        let allData: any[] = [];
-
-        if (Array.isArray(installationList)) {
-            allData = [...allData, ...installationList.map((i:any) => ({
-                ...i,
-                reportType: 'Installation',
-                displayDate: i.dateIso || i.date || i.installationDate || i.createdAt,
-                hospital: i.hospital || i.orgName || i.hospitalName || "Unknown Client",
-                orgId: i.orgId || '', 
-                engineer: i.engineer || i.senderName || i.userName || "Admin",
-                engineerId: i.senderId || i.userId || i.uid, 
-                details: `Model: ${i.model || '-'} (${i.product || '-'})`,
-                machineDisplay: i.productName || i.product || i.model || '-',
-                serialDisplay: i.serialNo || '-',
-                status: i.status || 'Installed'
-            }))];
-        }
-
-        if (Array.isArray(pmsList)) {
-            allData = [...allData, ...pmsList.map((i:any) => ({
-                ...i,
-                reportType: 'PMS',
-                displayDate: i.status === 'Done' || i.status === 'Completed' ? (i.dateIso || i.date || i.createdAt) : (i.nextServiceDate || i.scheduledDate || i.dueDate || i.computedDueDate),
-                hospital: i.hospitalName || i.hospital || "Unknown", 
-                orgId: i.orgId || '', 
-                engineer: i.userName || i.engineer || "Admin",
-                engineerId: i.userId || i.engineerId || i.uid || i.senderId, 
-                details: `Cycle: ${i.currentPmsNumber || '-'}/${i.totalPms || '-'}`,
-                machineDisplay: i.machineName || i.machine || '-',
-                serialDisplay: i.serialNo || '-',
-                status: i.status || 'Pending'
-            }))];
-        }
-
-        if (Array.isArray(serviceList)) {
-            allData = [...allData, ...serviceList.map((i:any) => ({
-                ...i,
-                reportType: 'Breakdown',
-                displayDate: i.dateIso || i.date || i.ticketDate || i.createdAt,
-                hospital: i.hospitalName || i.customerName || "Unknown",
-                orgId: i.orgId || '', 
-                engineer: i.resolvedBy || i.userName || i.assignedTo || "Admin",
-                engineerId: i.resolvedById || i.userId || i.assignedToId || i.senderId, 
-                details: i.remark || i.complaint || i.issue || "No Issue Listed", 
-                status: i.status || 'Pending',
-                machineDisplay: i.machine || i.product || '-',
-                serialDisplay: i.serialNo || '-'
-            }))];
-        }
-
-        if (Array.isArray(demoList)) {
-            allData = [...allData, ...demoList.map((i:any) => ({
-                ...i,
-                reportType: 'Demo',
-                displayDate: i.dateIso || i.demoDate || i.date || i.createdAt,
-                hospital: i.hospitalName || i.doctorName || i.hospital || "Unknown",
-                orgId: i.orgId || '', 
-                engineer: i.demonstrator || i.userName || i.senderName || "Admin",
-                engineerId: i.demonstratorId || i.userId || i.senderId || i.uid, 
-                details: `Result: ${i.result || 'Pending'}`,
-                machineDisplay: i.product || i.machineName || i.machine || '-',
-                serialDisplay: '-',
-                status: i.status || 'Pending'
-            }))];
-        }
-
-        if (isAdmin && selectedEmployee !== 'All') {
-            const targetName = selectedEmployeeName.toLowerCase().trim();
-            allData = allData.filter(i => 
-                (i.engineerId === selectedEmployee) || 
-                (i.senderId === selectedEmployee) ||
-                ((i.engineer || '').toLowerCase().trim() === targetName) || 
-                ((i.senderName || '').toLowerCase().trim() === targetName)
-            );
-        } else if (!isAdmin) {
-            const myId = currentUser?.id || currentUser?.uid;
-            allData = allData.filter(i => 
-                i.engineerId === myId || 
-                i.senderId === myId ||
-                ((i.engineer || '').toLowerCase() === (currentUser?.name || '').toLowerCase())
-            ); 
-        }
-
-        if (reportType !== 'All') {
-            allData = allData.filter(i => i.reportType === reportType);
-        }
-
-        if (searchText) {
-            const lower = searchText.toLowerCase();
-            allData = allData.filter(i => {
-                const dateStr = (i.displayDate || '').toLowerCase();
-                const row = `${dateStr} ${i.hospital || ''} ${i.engineer || ''} ${i.status || ''} ${i.reportType || ''} ${i.details || ''} ${i.serialDisplay || ''} ${i.machineDisplay || ''}`.toLowerCase();
-                return row.includes(lower);
-            });
-        }
-
-        if (viewMode !== 'All') {
-            const targetYear = selectedDate.getFullYear();
-            const targetMonth = selectedDate.getMonth();
-            const targetDay = selectedDate.getDate();
-
-            const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-            let fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-            const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
-
-            const APP_LAUNCH_DATE = new Date(2026, 0, 1).getTime();
-            if (fyStartDate < APP_LAUNCH_DATE) {
-                fyStartDate = APP_LAUNCH_DATE;
-            }
-
-            allData = allData.filter(item => {
-                const ts = parseDateOnly(item.displayDate);
-                if (!ts) return false; 
-
-                const d = new Date(ts);
-                const itemTime = d.getTime();
-                
-                if (viewMode === 'Month') return d.getFullYear() === targetYear && d.getMonth() === targetMonth;
-                if (viewMode === 'Day') return d.getFullYear() === targetYear && d.getMonth() === targetMonth && d.getDate() === targetDay;
-                if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-                
-                return true;
-            });
-        }
-
-        allData.sort((a, b) => parseDateOnly(b.displayDate) - parseDateOnly(a.displayDate));
-        
-        setFilteredData(allData);
-
-    }, [serviceList, installationList, pmsList, demoList, searchText, viewMode, selectedDate, reportType, selectedEmployee]);
 
 
     const changeDate = (dir: number) => {
@@ -334,7 +172,6 @@ export default function AnalysisScreen() {
         setDetailModalVisible(true);
     };
 
-    const renderedList = filteredData.slice(0, visibleCount);
 
     const renderItem = ({ item }: any) => {
         const isDone = ['Done', 'Completed', 'Closed', 'Installed', 'Successful', 'Resolved'].includes(item.status);
@@ -410,7 +247,7 @@ export default function AnalysisScreen() {
                     </View>
 
                     <View style={styles.searchBox}>
-                        {isDbLoading ? <ActivityIndicator size="small" color="#1565c0" /> : <Ionicons name="search" size={18} color="gray" />}
+                        {(isDbLoading || isAnalysisLoading) ? <ActivityIndicator size="small" color="#1565c0" /> : <Ionicons name="search" size={18} color="gray" />}
                         <TextInput 
                             style={styles.input} 
                             placeholder="Search Hospital, Serial..." 
@@ -422,12 +259,12 @@ export default function AnalysisScreen() {
                 </View>
 
                 <View style={styles.countStrip}>
-                    <Text style={{color:'gray', fontSize:12}}>Total Records: <Text style={{fontWeight:'bold', color:'#333'}}>{filteredData.length}</Text></Text>
+                    <Text style={{color:'gray', fontSize:12}}>Total Records: <Text style={{fontWeight:'bold', color:'#333'}}>{analysisTotal}</Text></Text>
                 </View>
 
                 <FlatList 
-                    data={renderedList}
-                    keyExtractor={(item, index) => item.id || index.toString()}
+                    data={filteredData}
+                    keyExtractor={(item, index) => item.rowKey || item.id || index.toString()}
                     contentContainerStyle={{ padding: 15, paddingBottom: 100 }}
                     renderItem={renderItem}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -436,23 +273,24 @@ export default function AnalysisScreen() {
                             {isAnalysisLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
                                 <>
                                     <Ionicons name="folder-open-outline" size={40} color="#ccc" />
-                                    <Text style={{ color: 'gray', marginTop: 10 }}>No reports found.</Text>
+                                    <Text style={{ color: 'gray', marginTop: 10 }}>{analysisError ? 'Could not load reports — pull down to retry.' : 'No reports found.'}</Text>
                                 </>
                             )}
                         </View>
                     }
                     ListFooterComponent={
                         <View style={{ paddingBottom: 80 }}>
-                            {visibleCount < filteredData.length ? (
-                                <TouchableOpacity 
-                                    onPress={() => setVisibleCount(prev => prev + 20)} 
+                            {analysisHasMore ? (
+                                <TouchableOpacity
+                                    onPress={loadMoreAnalysis}
+                                    disabled={analysisLoadingMore}
                                     style={{
                                         padding: 12, backgroundColor: '#fff', alignItems: 'center', marginVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ddd', elevation: 1
                                     }}
                                 >
-                                    <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                                        👇 Load More Records ({filteredData.length - visibleCount} remaining)
-                                    </Text>
+                                    {analysisLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({analysisTotal - filteredData.length} remaining)</Text>
+                        )}
                                 </TouchableOpacity>
                             ) : (
                                 filteredData.length > 0 ? (

@@ -14,7 +14,7 @@ export interface ApiExpense {
   createdAt: string;
 }
 
-function toLegacyExpense(e: ApiExpense): any {
+export function toLegacyExpense(e: ApiExpense): any {
   const dateOnly = e.date ? e.date.split('T')[0] : undefined;
   return {
     id: e.id,

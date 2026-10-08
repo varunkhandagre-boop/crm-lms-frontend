@@ -12,7 +12,7 @@ export interface ApiAdvance {
   createdAt: string;
 }
 
-function toLegacyAdvance(a: ApiAdvance): any {
+export function toLegacyAdvance(a: ApiAdvance): any {
   const dateOnly = a.date ? a.date.split('T')[0] : undefined;
   return {
     id: a.id,

@@ -22,7 +22,7 @@ export interface ApiPaymentDue {
   createdAt: string;
 }
 
-function toLegacyDue(d: ApiPaymentDue): any {
+export function toLegacyDue(d: ApiPaymentDue): any {
   return {
     id: d.id,
     companyId: d.companyId,
