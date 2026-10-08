@@ -28,7 +28,7 @@ export interface ApiPaymentCollection {
   createdAt: string;
 }
 
-function toLegacyPayment(p: ApiPaymentCollection): any {
+export function toLegacyPayment(p: ApiPaymentCollection): any {
   const dateOnly = p.date ? p.date.split('T')[0] : undefined;
   return {
     id: p.id,

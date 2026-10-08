@@ -1,4 +1,6 @@
 import { apiClient } from './client';
+import { ApiOrder, toLegacyOrder } from './orders';
+import { ApiPaymentCollection, toLegacyPayment } from './paymentCollections';
 
 export interface ApiPaymentDue {
   id: string;
@@ -87,4 +89,41 @@ export async function createPaymentDue(payload: CreatePaymentDuePayload): Promis
 export async function remindPaymentDue(id: string): Promise<any> {
   const res = await apiClient.post<{ data: ApiPaymentDue }>(`/payment-dues/${id}/remind`, {});
   return toLegacyDue(res.data);
+}
+
+export interface OutstandingFilters {
+  search?: string;
+  fromDate?: string; // YYYY-MM-DD
+  toDate?: string;
+}
+
+/**
+ * Pending Dues screen: manual dues + unpaid billed orders, oldest first, merged and
+ * filtered on the server. Each item keeps `collectionName` ('payment_dues' | 'orders')
+ * like the old merged list.
+ */
+export async function listOutstandingPage(
+  params: OutstandingFilters & { page: number; limit: number },
+): Promise<{ items: any[]; total: number; totalPages: number; totalAmount: number }> {
+  const res = await apiClient.get<{
+    data: ({ kind: 'due'; due: ApiPaymentDue } | { kind: 'order'; order: ApiOrder })[];
+    meta: { total: number; totalPages: number };
+    totals: { count: number; amount: number };
+  }>(`/payment-dues/outstanding${toQueryString(params)}`);
+  return {
+    items: res.data.map((x) =>
+      x.kind === 'due'
+        ? { ...toLegacyDue(x.due), collectionName: 'payment_dues' }
+        : { ...toLegacyOrder(x.order), collectionName: 'orders' },
+    ),
+    total: res.meta.total,
+    totalPages: res.meta.totalPages,
+    totalAmount: res.totals.amount,
+  };
+}
+
+/** Last 5 payments for one due / order (shown in its details). */
+export async function fetchDueItemPayments(kind: 'due' | 'order', id: string, billRef?: string): Promise<any[]> {
+  const res = await apiClient.get<{ data: ApiPaymentCollection[] }>(`/payment-dues/payments${toQueryString({ kind, id, billRef })}`);
+  return res.data.map(toLegacyPayment);
 }
