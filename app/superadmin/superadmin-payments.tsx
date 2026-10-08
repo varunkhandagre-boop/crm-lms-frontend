@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -14,6 +14,7 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import { useHeaderTop } from '../../hooks/useHeaderTop';
 import {
     approveSubscriptionRequest,
     deleteSubscriptionRequest,
@@ -21,7 +22,6 @@ import {
     rejectSubscriptionRequest,
     SubscriptionRequest,
 } from '../../services/api/subscriptionRequests';
-import { useHeaderTop } from '../../hooks/useHeaderTop';
 
 type TabKey = 'PENDING' | 'APPROVED' | 'ALL';
 
@@ -144,7 +144,7 @@ export default function SuperAdminPayments() {
         const automationLine = item.automationRequested ? `\nAutomation Add-on: Yes (+₹${item.automationAmount || 3000})` : '';
         Alert.alert(
             'Approve Payment',
-            `Payment received confirm karo?\n\nCompany: ${companyLabel}\nPlan: ${item.planLabelSnapshot}\nModules: ${formatModules(item.modulesSnapshot)}\nAmount: ₹${item.amountPaid}\nEmployees: ${item.employeesRequested}${automationLine}\n\nApprove karte hi company ko EXACTLY ye modules milenge — isse zyada nahi. Alag chahiye ho to Approve ke baad Companies tab se badal sakte ho.`,
+            `Confirm payment received?\n\nCompany: ${companyLabel}\nPlan: ${item.planLabelSnapshot}\nModules: ${formatModules(item.modulesSnapshot)}\nAmount: ₹${item.amountPaid}\nEmployees: ${item.employeesRequested}${automationLine}\n\nApprove karte hi company ko EXACTLY ye modules milenge — isse zyada nahi. Alag chahiye ho to Approve ke baad Companies tab se badal sakte ho.`,
             [
                 { text: 'Cancel', style: 'cancel' },
                 {
@@ -156,7 +156,7 @@ export default function SuperAdminPayments() {
                             const updated = await approveSubscriptionRequest(item.id);
                             setRequests(prev => prev.map(r => (r.id === item.id ? { ...r, ...updated } : r)));
                             loadCounts();
-                            Alert.alert('Success ✅', 'Payment approved aur company plan activate ho gaya!');
+                            Alert.alert('Success ✅', 'Payment approved and company plan activated!');
                         } catch (e: any) {
                             Alert.alert('Error', e.message || 'Something went wrong.');
                         } finally {
@@ -171,7 +171,7 @@ export default function SuperAdminPayments() {
     const handleNotReceived = async (item: SubscriptionRequest) => {
         Alert.alert(
             'Mark as Not Received',
-            "Payment 'Not Received' mark karo? Record safe rahega.",
+            "Mark payment as 'Not Received'? The record will be kept.",
             [
                 { text: 'Cancel', style: 'cancel' },
                 {
@@ -195,7 +195,7 @@ export default function SuperAdminPayments() {
     const handleDelete = async (item: SubscriptionRequest) => {
         Alert.alert(
             'Delete Request',
-            'Permanently delete karo? Ye recover nahi hoga.',
+            'Delete permanently? This cannot be undone.',
             [
                 { text: 'Cancel', style: 'cancel' },
                 {

@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as Location from 'expo-location';
+import { getCurrentLocation as getGpsFix } from '../utils/getLocation';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -161,7 +162,7 @@ export default function AddLeadScreen() {
               Alert.alert('Permission Denied', 'Location access is required.');
               return null;
           }
-          let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          let location = await getGpsFix();
           return {
               lat: location.coords.latitude,
               lng: location.coords.longitude,

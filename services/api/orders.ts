@@ -124,6 +124,36 @@ export async function listOrders(params: ListOrdersParams = {}): Promise<any[]> 
   return all.map(toLegacyOrder);
 }
 
+export interface OrderPageFilters {
+  status?: string;          // undefined / 'All' = every status
+  assignedToId?: string;
+  search?: string;
+  fromDate?: string;        // YYYY-MM-DD (local day)
+  toDate?: string;
+}
+
+/** One server page for Order Bookings: Pending / Approved first, then newest PO date. */
+export async function listOrdersPage(
+  params: OrderPageFilters & { page: number; limit: number }
+): Promise<{ items: any[]; total: number; totalPages: number }> {
+  const { status, ...rest } = params;
+  const res = await apiClient.get<ListResponse>(
+    `/orders${toQueryString({ ...rest, status: status && status !== 'All' ? status : undefined, prioritySort: 'true' })}`
+  );
+  return { items: res.data.map(toLegacyOrder), total: res.meta.total, totalPages: res.meta.totalPages };
+}
+
+export interface OrderCounts {
+  all: { count: number; amount: number };
+  byStatus: Record<string, { count: number; amount: number }>;
+}
+
+/** Status-chip numbers for the same filters (status ignored). */
+export async function getOrderCounts(filters: Omit<OrderPageFilters, 'status'>): Promise<OrderCounts> {
+  const res = await apiClient.get<{ data: OrderCounts }>(`/orders/counts${toQueryString(filters)}`);
+  return res.data;
+}
+
 export interface CreateOrderPayload {
   orgId?: string;
   orgName: string;

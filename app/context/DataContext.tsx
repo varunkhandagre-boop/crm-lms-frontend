@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert } from 'react-native';
 import { fetchCompanyProfile } from '../../services/api/companies';
+import { stopBackgroundTracking } from '../../utils/backgroundLocation';
 import { fetchPermissions } from '../../services/api/permissions';
 
 
@@ -641,6 +642,8 @@ export const DataProvider = ({ children }: any) => {
     // already gone (the 401s after logout).
     const logout = async () => { 
       sessionGen.current += 1;
+      // Stop Day-In location tracking before the token goes away.
+      await stopBackgroundTracking();
       setCurrentUser(null); 
       currentUserRef.current = null;
       isPostgresSession.current = false;

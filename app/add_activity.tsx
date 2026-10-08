@@ -1,8 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -17,18 +16,20 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 
 // 🔥 SAAS IMPORTS (organizations still Firestore)
 import * as Location from 'expo-location';
 import { useSaaSDB } from '../hooks/useSaaSDB';
+import { getCurrentLocation as getGpsFix, locationErrorMessage } from '../utils/getLocation';
 import { useData } from './context/DataContext';
 // 🔥 Phase 5: activity plans now via new backend API
 import { createActivityPlan } from '../services/api/activityPlans';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
-import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function AddActivityScreen() {
   const headerTop = useHeaderTop();
@@ -91,14 +92,14 @@ export default function AddActivityScreen() {
               Alert.alert('Permission Denied', 'Location access is required to save entry.');
               return null;
           }
-          let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          let location = await getGpsFix();
           return {
               lat: location.coords.latitude,
               lng: location.coords.longitude,
               timestamp: new Date().toISOString()
           };
       } catch (error) {
-          Alert.alert("GPS Required", "Please turn on your GPS Location to submit.");
+          Alert.alert("GPS Required", locationErrorMessage(error));
           return null;
       }
   };
@@ -308,7 +309,7 @@ export default function AddActivityScreen() {
             <Text style={styles.label}>Planning Agenda / Notes</Text>
             <TextInput 
                 style={[styles.input, {height: 80, textAlignVertical:'top'}]} 
-                multiline placeholder="Meeting se pehle ka plan/agenda..."
+                multiline placeholder="Plan / agenda before the meeting..."
                 value={planningNotes}
                 onChangeText={setPlanningNotes}
             />

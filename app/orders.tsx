@@ -4,7 +4,7 @@ import * as Print from 'expo-print';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -29,7 +29,6 @@ import { compressPhoto, isPdfUrl, isUploadedFile, pdfToDataUri } from '../utils/
 
 // 🔥 SAAS IMPORTS (payments/users still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
-import { listPaymentCollections } from '../services/api/paymentCollections';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
@@ -41,13 +40,31 @@ import {
     deleteOrder as apiDeleteOrder,
     updateOrder as apiUpdateOrder,
     updateOrderStatus as apiUpdateOrderStatus,
-    listOrders,
+    getOrderCounts,
+    listOrdersPage,
+    OrderCounts,
     uploadOrderPoFile,
     deleteOrderPoFile,
 } from '../services/api/orders';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useServerPagedList } from '../hooks/useServerPagedList';
 import { PeriodTabs, StaffPeriodRow, StatusChip, TotalBar } from '../components/compact';
 import { formatInr } from '../constants/leadStatus';
+
+const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/** PO-date range (local calendar days) for the Day / Month / FY tabs; "All" = no range. */
+function periodRange(mode: 'Day' | 'Month' | 'FY' | 'All', d: Date): { fromDate?: string; toDate?: string } {
+    if (mode === 'Day') return { fromDate: ymd(d), toDate: ymd(d) };
+    if (mode === 'Month') {
+        return { fromDate: ymd(new Date(d.getFullYear(), d.getMonth(), 1)), toDate: ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0)) };
+    }
+    if (mode === 'FY') {
+        const start = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+        return { fromDate: `${start}-04-01`, toDate: `${start + 1}-03-31` };
+    }
+    return {};
+}
 
 export default function OrderListScreen() {
   const headerTop = useHeaderTop();
@@ -58,8 +75,6 @@ export default function OrderListScreen() {
   // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); orders/payments/users no longer go through this
   const { isDbLoading } = useSaaSDB();
 
-  // orderList now comes from useCachedList below (cache-first)
-  const [paymentList, setPaymentList] = useState<any[]>([]);
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
 
   const [searchText, setSearchText] = useState('');
@@ -71,7 +86,6 @@ export default function OrderListScreen() {
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  const [visibleCount, setVisibleCount] = useState(20);
 
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
@@ -91,25 +105,62 @@ export default function OrderListScreen() {
   const isAdmin = ['admin', 'manager', 'account', 'accountant', 'hr', 'superadmin'].includes(userRole);
   const isStrictAdmin = ['admin', 'manager', 'accountant', 'account', 'superadmin'].includes(userRole); 
 
-  useEffect(() => {
-      if (viewMode === 'Day') setVisibleCount(500); 
-      else setVisibleCount(20); 
-  }, [viewMode, currentDate, searchText, statusFilter, selectedEmployee]);
 
-  // 🔥 ORDERS — cache-first (instant from AsyncStorage, then background
-  // refresh from the API). See hooks/useCachedList.ts.
-  const ordersCacheKey = buildCacheKey('orders', currentUser?.companyId);
+  // 🔥 ORDERS — 20 per page from the server; status, staff, search and the
+  // Day / Month / FY range are all filtered there (was: every order downloaded).
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+      const t = setTimeout(() => setDebouncedSearch(searchText.trim()), 400);
+      return () => clearTimeout(t);
+  }, [searchText]);
+
+  const orderFilters = useMemo(() => {
+      const { fromDate, toDate } = periodRange(viewMode, currentDate);
+      return {
+          status: statusFilter === 'All' ? undefined : statusFilter,
+          assignedToId: isStrictAdmin && selectedEmployee !== 'All' ? selectedEmployee : undefined,
+          search: debouncedSearch || undefined,
+          fromDate,
+          toDate,
+      };
+  }, [viewMode, currentDate, statusFilter, isStrictAdmin, selectedEmployee, debouncedSearch]);
+
+  // Page 1 of the default view (this FY, all staff / statuses) opens instantly from cache.
+  const isDefaultView = viewMode === 'FY' && statusFilter === 'All' && selectedEmployee === 'All' && !debouncedSearch
+      && periodRange('FY', currentDate).fromDate === periodRange('FY', new Date()).fromDate;
   const {
-      data: orderList,
-      setData: setOrderList,
+      items: orderList,
+      setItems: setOrderList,
+      total: orderTotal,
       loading: ordersLoading,
+      loadingMore: ordersLoadingMore,
+      hasMore: ordersHasMore,
+      loadMore: loadMoreOrders,
       refreshing: ordersRefreshing,
-      refresh: refreshOrders,
-  } = useCachedList({
-      cacheKey: ordersCacheKey,
+      refresh: refreshOrderList,
+  } = useServerPagedList<typeof orderFilters, any>({
+      fetchPage: listOrdersPage,
+      filters: orderFilters,
       enabled: !!currentUser?.companyId,
-      fetcher: listOrders, // was: fetchSaaSData("orders")
+      cacheKey: isDefaultView ? buildCacheKey('orders_page1_v2', currentUser?.companyId) : null,
   });
+
+  // Status chips: count + ₹ per status for the same filters (server side).
+  const [orderCounts, setOrderCounts] = useState<OrderCounts | null>(null);
+  const countFilters = useMemo(() => {
+      const { status, ...rest } = orderFilters;
+      return rest;
+  }, [orderFilters]);
+  const reloadCounts = useCallback(() => {
+      if (!currentUser?.companyId) return;
+      getOrderCounts(countFilters).then(setOrderCounts).catch(() => {});
+  }, [countFilters, currentUser?.companyId]);
+  useEffect(() => { reloadCounts(); }, [reloadCounts]);
+
+  const refreshOrders = useCallback(async () => {
+      reloadCounts();
+      await refreshOrderList();
+  }, [reloadCounts, refreshOrderList]);
 
   // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
   // as manage_team.tsx/employee_timeline.tsx.
@@ -148,43 +199,6 @@ export default function OrderListScreen() {
       })));
   }, [orderList, teamMembersForOrders]);
 
-  // Payments — unchanged plain fetch-on-mount (payments list is currently
-  // unused downstream; left as-is, out of scope for this pass).
-  useEffect(() => {
-      const loadRest = async () => {
-          if (currentUser?.companyId) {
-              const payments = await listPaymentCollections(); // was: fetchSaaSData("payments")
-              setPaymentList(payments);
-          }
-      };
-      loadRest();
-  }, [currentUser]);
-
-  const parseDate = (dateStr: any) => {
-      if (!dateStr) return 0;
-      if (typeof dateStr === 'number') return dateStr; 
-      if (dateStr instanceof Date) return dateStr.getTime(); 
-
-      if (typeof dateStr === 'string') {
-          let cleanStr = dateStr.replace(/\./g, '/').replace(/-/g, '/');
-          const parts = cleanStr.split('/');
-          
-          if (parts.length === 3 && parts[0].length === 4) {
-              const year = parseInt(parts[0]);
-              const month = parseInt(parts[1]) - 1; 
-              const day = parseInt(parts[2]);
-              return new Date(year, month, day).getTime();
-          }
-          if (parts.length === 3 && parts[2].length === 4) {
-              const day = parseInt(parts[0]);
-              const month = parseInt(parts[1]) - 1;
-              const year = parseInt(parts[2]);
-              return new Date(year, month, day).getTime();
-          }
-      }
-      const d = new Date(dateStr);
-      return isNaN(d.getTime()) ? 0 : d.getTime();
-  };
 
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
@@ -368,72 +382,16 @@ export default function OrderListScreen() {
       } catch (e: any) { Alert.alert("Error", "Could not open file."); }
   };
 
-  const getFilteredData = () => {
-      let data = orderList ? [...orderList] : [];
-
-      if (isAdmin && selectedEmployee !== 'All') {
-          const targetName = selectedEmployeeName.toLowerCase().trim();
-          data = data.filter((item: any) => 
-              (item.senderId === selectedEmployee) || 
-              (item.userId === selectedEmployee) ||
-              (item.senderName && item.senderName.toLowerCase().trim().includes(targetName)) ||
-              (item.userName && item.userName.toLowerCase().trim().includes(targetName)) ||
-              (item.bookedBy && item.bookedBy.toLowerCase().trim().includes(targetName))
-          );
-      } 
-      else if (!isAdmin) {
-          const myId = currentUser?.id || currentUser?.uid;
-          data = data.filter((item: any) => item.senderId === myId || item.bookedBy === currentUser?.name);
-      }
-
-      if (statusFilter !== 'All') data = data.filter((item: any) => item.status === statusFilter);
-
-      if (searchText) {
-          const term = searchText.toLowerCase();
-          data = data.filter((item: any) => {
-              const fullString = `${item.hospitalName || ''} ${item.poNumber || ''} ${item.orderId || ''} ${item.productDetails || ''} ${item.amount || ''} ${item.status || ''} ${item.senderName || item.userName || ''} ${item.bookedBy || ''}`.toLowerCase();
-              return fullString.includes(term);
-          });
-      }
-
-      if (viewMode !== 'All') {
-          const targetYear = currentDate.getFullYear();
-          const targetMonth = currentDate.getMonth();
-          const targetDay = currentDate.getDate();
-
-          const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime();
-
-          data = data.filter((item: any) => {
-              const ts = parseDate(item.dateIso || item.date || item.createdAt);
-              if (ts === 0) return false;
-              const itemDate = new Date(ts);
-              
-              if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-              if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-              if (viewMode === 'FY') return ts >= fyStartDate && ts <= fyEndDate;
-              return true;
-          });
-      }
-
-      data.sort((a: any, b: any) => {
-          const aStatus = (a.status || '').toLowerCase().trim();
-          const bStatus = (b.status || '').toLowerCase().trim();
-          
-          const aIsPriority = (aStatus === 'pending' || aStatus === 'approved') ? 1 : 0;
-          const bIsPriority = (bStatus === 'pending' || bStatus === 'approved') ? 1 : 0;
-
-          if (aIsPriority !== bIsPriority) {
-              return bIsPriority - aIsPriority; 
-          }
-          return parseDate(b.dateIso || b.date) - parseDate(a.dateIso || a.date);
-      });
-      return data;
+  const chipNumbers = (s: string) => {
+      if (!orderCounts) return { count: 0, amount: 0 };
+      return s === 'All' ? orderCounts.all : (orderCounts.byStatus[s] || { count: 0, amount: 0 });
   };
-
-  const fullList = getFilteredData(); 
-  const renderedList = fullList.slice(0, visibleCount);
+  // Total line: everything the list shows (in "All" that includes Rejected, like before).
+  const totalAmount = orderCounts
+      ? (statusFilter === 'All'
+          ? Object.values(orderCounts.byStatus).reduce((sum, v) => sum + v.amount, 0)
+          : chipNumbers(statusFilter).amount)
+      : 0;
 
   // 🔥 STATUS UPDATE — via new backend API
   const handleUpdateStatus = async (newStatus: string) => {
@@ -458,6 +416,7 @@ export default function OrderListScreen() {
                           });
                       }
                       setOrderList(prev => prev.map(item => item.id === selectedOrder.id ? { ...item, status: newStatus } : item));
+                      reloadCounts();
                       setModalVisible(false);
                   } catch (error: any) { Alert.alert("Error", error?.message || "Failed to update status."); } 
                   finally { setIsUpdating(false); }
@@ -505,6 +464,7 @@ export default function OrderListScreen() {
           if (editData.status) await apiUpdateOrderStatus(editData.id, editData.status);
 
           setOrderList(prev => prev.map(item => item.id === editData.id ? { ...item, hospitalName: editData.hospitalName, ...updates, status: editData.status } : item));
+          reloadCounts();
           Alert.alert("Success", "Order details updated successfully!");
           setEditModalVisible(false);
       } catch (error: any) {
@@ -529,6 +489,7 @@ export default function OrderListScreen() {
           const updated = await apiBillOrder(selectedOrder.id, finalAmountNum);
 
           setOrderList(prev => prev.map(item => item.id === selectedOrder.id ? { ...item, ...updated } : item));
+          reloadCounts();
           Alert.alert("Success", `Billing Done! Auto-calculated balance: ₹${updated.balance}.`);
           setBilledModalVisible(false);
           setModalVisible(false); 
@@ -555,6 +516,7 @@ export default function OrderListScreen() {
                       try {
                           await apiDeleteOrder(selectedOrder.id);
                           setOrderList(prev => prev.filter(item => item.id !== selectedOrder.id));
+                          reloadCounts();
                           setModalVisible(false);
                           Alert.alert("Deleted", "Order has been deleted successfully.");
                       } catch (error: any) {
@@ -786,69 +748,14 @@ export default function OrderListScreen() {
           {/* Respects the selected status chip and employee, like "Total Pending" on Dues/Payments. */}
           <TotalBar
               label={`${statusFilter === 'All' ? 'Total' : `Total (${statusFilter})`}${selectedEmployee !== 'All' ? ` — ${selectedEmployeeName}` : ''}`}
-              count={fullList.length}
-              amount={fullList.reduce((sum: number, o: any) => sum + (parseFloat(o.amount) || 0), 0)}
+              count={orderTotal}
+              amount={totalAmount}
           />
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingLeft:12, paddingRight:4, paddingTop:6, paddingBottom:2}}>
     {['All', 'Pending', 'Approved', 'Dispatched', 'Billed', 'Rejected'].map(s => {
         
-        const chipData = (() => {
-            let base = orderList ? [...orderList] : [];
-
-            if (isAdmin && selectedEmployee !== 'All') {
-                const targetName = selectedEmployeeName.toLowerCase().trim();
-                base = base.filter((item: any) =>
-                    item.senderId === selectedEmployee ||
-                    item.userId === selectedEmployee ||
-                    (item.senderName && item.senderName.toLowerCase().includes(targetName)) ||
-                    (item.userName && item.userName.toLowerCase().includes(targetName))
-                );
-            } else if (!isAdmin) {
-                const myId = currentUser?.id || currentUser?.uid;
-                base = base.filter((item: any) =>
-                    item.senderId === myId || item.bookedBy === currentUser?.name
-                );
-            }
-
-            if (searchText) {
-                const term = searchText.toLowerCase();
-                base = base.filter((item: any) => {
-                    const fullString = `${item.hospitalName || ''} ${item.poNumber || ''} ${item.orderId || ''} ${item.productDetails || ''} ${item.amount || ''}`.toLowerCase();
-                    return fullString.includes(term);
-                });
-            }
-
-            if (viewMode !== 'All') {
-                const targetYear = currentDate.getFullYear();
-                const targetMonth = currentDate.getMonth();
-                const targetDay = currentDate.getDate();
-                const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-                const fyStartDate = new Date(fyStartYear, 3, 1).getTime();
-                const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime();
-
-                base = base.filter((item: any) => {
-                    const ts = parseDate(item.dateIso || item.date || item.createdAt);
-                    if (ts === 0) return false;
-                    const itemDate = new Date(ts);
-                    if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-                    if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-                    if (viewMode === 'FY') return ts >= fyStartDate && ts <= fyEndDate;
-                    return true;
-                });
-            }
-
-            const filtered = s === 'All'
-                ? base.filter((item: any) => {
-                    const status = (item.status || '').toLowerCase();
-                    return !status.includes('reject') && !status.includes('cancel');
-                })
-                : base.filter((item: any) => item.status === s);
-
-            const count = filtered.length;
-            const amount = filtered.reduce((sum: number, o: any) => sum + (parseFloat(o.amount) || 0), 0);
-            return { count, amount };
-        })();
+        const chipData = chipNumbers(s);
 
         return (
             <StatusChip
@@ -864,7 +771,7 @@ export default function OrderListScreen() {
       </View>
 
       <FlatList 
-          data={renderedList}
+          data={orderList}
           keyExtractor={item => item.id}
           renderItem={renderItem}
           contentContainerStyle={{padding: 5, paddingBottom: 100}} 
@@ -878,11 +785,13 @@ export default function OrderListScreen() {
           }
           ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
-                {visibleCount < fullList.length ? (
-                    <TouchableOpacity onPress={() => setVisibleCount(prev => prev + 20)} style={styles.loadMoreBtn}>
-                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({fullList.length - visibleCount} remaining)</Text>
+                {ordersHasMore ? (
+                    <TouchableOpacity onPress={loadMoreOrders} style={styles.loadMoreBtn} disabled={ordersLoadingMore}>
+                        {ordersLoadingMore
+                            ? <ActivityIndicator color="#3b5998" />
+                            : <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({orderTotal - orderList.length} remaining)</Text>}
                     </TouchableOpacity>
-                ) : (fullList.length > 0 ? <Text style={styles.endListText}>--- End of List ---</Text> : null)}
+                ) : (orderList.length > 0 ? <Text style={styles.endListText}>--- End of List ---</Text> : null)}
             </View>
         }
       />

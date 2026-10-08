@@ -1,7 +1,7 @@
-import * as Device from 'expo-device';
-import { Notifications } from './notificationsModule';
-import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Device from 'expo-device';
+import { Platform } from 'react-native';
+import { Notifications } from './notificationsModule';
 import { DEFAULT_SCHEDULE, isOffDay, localYmd, MY_SCHEDULE_KEY, WorkSchedule } from './workSchedule';
 
 // ==========================================
@@ -118,7 +118,7 @@ export const manageAttendanceReminders = async (
 
     // 🛑 CHECK 1: Aaj ke liye check (weekly off OR Holiday)
     if (isOffDay(localYmd(now), schedule) || isHoliday(now, holidayList)) {
-        console.log("Aaj Chutti hai (weekly off/Holiday) 🌴, No Reminder today!");
+        console.log("Today is a holiday / weekly off 🌴 — no reminder today.");
     } else {
         // --- CASE A: Login Reminder ---
         if (status === 'LOGIN_PENDING') {
@@ -168,7 +168,7 @@ export const manageAttendanceReminders = async (
 
     // 🛑 CHECK 2: Kal ke liye check (weekly off OR Holiday)
     if (isOffDay(localYmd(tomorrow), schedule) || isHoliday(tomorrow, holidayList)) {
-        console.log("Kal Chutti hai (weekly off/Holiday) 🌴, Alarm skip kiya.");
+        console.log("Tomorrow is a holiday / weekly off 🌴 — alarm skipped.");
         return; 
     }
     

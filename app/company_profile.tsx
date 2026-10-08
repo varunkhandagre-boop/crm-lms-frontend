@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+import { getCurrentLocation as getGpsFix } from '../utils/getLocation';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -194,7 +195,7 @@ export default function CompanyProfileScreen() {
                 Alert.alert('Permission Denied', 'Location access is required to set the office location.');
                 return;
             }
-            const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+            const location = await getGpsFix();
             setProfile((prev: any) => ({
                 ...prev,
                 officeLatitude: location.coords.latitude,

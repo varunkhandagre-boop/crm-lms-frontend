@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as Location from 'expo-location';
+import { getCurrentLocation as getGpsFix, locationErrorMessage } from '../utils/getLocation';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -454,9 +455,9 @@ export default function AddInstallationScreen() {
       try {
           let { status } = await Location.requestForegroundPermissionsAsync();
           if (status !== 'granted') { Alert.alert('Permission Denied'); return null; }
-          let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          let location = await getGpsFix();
           return { lat: location.coords.latitude, lng: location.coords.longitude, timestamp: new Date().toISOString() };
-      } catch (error) { Alert.alert("GPS Required", "Please turn on GPS."); return null; }
+      } catch (error) { Alert.alert("GPS Required", locationErrorMessage(error)); return null; }
   };
 
   const openModal = (type: string) => {

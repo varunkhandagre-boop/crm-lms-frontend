@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -13,9 +13,9 @@ import {
     View
 } from 'react-native';
 
+import { useHeaderTop } from '../hooks/useHeaderTop';
 import { AutomationSettings, fetchAutomationSettings, saveAutomationSettings } from '../services/api/automationSettings';
 import { useData } from './context/DataContext';
-import { useHeaderTop } from '../hooks/useHeaderTop';
 
 const WHATSAPP_PROVIDERS = [
     { label: 'AiSensy', value: 'aisensy' },
@@ -182,7 +182,7 @@ export default function AutomationSettingsScreen() {
                     <Text style={styles.label}>API Key</Text>
                     <TextInput
                         style={styles.input}
-                        placeholder="Provider dashboard se copy karein"
+                        placeholder="Copy from the provider dashboard"
                         value={whatsappApiKey}
                         onChangeText={setWhatsappApiKey}
                         secureTextEntry
@@ -194,7 +194,7 @@ export default function AutomationSettingsScreen() {
                             <Text style={styles.label}>Phone Number ID (Meta Cloud only)</Text>
                             <TextInput
                                 style={styles.input}
-                                placeholder="Meta Business Manager se milega"
+                                placeholder="Find it in Meta Business Manager"
                                 value={whatsappSenderId}
                                 onChangeText={setWhatsappSenderId}
                                 autoCapitalize="none"
@@ -230,7 +230,7 @@ export default function AutomationSettingsScreen() {
                     <Text style={styles.label}>API Key</Text>
                     <TextInput
                         style={styles.input}
-                        placeholder="SendGrid dashboard se copy karein"
+                        placeholder="Copy from the SendGrid dashboard"
                         value={emailApiKey}
                         onChangeText={setEmailApiKey}
                         secureTextEntry

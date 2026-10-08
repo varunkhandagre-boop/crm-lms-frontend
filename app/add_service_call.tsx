@@ -23,6 +23,7 @@ import { urlToBase64Image } from '../utils/pdfImageHelper';
 
 // 🔥 SAAS IMPORTS (organizations still Firestore)
 import * as Location from 'expo-location';
+import { getCurrentLocation as getGpsFix, locationErrorMessage } from '../utils/getLocation';
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: service calls, installations, spare parts now via new backend API
@@ -164,14 +165,14 @@ export default function AddServiceCallScreen() {
               Alert.alert('Permission Denied', 'Location access is required to save entry.');
               return null;
           }
-          let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          let location = await getGpsFix();
           return {
               lat: location.coords.latitude,
               lng: location.coords.longitude,
               timestamp: new Date().toISOString()
           };
       } catch (error) {
-          Alert.alert("GPS Required", "Please turn on your GPS Location to submit.");
+          Alert.alert("GPS Required", locationErrorMessage(error));
           return null;
       }
   };

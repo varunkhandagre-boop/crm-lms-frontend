@@ -4,6 +4,7 @@ import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+import { getCurrentLocation as getGpsFix } from '../utils/getLocation';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -309,7 +310,7 @@ export default function AddOrderScreen() {
       try {
           let { status } = await Location.requestForegroundPermissionsAsync();
           if (status !== 'granted') return null;
-          let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          let location = await getGpsFix();
           return { lat: location.coords.latitude, lng: location.coords.longitude, timestamp: new Date().toISOString() };
       } catch (error) { return null; }
   };

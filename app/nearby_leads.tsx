@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import { getCurrentLocation as getGpsFix, locationErrorMessage } from '../utils/getLocation';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -55,10 +56,10 @@ export default function NearbyLeadsScreen() {
                 setLocError('Location permission is needed for "Near me". You can still use "By city".');
                 return;
             }
-            const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+            const pos = await getGpsFix();
             setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        } catch {
-            setLocError('Could not get your location. Check that GPS is on and try again.');
+        } catch (err) {
+            setLocError(locationErrorMessage(err));
         } finally {
             setLocating(false);
         }

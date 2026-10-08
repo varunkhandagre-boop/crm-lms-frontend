@@ -13,7 +13,8 @@ import { manageAttendanceReminders, setupNotificationPermissions } from '../util
 import * as Location from 'expo-location';
 // 🔥 Firestore direct imports minimized
 import { fetchCompanyProfile } from '../services/api/companies';
-import { recordLocationLog } from '../services/api/locationLogs';
+// Also registers the background location task — must stay imported here (app root).
+import { recordThrottledLocation, syncBackgroundTracking } from '../utils/backgroundLocation';
 import { fetchTodayAttendance } from '../services/api/attendance';
 import { getLeadCounts } from '../services/api/leads';
 import { getServiceCallCounts } from '../services/api/serviceCalls';
@@ -271,7 +272,6 @@ function NavigationLayout() {
     if (loading || !currentUser) return;
 
     let locationSubscription: any = null;
-    let lastUpdateTimestamp = 0; 
     // startTracking is async (permission prompts + watchPositionAsync), so the cleanup
     // below can run before locationSubscription is set — e.g. on logout. Without this
     // flag the watcher kept running after logout and posted location logs with no token.
@@ -282,10 +282,9 @@ function NavigationLayout() {
             const { status: foreStatus } = await Location.requestForegroundPermissionsAsync();
             if (foreStatus !== 'granted') return;
 
-            try {
-                const { status: backStatus } = await Location.requestBackgroundPermissionsAsync();
-                if (backStatus !== 'granted') console.log("Bg Permission denied");
-            } catch (err) { }
+            // "Allow all the time" is asked at Day In (with an explanation first), not here.
+            // Re-start background tracking if Day In was today and Android stopped it.
+            syncBackgroundTracking().catch(() => {});
 
             locationSubscription = await Location.watchPositionAsync(
                 {
@@ -295,27 +294,8 @@ function NavigationLayout() {
                 },
                 async (loc) => {
                     if (cancelled) return;
-                    const now = Date.now();
-                    const THIRTY_MINUTES = 30 * 60 * 1000; 
-
-                    if (lastUpdateTimestamp !== 0 && (now - lastUpdateTimestamp) < THIRTY_MINUTES) {
-                        return; 
-                    }
-
-                    lastUpdateTimestamp = now;
-
-                    try {
-    await recordLocationLog({
-        latitude: loc.coords.latitude,
-        longitude: loc.coords.longitude,
-        type: "Auto-Track (30 min)",
-        device: "App",
-    });
-} catch (dbError: any) {
-    // 401 = the user logged out while this request was in flight; nothing to record.
-    if (dbError?.status === 401) return;
-    console.error("DB Error:", dbError);
-}
+                    // Shared 30-minute throttle with the background task (one log per 30 min).
+                    await recordThrottledLocation(loc.coords, 'App');
                 }
             );
             if (cancelled) {

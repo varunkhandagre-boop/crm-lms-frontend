@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as Location from 'expo-location';
+import { getCurrentLocation as getGpsFix } from '../utils/getLocation';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -182,7 +183,7 @@ export default function LeadDetailsScreen() {
         try {
             let { status } = await Location.requestForegroundPermissionsAsync();
             if (status !== 'granted') return null;
-            let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+            let location = await getGpsFix();
             return { lat: location.coords.latitude, lng: location.coords.longitude, timestamp: new Date().toISOString() };
         } catch (error) { return null; }
     };

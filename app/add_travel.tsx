@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as Location from 'expo-location';
+import { getCurrentLocation as getGpsFix, locationErrorMessage } from '../utils/getLocation';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
@@ -79,7 +80,7 @@ export default function AddTravelScreen() {
         return;
       }
 
-      let loc = await Location.getCurrentPositionAsync({});
+      let loc = await getGpsFix();
       let address = await Location.reverseGeocodeAsync({
         latitude: loc.coords.latitude,
         longitude: loc.coords.longitude
@@ -90,7 +91,7 @@ export default function AddTravelScreen() {
         setFromLoc(`${addr.city || ''}, ${addr.region || ''}`);
       }
     } catch (error) {
-      Alert.alert("Error", "Could not fetch location.");
+      Alert.alert("Location", locationErrorMessage(error, "Could not fetch location."));
     } finally {
       setLocLoading(false);
     }

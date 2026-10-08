@@ -1,9 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
-import { Notifications } from '../utils/notificationsModule';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -18,12 +17,15 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import { startBackgroundTracking, stopBackgroundTracking } from '../utils/backgroundLocation';
+import { coordsText, getAddressFromCoords, getCurrentLocation as getGpsFix, LocationError, tryGetCurrentLocation } from '../utils/getLocation';
+import { Notifications } from '../utils/notificationsModule';
 
 // 🔥 SAAS IMPORTS ("users" stays on Firestore until Phase 10)
 import { useSaaSDB } from '../hooks/useSaaSDB';
-import { useData } from './context/DataContext';
 import { useWorkSchedules } from '../hooks/useWorkSchedules';
 import { isOffDay, offDayLabel } from '../utils/workSchedule';
+import { useData } from './context/DataContext';
 
 import { manageAttendanceReminders } from '../utils/notificationHelper';
 
@@ -34,8 +36,8 @@ import { fetchLeaves } from '../services/api/leaves';
 import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
-import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { buildCacheKey } from '../utils/listCache';
 
 export default function DayInScreen() {
     const headerTop = useHeaderTop();
@@ -479,29 +481,13 @@ export default function DayInScreen() {
                 return;
             }
 
-            let { status: permStatus } = await Location.requestForegroundPermissionsAsync();
-            if (permStatus !== 'granted') throw new Error("Denied");
-
-            let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+            // Permission, GPS on, precise → normal → last known fix (see utils/getLocation.ts).
+            const loc = await getGpsFix();
             setLocation(loc);
 
-            let addrRes = await Location.reverseGeocodeAsync({ 
-                latitude: loc.coords.latitude, 
-                longitude: loc.coords.longitude 
-            });
-
-            let currentAddr = "Unknown Location";
-            if (addrRes.length > 0) {
-                const obj = addrRes[0];
-                let city = obj.city || '';
-                let building = obj.name || '';
-                if (building.includes(',')) building = ''; 
-                let street = obj.street || '';
-                if(street === building) street = '';
-                let area = obj.district || obj.subregion || '';
-                if (area === city) area = ''; 
-                currentAddr = [building, street, area, city].filter(Boolean).join(', ');
-            }
+            // The address is a nice-to-have: some phones' geocoder fails or is slow,
+            // and that used to fail the whole Day In.
+            const currentAddr = (await getAddressFromCoords(loc.coords)) || coordsText(loc.coords);
             setAddress(currentAddr);
 
             const res = await dayInApi({
@@ -522,14 +508,22 @@ export default function DayInScreen() {
                 // Silent refresh
                 await loadAllData();
                 const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                Alert.alert("Success", `✅ Punched In at ${timeString}\n📍 ${currentAddr}`);
+                // Background tracking asks for "Allow all the time" once — only after this alert is closed.
+                Alert.alert("Success", `✅ Punched In at ${timeString}\n📍 ${currentAddr}`, [
+                    { text: 'OK', onPress: () => { startBackgroundTracking(); } },
+                ], { cancelable: true, onDismiss: () => { startBackgroundTracking(); } });
             } else {
                 throw new Error("Could not save to Postgres");
             }
         } catch (error) {
             console.log(error);
-            Alert.alert("Error", "Check GPS/Internet or Permission");
-            setAddress("Error fetching location");
+            if (error instanceof LocationError) {
+                Alert.alert("Location needed", error.message);
+                setAddress("Location not available");
+            } else {
+                Alert.alert("Error", "Could not save Day In. Check internet and try again.");
+                setAddress("Error saving Day In");
+            }
         } finally { 
             setLoading(false); 
         }
@@ -538,7 +532,7 @@ export default function DayInScreen() {
     const handleMainButton = () => {
         if (status === 'Out') handleDayIn();
         else if (status === 'In') setExpenseModalVisible(true);
-        else Alert.alert("Done", "Aaj ka kaam ho gaya hai.");
+        else Alert.alert("Done", "Your work for today is complete.");
     };
 
     // 🔥 6. Day-Out — Phase 7: PATCHes /api/v1/attendance/:id via dayOutApi()
@@ -561,22 +555,12 @@ export default function DayInScreen() {
 
             let outLocData: { latitude: number; longitude: number } | undefined;
             let outAddr = "Unknown";
-            try {
-                let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+            // Day Out never fails because of GPS: location is saved when we can get it.
+            const loc = await tryGetCurrentLocation();
+            if (loc) {
                 outLocData = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
-                let addrRes = await Location.reverseGeocodeAsync(outLocData);
-                if (addrRes.length > 0) {
-                    const obj = addrRes[0];
-                    let building = obj.name || '';
-                    if (building.includes(',')) building = '';
-                    let street = obj.street || '';
-                    if (street === building) street = '';
-                    let area = obj.district || obj.subregion || '';
-                    let city = obj.city || '';
-                    if (area === city) area = '';
-                    outAddr = [building, street, area, city].filter(Boolean).join(', ');
-                }
-            } catch (e) { console.log("Out loc failed"); }
+                outAddr = (await getAddressFromCoords(outLocData)) || coordsText(outLocData);
+            }
 
             const res = await dayOutApi(todayDocId, {
                 checkOutAt: new Date().toISOString(),
@@ -589,6 +573,7 @@ export default function DayInScreen() {
             });
 
             if (res.success) {
+                await stopBackgroundTracking();
                 await Notifications.dismissAllNotificationsAsync();
                 await Notifications.cancelAllScheduledNotificationsAsync();
                 await manageAttendanceReminders('COMPLETED', holidayList);

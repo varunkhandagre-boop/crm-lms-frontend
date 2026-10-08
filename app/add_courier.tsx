@@ -21,6 +21,7 @@ import { urlToBase64Image } from '../utils/pdfImageHelper';
 
 import { useData } from './context/DataContext';
 
+import { fetchCompanyProfile } from '../services/api/companies';
 import { createCourier } from '../services/api/couriers';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
@@ -96,34 +97,34 @@ export default function AddCourierScreen() {
       loadData();
   }, [currentUser]);
 
+  // Our side of the courier (Outward FROM / Inward TO) is always the company, for every role.
+  // Was: non-office roles got their own name + a fixed "Nagpur" on Inward.
+  // If the profile hasn't loaded yet (cold start / fresh install), fetch it here once.
+  const [ownProfile, setOwnProfile] = useState<any>(null);
+  const loadedName = companyProfile?.companyName && companyProfile.companyName !== 'Loading...' ? companyProfile : null;
   useEffect(() => {
-      const myCompName = companyProfile?.companyName;
-      const myCity = (companyProfile as any)?.fullAddress?.city || (companyProfile as any)?.address || '';
-      if (!myCompName || myCompName === 'Loading...') return;
+      if (loadedName || ownProfile || !currentUser?.companyId) return;
+      fetchCompanyProfile().then(setOwnProfile).catch(() => {});
+  }, [loadedName, ownProfile, currentUser?.companyId]);
+  const ourCompany: any = loadedName || ownProfile;
 
+  useEffect(() => {
+      const myCompName = ourCompany?.companyName;
+      if (!myCompName) return;
+      const myCity = ourCompany?.fullAddress?.city || ourCompany?.city || ourCompany?.address || '';
+
+      setSelectedOrg(null); setIsManualEntry(false);
+      setOrgId('');
       if (type === 'Outward') {
           setFromName(myCompName);
           setFromCity(myCity);
           setToName(''); setToCity('');
-          setSelectedOrg(null); setIsManualEntry(false);
-          setOrgId(''); 
       } else {
           setFromName(''); setFromCity('');
-          setSelectedOrg(null); setIsManualEntry(false);
-          setOrgId(''); 
-
-          const myRole = currentUser?.role || '';
-          const isOfficeRole = ['Admin', 'Manager', 'Account', 'Accountant', 'Store', 'Store Keeper', 'Hr', 'SuperAdmin'].includes(myRole);
-
-          if (isOfficeRole) {
-              setToName(myCompName);
-              setToCity(myCity);
-          } else {
-              setToName(currentUser?.name || 'Office'); 
-              setToCity('Nagpur');
-          }
+          setToName(myCompName);
+          setToCity(myCity);
       }
-  }, [type, currentUser, companyProfile]);
+  }, [type, ourCompany]);
 
   const formatDate = (rawDate: Date) => {
       let day = rawDate.getDate().toString().padStart(2, '0');
