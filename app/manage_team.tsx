@@ -20,7 +20,6 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { bulkSetTeamMemberStatus } from '../services/api/users';
 
 // 🔥 SAAS IMPORTS (Tracking tab still Firestore — its own turn later)
@@ -36,7 +35,7 @@ import { addHoliday as addHolidayApi, deleteHoliday as deleteHolidayApi, fetchHo
 // 🔥 Permissions tab — new Postgres adapter, replaces Firestore settings_permissions
 import { fetchPermissions, PermissionsBlob, savePermissions } from '../services/api/permissions';
 // 🔥 Tracking tab — new Postgres adapter, replaces Firestore location_logs
-import { fetchLocationLogs } from '../services/api/locationLogs';
+import DayRouteMap from '../components/DayRouteMap';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { useCachedObject } from '../hooks/useCachedObject';
@@ -893,24 +892,10 @@ const TrackingTab = () => {
         fetcher: fetchTeamMembers,
     });
 
-    // 🔥 LOCATION LOGS — cache-first, parameterized by date + selected user
-    // (same pattern as attendance.tsx/travel.tsx). Note: for *today's* date
-    // this is live-ish tracking data that keeps changing through the day —
-    // cache still shows the last-known snapshot instantly, then refreshes
-    // in the background, same as everywhere else; the explicit refresh
-    // button below remains for an immediate manual re-check.
+    // Employee Day Map (components/DayRouteMap.tsx) loads its own data for this date + person.
     const dateQuery = `${mapDate.getFullYear()}-${String(mapDate.getMonth() + 1).padStart(2, '0')}-${String(mapDate.getDate()).padStart(2, '0')}`;
-    const locationsCacheKey = buildCacheKey(`location_logs:${dateQuery}:${selectedUserId}`, currentUser?.companyId);
-    const {
-        data: locations,
-        loading,
-        refresh: refreshLocations,
-    } = useCachedList({
-        cacheKey: locationsCacheKey,
-        enabled: !!currentUser?.companyId,
-        fetcher: () => fetchLocationLogs(dateQuery, selectedUserId),
-    });
-
+    const [refreshKey, setRefreshKey] = useState(0);
+    const refreshLocations = () => setRefreshKey((k) => k + 1);
     const onDateChange = (event: any, selectedDate?: Date) => {
         setShowDatePicker(Platform.OS === 'ios');
         if (selectedDate) setMapDate(selectedDate);
@@ -954,74 +939,7 @@ const TrackingTab = () => {
                 </ScrollView>
             </View>
 
-            <View style={{flex: 1}}>
-                {loading && <ActivityIndicator size="large" color="#3b5998" style={{position:'absolute', top: 20, alignSelf:'center', zIndex:10}} />}
-                
-                <MapView
-                    style={{flex: 1}}
-                    provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined} 
-                    initialRegion={{
-                        latitude: 20.5937, 
-                        longitude: 78.9629,
-                        latitudeDelta: 15,
-                        longitudeDelta: 15,
-                    }}
-                    region={locations.length > 0 ? {
-                        latitude: locations[locations.length-1].latitude,
-                        longitude: locations[locations.length-1].longitude,
-                        latitudeDelta: 0.05,
-                        longitudeDelta: 0.05,
-                    } : undefined}
-                >
-                    {locations.length > 1 && (
-                        <Polyline
-                            coordinates={locations.map(l => ({ latitude: l.latitude, longitude: l.longitude }))}
-                            strokeColor="#3498db" 
-                            strokeWidth={4}
-                        />
-                    )}
-
-                    {locations.map((loc, index) => {
-                        if (!loc.latitude || !loc.longitude) return null;
-
-                        let pinColor = 'cyan'; 
-                        let title = "Path";
-                        let zIndex = 1;
-
-                        if (index === 0) { 
-                            pinColor = 'green'; title = "Start"; zIndex = 10;
-                        } else if (index === locations.length - 1) {
-                            pinColor = 'red'; title = "Current/End"; zIndex = 10;
-                        } else if (['Order','Lead','Visit'].includes(loc.type)) {
-                            pinColor = 'orange'; title = loc.type; zIndex = 5;
-                        }
-
-                        return (
-                            <Marker
-                                key={loc.id || index}
-                                coordinate={{ latitude: loc.latitude, longitude: loc.longitude }}
-                                title={`${title}: ${loc.userName}`}
-                                description={new Date(loc.timestamp).toLocaleTimeString()}
-                                pinColor={pinColor}
-                                zIndex={zIndex}
-                            />
-                        );
-                    })}
-                </MapView>
-                
-                {locations.length === 0 && !loading && (
-                     <View style={{position:'absolute', bottom: 20, alignSelf:'center', backgroundColor:'rgba(255,255,255,0.9)', padding:10, borderRadius:8}}>
-                         <Text style={{color:'gray', fontSize:12}}>No logs found for this date.</Text>
-                     </View>
-                )}
-            </View>
-
-            <View style={{backgroundColor: 'white', padding: 8, flexDirection: 'row', justifyContent: 'space-around', borderTopWidth: 1, borderColor: '#eee'}}>
-                <Text style={{fontSize: 10, color: 'green', fontWeight:'bold'}}>● START</Text>
-                <Text style={{fontSize: 10, color: 'cyan', fontWeight:'bold'}}>● PATH</Text>
-                <Text style={{fontSize: 10, color: 'red', fontWeight:'bold'}}>● END</Text>
-                                <Text style={{fontSize: 10, color: 'orange', fontWeight:'bold'}}>● VISITS</Text>
-            </View>
+            <DayRouteMap userId={selectedUserId} date={dateQuery} refreshKey={refreshKey} />
         </View>
     );
 };
