@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -23,9 +23,11 @@ import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 
 // 🔥 Phase 8: tasks now come from Postgres via these adapters
-import { completeTask as completeTaskApi, fetchTasks } from '../services/api/tasks';
+import { completeTask as completeTaskApi, listTasksPage, TaskPageFilters } from '../services/api/tasks';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
 import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
@@ -41,9 +43,7 @@ export default function TaskScreen() {
   const { isDbLoading } = useSaaSDB();
 
   // 🔥 3. Lazy Loaded States
-  // taskList now comes from useCachedList below (cache-first)
   // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
-  const [refreshing, setRefreshing] = useState(false);
 
   // --- STATES ---
   const [taskViewMode, setTaskViewMode] = useState<'MyTasks' | 'Given'>('MyTasks');
@@ -67,34 +67,8 @@ export default function TaskScreen() {
   // LOADING STATE FOR COMPLETE BUTTON
   const [isCompleting, setIsCompleting] = useState(false);
 
-  // PAGINATION STATE
-  const [visibleCount, setVisibleCount] = useState(20);
-
-  // RESET PAGINATION ON FILTER CHANGE
-  useEffect(() => {
-      if (dateViewMode === 'Day' && activeStatus === 'Pending' && !searchText) {
-          setVisibleCount(500); 
-      } else {
-          setVisibleCount(20); 
-      }
-  }, [taskViewMode, activeStatus, searchText, priorityFilter, selectedEmployee, dateViewMode, currentDate]);
 
   const isAdminOrManager = ['Admin', 'Manager', 'SuperAdmin'].includes(currentUser?.role || '');
-
-  function getFetchRange(): { fromDate?: string; toDate?: string } {
-      const toIso = (d: Date) => d.toISOString().split('T')[0];
-      if (dateViewMode === 'All') return {};
-      if (dateViewMode === 'Day') return { fromDate: toIso(currentDate), toDate: toIso(currentDate) };
-      if (dateViewMode === 'Month') {
-          const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-          const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-          return { fromDate: toIso(start), toDate: toIso(end) };
-      }
-      const m = currentDate.getMonth();
-      const y = currentDate.getFullYear();
-      const fyStartYear = m >= 3 ? y : y - 1;
-      return { fromDate: toIso(new Date(fyStartYear, 3, 1)), toDate: toIso(new Date(fyStartYear + 1, 2, 31)) };
-  }
 
   // 🔥 4a. Users list — cache-first, shares the SAME 'team_members' cache
   // key as manage_team.tsx/employee_timeline.tsx.
@@ -104,12 +78,10 @@ export default function TaskScreen() {
       fetcher: fetchTeamMembers,
   });
 
-  // 🔥 TASKS — cache-first, parameterized by date-range + employee filter
-  // (same pattern as attendance.tsx/travel.tsx). Fetches both directions
-  // (received + given) and merges inside the fetcher, same as before —
-  // the hook only cares that the fetcher resolves to one array.
+  // 🔥 TASKS — 20 per page from the server: tab (My Tasks / Given), employee,
+  // status, priority, date and search all run there. The date is the completion
+  // day for done tasks, else the due day (created day when there is none).
   const usersReady = !(isAdminOrManager && selectedEmployee !== 'All' && userList.length === 0);
-  const { fromDate, toDate } = getFetchRange();
   const resolveTargetUserId = (): string | undefined => {
       if (isAdminOrManager && selectedEmployee !== 'All') {
           return userList.find((u: any) => u.name === selectedEmployee)?.id;
@@ -117,32 +89,40 @@ export default function TaskScreen() {
       return isAdminOrManager ? 'all' : undefined;
   };
   const targetUserId = resolveTargetUserId();
-  const tasksCacheKey = buildCacheKey(`tasks:${dateViewMode}:${fromDate || 'none'}:${toDate || 'none'}:${targetUserId || 'self'}`, currentUser?.companyId);
+  const debouncedSearch = useDebounced(searchText.trim());
+  const taskFilters = useMemo<TaskPageFilters>(() => ({
+      view: taskViewMode === 'Given' ? 'given' : 'received',
+      userId: targetUserId,
+      status: activeStatus === 'All' ? undefined : (activeStatus as TaskPageFilters['status']),
+      priority: priorityFilter === 'All' ? undefined : priorityFilter,
+      ...periodRange(dateViewMode, currentDate),
+      search: debouncedSearch || undefined,
+  }), [taskViewMode, targetUserId, activeStatus, priorityFilter, dateViewMode, currentDate, debouncedSearch]);
+  const [pendingCounts, setPendingCounts] = useState({ receivedPending: 0, givenPending: 0 });
+  const fetchTaskPage = useCallback(async (p: TaskPageFilters & { page: number; limit: number }) => {
+      const r = await listTasksPage(p);
+      if (r.counts) setPendingCounts(r.counts);
+      return r;
+  }, []);
+  const isDefaultView = taskViewMode === 'MyTasks' && activeStatus === 'Pending' && priorityFilter === 'All'
+      && selectedEmployee === 'All' && isCurrentFy(dateViewMode, currentDate) && !debouncedSearch;
   const {
-      data: taskList,
-      setData: setTaskList,
+      items: taskList,
+      setItems: setTaskList,
+      total: taskTotal,
       loading: tasksLoading,
-      refreshing: tasksRefreshing,
+      loadingMore: tasksLoadingMore,
+      hasMore: tasksHasMore,
+      loadMore: loadMoreTasks,
+      refreshing,
       refresh: refreshTasks,
-  } = useCachedList({
-      cacheKey: tasksCacheKey,
+      error: tasksError,
+  } = useServerPagedList<TaskPageFilters, any>({
+      fetchPage: fetchTaskPage,
+      filters: taskFilters,
       enabled: !!currentUser?.companyId && usersReady,
-      fetcher: async () => {
-          const [received, given] = await Promise.all([
-              fetchTasks({ direction: 'received', userId: targetUserId, fromDate, toDate, limit: 500 }),
-              fetchTasks({ direction: 'given', userId: targetUserId, fromDate, toDate, limit: 500 }),
-          ]);
-          const merged = new Map<string, any>();
-          [...received, ...given].forEach((t) => merged.set(t.id, t));
-          return Array.from(merged.values());
-      },
+      cacheKey: isDefaultView ? buildCacheKey('tasks_page1_v1', currentUser?.companyId) : null,
   });
-
-  const onRefresh = async () => {
-      setRefreshing(true);
-      await refreshTasks();
-      setRefreshing(false);
-  };
 
   // --- GENERATE EMPLOYEE LIST ---
   const employeeList = useMemo(() => {
@@ -150,33 +130,12 @@ export default function TaskScreen() {
       if (userList) userList.forEach((u: any) => {
           if(u.name) names.add(u.name);
       });
-      if (taskList) {
-          taskList.forEach((t: any) => {
-              if (t.to && t.to !== 'Self') names.add(t.to);
-              if (t.from) names.add(t.from);
-          });
-      }
       return Array.from(names).sort();
-  }, [taskList, userList]);
+  }, [userList]);
 
   // --- COUNTS ---
-  const myPendingCount = taskList.filter((t: any) => {
-      if (isAdminOrManager) {
-           const matchesUser = selectedEmployee === 'All' ? true : t.to === selectedEmployee;
-           return matchesUser && t.status === 'Pending';
-      }
-      return (t.to === 'Self' || t.to === currentUser?.name) && t.status === 'Pending';
-  }).length;
-
-  const givenPendingCount = taskList.filter((t: any) => {
-      if (isAdminOrManager) {
-          if (selectedEmployee !== 'All') {
-              return t.from === selectedEmployee && t.to !== 'Self' && t.status === 'Pending';
-          }
-          return t.from && t.from !== 'Self' && t.status === 'Pending';
-      }
-      return t.from === currentUser?.name && t.to !== 'Self' && t.to !== currentUser?.name && t.status === 'Pending';
-  }).length;
+  const myPendingCount = pendingCounts.receivedPending;
+  const givenPendingCount = pendingCounts.givenPending;
 
   // --- HELPER: DATE PARSER ---
   const parseDate = (dateStr: string) => {
@@ -237,73 +196,6 @@ export default function TaskScreen() {
   };
 
   // --- FILTER & SORT LOGIC ---
-  const getFilteredData = () => {
-      let data = taskList ? [...taskList] : [];
-
-      if (taskViewMode === 'MyTasks') {
-          if (isAdminOrManager) {
-              if (selectedEmployee !== 'All') data = data.filter((t: any) => t.to === selectedEmployee);
-          } else {
-              data = data.filter((t: any) => t.to === 'Self' || t.to === currentUser?.name);
-          }
-      } else {
-          if (isAdminOrManager) {
-              if (selectedEmployee !== 'All') {
-                  data = data.filter((t: any) => t.from === selectedEmployee && t.to !== 'Self');
-              } else {
-                  data = data.filter((t: any) => t.from && t.to !== 'Self'); 
-              }
-          } else {
-              data = data.filter((t: any) => t.from === currentUser?.name && t.to !== 'Self' && t.to !== currentUser?.name);
-          }
-      }
-
-      if (activeStatus !== 'All') data = data.filter((t: any) => t.status === activeStatus);
-      if (priorityFilter !== 'All') data = data.filter((t: any) => t.priority === priorityFilter);
-
-      if (searchText) {
-          const lowerText = searchText.toLowerCase();
-          data = data.filter((t: any) => {
-              const fullString = `${t.task || ''} ${t.from || ''} ${t.to || ''} ${t.priority || ''} ${t.remark || ''}`.toLowerCase();
-              return fullString.includes(lowerText);
-          });
-      }
-
-      if (dateViewMode !== 'All') {
-          const targetYear = currentDate.getFullYear();
-          const targetMonth = currentDate.getMonth();
-          const targetDay = currentDate.getDate();
-
-          const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
-
-          data = data.filter((item: any) => {
-              const dateField = item.status === 'Completed' ? item.completedAt : (item.dueDate || item.createdAt);
-              if(!dateField) return false;
-              const itemDate = parseDate(dateField);
-              const itemTime = itemDate.getTime();
-              
-              if (dateViewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-              if (dateViewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-              if (dateViewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-              return true;
-          });
-      }
-
-      data.sort((a: any, b: any) => {
-          if (a.status === 'Pending' && b.status === 'Completed') return -1;
-          if (a.status === 'Completed' && b.status === 'Pending') return 1;
-          const dateA = parseDate(a.dueDate || a.createdAt).getTime();
-          const dateB = parseDate(b.dueDate || b.createdAt).getTime();
-          return dateB - dateA;
-      });
-
-      return data;
-  };
-
-  const displayList = getFilteredData(); 
-  const renderedList = displayList.slice(0, visibleCount);
 
   const handleOpenTask = (task: any) => {
       setSelectedTask(task);
@@ -324,6 +216,7 @@ export default function TaskScreen() {
 
           if (res.success) {
               setTaskList(prev => prev.map(t => t.id === selectedTask.id ? res.record : t));
+              refreshTasks(); // badges + Pending tab
               Alert.alert("Success", "Task marked as completed!");
               setTaskModalVisible(false);
           } else {
@@ -383,7 +276,7 @@ export default function TaskScreen() {
 
           <View style={styles.searchRow}>
               <View style={styles.searchBar}>
-                  {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" style={{marginRight: 5}}/> : <Ionicons name="search" size={20} color="gray" />}
+                  {(isDbLoading || tasksLoading) ? <ActivityIndicator size="small" color="#3b5998" style={{marginRight: 5}}/> : <Ionicons name="search" size={20} color="gray" />}
                   <TextInput 
                       style={styles.input}
                       placeholder="Search tasks..."
@@ -419,20 +312,20 @@ export default function TaskScreen() {
               ))}
           </View>
           
-          <TotalBar label="Total" count={displayList.length} />
+          <TotalBar label="Total" count={taskTotal} />
       </View>
 
       <FlatList 
-        data={renderedList}
+        data={taskList}
         keyExtractor={(item, index) => (item.id || index.toString()) + index}
         contentContainerStyle={styles.listPadding}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshTasks} />}
         ListEmptyComponent={
             <View style={{alignItems:'center', marginTop:2}}>
                 {tasksLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
                     <>
                         <Ionicons name="checkbox-outline" size={60} color="#ccc" />
-                        <Text style={{color:'gray', marginTop:10}}>No Tasks Found</Text>
+                        <Text style={{color:'gray', marginTop:10}}>{tasksError ? 'Could not load tasks — pull down to retry.' : 'No Tasks Found'}</Text>
                         {priorityFilter !== 'All' && <Text style={{color:'#3b5998', marginTop:5}}>Filter: {priorityFilter}</Text>}
                     </>
                 )}
@@ -491,9 +384,10 @@ export default function TaskScreen() {
         
         ListFooterComponent={
           <View style={{ paddingBottom: 80 }}>
-              {visibleCount < displayList.length ? (
+              {tasksHasMore ? (
                   <TouchableOpacity 
-                      onPress={() => setVisibleCount(prev => prev + 20)} 
+                      onPress={loadMoreTasks}
+                      disabled={tasksLoadingMore}
                       style={{
                           padding: 12, 
                           backgroundColor: '#fff', 
@@ -505,12 +399,12 @@ export default function TaskScreen() {
                           elevation: 1
                       }}
                   >
-                      <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                          👇 Load More Tasks ({displayList.length - visibleCount} remaining)
-                      </Text>
+                      {tasksLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                          <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Tasks ({taskTotal - taskList.length} remaining)</Text>
+                      )}
                   </TouchableOpacity>
               ) : (
-                  displayList.length > 0 ? (
+                  taskList.length > 0 ? (
                       <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
                           --- End of List ---
                       </Text>

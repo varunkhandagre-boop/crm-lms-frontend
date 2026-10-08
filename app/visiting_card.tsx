@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -23,9 +23,11 @@ import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 
 // 🔥 Phase 8: visiting card requests now come from Postgres via these adapters
-import { dispatchVisitingCardRequest, fetchVisitingCards, receiveVisitingCardRequest } from '../services/api/visitingCards';
+import { dispatchVisitingCardRequest, listVisitingCardsPage, VisitingCardPageFilters, receiveVisitingCardRequest } from '../services/api/visitingCards';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { periodRange, useDebounced } from '../utils/periodRange';
 import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';
@@ -42,7 +44,6 @@ export default function VisitingCardScreen() {
   const { addSaaSData } = useSaaSDB();
 
   // 🔥 3. Local States for independent loading
-  // cardRequestList now comes from useCachedList below (cache-first)
   // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
 
   // --- STATES ---
@@ -54,7 +55,6 @@ export default function VisitingCardScreen() {
   // MODAL STATES
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<any>(null);
-  const [refreshing, setRefreshing] = useState(false);
   
   // State for Tracking No
   const [dispatchTracking, setDispatchTracking] = useState('');
@@ -68,27 +68,11 @@ export default function VisitingCardScreen() {
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All'); 
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  const [visibleCount, setVisibleCount] = useState(20);
 
   // ROLE CHECK
   const myRole = (currentUser?.role || '').toLowerCase();
   const canViewAll = ['admin', 'manager', 'store', 'account', 'accountant', 'hr', 'superadmin'].some(r => myRole.includes(r));
   const canDispatch = canViewAll; 
-
-  function getFetchRange(): { fromDate?: string; toDate?: string } {
-      const toIso = (d: Date) => d.toISOString().split('T')[0];
-      if (viewMode === 'All') return {};
-      if (viewMode === 'Day') return { fromDate: toIso(currentDate), toDate: toIso(currentDate) };
-      if (viewMode === 'Month') {
-          const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-          const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-          return { fromDate: toIso(start), toDate: toIso(end) };
-      }
-      const m = currentDate.getMonth();
-      const y = currentDate.getFullYear();
-      const fyStartYear = m >= 3 ? y : y - 1;
-      return { fromDate: toIso(new Date(fyStartYear, 3, 1)), toDate: toIso(new Date(fyStartYear + 1, 2, 31)) };
-  }
 
   // 🔥 4a. Users list — cache-first, shares the SAME 'team_members' cache
   // key as manage_team.tsx/employee_timeline.tsx.
@@ -106,67 +90,40 @@ export default function VisitingCardScreen() {
       }
   }, [userList, canViewAll]);
 
-  // 🔥 VISITING CARD REQUESTS — cache-first, parameterized by date-range +
-  // employee filter + status (same pattern as attendance.tsx/travel.tsx —
-  // a repeat visit to the same view/date/filter/status is instant; a
-  // genuinely new combination still goes to the network). See
-  // hooks/useCachedList.ts.
+  // 🔥 VISITING CARD REQUESTS — 20 per page from the server: date range, employee
+  // (field staff only get their own — server-enforced), status and search.
   const usersReady = !(canViewAll && selectedEmployeeName !== 'All' && employees.length === 0);
-  const { fromDate, toDate } = getFetchRange();
   const resolveTargetUserId = (): string | undefined => {
-      if (!canViewAll) return undefined; // self, enforced server-side
+      if (!canViewAll) return undefined;
       if (selectedEmployeeName === 'All') return 'all';
       return employees.find(e => e.name === selectedEmployeeName)?.id;
   };
   const targetUserId = resolveTargetUserId();
-  const cardsCacheKey = buildCacheKey(
-      `visiting_cards:${viewMode}:${fromDate || 'none'}:${toDate || 'none'}:${targetUserId || 'self'}:${activeStatus}`,
-      currentUser?.companyId
-  );
+  const debouncedSearch = useDebounced(searchText.trim());
+  const cardFilters = useMemo<VisitingCardPageFilters>(() => ({
+      ...periodRange(viewMode, currentDate),
+      userId: targetUserId,
+      status: activeStatus !== 'All' ? (activeStatus as VisitingCardPageFilters['status']) : undefined,
+      search: debouncedSearch || undefined,
+  }), [viewMode, currentDate, targetUserId, activeStatus, debouncedSearch]);
+  const isDefaultView = viewMode === 'All' && activeStatus === 'All' && selectedEmployeeName === 'All' && !debouncedSearch;
   const {
-      data: cardRequestList,
+      items: cardRequestList,
+      total: cardTotal,
       loading: cardsLoading,
+      loadingMore: cardsLoadingMore,
+      hasMore: cardsHasMore,
+      loadMore: loadMoreCards,
+      refreshing,
       refresh: refreshCards,
-  } = useCachedList({
-      cacheKey: cardsCacheKey,
+      error: cardsError,
+  } = useServerPagedList<VisitingCardPageFilters, any>({
+      fetchPage: listVisitingCardsPage,
+      filters: cardFilters,
       enabled: !!currentUser?.companyId && usersReady,
-      fetcher: () => fetchVisitingCards({
-          userId: targetUserId,
-          status: activeStatus !== 'All' ? (activeStatus as any) : undefined,
-          fromDate, toDate,
-          limit: 500,
-      }),
+      cacheKey: isDefaultView ? buildCacheKey('visiting_cards_page1_v1', currentUser?.companyId) : null,
   });
 
-  // Pull to Refresh
-  const onRefresh = async () => {
-      setRefreshing(true);
-      await refreshCards();
-      setRefreshing(false);
-  };
-
-  // PAGE LOAD LIMIT LOGIC
-  useEffect(() => {
-      if (viewMode === 'Day' && activeStatus === 'All' && !searchText) {
-          setVisibleCount(500); 
-      } else {
-          setVisibleCount(20); 
-      }
-  }, [viewMode, currentDate, activeStatus, searchText, selectedEmployeeName]);
-
-  const parseDate = (dateStr: any) => {
-      if (!dateStr) return new Date();
-      if (dateStr instanceof Date) return dateStr;
-      if (typeof dateStr === 'string') {
-          if (dateStr.includes('/')) {
-              const parts = dateStr.split('/');
-              if (parts.length === 3) {
-                  return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-              }
-          }
-      }
-      return new Date(dateStr);
-  };
 
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
@@ -188,55 +145,6 @@ export default function VisitingCardScreen() {
       return "All Time";
   };
 
-  // --- FILTER LOGIC ---
-  const getFilteredData = () => {
-      let data = Array.isArray(cardRequestList) ? [...cardRequestList] : [];
-
-      // employee/status/date-range already applied server-side (see the useCachedList fetcher above);
-      // search stays client-side over the bounded fetched set.
-
-      if (searchText) {
-          const lowerText = searchText.toLowerCase();
-          data = data.filter((item: any) => {
-              const fullString = `${item.reqId} ${item.userName} ${item.shippingAddress} ${item.status} ${item.trackingNo}`.toLowerCase();
-              return fullString.includes(lowerText);
-          });
-      }
-
-      if (viewMode !== 'All') {
-          const targetYear = currentDate.getFullYear();
-          const targetMonth = currentDate.getMonth();
-          const targetDay = currentDate.getDate();
-
-          const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
-
-          data = data.filter((item: any) => {
-              const dateField = item.dateIso || item.createdAt || item.date;
-              if(!dateField) return false;
-              const itemDate = parseDate(dateField);
-              const itemTime = itemDate.getTime();
-              
-              if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-              if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-              if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-              return true;
-          });
-      }
-
-      // Safe Sorting to prevent crash on invalid dates
-      data.sort((a: any, b: any) => {
-          const d1 = new Date(b.dateIso || b.createdAt || b.date).getTime();
-          const d2 = new Date(a.dateIso || a.createdAt || a.date).getTime();
-          return (isNaN(d1) ? 0 : d1) - (isNaN(d2) ? 0 : d2);
-      });
-
-      return data;
-  };
-
-  const displayList = getFilteredData(); 
-  const renderedList = displayList.slice(0, visibleCount);
 
   const openDetails = (item: any) => {
       setSelectedRequest(item);
@@ -354,15 +262,15 @@ export default function VisitingCardScreen() {
               ))}
           </ScrollView>
           <Text style={{textAlign:'right', fontSize:12, color:'gray', paddingRight:15, marginTop:5}}>
-              Total: <Text style={{fontWeight:'bold', color:'#333'}}>{displayList.length}</Text>
+              Total: <Text style={{fontWeight:'bold', color:'#333'}}>{cardTotal}</Text>
           </Text>
       </View>
 
       <FlatList 
-        data={renderedList}
+        data={cardRequestList}
         keyExtractor={(item, index) => item.id || index.toString()}
         contentContainerStyle={styles.contentContainer}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshCards} />}
         ListEmptyComponent={
             <View style={styles.emptyBox}>
                 {cardsLoading ? (
@@ -370,7 +278,7 @@ export default function VisitingCardScreen() {
                 ) : (
                     <>
                         <Ionicons name="documents-outline" size={60} color="#ccc" />
-                        <Text style={styles.emptyText}>No requests found.</Text>
+                        <Text style={styles.emptyText}>{cardsError ? 'Could not load requests — pull down to retry.' : 'No requests found.'}</Text>
                     </>
                 )}
             </View>
@@ -408,9 +316,10 @@ export default function VisitingCardScreen() {
         
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
-                {visibleCount < displayList.length ? (
-                    <TouchableOpacity 
-                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                {cardsHasMore ? (
+                    <TouchableOpacity
+                        onPress={loadMoreCards}
+                        disabled={cardsLoadingMore}
                         style={{
                             padding: 12, 
                             backgroundColor: '#fff', 
@@ -422,12 +331,12 @@ export default function VisitingCardScreen() {
                             elevation: 1
                         }}
                     >
-                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                            👇 Load More Records ({displayList.length - visibleCount} remaining)
-                        </Text>
+                        {cardsLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({cardTotal - cardRequestList.length} remaining)</Text>
+                        )}
                     </TouchableOpacity>
                 ) : (
-                    displayList.length > 0 ? (
+                    cardRequestList.length > 0 ? (
                         <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
                             --- End of List ---
                         </Text>

@@ -67,6 +67,22 @@ export async function fetchVisitingCards(opts: {
   return (res.data ?? []).map(toLegacyVisitingCard);
 }
 
+export interface VisitingCardPageFilters {
+  userId?: string;
+  status?: "Pending" | "Sent" | "Received";
+  fromDate?: string;
+  toDate?: string;
+  search?: string;
+}
+
+/** One page for the Visiting Cards screen (newest first); every filter runs on the server. */
+export async function listVisitingCardsPage(
+  params: VisitingCardPageFilters & { page: number; limit: number },
+): Promise<{ items: LegacyVisitingCard[]; total: number; totalPages: number }> {
+  const res = await apiClient.get<ListResponse<any>>(`/visiting-cards${buildQuery({ ...params })}`);
+  return { items: (res.data ?? []).map(toLegacyVisitingCard), total: res.meta.total, totalPages: res.meta.totalPages };
+}
+
 export async function createVisitingCardRequest(payload: { shippingAddress: string; items: LegacyVisitingCardItem[] }) {
   const res = await apiClient.post<OneResponse<any>>(`/visiting-cards`, payload);
   return { success: true, id: res.data?.id, record: toLegacyVisitingCard(res.data) };

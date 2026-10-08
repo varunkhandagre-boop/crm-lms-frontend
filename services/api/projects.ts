@@ -146,6 +146,18 @@ function toQueryString(params: Record<string, any>) {
   return s ? `?${s}` : '';
 }
 
+export interface ProjectPageFilters { fromDate?: string; toDate?: string; search?: string }
+
+/** One page (newest first); page 1 also brings the Running / Completed counts for the filter. */
+export async function listProjectsPage(
+  params: ProjectPageFilters & { page: number; limit: number },
+): Promise<{ items: any[]; total: number; totalPages: number; counts?: { ongoing: number; completed: number } }> {
+  const res = await apiClient.get<{ data: ApiProject[]; meta: { total: number; totalPages: number }; counts?: { ongoing: number; completed: number } }>(
+    `/projects${toQueryString({ ...params, sortBy: 'createdAt', sortOrder: 'desc', withCounts: params.page === 1 ? 'true' : undefined })}`,
+  );
+  return { items: res.data.map(toLegacyProject), total: res.meta.total, totalPages: res.meta.totalPages, counts: res.counts };
+}
+
 export async function listProjects(params: { status?: string; search?: string } = {}): Promise<any[]> {
   const res = await apiClient.get<{ data: ApiProject[] }>(`/projects${toQueryString({limit: 1000,  ...params })}`);
   return res.data.map(toLegacyProject);

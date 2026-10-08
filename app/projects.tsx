@@ -1,13 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 // 🔥 SAAS IMPORTS (kept only for isDbLoading UX)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 5: projects now via new backend API
-import { listProjects } from '../services/api/projects';
+import { listProjectsPage, ProjectPageFilters } from '../services/api/projects';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { buildCacheKey } from '../utils/listCache';
+import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
 
@@ -18,10 +21,8 @@ export default function ProjectsScreen() {
   const { currentUser } = useData(); 
   const { isDbLoading } = useSaaSDB();
 
-  const [projectList, setProjectList] = useState<any[]>([]);
 
   const [searchText, setSearchText] = useState('');
-  const [visibleCount, setVisibleCount] = useState(20);
 
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -41,20 +42,36 @@ export default function ProjectsScreen() {
       }
   }, [currentUser, hasAccess]);
 
-  useEffect(() => {
-      setVisibleCount(20);
-  }, [searchText, viewMode, currentDate]);
-
-  // 🔥 LOAD DATA — via new backend API
-  useEffect(() => {
-      const loadData = async () => {
-          if (currentUser?.companyId && hasAccess) {
-              const data = await listProjects(); // was: fetchSaaSData("projects")
-              setProjectList(data);
-          }
-      };
-      loadData();
-  }, [currentUser, hasAccess]);
+  // 🔥 PROJECTS — 20 per page from the server (a search looks across all dates, as before);
+  // page 1 also brings the Running / Completed counts.
+  const debouncedSearch = useDebounced(searchText.trim());
+  const projectFilters = useMemo<ProjectPageFilters>(() => ({
+      ...(debouncedSearch ? {} : periodRange(viewMode, currentDate)),
+      search: debouncedSearch || undefined,
+  }), [viewMode, currentDate, debouncedSearch]);
+  const [statusCounts, setStatusCounts] = useState({ ongoing: 0, completed: 0 });
+  const fetchProjectPage = useCallback(async (p: ProjectPageFilters & { page: number; limit: number }) => {
+      const r = await listProjectsPage(p);
+      if (r.counts) setStatusCounts(r.counts);
+      return r;
+  }, []);
+  const isDefaultView = isCurrentFy(viewMode, currentDate) && !debouncedSearch;
+  const {
+      items: fullList,
+      total: projectTotal,
+      loading: projectsLoading,
+      loadingMore: projectsLoadingMore,
+      hasMore: projectsHasMore,
+      loadMore: loadMoreProjects,
+      refreshing: projectsRefreshing,
+      refresh: refreshProjects,
+      error: projectsError,
+  } = useServerPagedList<ProjectPageFilters, any>({
+      fetchPage: fetchProjectPage,
+      filters: projectFilters,
+      enabled: !!currentUser?.companyId && hasAccess,
+      cacheKey: isDefaultView ? buildCacheKey('projects_page1_v1', currentUser?.companyId) : null,
+  });
 
   if (!hasAccess) {
       return null; 
@@ -64,23 +81,6 @@ export default function ProjectsScreen() {
       if (status === 'Completed') return '#4caf50'; 
       if (status === 'Ongoing') return '#2196f3';   
       return '#ff9800'; 
-  };
-
-  const parseDate = (dateStr: any) => {
-      if (!dateStr) return 0;
-      if (typeof dateStr === 'number') return dateStr;
-      if (dateStr instanceof Date) return dateStr.getTime();
-      if (typeof dateStr === 'string') {
-          if (dateStr.includes('T')) return new Date(dateStr).getTime();
-          if (dateStr.includes('-')) return new Date(dateStr).getTime();
-          if (dateStr.includes('/')) {
-              const parts = dateStr.split('/');
-              if (parts.length === 3) {
-                  return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0])).getTime();
-              }
-          }
-      }
-      return new Date(dateStr).getTime();
   };
 
   const changeDate = (dir: number) => {
@@ -103,57 +103,6 @@ export default function ProjectsScreen() {
       return "All Time";
   };
 
-  const getFilteredProjects = () => {
-      let data = Array.isArray(projectList) ? [...projectList] : [];
-
-      if (searchText) {
-          const lower = searchText.toLowerCase();
-          data = data.filter((item: any) => 
-              (item.name && item.name.toLowerCase().includes(lower)) ||
-              (item.client && item.client.toLowerCase().includes(lower)) ||
-              (item.location && item.location.toLowerCase().includes(lower)) ||
-              (item.orgId && item.orgId.toLowerCase().includes(lower)) 
-          );
-      } else if (viewMode !== 'All') {
-          const tYear = currentDate.getFullYear();
-          const tMonth = currentDate.getMonth();
-          const tDay = currentDate.getDate();
-
-          const fyStartYear = tMonth >= 3 ? tYear : tYear - 1;
-          let fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
-
-          const APP_LAUNCH_DATE = new Date(2026, 0, 1).getTime(); 
-          if (fyStartDate < APP_LAUNCH_DATE) {
-              fyStartDate = APP_LAUNCH_DATE;
-          }
-
-          data = data.filter((item: any) => {
-              const dateField = item.dateIso || item.createdAt || item.date;
-              if (!dateField) return false;
-              const ts = parseDate(dateField);
-              if (ts === 0) return false;
-              const itemDate = new Date(ts);
-              const itemTime = itemDate.getTime();
-
-              if (viewMode === 'Month') return itemDate.getFullYear() === tYear && itemDate.getMonth() === tMonth;
-              if (viewMode === 'Day') return itemDate.getFullYear() === tYear && itemDate.getMonth() === tMonth && itemDate.getDate() === tDay;
-              if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-              return true;
-          });
-      }
-
-      data.sort((a: any, b: any) => {
-          const dateA = parseDate(a.dateIso || a.createdAt || a.date);
-          const dateB = parseDate(b.dateIso || b.createdAt || b.date);
-          return dateB - dateA;
-      });
-
-      return data;
-  };
-
-  const fullList = getFilteredProjects(); 
-  const renderedList = fullList.slice(0, visibleCount);
 
   const renderProjectCard = ({ item }: any) => (
       <TouchableOpacity 
@@ -235,30 +184,31 @@ export default function ProjectsScreen() {
               <View style={[styles.summaryCard, {backgroundColor:'#e3f2fd'}]}>
                   <Text style={styles.summaryLabel}>Running</Text>
                   <Text style={styles.summaryValue}>
-                      {fullList ? fullList.filter((p:any) => p.status === 'Ongoing').length : 0}
+                      {statusCounts.ongoing}
                   </Text>
               </View>
               <View style={[styles.summaryCard, {backgroundColor:'#e8f5e9'}]}>
                   <Text style={styles.summaryLabel}>Completed</Text>
                   <Text style={styles.summaryValue}>
-                      {fullList ? fullList.filter((p:any) => p.status === 'Completed').length : 0}
+                      {statusCounts.completed}
                   </Text>
               </View>
           </View>
 
-          <TotalBar label="Total Projects" count={fullList.length} />
+          <TotalBar label="Total Projects" count={projectTotal} />
       </View>
 
       <FlatList 
-        data={renderedList}
+        data={fullList}
+        refreshControl={<RefreshControl refreshing={projectsRefreshing} onRefresh={refreshProjects} colors={['#3b5998']} tintColor="#3b5998" />}
         keyExtractor={(item:any) => item.id.toString()} 
         contentContainerStyle={{padding: 15, paddingBottom: 50}}
         ListEmptyComponent={
             <View style={{alignItems:'center', marginTop:50}}>
-                {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                {(isDbLoading || projectsLoading) ? <ActivityIndicator size="large" color="#3b5998" /> : (
                     <>
                         <Ionicons name="business-outline" size={60} color="#ccc" />
-                        <Text style={{color:'gray', marginTop:10}}>No Projects Found.</Text>
+                        <Text style={{color:'gray', marginTop:10}}>{projectsError ? 'Could not load projects — pull down to retry.' : 'No Projects Found.'}</Text>
                     </>
                 )}
             </View>
@@ -267,9 +217,10 @@ export default function ProjectsScreen() {
         
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
-                {visibleCount < fullList.length ? (
-                    <TouchableOpacity 
-                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                {projectsHasMore ? (
+                    <TouchableOpacity
+                        onPress={loadMoreProjects}
+                        disabled={projectsLoadingMore}
                         style={{
                             padding: 12, 
                             backgroundColor: '#fff', 
@@ -281,9 +232,9 @@ export default function ProjectsScreen() {
                             elevation: 1
                         }}
                     >
-                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                            👇 Load More Records ({fullList.length - visibleCount} remaining)
-                        </Text>
+                        {projectsLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({projectTotal - fullList.length} remaining)</Text>
+                        )}
                     </TouchableOpacity>
                 ) : (
                     fullList.length > 0 ? (
