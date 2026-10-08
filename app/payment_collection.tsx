@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -27,7 +27,9 @@ import { buildCacheKey } from '../utils/listCache';
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: payment collections now via new backend API
-import { deleteChequePhoto, deletePaymentCollection, listPaymentCollections, markChequeBounced, markChequeCleared, updatePaymentCollection, uploadChequePhoto } from '../services/api/paymentCollections';
+import { deleteChequePhoto, deletePaymentCollection, listPaymentCollectionsPage, markChequeBounced, markChequeCleared, PaymentPageFilters, updatePaymentCollection, uploadChequePhoto } from '../services/api/paymentCollections';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
 import RecordPhotoSection from '../components/RecordPhotoSection';
 
 import * as FileSystem from 'expo-file-system/legacy';
@@ -69,7 +71,6 @@ export default function PaymentCollection() {
     const [showBankModal, setShowBankModal] = useState(false);
     const [showEditModeModal, setShowEditModeModal] = useState(false); 
 
-    const [visibleCount, setVisibleCount] = useState(20);
     const paymentModes = ['Cash', 'UPI', 'NEFT', 'RTGS', 'Cheque'];
 
     const userRole = currentUser?.role ? currentUser.role.toLowerCase() : '';
@@ -82,32 +83,48 @@ export default function PaymentCollection() {
         setPaymentList(prev => prev.map(item => item.id === updated.id ? { ...item, chequeImageUrl: updated.chequeImageUrl } : item));
     };
 
-    useEffect(() => {
-        if (viewMode === 'Day') setVisibleCount(500); 
-        else setVisibleCount(20); 
-    }, [viewMode, historyDate, historySearch, selectedEmployee]);
-
-    // 🔥 PAYMENT COLLECTIONS — cache-first (instant from AsyncStorage, then
-    // background refresh). See hooks/useCachedList.ts.
-    const paymentsCacheKey = buildCacheKey('payment_collections', currentUser?.companyId);
-    const {
-        data: paymentList,
-        setData: setPaymentList,
-        loading: paymentsLoading,
-        refreshing: paymentsRefreshing,
-        refresh: refreshPayments,
-    } = useCachedList({
-        cacheKey: paymentsCacheKey,
-        enabled: !!currentUser?.companyId,
-        fetcher: listPaymentCollections, // was: fetchSaaSData("payment_collections")
-    });
-
-    // 🔥 Users — cache-first, shares the SAME 'team_members' cache key as
-    // manage_team.tsx/employee_timeline.tsx.
+    // Users — cache-first, shares the SAME 'team_members' cache key as
+    // manage_team.tsx/employee_timeline.tsx. Needed first: the staff picker shows names, the server filters by id.
     const { data: userList } = useCachedList({
         cacheKey: buildCacheKey('team_members', currentUser?.companyId),
         enabled: !!currentUser?.companyId,
         fetcher: fetchTeamMembers,
+    });
+
+    // 🔥 PAYMENT COLLECTIONS — 20 per page from the server; date range, collector,
+    // search and "own receipts only" for field users are all applied there.
+    const debouncedSearch = useDebounced(historySearch.trim());
+    const selectedEmployeeId = useMemo(
+        () => (selectedEmployee === 'All' ? undefined : userList.find((u: any) => u.name === selectedEmployee)?.id),
+        [selectedEmployee, userList],
+    );
+    const paymentFilters = useMemo<PaymentPageFilters>(() => ({
+        ...periodRange(viewMode, historyDate),
+        createdById: isAdmin ? selectedEmployeeId : undefined,
+        search: debouncedSearch || undefined,
+    }), [viewMode, historyDate, isAdmin, selectedEmployeeId, debouncedSearch]);
+    const [totalCollected, setTotalCollected] = useState(0);
+    const fetchPaymentsPage = useCallback(async (p: PaymentPageFilters & { page: number; limit: number }) => {
+        const r = await listPaymentCollectionsPage(p);
+        if (p.page === 1) setTotalCollected(r.totalAmount);
+        return r;
+    }, []);
+    const isDefaultView = isCurrentFy(viewMode, historyDate) && selectedEmployee === 'All' && !debouncedSearch;
+    const {
+        items: paymentList,
+        setItems: setPaymentList,
+        total: paymentsTotal,
+        loading: paymentsLoading,
+        loadingMore: paymentsLoadingMore,
+        hasMore: paymentsHasMore,
+        loadMore: loadMorePayments,
+        refreshing: paymentsRefreshing,
+        refresh: refreshPayments,
+    } = useServerPagedList<PaymentPageFilters, any>({
+        fetchPage: fetchPaymentsPage,
+        filters: paymentFilters,
+        enabled: !!currentUser?.companyId,
+        cacheKey: isDefaultView ? buildCacheKey('payment_collections_page1_v2', currentUser?.companyId) : null,
     });
 
     // 🔥 senderName was never populated — the API only returns senderId
@@ -341,6 +358,7 @@ export default function PaymentCollection() {
                 refNumber: editRefNumber
             } : item));
             
+            refreshPayments(); // the total changes with the amount
             Alert.alert("Success", "Receipt Updated!");
             setIsEditing(false);
             setSelectedHistoryItem(null); 
@@ -370,6 +388,7 @@ export default function PaymentCollection() {
                         try {
                             await deletePaymentCollection(selectedHistoryItem.id);
                             setPaymentList(prev => prev.filter(item => item.id !== selectedHistoryItem.id));
+                            refreshPayments();
                             setSelectedHistoryItem(null);
                             Alert.alert("Deleted & Reversed", "Payment deleted and due balance restored successfully.");
                         } catch (error: any) {
@@ -407,15 +426,6 @@ export default function PaymentCollection() {
         return ['All', ...Array.from(names)];
     }, [paymentList, userList, isAdmin]);
 
-    const parseDate = (dateStr: string) => {
-        if (!dateStr) return new Date(0);
-        const d = new Date(dateStr);
-        if (!isNaN(d.getTime())) return d;
-        const parts = dateStr.split('/');
-        if (parts.length === 3) return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-        return new Date(0); 
-    };
-
     const changeHistoryDate = (dir: number) => {
         const d = new Date(historyDate);
         if (viewMode === 'Day') d.setDate(d.getDate() + dir);
@@ -437,56 +447,6 @@ export default function PaymentCollection() {
         return "All Time";
     };
 
-        const getMyFilteredHistory = () => {
-        let data = paymentList ? [...paymentList] : [];
-
-        // toLegacyPayment() never sets p.userName (services/api/paymentCollections.ts
-        // leaves it undefined — the backend only returns createdById, a UUID, not a
-        // name). Resolve it here from the already-loaded team list so employee
-        // filtering actually matches something instead of comparing against undefined.
-        const userIdToName = new Map((userList || []).map((u: any) => [u.id, u.name]));
-        const resolveName = (p: any) => p.userName || userIdToName.get(p.senderId) || '';
-
-        if (isAdmin && selectedEmployee !== 'All') {
-            data = data.filter((p: any) => resolveName(p) === selectedEmployee);
-        } else if (!isAdmin) {
-            data = data.filter((p: any) => p.senderId === currentUser?.id || resolveName(p) === currentUser?.name);
-        }
-        
-        if (historySearch) {
-            const lowerSearch = historySearch.toLowerCase();
-            data = data.filter((item: any) => {
-                const fullString = `${item.orgName} ${item.amount} ${item.billRef} ${item.orderRef} ${item.mode} ${item.bankName} ${item.refNumber} ${item.date} ${item.note}`.toLowerCase();
-                return fullString.includes(lowerSearch);
-            });
-        }
-
-        if (viewMode !== 'All') {
-            const targetYear = historyDate.getFullYear();
-            const targetMonth = historyDate.getMonth();
-            const targetDay = historyDate.getDate();
-
-            const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-            const fyStartDate = new Date(fyStartYear, 3, 1); 
-            const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59); 
-
-            data = data.filter((item: any) => {
-                const dateVal = item.dateIso || item.date;
-                if(!dateVal) return false;
-                const itemDate = parseDate(dateVal); 
-                
-                if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-                if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-                if (viewMode === 'FY') return itemDate >= fyStartDate && itemDate <= fyEndDate;
-                return true;
-            });
-        }
-        return data.sort((a: any, b: any) => parseDate(b.dateIso || b.date).getTime() - parseDate(a.dateIso || a.date).getTime());
-    };
-
-    const fullFilteredList = getMyFilteredHistory(); 
-    const renderedList = fullFilteredList.slice(0, visibleCount);
-    const totalCollected = fullFilteredList.reduce((sum: number, item: any) => sum + (parseFloat(item.amount) || 0), 0);
     const linkedOrgDetails = selectedHistoryItem ? getFullOrgDetails(selectedHistoryItem) : null;
 
     const shareUPI = async () => {
@@ -593,11 +553,11 @@ export default function PaymentCollection() {
                     {historySearch.length > 0 && <TouchableOpacity onPress={() => setHistorySearch('')}><Ionicons name="close-circle" size={18} color="gray" /></TouchableOpacity>}
                 </View>
                 
-                <TotalBar label="Total Collected" count={fullFilteredList.length} amount={totalCollected} accent="#27ae60" />
+                <TotalBar label="Total Collected" count={paymentsTotal} amount={totalCollected} accent="#27ae60" />
             </View>
 
             <FlatList 
-                data={renderedList} 
+                data={paymentList} 
                 keyExtractor={item => item.id} 
                 contentContainerStyle={{padding: 5, paddingBottom: 100}} 
                 renderItem={renderItem} 
@@ -608,17 +568,20 @@ export default function PaymentCollection() {
                 
                 ListFooterComponent={
                     <View style={{ paddingBottom: 80 }}>
-                        {visibleCount < fullFilteredList.length ? (
+                        {paymentsHasMore ? (
                             <TouchableOpacity 
-                                onPress={() => setVisibleCount(prev => prev + 20)} 
+                                onPress={loadMorePayments} 
+                                disabled={paymentsLoadingMore}
                                 style={{ padding: 12, backgroundColor: '#fff', alignItems: 'center', marginVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ddd', marginHorizontal: 15 }}
                             >
-                                <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                                    👇 Load More Records ({fullFilteredList.length - visibleCount} remaining)
-                                </Text>
+                                {paymentsLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                                    <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                                        👇 Load More Records ({paymentsTotal - paymentList.length} remaining)
+                                    </Text>
+                                )}
                             </TouchableOpacity>
                         ) : (
-                            fullFilteredList.length > 0 ? (
+                            paymentList.length > 0 ? (
                                 <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
                                     --- End of List ---
                                 </Text>
