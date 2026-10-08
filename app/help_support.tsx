@@ -38,6 +38,8 @@ const GUIDE_SECTIONS = [
             'If it fails, close the app fully, reopen it, then try again.',
             'In low signal areas, move to a better coverage spot before marking.',
             'Your attendance status (Logged In / Logged Out / Not Marked) is visible directly on the home screen banner — no need to open the attendance screen to check.',
+            'After Day In, the app shows a one-time explanation and then a notification "LMS — on duty". While it is shown, your location is shared every 30 minutes so your manager can see field visits. It stops by itself at Day Out.',
+            'If the app cannot get your location it tells you what to do (turn on Location, allow permission, or turn on "Google Location Accuracy" and step near a window). Day Out still saves even without GPS.',
         ],
     },
     {
@@ -125,6 +127,7 @@ const GUIDE_SECTIONS = [
             'Choose Cash or Credit sale, enter PO number, amount, and products.',
             'Tap Submit — the order is saved and the customer gets a WhatsApp/Email update automatically (if automation is enabled).',
             'The order PDF (Delivery Challan) will include your company name, logo, address, and bank details from Company Profile.',
+            'Attaching the PO: a photo is best (it is compressed automatically). A PDF can be up to 2 MB — for a bigger scanned PDF, take a photo of the PO instead.',
         ],
     },
     {
@@ -595,6 +598,16 @@ const FAQS = [
     },
     {
         category: 'Attendance',
+        q: 'Why does "LMS — on duty" stay in my notifications after Day In?',
+        a: `After Day In, LMS records your location every 30 minutes until Day Out, so your manager can see field visits on the Live Map — even if you minimise the app.\n\n• The notification shows that this is on. It cannot be swiped away while you are on duty.\n• It stops automatically when you mark Day Out or log out, and also at the end of the day.\n• Location is not recorded outside Day In → Day Out.\n• If your phone restarts, open the app once and tracking continues.`,
+    },
+    {
+        category: 'Attendance',
+        q: 'What do the location messages mean?',
+        a: `• "Location permission is off" → Settings → Apps → LMS → Permissions → Location → Allow.\n• "Phone location (GPS) is off" → turn on Location from the quick settings.\n• "Could not get your location" → turn on "Google Location Accuracy" (Settings → Location), step near a window or outside, and try again.\n\nDay In needs a location. Day Out always saves — the location is added when the phone can get it.`,
+    },
+    {
+        category: 'Attendance',
         q: 'I forgot to mark Day In / Day Out — what should I do?',
         a: `If you missed marking attendance:\n\n1. Contact your Admin or HR immediately and inform them.\n2. The Admin can manually update or note your attendance from the Admin Control panel.\n3. Do not try to mark it later on your own — the system records the actual time of marking.\n\nNote: Always mark Day In as soon as you start work to avoid discrepancies.`,
     },
@@ -667,6 +680,11 @@ const FAQS = [
         category: 'Reports & PDFs',
         q: 'PDF is showing blank or missing data fields',
         a: `Blank fields in PDFs happen when the original record was saved without filling all details, OR when Company Profile is incomplete.\n\n1. First check Company Profile — make sure Name, Address, Phone, and Bank Details are filled.\n2. Open the specific record and check if all fields are filled.\n3. Edit the record and fill missing details, then regenerate the PDF.`,
+    },
+    {
+        category: 'Orders & Payments',
+        q: 'My PO PDF does not upload — "larger than 2 MB"',
+        a: `PDFs can be up to 2 MB. Scanned PDFs are often bigger.\n\nTake a photo of the PO instead (camera or gallery) — photos are compressed automatically to about 100–200 KB and stay readable.`,
     },
     {
         category: 'Orders & Payments',
