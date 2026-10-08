@@ -120,6 +120,7 @@ export default function PaymentCollection() {
         loadMore: loadMorePayments,
         refreshing: paymentsRefreshing,
         refresh: refreshPayments,
+        error: paymentsError,
     } = useServerPagedList<PaymentPageFilters, any>({
         fetchPage: fetchPaymentsPage,
         filters: paymentFilters,
@@ -564,7 +565,7 @@ export default function PaymentCollection() {
                 refreshControl={
                     <RefreshControl refreshing={paymentsRefreshing} onRefresh={refreshPayments} colors={['#3b5998']} tintColor="#3b5998" />
                 }
-                ListEmptyComponent={<View style={{alignItems:'center', marginTop:50}}><Ionicons name="documents-outline" size={50} color="#ccc" /><Text style={{color:'gray', marginTop:10}}>{paymentsLoading ? 'Loading payments...' : 'No Collections Found'}</Text></View>} 
+                ListEmptyComponent={<View style={{alignItems:'center', marginTop:50}}><Ionicons name="documents-outline" size={50} color="#ccc" /><Text style={{color:'gray', marginTop:10}}>{paymentsLoading ? 'Loading payments...' : paymentsError ? 'Could not load collections — pull down to retry.' : 'No Collections Found'}</Text></View>} 
                 
                 ListFooterComponent={
                     <View style={{ paddingBottom: 80 }}>

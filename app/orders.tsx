@@ -138,6 +138,7 @@ export default function OrderListScreen() {
       loadMore: loadMoreOrders,
       refreshing: ordersRefreshing,
       refresh: refreshOrderList,
+      error: ordersError,
   } = useServerPagedList<typeof orderFilters, any>({
       fetchPage: listOrdersPage,
       filters: orderFilters,
@@ -780,7 +781,7 @@ export default function OrderListScreen() {
           }
           ListEmptyComponent={
               <View style={{alignItems:'center', marginTop:50}}>
-                  {ordersLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{color:'gray'}}>No Orders Found</Text>}
+                  {ordersLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{color:'gray'}}>{ordersError ? 'Could not load orders — pull down to retry.' : 'No Orders Found'}</Text>}
               </View>
           }
           ListFooterComponent={

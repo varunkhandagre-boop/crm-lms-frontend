@@ -74,3 +74,34 @@ export async function deleteExpenseBillPhoto(id: string): Promise<any> {
   const res = await apiClient.delete<{ data: ApiExpense }>(`/expenses/${id}/bill-photo`);
   return toLegacyExpense(res.data);
 }
+
+export interface ClaimPageFilters {
+  createdById?: string;
+  search?: string;
+  fromDate?: string; // YYYY-MM-DD
+  toDate?: string;
+}
+
+/** One server page (newest first) + the screen's two totals for the whole filter (page 1 only). */
+export async function listExpensesPage(
+  params: ClaimPageFilters & { page: number; limit: number },
+): Promise<{ items: any[]; total: number; totalPages: number; outstanding: number; totalAmount: number }> {
+  const res = await apiClient.get<{
+    data: ApiExpense[];
+    meta: { total: number; totalPages: number };
+    totals?: { outstanding: number; total: number };
+  }>(`/expenses${toQueryString({ ...params, newestFirst: 'true', withTotals: params.page === 1 ? 'true' : undefined })}`);
+  return {
+    items: res.data.map(toLegacyExpense),
+    total: res.meta.total,
+    totalPages: res.meta.totalPages,
+    outstanding: res.totals?.outstanding ?? 0,
+    totalAmount: res.totals?.total ?? 0,
+  };
+}
+
+/** One record by id — for opening it from a notification when it isn't on the loaded page. */
+export async function getExpense(id: string): Promise<any> {
+  const res = await apiClient.get<{ data: ApiExpense }>(`/expenses/${id}`);
+  return toLegacyExpense(res.data);
+}

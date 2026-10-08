@@ -67,6 +67,7 @@ export default function PaymentDueList() {
         loadMore: loadMoreDues,
         refreshing: duesRefreshing,
         refresh: refreshDues,
+        error: duesError,
     } = useServerPagedList<OutstandingFilters, any>({
         fetchPage: fetchDuesPage,
         filters: dueFilters,
@@ -308,7 +309,12 @@ export default function PaymentDueList() {
                 }
                 ListEmptyComponent={
                     <View style={styles.empty}>
-                        {duesLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                        {duesLoading ? <ActivityIndicator size="large" color="#3b5998" /> : duesError ? (
+                            <>
+                                <Ionicons name="cloud-offline-outline" size={60} color="#ccc" />
+                                <Text style={{color:'gray', marginTop:10, fontSize:16}}>Could not load dues — pull down to retry.</Text>
+                            </>
+                        ) : (
                             <>
                                 <Ionicons name="checkmark-circle-outline" size={60} color="#4caf50" />
                                 <Text style={{color:'gray', marginTop:10, fontSize:16}}>No Pending Dues!</Text>

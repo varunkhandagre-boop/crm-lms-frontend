@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -20,12 +20,14 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: expenses now via new backend API
-import { deleteExpenseBillPhoto, listExpenses, settleExpensesForEmployee, updateExpenseStatus, uploadExpenseBillPhoto } from '../services/api/expenses';
+import { deleteExpenseBillPhoto, ClaimPageFilters, getExpense, listExpensesPage, settleExpensesForEmployee, updateExpenseStatus, uploadExpenseBillPhoto } from '../services/api/expenses';
 import RecordPhotoSection from '../components/RecordPhotoSection';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';
 
 export default function ExpenseScreen() {
@@ -54,7 +56,6 @@ export default function ExpenseScreen() {
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All'); 
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  const [visibleCount, setVisibleCount] = useState(20);
 
   const applyBill = (updated: any) => {
       setSelectedItem((prev: any) => (prev ? { ...prev, imageUri: updated.imageUri } : prev));
@@ -63,26 +64,39 @@ export default function ExpenseScreen() {
 
   const canManage = ['Admin', 'Manager', 'Hr', 'Account', 'Accountant', 'SuperAdmin'].includes(currentUser?.role || '');
 
-  useEffect(() => {
-      if (viewMode === 'Day') setVisibleCount(100); 
-      else setVisibleCount(20); 
-  }, [viewMode, currentDate, selectedEmployeeName, searchText]);
 
-  // 🔥 EXPENSES — cache-first (instant from AsyncStorage, then background
-  // refresh from the API). Cached raw (no senderName enrichment baked in —
-  // that's computed at filter time from senderNameMap below, since the
-  // team-members lookup itself isn't cached). See hooks/useCachedList.ts.
-  const expensesCacheKey = buildCacheKey('expenses', currentUser?.companyId);
+  // 🔥 20 per page from the server: date range, employee (own records only for
+  // field staff — enforced by the server), search, and both totals for the filter.
+  const debouncedSearch = useDebounced(searchText.trim());
+  const claimFilters = useMemo<ClaimPageFilters>(() => ({
+      ...periodRange(viewMode, currentDate),
+      createdById: canManage && selectedEmployeeId !== 'All' ? selectedEmployeeId : undefined,
+      search: debouncedSearch || undefined,
+  }), [viewMode, currentDate, canManage, selectedEmployeeId, debouncedSearch]);
+  const [outstandingAmount, setOutstandingAmount] = useState(0);
+  const [totalHistoryAmount, setTotalHistoryAmount] = useState(0);
+  const fetchClaimsPage = useCallback(async (p: ClaimPageFilters & { page: number; limit: number }) => {
+      const r = await listExpensesPage(p);
+      if (p.page === 1) { setOutstandingAmount(r.outstanding); setTotalHistoryAmount(r.totalAmount); }
+      return r;
+  }, []);
+  const isDefaultView = (viewMode === 'All' || isCurrentFy(viewMode, currentDate)) && selectedEmployeeId === 'All' && !debouncedSearch;
   const {
-      data: expenseList,
-      setData: setExpenseList,
+      items: expenseList,
+      setItems: setExpenseList,
+      total: listTotal,
       loading: expensesLoading,
+      loadingMore: listLoadingMore,
+      hasMore: listHasMore,
+      loadMore: loadMoreList,
       refreshing: expensesRefreshing,
       refresh: refreshExpenses,
-  } = useCachedList({
-      cacheKey: expensesCacheKey,
+      error: listError,
+  } = useServerPagedList<ClaimPageFilters, any>({
+      fetchPage: fetchClaimsPage,
+      filters: claimFilters,
       enabled: !!currentUser?.companyId,
-      fetcher: listExpenses, // was: fetchSaaSData("expenses")
+      cacheKey: isDefaultView ? buildCacheKey(`expenses_page1_v2:${viewMode}`, currentUser?.companyId) : null,
   });
 
   // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
@@ -107,17 +121,6 @@ export default function ExpenseScreen() {
       }
   }, [teamMembersForExpense, canManage]);
 
-  const parseDate = (dateStr: any) => {
-      if (!dateStr) return new Date();
-      if (dateStr instanceof Date) return dateStr;
-      if (typeof dateStr === 'string' && dateStr.includes('/')) {
-          const parts = dateStr.split('/');
-          if (parts.length === 3) {
-              return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-          }
-      }
-      return new Date(dateStr);
-  };
 
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
@@ -139,65 +142,11 @@ export default function ExpenseScreen() {
       return "All Time";
   };
 
-  // --- FILTER LOGIC — filters by senderId now, not senderName ---
-  const getFilteredData = () => {
-    let data = Array.isArray(expenseList)
-        ? expenseList.map((e: any) => ({ ...e, senderName: senderNameMap.get(e.senderId) || 'Unknown' }))
-        : [];
-
-    if (canManage) {
-        if(selectedEmployeeId !== 'All') {
-            data = data.filter((item: any) => item.senderId === selectedEmployeeId);
-        }
-    } else {
-        if(currentUser?.id) {
-            data = data.filter((item: any) => item.senderId === currentUser.id);
-        }
-    }
-
-    if (viewMode !== 'All') {
-        const targetYear = currentDate.getFullYear();
-        const targetMonth = currentDate.getMonth();
-        const targetDay = currentDate.getDate();
-
-        const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-        const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-        const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
-
-        data = data.filter(item => {
-            if(!item.date) return false;
-            const itemDate = parseDate(item.date);
-            const itemTime = itemDate.getTime();
-            
-            if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-            if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-            if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-            return true;
-        });
-    }
-
-    if (searchText) {
-        const term = searchText.toLowerCase();
-        data = data.filter((item: any) => {
-            const row = `${item.date} ${item.amount} ${item.type} ${item.remark} ${item.senderName} ${item.status}`.toLowerCase();
-            return row.includes(term);
-        });
-    }
-
-    data.sort((a: any, b: any) => parseDate(b.date).getTime() - parseDate(a.date).getTime());
-    return data;
-  };
-
-  const fullFilteredList = getFilteredData(); 
-  const renderedList = fullFilteredList.slice(0, visibleCount);
-
-  const outstandingAmount = fullFilteredList
-      .filter((item: any) => item.status === 'Pending' || item.status === 'Approved')
-      .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
-
-  const totalHistoryAmount = fullFilteredList
-      .filter((item: any) => item.status !== 'Rejected')
-      .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+  // Names come from the team list (the API only returns the employee id).
+  const fullFilteredList = useMemo(
+      () => expenseList.map((e: any) => ({ ...e, senderName: senderNameMap.get(e.senderId) || 'Unknown' })),
+      [expenseList, senderNameMap],
+  );
 
   // 🔥 SETTLEMENT — via new backend API bulk-settle endpoint
   const handleSettlement = async () => {
@@ -245,12 +194,14 @@ export default function ExpenseScreen() {
   useEffect(() => {
       const id = typeof linkParams.id === 'string' ? linkParams.id : undefined;
       if (!id || openedFromLink.current === id) return;
-      const item = fullFilteredList.find((x: any) => x.id === id) || (expenseList || []).find((x: any) => x.id === id);
-      if (item) {
-          openedFromLink.current = id;
-          openDetails(item);
-      }
-  }, [linkParams.id, fullFilteredList, expenseList]);
+      openedFromLink.current = id;
+      const item = fullFilteredList.find((x: any) => x.id === id);
+      if (item) { openDetails(item); return; }
+      // Not on the loaded page (older / other filter) — fetch just that one.
+      getExpense(id)
+          .then((rec) => openDetails({ ...rec, senderName: senderNameMap.get(rec.senderId) || 'Unknown' }))
+          .catch(() => {});
+  }, [linkParams.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 🔥 STATUS UPDATE — via new backend API
   const handleStatusUpdate = async (status: string) => {
@@ -271,6 +222,8 @@ export default function ExpenseScreen() {
           }
           
           setExpenseList(prev => prev.map(item => item.id === selectedItem.id ? { ...item, status: status } : item));
+          
+          refreshExpenses(); // totals change with the status
           setModalVisible(false);
           Alert.alert("Updated", `Claim marked as ${status}`);
       } catch (error) {
@@ -374,7 +327,7 @@ export default function ExpenseScreen() {
           />
           <View style={{paddingHorizontal:12, marginTop:6}}>
               <View style={styles.searchBar}>
-                  {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+                  {(isDbLoading || expensesLoading) ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
                   <TextInput 
                       style={styles.searchInput}
                       placeholder={canManage ? "Search Name, Amount..." : "Search Amount, Type..."}
@@ -387,7 +340,7 @@ export default function ExpenseScreen() {
       </View>
 
       <FlatList 
-        data={renderedList}
+        data={fullFilteredList}
         keyExtractor={item => item.id}
         renderItem={renderItem}
         contentContainerStyle={{padding: 12}}
@@ -397,14 +350,15 @@ export default function ExpenseScreen() {
         ListEmptyComponent={
             <View style={{alignItems:'center', marginTop:50}}>
                 <Ionicons name="receipt-outline" size={60} color="#ddd" />
-                <Text style={{textAlign:'center', marginTop:10, color:'gray'}}>{expensesLoading ? 'Loading expenses...' : 'No expense records found.'}</Text>
+                <Text style={{textAlign:'center', marginTop:10, color:'gray'}}>{expensesLoading ? 'Loading expenses...' : listError ? 'Could not load expenses — pull down to retry.' : 'No expense records found.'}</Text>
             </View>
         }
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
-                {visibleCount < fullFilteredList.length ? (
+                {listHasMore ? (
                     <TouchableOpacity 
-                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                        onPress={loadMoreList}
+                        disabled={listLoadingMore}
                         style={{
                             padding: 12, 
                             backgroundColor: '#fff', 
@@ -415,9 +369,9 @@ export default function ExpenseScreen() {
                             borderColor: '#ddd'
                         }}
                     >
-                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                            👇 Load More Records ({fullFilteredList.length - visibleCount} remaining)
-                        </Text>
+                        {listLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({listTotal - fullFilteredList.length} remaining)</Text>
+                        )}
                     </TouchableOpacity>
                 ) : (
                     fullFilteredList.length > 0 ? (
