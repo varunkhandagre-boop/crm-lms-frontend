@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -19,11 +19,12 @@ import {
 // 🔥 SAAS IMPORTS (organizations/users still Firestore)
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { markAllNotificationsRead } from '../services/api/notifications';
-import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: sales visits now go through the new backend API
-import { deleteSalesVisit as apiDeleteSalesVisit, listSalesVisits } from '../services/api/salesVisits';
+import { deleteSalesVisit as apiDeleteSalesVisit, listSalesVisitsPage, SalesVisitPageFilters } from '../services/api/salesVisits';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { isCurrentFy, localYmd, periodRange, useDebounced } from '../utils/periodRange';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
@@ -39,11 +40,8 @@ export default function SalesReportScreen() {
   // 🔥 SaaS Engine kept for organizations/users only
   const { isDbLoading } = useSaaSDB();
 
-  // salesVisitList now comes from useCachedList below (cache-first)
-  // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
   // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
       if (markAllNotificationsRead) {
@@ -65,32 +63,37 @@ export default function SalesReportScreen() {
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const [visibleCount, setVisibleCount] = useState(20);
 
   const userRole = currentUser?.role ? currentUser.role.toLowerCase() : 'unknown';
   const isAdmin = userRole === 'admin' || userRole === 'manager' || userRole === 'accountant' || userRole === 'hr' || userRole === 'store' || userRole === 'superadmin';
   const isStrictAdmin = userRole === 'admin' || userRole === 'manager';
 
-  useEffect(() => {
-      if (viewMode === 'Day' && visitTypeFilter === 'All' && !searchText) {
-          setVisibleCount(500); 
-      } else {
-          setVisibleCount(20); 
-      }
-  }, [viewMode, currentDate, visitTypeFilter, searchText, selectedEmployee]);
 
-  // 🔥 SALES VISITS (DSR) — cache-first (instant from AsyncStorage, then
-  // background refresh). See hooks/useCachedList.ts.
-  const salesVisitsCacheKey = buildCacheKey('sales_visits', currentUser?.companyId);
+  // 🔥 SALES VISITS (DSR) — 20 per page from the server. Visit type, date range,
+  // employee and search all run there; a search looks across all dates (as before).
+  const debouncedSearch = useDebounced(searchText.trim());
+  const visitFilters = useMemo<SalesVisitPageFilters>(() => ({
+      ...(debouncedSearch ? {} : periodRange(viewMode, currentDate)),
+      visitType: visitTypeFilter === 'All' ? undefined : visitTypeFilter,
+      createdById: isAdmin && selectedEmployee !== 'All' ? selectedEmployee : undefined,
+      search: debouncedSearch || undefined,
+  }), [viewMode, currentDate, visitTypeFilter, isAdmin, selectedEmployee, debouncedSearch]);
+  const isDefaultView = isCurrentFy(viewMode, currentDate) && visitTypeFilter === 'All' && selectedEmployee === 'All' && !debouncedSearch;
   const {
-      data: salesVisitList,
-      setData: setSalesVisitList,
+      items: salesVisitList,
+      total: visitTotal,
       loading: salesVisitsLoading,
+      loadingMore: visitsLoadingMore,
+      hasMore: visitsHasMore,
+      loadMore: loadMoreVisits,
+      refreshing,
       refresh: refreshSalesVisits,
-  } = useCachedList({
-      cacheKey: salesVisitsCacheKey,
+      error: visitsError,
+  } = useServerPagedList<SalesVisitPageFilters, any>({
+      fetchPage: listSalesVisitsPage,
+      filters: visitFilters,
       enabled: !!currentUser?.companyId,
-      fetcher: listSalesVisits, // was: fetchSaaSData("sales_reports")
+      cacheKey: isDefaultView ? buildCacheKey('sales_visits_page1_v1', currentUser?.companyId) : null,
   });
 
   // 🔥 Users — cache-first, shares the SAME 'team_members' cache key as
@@ -101,16 +104,6 @@ export default function SalesReportScreen() {
       fetcher: fetchTeamMembers,
   });
 
-  // 🔥 senderName was never populated — the API only returns senderId (see
-  // services/api/salesVisits.ts), so DSR entries showed no name. Fill it
-  // in once team members are available.
-  useEffect(() => {
-      if (userList.length === 0 || salesVisitList.length === 0) return;
-      const nameById = new Map(userList.map((u: any) => [u.id, u.name || 'Unknown']));
-      const needsEnrichment = salesVisitList.some((v: any) => v.senderName === undefined);
-      if (!needsEnrichment) return;
-      setSalesVisitList(salesVisitList.map((v: any) => ({ ...v, senderName: nameById.get(v.senderId) || 'Unknown' })));
-  }, [salesVisitList, userList]);
 
   useEffect(() => {
       if (isAdmin) {
@@ -122,25 +115,9 @@ export default function SalesReportScreen() {
       }
   }, [userList, isAdmin]);
 
-  // Organizations — cache-first, shares the SAME 'organizations' cache key
-  // as organization.tsx/messaging_center.tsx.
-  const { data: orgList } = useCachedList({
-      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 500 }),
-  });
 
-  const onRefresh = async () => {
-      setRefreshing(true);
-      await refreshSalesVisits();
-      setRefreshing(false);
-  };
-
-  const getCity = (item: any) => {
-      if (item.city) return item.city;
-      const orgData = orgList.find((o: any) => (item.orgId && o.id === item.orgId) || o.orgName === item.hospital || o.name === item.hospital);
-      return orgData?.city || '';
-  };
+  // City comes with the visit (its own, else the organization's — added by the server).
+  const getCity = (item: any) => item.city || '';
 
   const parseDate = (dateStr: any) => {
       if (!dateStr) return 0;
@@ -218,70 +195,19 @@ export default function SalesReportScreen() {
       return null;
   };
 
-  const getData = () => {
-      let list = salesVisitList ? [...salesVisitList] : [];
-
-      if (!isAdmin) {
-          const myId = currentUser?.uid || currentUser?.id;
-          list = list.filter((item: any) => item.senderId === myId || item.senderUid === myId);
-      } else if (selectedEmployee !== 'All') {
-          list = list.filter((item: any) => (item.senderId === selectedEmployee) || (item.senderUid === selectedEmployee) || (item.senderName === selectedEmployeeName));
-      }
-
-      if (visitTypeFilter === 'Cold Call') list = list.filter((i: any) => i.visitType === 'Cold Call');
-      else if (visitTypeFilter === 'Follow Up') list = list.filter((i: any) => i.visitType === 'Follow Up');
-
-      if (searchText) {
-          const term = searchText.toLowerCase();
-          list = list.filter((item: any) => {
-              const city = getCity(item).toLowerCase();
-              const prodStr = getProductDisplay(item.product);
-              const mainText = `${item.hospital || ''} ${city} ${item.person || ''} ${item.senderName || ''} ${item.outcome || ''} ${prodStr}`.toLowerCase();
-              return mainText.includes(term);
-          });
-      } 
-      else if (viewMode !== 'All') {
-          const tYear = currentDate.getFullYear();
-          const tMonth = currentDate.getMonth();
-          const tDay = currentDate.getDate();
-
-          const fyStartYear = tMonth >= 3 ? tYear : tYear - 1;
-          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime();
-
-          list = list.filter((item: any) => {
-              const dateField = item.dateIso || item.date || item.createdAt;
-              if(!dateField) return false;
-              const itemDate = new Date(parseDate(dateField));
-              const itemTime = itemDate.getTime();
-              
-              if (viewMode === 'Month') return itemDate.getFullYear() === tYear && itemDate.getMonth() === tMonth;
-              if (viewMode === 'Day') return itemDate.getFullYear() === tYear && itemDate.getMonth() === tMonth && itemDate.getDate() === tDay;
-              if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-              return true;
-          });
-      }
-
-      return list.sort((a: any, b: any) => {
-          const dateA = a.nextFollowUp ? parseDate(a.nextFollowUp) : parseDate(a.dateIso || a.date);
-          const dateB = b.nextFollowUp ? parseDate(b.nextFollowUp) : parseDate(b.dateIso || b.date);
-          return dateB - dateA; 
-      });
-  };
-
-  const displayList = getData(); 
-  const renderedList = displayList.slice(0, visibleCount);
 
   const shareDailyReport = async () => {
       const now = new Date();
-      const localTodayStr = now.toISOString().split('T')[0];
-
-      const todaysVisits = salesVisitList.filter((item: any) => {
-          const isDateMatch = (item.dateIso === localTodayStr || item.date === localTodayStr);
-          const targetId = selectedEmployee !== 'All' ? selectedEmployee : (currentUser?.uid || currentUser?.id);
-          const isUserMatch = item.senderId === targetId || item.senderUid === targetId; 
-          return isDateMatch && isUserMatch;
-      });
+      const localTodayStr = localYmd(now);
+      const targetId = selectedEmployee !== 'All' ? selectedEmployee : (currentUser?.uid || currentUser?.id);
+      let todaysVisits: any[] = [];
+      try {
+          // Only today's visits of one person — fetched when the button is pressed.
+          const r = await listSalesVisitsPage({ fromDate: localTodayStr, toDate: localTodayStr, createdById: isAdmin ? targetId : undefined, page: 1, limit: 100 });
+          todaysVisits = r.items.reverse(); // oldest first, as the day went
+      } catch (e: any) {
+          return Alert.alert("Error", e?.message || "Could not load today's visits.");
+      }
 
       if (todaysVisits.length === 0) return Alert.alert("No Data", `No visits found for date: ${localTodayStr}`);
 
@@ -424,7 +350,7 @@ export default function SalesReportScreen() {
 
       <View style={{backgroundColor:'white', paddingTop:6, paddingBottom:6, marginBottom:2}}>
           <View style={styles.searchBar}>
-              {isDbLoading ? <ActivityIndicator size="small" color="#1565c0" style={{marginRight: 5}}/> : <Ionicons name="search" size={20} color="#1565c0" />} 
+              {(isDbLoading || salesVisitsLoading) ? <ActivityIndicator size="small" color="#1565c0" style={{marginRight: 5}}/> : <Ionicons name="search" size={20} color="#1565c0" />} 
               <TextInput style={styles.input} placeholder="Search: Hospital, City..." value={searchText} onChangeText={setSearchText} />
               {searchText.length > 0 && (
                   <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={20} color="#d32f2f" /></TouchableOpacity>
@@ -446,23 +372,23 @@ export default function SalesReportScreen() {
             </>
           )}
           
-          <TotalBar label="Total" count={displayList.length} accent="#2e7d32" />
+          <TotalBar label="Total" count={visitTotal} accent="#2e7d32" />
       </View>
 
       <FlatList 
-          data={renderedList}
+          data={salesVisitList}
           keyExtractor={item => item.id}
           contentContainerStyle={styles.listContent}
           renderItem={renderItem}
           refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#1565c0']} tintColor="#1565c0" />
+              <RefreshControl refreshing={refreshing} onRefresh={refreshSalesVisits} colors={['#1565c0']} tintColor="#1565c0" />
           }
           ListEmptyComponent={
               <View style={{alignItems:'center', marginTop:50}}>
                   {salesVisitsLoading ? <ActivityIndicator size="large" color="#1565c0"/> : (
                       <>
                         <Ionicons name="folder-open-outline" size={60} color="#ddd" />
-                        <Text style={{color:'gray', marginTop:0}}>No Visits Found.</Text>
+                        <Text style={{color:'gray', marginTop:0}}>{visitsError ? 'Could not load visits — pull down to retry.' : 'No Visits Found.'}</Text>
                       </>
                   )}
               </View>
@@ -470,19 +396,20 @@ export default function SalesReportScreen() {
           
           ListFooterComponent={
               <View style={{ paddingBottom: 80 }}>
-                  {visibleCount < displayList.length ? (
+                  {visitsHasMore ? (
                       <TouchableOpacity 
-                          onPress={() => setVisibleCount(prev => prev + 20)} 
+                          onPress={loadMoreVisits}
+                          disabled={visitsLoadingMore}
                           style={{
                               padding: 12, backgroundColor: '#fff', alignItems: 'center', marginVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ddd'
                           }}
                       >
-                          <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                              👇 Load More Records ({displayList.length - visibleCount} remaining)
-                          </Text>
+                          {visitsLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                              <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({visitTotal - salesVisitList.length} remaining)</Text>
+                          )}
                       </TouchableOpacity>
                   ) : (
-                      displayList.length > 0 ? (
+                      salesVisitList.length > 0 ? (
                           <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
                               --- End of List ---
                           </Text>

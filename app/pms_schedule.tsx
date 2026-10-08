@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -19,9 +19,11 @@ import {
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: PMS reports now via new backend API
-import { listPmsReports } from '../services/api/pmsReports';
+import { listPmsReportsPage, PmsPageFilters } from '../services/api/pmsReports';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { isCurrentFy, localYmd, periodRange, useDebounced } from '../utils/periodRange';
 import { buildCacheKey } from '../utils/listCache';
 
 // 🔥 PDF IMPORTS
@@ -41,8 +43,6 @@ export default function PMSScheduleScreen() {
   const { currentUser, companyProfile } = useData(); 
   const { isDbLoading } = useSaaSDB();
 
-  // pmsList now comes from useCachedList below (cache-first)
-  // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
   const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
 
   const [filter, setFilter] = useState<'All' | 'Upcoming' | 'Completed' | 'Overdue'>('All');
@@ -51,7 +51,6 @@ export default function PMSScheduleScreen() {
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
 
-  const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [generatingPdf, setGeneratingPdf] = useState(false); 
@@ -60,31 +59,37 @@ export default function PMSScheduleScreen() {
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  const [visibleCount, setVisibleCount] = useState(20);
 
   const isAdmin = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
 
-  useEffect(() => {
-      if (viewMode === 'Day') {
-          setVisibleCount(500); 
-      } else {
-          setVisibleCount(20); 
-      }
-  }, [viewMode, currentDate, searchText, filter, selectedEmployee]);
 
-  // 🔥 PMS REPORTS — cache-first (instant from AsyncStorage, then
-  // background refresh). See hooks/useCachedList.ts.
-  const pmsCacheKey = buildCacheKey('pms_reports', currentUser?.companyId);
-    const {
-      data: pmsList,
-      setData: setPmsList,
+  // 🔥 PMS REPORTS — 20 per page from the server: tab (All / Upcoming / Overdue /
+  // Completed), date range, employee and search all run there, with names.
+  // Upcoming / Overdue ignore the date tabs, as before.
+  const debouncedSearch = useDebounced(searchText.trim());
+  const pmsFilters = useMemo<PmsPageFilters>(() => ({
+      view: filter,
+      ...(filter === 'All' || filter === 'Completed' ? periodRange(viewMode, currentDate) : {}),
+      today: localYmd(new Date()),
+      createdById: isAdmin && selectedEmployee !== 'All' ? selectedEmployee : undefined,
+      search: debouncedSearch || undefined,
+  }), [filter, viewMode, currentDate, isAdmin, selectedEmployee, debouncedSearch]);
+  const isDefaultView = filter === 'All' && isCurrentFy(viewMode, currentDate) && selectedEmployee === 'All' && !debouncedSearch;
+  const {
+      items: pmsList,
+      total: pmsTotal,
       loading: pmsLoading,
-      refreshing: pmsRefreshing,
+      loadingMore: pmsLoadingMore,
+      hasMore: pmsHasMore,
+      loadMore: loadMorePms,
+      refreshing,
       refresh: refreshPms,
-  } = useCachedList({
-      cacheKey: pmsCacheKey,
+      error: pmsError,
+  } = useServerPagedList<PmsPageFilters, any>({
+      fetchPage: listPmsReportsPage,
+      filters: pmsFilters,
       enabled: !!currentUser?.companyId,
-      fetcher: listPmsReports, // was: fetchSaaSData("pms_reports")
+      cacheKey: isDefaultView ? buildCacheKey('pms_page1_v1', currentUser?.companyId) : null,
   });
 
   // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
@@ -95,19 +100,6 @@ export default function PMSScheduleScreen() {
       fetcher: fetchTeamMembers,
   });
 
-  // 🔥 senderName was never populated by the API (only senderId), so every
-  // PMS report showed a blank/undefined engineer name — same fix pattern
-  // as orders.tsx/installation.tsx.
-  useEffect(() => {
-      if (teamMembersForPms.length === 0 || pmsList.length === 0) return;
-      const nameById = new Map(teamMembersForPms.map((u: any) => [u.id, u.name || 'Unknown']));
-      const needsEnrichment = pmsList.some((p: any) => p.senderName === undefined);
-      if (!needsEnrichment) return;
-      setPmsList(pmsList.map((p: any) => ({
-          ...p,
-          senderName: nameById.get(p.senderId) || 'Unknown',
-      })));
-  }, [pmsList, teamMembersForPms]);
 
   useEffect(() => {
       if (isAdmin) {
@@ -119,40 +111,20 @@ export default function PMSScheduleScreen() {
       }
   }, [teamMembersForPms, isAdmin]);
 
-  // 🔥 senderName was never populated — the API only returns senderId (see
-  // services/api/pmsReports.ts's comment), so every PMS report showed no
-  // name. Fill it in once team members are available.
-  useEffect(() => {
-      if (teamMembersForPms.length === 0 || pmsList.length === 0) return;
-      const nameById = new Map(teamMembersForPms.map((u: any) => [u.id, u.name || 'Unknown']));
-      const needsEnrichment = pmsList.some((p: any) => p.senderName === undefined);
-      if (!needsEnrichment) return;
-      setPmsList(pmsList.map((p: any) => ({ ...p, senderName: nameById.get(p.senderId) || 'Unknown' })));
-  }, [pmsList, teamMembersForPms]);
 
-  // Organizations — cache-first, shares the SAME 'organizations' cache key
-  // as organization.tsx/messaging_center.tsx.
-  const { data: orgList, refresh: refreshOrgsForPms } = useCachedList({
-      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 500 }),
-  });
 
-  // Refresh PMS reports (background, cache already shows something instant)
-  // whenever the screen regains focus — same intent as the original
-  // useFocusEffect + loadData(), now routed through the hook's refresh().
+  // Coming back to this screen (e.g. after adding a PMS) reloads page 1.
+  // The first focus is skipped — the list hook already loads on open.
+  const refreshPmsRef = useRef(refreshPms);
+  useEffect(() => { refreshPmsRef.current = refreshPms; }, [refreshPms]);
+  const focusedOnce = useRef(false);
   useFocusEffect(
       useCallback(() => {
-          refreshPms();
-          // eslint-disable-next-line react-hooks/exhaustive-deps
-      }, [pmsCacheKey])
+          if (focusedOnce.current) refreshPmsRef.current();
+          focusedOnce.current = true;
+      }, [])
   );
 
-  const onRefresh = async () => {
-      setRefreshing(true);
-      await Promise.all([refreshPms(), refreshOrgsForPms()]);
-      setRefreshing(false);
-  };
 
   const isTaskCompleted = (status: string) => {
     const s = (status || '').toLowerCase();
@@ -224,11 +196,12 @@ export default function PMSScheduleScreen() {
         let orgCity = pmsData.city || '';
         
         if (!orgAddr || !orgCity) {
-            const org = orgList.find((o: any) => 
-                (pmsData.orgId && o.id === pmsData.orgId) || 
-                o.orgName === pmsData.hospitalName || 
-                o.name === pmsData.hospitalName
-            );
+            // Linked organization (sent with the list), else look it up by name.
+            let org: any = pmsData.orgAddress || pmsData.orgCity ? { address: pmsData.orgAddress, city: pmsData.orgCity } : null;
+            if (!org && pmsData.hospitalName) {
+                const found = await fetchOrganizations({ search: pmsData.hospitalName, limit: 5 }).catch(() => []);
+                org = found.find((o: any) => o.orgName === pmsData.hospitalName || o.name === pmsData.hospitalName) || null;
+            }
             if (org) {
                 orgAddr = orgAddr || org.address || '';
                 orgCity = orgCity || org.city || '';
@@ -420,93 +393,7 @@ export default function PMSScheduleScreen() {
 
   const processedList = getProcessedList();
 
-  const getFilteredData = () => {
-    let data = [...processedList];
-
-        if (isAdmin && selectedEmployee !== 'All') {
-      data = data.filter((item: any) =>
-        (item.senderId === selectedEmployee) ||
-        (item.userId === selectedEmployee) ||
-        (item.engineerId === selectedEmployee) ||
-        (item.userName === selectedEmployeeName) ||
-        (item.senderName === selectedEmployeeName)
-      );
-    } else if (!isAdmin) {
-      const myId = currentUser?.uid || currentUser?.id;
-      data = data.filter((item: any) => item.userId === myId || item.engineerId === myId || item.senderId === myId);
-    }
-
-    if (searchText) {
-      const term = searchText.toLowerCase().trim();
-      data = data.filter((item: any) =>
-        `${item.hospital || ''} ${item.hospitalName || ''} ${item.city || ''} ${item.serialNo || ''} ${item.machine || ''}`.toLowerCase().includes(term)
-      );
-    }
-
-    const nowTs = new Date().setHours(0, 0, 0, 0);
-
-    if (filter === 'Completed') {
-      data = data.filter((i: any) => isTaskCompleted(i.status));
-    }
-    else if (filter === 'Overdue') {
-      data = data.filter((i: any) => {
-        const dueTs = parseDate(i.computedDueDate);
-        return dueTs < nowTs;
-      });
-    }
-    else if (filter === 'Upcoming') {
-      data = data.filter((i: any) => {
-        const dueTs = parseDate(i.computedDueDate);
-        return dueTs >= nowTs;
-      });
-    }
-
-    const shouldApplyDateFilter = viewMode !== 'All' && (filter === 'All' || filter === 'Completed');
-
-    if (shouldApplyDateFilter) {
-      const tYear = currentDate.getFullYear();
-      const tMonth = currentDate.getMonth();
-      const tDay = currentDate.getDate();
-
-      const fyStartYear = tMonth >= 3 ? tYear : tYear - 1;
-      const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-      const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
-
-      data = data.filter((item: any) => {
-        let dateField;
-        if (isTaskCompleted(item.status)) {
-          dateField = item.lastDoneDate || item.dateIso || item.date;
-        } else {
-          dateField = item.computedDueDate;
-        }
-
-        const ts = parseDate(dateField);
-        if (!ts) return false;
-
-        const d = new Date(ts);
-        const itemTime = d.getTime();
-
-        if (viewMode === 'Month') return d.getFullYear() === tYear && d.getMonth() === tMonth;
-        if (viewMode === 'Day') return d.getFullYear() === tYear && d.getMonth() === tMonth && d.getDate() === tDay;
-        if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-        return true;
-      });
-    }
-
-    data.sort((a: any, b: any) => {
-      if (filter === 'Upcoming' || filter === 'Overdue') {
-        return parseDate(a.computedDueDate) - parseDate(b.computedDueDate);
-      }
-      const dateA = isTaskCompleted(a.status) ? parseDate(a.lastDoneDate || a.dateIso || a.date) : parseDate(a.computedDueDate);
-      const dateB = isTaskCompleted(b.status) ? parseDate(b.lastDoneDate || b.dateIso || b.date) : parseDate(b.computedDueDate);
-      return dateA - dateB;
-    });
-
-    return data;
-  };
-
-  const fullList = getFilteredData(); 
-  const renderedList = fullList.slice(0, visibleCount);
+  const fullList = processedList; // already filtered and sorted by the server
 
   const openDetails = (item: any) => {
     setSelectedItem(item);
@@ -648,25 +535,26 @@ export default function PMSScheduleScreen() {
             </TouchableOpacity>
           ))}
         </ScrollView>
-        <Text style={{ textAlign: 'right', fontSize: 12, color: 'gray', paddingRight: 15 }}>Total: {fullList.length}</Text>
+        <Text style={{ textAlign: 'right', fontSize: 12, color: 'gray', paddingRight: 15 }}>Total: {pmsTotal}</Text>
       </View>
 
       <FlatList
-        data={renderedList}
+        data={fullList}
         keyExtractor={(item, index) => item.id || index.toString()}
         contentContainerStyle={{ padding: 5, paddingBottom: 100 }}
         renderItem={renderItem}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshPms} />}
         ListEmptyComponent={
             <View style={{ alignItems: 'center', marginTop: 50 }}>
-                {pmsLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{ color: 'gray' }}>No Data Found</Text>}
+                {pmsLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{ color: 'gray' }}>{pmsError ? 'Could not load PMS — pull down to retry.' : 'No Data Found'}</Text>}
             </View>
         }
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
-                {visibleCount < fullList.length ? (
-                    <TouchableOpacity 
-                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                {pmsHasMore ? (
+                    <TouchableOpacity
+                        onPress={loadMorePms}
+                        disabled={pmsLoadingMore}
                         style={{
                             padding: 12, 
                             backgroundColor: '#fff', 
@@ -678,9 +566,9 @@ export default function PMSScheduleScreen() {
                             marginHorizontal: 15
                         }}
                     >
-                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                            👇 Load More Records ({fullList.length - visibleCount} remaining)
-                        </Text>
+                        {pmsLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({pmsTotal - fullList.length} remaining)</Text>
+                        )}
                     </TouchableOpacity>
                 ) : (
                     fullList.length > 0 ? (

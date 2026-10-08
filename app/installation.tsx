@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -26,7 +26,7 @@ import { useData } from './context/DataContext';
 import {
   deleteInstallation as apiDeleteInstallation,
   updateInstallation as apiUpdateInstallation,
-  listInstallations,
+  InstallationPageFilters, listInstallationsPage,
   sendAmcReminder,
   uploadInstallationPhoto,
   deleteInstallationPhoto,
@@ -34,6 +34,8 @@ import {
 import RecordPhotoSection from '../components/RecordPhotoSection';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
 import { buildCacheKey } from '../utils/listCache';
 
 import * as FileSystem from 'expo-file-system/legacy';
@@ -52,7 +54,6 @@ export default function InstallationListScreen() {
   const { currentUser, companyProfile } = useData(); 
   const { isDbLoading } = useSaaSDB();
 
-  // installList now comes from useCachedList below (cache-first)
   const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
 
   const [searchText, setSearchText] = useState('');
@@ -77,7 +78,6 @@ export default function InstallationListScreen() {
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  const [visibleCount, setVisibleCount] = useState(20);
 
   const isAdmin = ['Admin', 'Manager', 'Hr', 'Account', 'Accountant', 'SuperAdmin'].includes(currentUser?.role || '');
   const isStrictAdmin = ['Admin', 'Manager', 'SuperAdmin'].includes(currentUser?.role || '');
@@ -88,24 +88,32 @@ export default function InstallationListScreen() {
       setInstallList(prev => prev.map(i => i.id === updated.id ? { ...i, photoUrl: updated.photoUrl } : i));
   };
 
-  useEffect(() => {
-      if (viewMode === 'Day') setVisibleCount(500); 
-      else setVisibleCount(20); 
-  }, [viewMode, currentDate, searchText, selectedEmployee]);
 
-  // 🔥 INSTALLATIONS — cache-first (instant from AsyncStorage, then
-  // background refresh). See hooks/useCachedList.ts.
-  const installsCacheKey = buildCacheKey('installations', currentUser?.companyId);
+  // 🔥 INSTALLATIONS — 20 per page from the server: date range, employee (added by
+  // or named engineer), search, and the "Added by" name all come from there.
+  const debouncedSearch = useDebounced(searchText.trim());
+  const installFilters = useMemo<InstallationPageFilters>(() => ({
+      ...periodRange(viewMode, currentDate),
+      createdById: isAdmin && selectedEmployee !== 'All' ? selectedEmployee : undefined,
+      search: debouncedSearch || undefined,
+  }), [viewMode, currentDate, isAdmin, selectedEmployee, debouncedSearch]);
+  const isDefaultView = isCurrentFy(viewMode, currentDate) && selectedEmployee === 'All' && !debouncedSearch;
   const {
-      data: installList,
-      setData: setInstallList,
+      items: installList,
+      setItems: setInstallList,
+      total: installTotal,
       loading: installsLoading,
+      loadingMore: installsLoadingMore,
+      hasMore: installsHasMore,
+      loadMore: loadMoreInstalls,
       refreshing: installsRefreshing,
       refresh: refreshInstalls,
-  } = useCachedList({
-      cacheKey: installsCacheKey,
+      error: installsError,
+  } = useServerPagedList<InstallationPageFilters, any>({
+      fetchPage: listInstallationsPage,
+      filters: installFilters,
       enabled: !!currentUser?.companyId,
-      fetcher: listInstallations, // was: fetchSaaSData("installations")
+      cacheKey: isDefaultView ? buildCacheKey('installations_page1_v1', currentUser?.companyId) : null,
   });
 
   // 🔥 Users — cache-first, shares the SAME 'team_members' cache key as
@@ -116,18 +124,6 @@ export default function InstallationListScreen() {
       fetcher: fetchTeamMembers,
   });
 
-  // 🔥 senderName was never populated by the API (only senderId), so every
-  // installation showed "Unknown" — same fix pattern as orders.tsx.
-  useEffect(() => {
-      if (teamMembersForInstall.length === 0 || installList.length === 0) return;
-      const nameById = new Map(teamMembersForInstall.map((u: any) => [u.id, u.name || 'Unknown']));
-      const needsEnrichment = installList.some((i: any) => i.senderName === undefined);
-      if (!needsEnrichment) return;
-      setInstallList(installList.map((i: any) => ({
-          ...i,
-          senderName: nameById.get(i.senderId) || 'Unknown',
-      })));
-  }, [installList, teamMembersForInstall]);
 
   useEffect(() => {
       if (isAdmin) {
@@ -139,18 +135,6 @@ export default function InstallationListScreen() {
       }
   }, [teamMembersForInstall, isAdmin]);
 
-  // 🔥 senderName ("Added by") was never populated — the API only returns
-  // senderId (see services/api/installations.ts's comment). Note this is
-  // separate from the "Engineer" field, which is a directly-typed text
-  // field on the record and always worked fine. Fill senderName in once
-  // team members are available.
-  useEffect(() => {
-      if (teamMembersForInstall.length === 0 || installList.length === 0) return;
-      const nameById = new Map(teamMembersForInstall.map((u: any) => [u.id, u.name || 'Unknown']));
-      const needsEnrichment = installList.some((i: any) => i.senderName === undefined);
-      if (!needsEnrichment) return;
-      setInstallList(installList.map((i: any) => ({ ...i, senderName: nameById.get(i.senderId) || 'Unknown' })));
-  }, [installList, teamMembersForInstall]);
 
   const parseDate = (dateStr: any) => {
     if (!dateStr) return 0;
@@ -395,86 +379,6 @@ export default function InstallationListScreen() {
     }
   };
 
-  const getSortedAndFilteredData = () => {
-    let data = installList ? [...installList] : [];
-
-    if (isAdmin && selectedEmployee !== 'All') {
-      const targetName = selectedEmployeeName ? selectedEmployeeName.toLowerCase().trim() : '';
-      data = data.filter((item: any) => {
-        if (item.senderId === selectedEmployee) return true;
-        if (item.engineer && item.engineer.toLowerCase().trim() === targetName) return true;
-        if (item.senderName && item.senderName.toLowerCase().trim() === targetName) return true;
-        if (item.userName && item.userName.toLowerCase().trim() === targetName) return true;
-        return false;
-      });
-    } 
-    else if (!isAdmin) {
-      const myId = currentUser?.id || currentUser?.uid;
-      data = data.filter((item: any) => 
-          item.senderId === myId || 
-          (item.engineer && item.engineer.toLowerCase() === currentUser?.name?.toLowerCase())
-      );
-    }
-
-    if (searchText) {
-      const term = searchText.toLowerCase();
-      data = data.filter((item: any) => {
-        const fullString = `
-          ${item.hospital || ''}
-          ${item.orgName || ''}
-          ${item.serialNo || ''}
-          ${item.product || ''}
-          ${item.productName || ''}
-          ${item.model || ''}
-          ${item.senderName || ''}
-          ${item.department || ''}
-          ${item.city || ''}
-        `.toLowerCase();
-        return fullString.includes(term);
-      });
-    }
-
-    if (viewMode !== 'All') {
-      const targetYear = currentDate.getFullYear();
-      const targetMonth = currentDate.getMonth();
-      const targetDay = currentDate.getDate();
-
-      const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-      const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-      const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
-
-      data = data.filter((item: any) => {
-        let ts = item.timestamp;
-        if (!ts && item.createdAt) ts = new Date(item.createdAt).getTime();
-        if (!ts) ts = parseDate(item.dateIso || item.date || item.displayDate);
-        
-        if (!ts || isNaN(ts)) return false;
-        
-        const itemDate = new Date(ts);
-        const itemTime = itemDate.getTime();
-
-        if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-        if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-        if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-        return true;
-      });
-    }
-
-    data.sort((a: any, b: any) => {
-        let tsA = a.timestamp || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
-        if (!tsA) tsA = parseDate(a.dateIso || a.date || a.displayDate);
-
-        let tsB = b.timestamp || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
-        if (!tsB) tsB = parseDate(b.dateIso || b.date || b.displayDate);
-
-        return tsB - tsA;
-    });
-
-    return data;
-  };
-
-  const fullList = getSortedAndFilteredData(); 
-  const renderedList = fullList.slice(0, visibleCount);
 
   const openDetails = (item: any) => {
     setSelectedItem(item);
@@ -556,6 +460,7 @@ export default function InstallationListScreen() {
                       try {
                           await apiDeleteInstallation(selectedItem.id);
                           setInstallList(prev => prev.filter(i => i.id !== selectedItem.id));
+                          refreshInstalls(); // keeps the total right
                           setModalVisible(false);
                           Alert.alert("Deleted", "Installation record has been deleted successfully.");
                       } catch (error: any) {
@@ -693,13 +598,13 @@ export default function InstallationListScreen() {
             )}
           </View>
           <Text style={{ textAlign: 'right', fontSize: 12, color: 'gray', marginTop: 5 }}>
-            Total: <Text style={{ fontWeight: 'bold', color: 'green' }}>{fullList.length}</Text> Records
+            Total: <Text style={{ fontWeight: 'bold', color: 'green' }}>{installTotal}</Text> Records
           </Text>
         </View>
       </View>
 
       <FlatList
-        data={renderedList}
+        data={installList}
         keyExtractor={item => item.id}
         renderItem={renderItem}
         contentContainerStyle={{ padding: 5, paddingBottom: 50 }}
@@ -711,24 +616,25 @@ export default function InstallationListScreen() {
             {installsLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
                 <>
                     <Ionicons name="cube-outline" size={60} color="#ddd" />
-                    <Text style={{ textAlign: 'center', marginTop: 10, color: 'gray' }}>No Installations Found</Text>
+                    <Text style={{ textAlign: 'center', marginTop: 10, color: 'gray' }}>{installsError ? 'Could not load installations — pull down to retry.' : 'No Installations Found'}</Text>
                 </>
             )}
           </View>
         }
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
-                {visibleCount < fullList.length ? (
-                    <TouchableOpacity 
-                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                {installsHasMore ? (
+                    <TouchableOpacity
+                        onPress={loadMoreInstalls}
+                        disabled={installsLoadingMore}
                         style={styles.loadMoreBtn}
                     >
-                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                            👇 Load More Records ({fullList.length - visibleCount} remaining)
-                        </Text>
+                        {installsLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({installTotal - installList.length} remaining)</Text>
+                        )}
                     </TouchableOpacity>
                 ) : (
-                    fullList.length > 0 ? (
+                    installList.length > 0 ? (
                         <Text style={styles.endListText}>--- End of List ---</Text>
                     ) : null
                 )}

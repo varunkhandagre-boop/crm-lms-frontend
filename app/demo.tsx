@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     FlatList,
@@ -19,8 +19,9 @@ import {
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: demos & sales visits now go through the new backend API
-import { listDemos } from '../services/api/demos';
-import { listSalesVisits } from '../services/api/salesVisits';
+import { DemoFeedFilters, listDemoFeedPage } from '../services/api/demos';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
@@ -30,7 +31,6 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
-import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTeamMembers } from '../services/api/users';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';
@@ -44,8 +44,6 @@ export default function DemoScreen() {
   // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); demos no longer go through this
   const { isDbLoading } = useSaaSDB();
 
-  // demoList now comes from useCachedList below (cache-first)
-  // salesVisitList/orgList now come from useCachedList below (cache-first, shared keys)
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
 
   const [searchText, setSearchText] = useState('');
@@ -61,31 +59,34 @@ export default function DemoScreen() {
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  const [visibleCount, setVisibleCount] = useState(20);
 
   const isAdmin = ['Admin', 'Manager', 'Accountant' , 'Account', 'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
 
-  useEffect(() => {
-      if (viewMode === 'Day') {
-          setVisibleCount(500); 
-      } else {
-          setVisibleCount(20); 
-      }
-  }, [viewMode, currentDate, selectedEmployee, searchText]);
 
-  // 🔥 DEMOS — cache-first (instant from AsyncStorage, then background
-  // refresh from the API). See hooks/useCachedList.ts.
-  const demosCacheKey = buildCacheKey('demos', currentUser?.companyId);
+  // 🔥 DEMOS — 20 per page from the server: demos + DSR visits that mention a demo,
+  // date range, employee and search merged and filtered there (with names, city).
+  const debouncedSearch = useDebounced(searchText.trim());
+  const demoFilters = useMemo<DemoFeedFilters>(() => ({
+      ...periodRange(viewMode, currentDate),
+      createdById: isAdmin && selectedEmployee !== 'All' ? selectedEmployee : undefined,
+      search: debouncedSearch || undefined,
+  }), [viewMode, currentDate, isAdmin, selectedEmployee, debouncedSearch]);
+  const isDefaultView = isCurrentFy(viewMode, currentDate) && selectedEmployee === 'All' && !debouncedSearch;
   const {
-      data: demoList,
-      setData: setDemoList,
+      items: demoList,
+      total: demoTotal,
       loading: demosLoading,
+      loadingMore: demosLoadingMore,
+      hasMore: demosHasMore,
+      loadMore: loadMoreDemos,
       refreshing: demosRefreshing,
       refresh: refreshDemos,
-  } = useCachedList({
-      cacheKey: demosCacheKey,
+      error: demosError,
+  } = useServerPagedList<DemoFeedFilters, any>({
+      fetchPage: listDemoFeedPage,
+      filters: demoFilters,
       enabled: !!currentUser?.companyId,
-      fetcher: listDemos, // was: fetchSaaSData("demos")
+      cacheKey: isDefaultView ? buildCacheKey('demo_feed_page1_v1', currentUser?.companyId) : null,
   });
 
   // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
@@ -104,44 +105,6 @@ export default function DemoScreen() {
           setEmployees([{ id: 'All', name: 'All Staff' }, ...mappedUsers]);
       }
   }, [teamMembersForDemo, isAdmin]);
-
-  // 🔥 senderName was never populated — the API only returns senderId (see
-  // services/api/demos.ts's comment), so every demo showed no name at all.
-  // Fill it in once team members are available.
-  useEffect(() => {
-      if (teamMembersForDemo.length === 0 || demoList.length === 0) return;
-      const nameById = new Map(teamMembersForDemo.map((u: any) => [u.id, u.name || 'Unknown']));
-      const needsEnrichment = demoList.some((d: any) => d.senderName === undefined);
-      if (!needsEnrichment) return;
-      setDemoList(demoList.map((d: any) => ({ ...d, senderName: nameById.get(d.senderId) || 'Unknown' })));
-  }, [demoList, teamMembersForDemo]);
-
-  // Sales visits/orgs — unchanged plain fetch-on-mount (out of scope for
-  // this pass).
-  // 🔥 Sales visits + Organizations — cache-first, sharing the SAME cache
-  // keys as sales.tsx ('sales_visits') and organization.tsx/messaging_center.tsx
-  // ('organizations').
-  const { data: salesVisitList } = useCachedList({
-      cacheKey: buildCacheKey('sales_visits', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: listSalesVisits, // was: fetchSaaSData("sales_reports")
-  });
-  const { data: orgList } = useCachedList({
-      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 500 }),
-  });
-
-  const parseDate = (dateStr: string) => {
-      if (!dateStr) return new Date(0);
-      if (dateStr.includes('T')) return new Date(dateStr);
-      if (dateStr.includes('-')) return new Date(dateStr);
-      const parts = dateStr.split('/');
-      if (parts.length === 3) {
-          return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-      }
-      return new Date(0);
-  };
 
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
@@ -345,105 +308,10 @@ export default function DemoScreen() {
     }
   };
 
-  // --- SMART MERGE LOGIC (unchanged, now fed by API data) ---
-    const getAllDemos = () => {
-      // toLegacySalesVisit() never sets senderName (services/api/salesVisits.ts
-      // — the backend only returns createdById, a UUID, not a name), so any
-      // DSR-sourced ("From Sales") demo entry always fell back to "Unknown"
-      // here. Resolve it from the already-loaded team list instead — same
-      // fix as payment_collection.tsx's employee filter.
-      const userIdToName = new Map((teamMembersForDemo || []).map((u: any) => [u.id, u.name]));
-      const salesDemos = salesVisitList ? salesVisitList.filter((item: any) => 
-          (item.discussion && item.discussion.toLowerCase().includes('demo')) || 
-          (item.outcome && item.outcome.toLowerCase().includes('demo'))
-      ).map((item: any) => ({
-          id: item.id, 
-          hospital: item.hospital,
-          orgId: item.orgId || '', 
-          date: item.date,
-          product: 'See Details', 
-          result: item.outcome || 'N/A',
-          status: 'Completed',    
-          isFromSales: true,      
-          fullData: item,
-          senderId: item.senderId,
-          senderName: item.senderName || userIdToName.get(item.senderId) || 'Unknown'
-      })) : [];
-
-      const actualDemos = demoList || [];
-      
-      let combined = [...actualDemos, ...salesDemos].map(item => {
-        const org = orgList.find((o: any) => (o.id === item.orgId) || (o.orgName === item.hospital) || (o.name === item.hospital));
-        return { ...item, city: item.city || (org ? org.city : '') };
-      });
-
-      if (!isAdmin) {
-          const myId = currentUser?.id || currentUser?.uid;
-          combined = combined.filter((item: any) => item.senderId === myId || item.userName === currentUser?.name);
-      }
-
-      return combined;
-  };
-
-  const allData = getAllDemos(); 
-
-  const getFilteredData = () => {
-    let data = allData;
-
-    if (isAdmin && selectedEmployee !== 'All') {
-        data = data.filter((item: any) => 
-          (item.senderId === selectedEmployee) || 
-          (item.userId === selectedEmployee) ||
-          (item.senderName === selectedEmployeeName)
-        );
-    }
-
-    if (searchText) {
-        const lowerTerm = searchText.toLowerCase();
-        data = data.filter((item: any) => {
-           const fullString = `
-               ${item.hospital || ''} 
-               ${item.product || ''} 
-               ${item.result || ''} 
-               ${item.senderName || ''}
-               ${item.date || ''}
-               ${item.id || ''}
-           `.toLowerCase();
-           return fullString.includes(lowerTerm);
-        });
-    }
-
-    if (viewMode !== 'All') {
-        const targetYear = currentDate.getFullYear();
-        const targetMonth = currentDate.getMonth();
-        const targetDay = currentDate.getDate();
-
-        const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-        const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-        const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
-
-        data = data.filter((item: any) => {
-            if(!item.date) return false;
-            const itemDate = parseDate(item.date);
-            const itemTime = itemDate.getTime();
-            
-            if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-            if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-            if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-            return true;
-        });
-    }
-
-    return data.sort((a, b) => parseDate(b.date).getTime() - parseDate(a.date).getTime());
-  };
-
-  const fullList = getFilteredData(); 
-  const renderedList = fullList.slice(0, visibleCount);
 
   const openDetails = (item: any) => {
       setSelectedItem(item);
-      const foundOrg = orgList.find((o: any) => (o.id === item.orgId) || (o.orgName === item.hospital) || (o.name === item.hospital));
-      setOrgDetails(foundOrg || null);
+      setOrgDetails(item.org || null); // linked organization's city / state, sent with the row
       setModalVisible(true);
   };
 
@@ -528,7 +396,7 @@ export default function DemoScreen() {
 
           <View style={{paddingHorizontal:12, marginTop:6}}>
               <View style={styles.searchBar}>
-                  {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+                  {(isDbLoading || demosLoading) ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
                   <TextInput 
                     style={styles.input} 
                     placeholder={isAdmin ? "Search Hospital, Product, Employee..." : "Search Hospital, Product..."}
@@ -542,13 +410,13 @@ export default function DemoScreen() {
                   )}
               </View>
               <Text style={{textAlign:'right', fontSize:12, color:'gray', marginTop:5}}>
-                  Total: <Text style={{fontWeight:'bold', color:'green'}}>{fullList.length}</Text> Records
+                  Total: <Text style={{fontWeight:'bold', color:'green'}}>{demoTotal}</Text> Records
               </Text>
           </View>
       </View>
 
       <FlatList 
-        data={renderedList}
+        data={demoList}
         keyExtractor={(item, index) => (item.id || index.toString()) + index} 
         renderItem={renderItem}
         contentContainerStyle={{padding: 15}}
@@ -558,14 +426,15 @@ export default function DemoScreen() {
         ListEmptyComponent={
             <View style={{alignItems:'center', marginTop:50}}>
                 <Ionicons name="flask-outline" size={60} color="#ccc" />
-                <Text style={{color:'gray', marginTop:10}}>{demosLoading ? 'Loading Demos...' : 'No Demo Records Found'}</Text>
+                <Text style={{color:'gray', marginTop:10}}>{demosLoading ? 'Loading Demos...' : demosError ? 'Could not load demos — pull down to retry.' : 'No Demo Records Found'}</Text>
             </View>
         }
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
-                {visibleCount < fullList.length ? (
-                    <TouchableOpacity 
-                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                {demosHasMore ? (
+                    <TouchableOpacity
+                        onPress={loadMoreDemos}
+                        disabled={demosLoadingMore}
                         style={{
                             padding: 12, 
                             backgroundColor: '#fff', 
@@ -576,12 +445,12 @@ export default function DemoScreen() {
                             borderColor: '#ddd'
                         }}
                     >
-                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                            👇 Load More Records ({fullList.length - visibleCount} remaining)
-                        </Text>
+                        {demosLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({demoTotal - demoList.length} remaining)</Text>
+                        )}
                     </TouchableOpacity>
                 ) : (
-                    fullList.length > 0 ? (
+                    demoList.length > 0 ? (
                         <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
                             --- End of List ---
                         </Text>

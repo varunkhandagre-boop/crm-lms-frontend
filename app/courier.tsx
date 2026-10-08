@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -22,10 +22,9 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 // 🔥 Phase 8: couriers now come from Postgres via these adapters
-import { deleteCourier, fetchCouriers, updateCourier, updateCourierStatus } from '../services/api/couriers';
-import { fetchTeamMembers } from '../services/api/users';
-// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
-import { useCachedList } from '../hooks/useCachedList';
+import { CourierPageFilters, deleteCourier, listCouriersPage, updateCourier, updateCourierStatus } from '../services/api/couriers';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
 import { buildCacheKey } from '../utils/listCache';
 
 import * as FileSystem from 'expo-file-system/legacy';
@@ -48,8 +47,6 @@ export default function CourierScreen() {
   // isDbLoading (courier-specific) is computed below, once courierLoading is available
 
   // 🔥 3. Lazy Loaded Lists
-  // courierList now comes from useCachedList below (cache-first)
-  // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
 
   // --- STATES ---
   const [activeTab, setActiveTab] = useState<'All' | 'Inward' | 'Outward'>('All'); 
@@ -70,76 +67,43 @@ export default function CourierScreen() {
   const [editData, setEditData] = useState<any>({});
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
-  const [visibleCount, setVisibleCount] = useState(20);
 
-  useEffect(() => {
-      if (viewMode === 'Day') setVisibleCount(500); 
-      else setVisibleCount(20); 
-  }, [viewMode, currentDate, activeTab, activeStatus, searchText]);
-
-  // 🔥 4. LOAD DATA — couriers bounded by the current view window + type/status filter
-  // (server-enforced visibility: non-office roles automatically only see their own).
-  function getFetchRange(): { fromDate?: string; toDate?: string } {
-      const toIso = (d: Date) => d.toISOString().split('T')[0];
-      if (viewMode === 'All') return {};
-      if (viewMode === 'Day') return { fromDate: toIso(currentDate), toDate: toIso(currentDate) };
-      if (viewMode === 'Month') {
-          const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-          const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-          return { fromDate: toIso(start), toDate: toIso(end) };
-      }
-      // FY
-      const m = currentDate.getMonth();
-      const y = currentDate.getFullYear();
-      const fyStartYear = m >= 3 ? y : y - 1;
-      return { fromDate: toIso(new Date(fyStartYear, 3, 1)), toDate: toIso(new Date(fyStartYear + 1, 2, 31)) };
-  }
-
-    // Organizations — cache-first, shares the SAME 'organizations' cache key
-  // as organization.tsx/messaging_center.tsx.
-  const { data: orgList } = useCachedList({
-      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 500 }),
-  });
-
-  // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
-  // as manage_team.tsx/employee_timeline.tsx.
-  const { data: teamMembersForCourier } = useCachedList({
-      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: fetchTeamMembers,
-  });
-
-  // 🔥 COURIERS — cache-first, parameterized by date-range (server
-  // auto-scopes by role, no employee filter param exists for this list).
-  // See hooks/useCachedList.ts.
-  const { fromDate, toDate } = getFetchRange();
-  const courierCacheKey = buildCacheKey(`couriers:${viewMode}:${fromDate || 'none'}:${toDate || 'none'}`, currentUser?.companyId);
+  // 🔥 4. COURIERS — 20 per page from the server: type tab, status chip, date range
+  // and search all run there (non-office roles only get their own — server-enforced).
+  // Page 1 also brings the Pending badges for the date range.
+  const debouncedSearch = useDebounced(searchText.trim());
+  const courierFilters = useMemo<CourierPageFilters>(() => ({
+      ...periodRange(viewMode, currentDate),
+      type: activeTab === 'All' ? undefined : activeTab,
+      status: activeStatus === 'All' ? undefined : (activeStatus as CourierPageFilters['status']),
+      search: debouncedSearch || undefined,
+  }), [viewMode, currentDate, activeTab, activeStatus, debouncedSearch]);
+  const [pendingCounts, setPendingCounts] = useState({ inwardPending: 0, outwardPending: 0 });
+  const fetchCourierPage = useCallback(async (p: CourierPageFilters & { page: number; limit: number }) => {
+      const r = await listCouriersPage(p);
+      if (r.counts) setPendingCounts(r.counts);
+      return r;
+  }, []);
+  const isDefaultView = isCurrentFy(viewMode, currentDate) && activeTab === 'All' && activeStatus === 'Pending' && !debouncedSearch;
   const {
-      data: courierList,
-      setData: setCourierList,
+      items: courierList,
+      setItems: setCourierList,
+      total: courierTotal,
       loading: courierLoading,
+      loadingMore: courierLoadingMore,
+      hasMore: courierHasMore,
+      loadMore: loadMoreCouriers,
       refreshing: courierRefreshing,
       refresh: refreshCouriers,
-  } = useCachedList({
-      cacheKey: courierCacheKey,
+      error: courierError,
+  } = useServerPagedList<CourierPageFilters, any>({
+      fetchPage: fetchCourierPage,
+      filters: courierFilters,
       enabled: !!currentUser?.companyId,
-      fetcher: () => fetchCouriers({ fromDate, toDate, limit: 500 }),
+      cacheKey: isDefaultView ? buildCacheKey('couriers_page1_v1', currentUser?.companyId) : null,
   });
-
-  // 🔥 senderName was never populated by the API (only senderId), so every
-  // courier entry showed "Unknown" — same fix pattern as orders.tsx.
-  useEffect(() => {
-      if (teamMembersForCourier.length === 0 || courierList.length === 0) return;
-      const nameById = new Map(teamMembersForCourier.map((u: any) => [u.id, u.name || 'Unknown']));
-      const needsEnrichment = courierList.some((c: any) => c.senderName === undefined);
-      if (!needsEnrichment) return;
-      setCourierList(courierList.map((c: any) => ({
-          ...c,
-          senderName: nameById.get(c.senderId) || 'Unknown',
-      })));
-  }, [courierList, teamMembersForCourier]);
+  // Update / status responses don't carry the creator's name or org address — keep them from the list row.
+  const mergeRecord = (item: any, rec: any) => ({ ...item, ...rec, senderName: rec.senderName || item.senderName, orgAddress: item.orgAddress, orgCity: item.orgCity });
 
   const isDbLoading = isOrgsLoading || courierLoading;
 
@@ -155,19 +119,7 @@ export default function CourierScreen() {
   const isStrictAdmin = role === 'Admin' || role === 'Manager' || role === 'SuperAdmin';
 
   // --- BADGE COUNTS ---
-  const inwardPending = courierList.filter((c: any) => c.type === 'Inward' && c.status === 'Pending').length;
-  const outwardPending = courierList.filter((c: any) => c.type === 'Outward' && c.status === 'Pending').length;
-
-  const parseDate = (dateStr: string) => {
-      if (!dateStr) return new Date(0);
-      if (dateStr.includes('T')) return new Date(dateStr);
-      if (dateStr.includes('-')) return new Date(dateStr);
-      const parts = dateStr.split('/');
-      if (parts.length === 3) {
-          return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-      }
-      return new Date(0);
-  };
+  const { inwardPending, outwardPending } = pendingCounts;
 
     const generateChallan = async (data: any) => {
       try {
@@ -214,12 +166,12 @@ export default function CourierScreen() {
           let receiverName = data.receiver ? data.receiver.split(',')[0] : '-';
           let receiverAddr = data.toCity || '';
           
-          const org = orgList.find((o: any) => 
-              (data.orgId && o.id === data.orgId) || 
-              o.orgName === receiverName || 
-              o.name === receiverName
-          );
-          
+          // Address of the linked organization (sent with the list), else look it up by name.
+          let org: any = data.orgAddress || data.orgCity ? { address: data.orgAddress, city: data.orgCity } : null;
+          if (!org && receiverName && receiverName !== '-') {
+              const found = await fetchOrganizations({ search: receiverName, limit: 5 }).catch(() => []);
+              org = found.find((o: any) => o.orgName === receiverName || o.name === receiverName) || null;
+          }
           if (org) {
               receiverAddr = org.address ? `${org.address}, ${org.city || ''}` : (org.city || receiverAddr);
           }
@@ -393,56 +345,6 @@ export default function CourierScreen() {
       return "All Time";
   };
 
-  const getFilteredData = () => {
-      let data = Array.isArray(courierList) ? [...courierList] : [];
-
-      // Date range already applied server-side (see getFetchRange() above);
-      // visibility (self vs all) is also server-enforced now — no client-side self-filter needed.
-      // type/status stay client-side so the tab badges above can see across all of them.
-
-      if (activeTab !== 'All') {
-          data = data.filter((item: any) => item.type === activeTab);
-      }
-
-      if (activeStatus !== 'All') {
-          data = data.filter((item: any) => item.status === activeStatus);
-      }
-
-      if (searchText) {
-          const lowerText = searchText.toLowerCase();
-          data = data.filter((item: any) => {
-              const fullString = `${item.docketNo} ${item.courierName} ${item.receiver} ${item.sender} ${item.materialSummary || item.material || ''} ${item.type}`.toLowerCase();
-              return fullString.includes(lowerText);
-          });
-      }
-
-      if (viewMode !== 'All') {
-          const targetYear = currentDate.getFullYear();
-          const targetMonth = currentDate.getMonth();
-          const targetDay = currentDate.getDate();
-
-          const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
-
-          data = data.filter((item: any) => {
-              if(!item.date) return false;
-              const itemDate = parseDate(item.date);
-              const itemTime = itemDate.getTime();
-
-              if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-              if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-              if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-              return true;
-          });
-      }
-
-      data.sort((a: any, b: any) => new Date(b.createdAt || b.dateIso || b.date).getTime() - new Date(a.createdAt || a.dateIso || a.date).getTime());
-      return data;
-  };
-
-  const fullList = getFilteredData(); 
-  const renderedList = fullList.slice(0, visibleCount);
 
   const openDetails = (item: any) => {
       setSelectedCourier(item);
@@ -502,7 +404,8 @@ export default function CourierScreen() {
         });
 
         if (res.success) {
-            setCourierList(prev => prev.map(item => item.id === editData.id ? res.record : item));
+            setCourierList(prev => prev.map(item => item.id === editData.id ? mergeRecord(item, res.record) : item));
+            refreshCouriers(); // badges / tabs may change
             Alert.alert("Success", "Courier details updated successfully!");
             setEditModalVisible(false);
         } else {
@@ -526,6 +429,7 @@ export default function CourierScreen() {
             const res = await deleteCourier(selectedCourier.id);
             if (res.success) {
                 setCourierList(prev => prev.filter(item => item.id !== selectedCourier.id));
+                refreshCouriers();
                 setModalVisible(false);
                 Alert.alert("Deleted", "Success.");
             } else {
@@ -559,7 +463,8 @@ export default function CourierScreen() {
                               route: '/courier'
                           });
                       }
-                      setCourierList(prev => prev.map(item => item.id === selectedCourier.id ? res.record : item));
+                      setCourierList(prev => prev.map(item => item.id === selectedCourier.id ? mergeRecord(item, res.record) : item));
+                      refreshCouriers(); // Pending badge + status chip
                       setModalVisible(false);
                       Alert.alert("Success", "Status Updated!");
                   } else {
@@ -698,23 +603,24 @@ export default function CourierScreen() {
                   </TouchableOpacity>
               ))}
           </ScrollView>
-          <TotalBar label="Total" count={fullList.length} />
+          <TotalBar label="Total" count={courierTotal} />
       </View>
 
       <FlatList 
-        data={renderedList} 
+        data={courierList} 
         keyExtractor={item => item.id} 
         contentContainerStyle={styles.contentContainer} 
         refreshControl={
             <RefreshControl refreshing={courierRefreshing} onRefresh={refreshCouriers} colors={['#3b5998']} tintColor="#3b5998" />
         }
-        ListEmptyComponent={<Text style={{textAlign:'center', marginTop:50, color:'gray'}}>{courierLoading ? 'Loading data...' : 'No Couriers Found'}</Text>} 
+        ListEmptyComponent={<Text style={{textAlign:'center', marginTop:50, color:'gray'}}>{courierLoading ? 'Loading data...' : courierError ? 'Could not load couriers — pull down to retry.' : 'No Couriers Found'}</Text>} 
         renderItem={renderItem} 
         ListFooterComponent={
             <View style={{ paddingBottom: 100 }}>
-                {visibleCount < fullList.length ? (
+                {courierHasMore ? (
                     <TouchableOpacity 
-                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                        onPress={loadMoreCouriers}
+                        disabled={courierLoadingMore}
                         style={{
                             padding: 12, 
                             backgroundColor: '#fff', 
@@ -725,12 +631,12 @@ export default function CourierScreen() {
                             borderColor: '#ddd'
                         }}
                     >
-                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                            👇 Load More Records ({fullList.length - visibleCount} remaining)
-                        </Text>
+                        {courierLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({courierTotal - courierList.length} remaining)</Text>
+                        )}
                     </TouchableOpacity>
                 ) : (
-                    fullList.length > 0 ? (
+                    courierList.length > 0 ? (
                         <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
                             --- End of List ---
                         </Text>

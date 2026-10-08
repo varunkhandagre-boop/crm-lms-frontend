@@ -1,4 +1,5 @@
 import { apiClient } from './client';
+import { toLegacySalesVisit } from './salesVisits';
 
 export interface ApiDemo {
   id: string;
@@ -86,6 +87,47 @@ function toQueryString(params: Record<string, any>) {
 export async function listDemos(params: ListDemosParams = {}): Promise<any[]> {
   const res = await apiClient.get<ListResponse>(`/demos${toQueryString({limit: 1000,  ...params })}`);
   return res.data.map(toLegacyDemo);
+}
+
+export interface DemoFeedFilters {
+  fromDate?: string; // YYYY-MM-DD
+  toDate?: string;
+  createdById?: string;
+  search?: string;
+}
+
+/**
+ * One page of the Demo screen: demos + DSR visits that mention a demo
+ * ("From Sales"), newest first — merged, filtered and paged on the server.
+ * `org` carries the linked organization's city / state for the detail popup.
+ */
+export async function listDemoFeedPage(
+  params: DemoFeedFilters & { page: number; limit: number },
+): Promise<{ items: any[]; total: number; totalPages: number }> {
+  const res = await apiClient.get<{ data: any[]; meta: { total: number; totalPages: number } }>(`/demos/feed${toQueryString(params)}`);
+  const items = res.data.map((x: any) => {
+    if (x.kind === 'demo') {
+      const d = x.demo;
+      return { ...toLegacyDemo(d), senderName: d.createdBy?.name || 'Unknown', city: d.city || d.organization?.city || '', org: d.organization || null };
+    }
+    const v = toLegacySalesVisit(x.visit);
+    return {
+      id: v.id,
+      hospital: v.hospital,
+      orgId: v.orgId || '',
+      date: v.date,
+      product: 'See Details',
+      result: v.outcome || 'N/A',
+      status: 'Completed',
+      isFromSales: true,
+      fullData: v,
+      senderId: v.senderId,
+      senderName: v.senderName || 'Unknown',
+      city: v.city || '',
+      org: x.visit.organization || null,
+    };
+  });
+  return { items, total: res.meta.total, totalPages: res.meta.totalPages };
 }
 
 export interface CreateDemoPayload {

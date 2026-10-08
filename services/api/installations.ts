@@ -23,6 +23,8 @@ export interface ApiInstallation {
   location: { latitude: number; longitude: number } | null;
   createdById: string;
   createdAt: string;
+  /** List endpoint only. */
+  createdBy?: { name: string } | null;
   updatedAt: string;
 }
 
@@ -66,7 +68,8 @@ export function toLegacyInstallation(i: ApiInstallation): any {
     dateIso: dateOnly,
     location: i.location,
     senderId: i.createdById,
-    senderName: undefined,
+    // Only the list sends the name; leave the key out otherwise so a merge keeps the old one.
+    ...(i.createdBy ? { senderName: i.createdBy.name } : {}),
     createdAt: i.createdAt,
   };
 }
@@ -81,6 +84,16 @@ function toQueryString(params: Record<string, any>) {
 }
 
 const INSTALLATIONS_PAGE_SIZE = 200;
+
+export interface InstallationPageFilters { fromDate?: string; toDate?: string; createdById?: string; search?: string }
+
+/** One page for the Installation screen (newest first); every filter runs on the server. */
+export async function listInstallationsPage(
+  params: InstallationPageFilters & { page: number; limit: number },
+): Promise<{ items: any[]; total: number; totalPages: number }> {
+  const res = await apiClient.get<ListResponse>(`/installations${toQueryString({ ...params, sortBy: 'createdAt', sortOrder: 'desc' })}`);
+  return { items: res.data.map(toLegacyInstallation), total: res.meta.total, totalPages: res.meta.totalPages };
+}
 
 export async function listInstallations(params: { search?: string } = {}): Promise<any[]> {
   const all: any[] = [];
