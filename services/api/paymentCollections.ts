@@ -143,6 +143,7 @@ export async function deleteChequePhoto(id: string): Promise<any> {
 
 export interface PaymentPageFilters {
   createdById?: string;
+  linkedOrderId?: string; // receipts against one order
   search?: string;
   fromDate?: string; // YYYY-MM-DD
   toDate?: string;

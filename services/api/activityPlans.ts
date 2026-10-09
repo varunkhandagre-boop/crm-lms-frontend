@@ -22,7 +22,7 @@ export interface ApiActivityPlan {
   updatedAt: string;
 }
 
-function toLegacyActivityPlan(a: ApiActivityPlan): any {
+export function toLegacyActivityPlan(a: ApiActivityPlan): any {
   const d = a.date ? new Date(a.date) : null;
   const formattedDate = d ? `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}` : '';
   return {

@@ -143,6 +143,64 @@ export async function listOrdersPage(
   return { items: res.data.map(toLegacyOrder), total: res.meta.total, totalPages: res.meta.totalPages };
 }
 
+// ── Sales Dashboard / Sales Calculation ─────────────────────────────────────
+// "Sold" = Approved / Dispatched / Billed / Completed. Credit = anything not Cash.
+
+export interface SalesFilters {
+  fromDate?: string; // YYYY-MM-DD
+  toDate?: string;
+  createdById?: string; // office roles only; others always get their own
+  search?: string;
+}
+
+/** One page of sold orders, newest PO date first. */
+export async function listSoldOrdersPage(
+  params: SalesFilters & { saleType?: 'Cash' | 'Credit'; page: number; limit: number },
+): Promise<{ items: any[]; total: number; totalPages: number }> {
+  const { saleType, ...rest } = params;
+  const res = await apiClient.get<ListResponse>(
+    `/orders${toQueryString({
+      ...rest,
+      soldOnly: 'true',
+      saleType: saleType === 'Cash' ? 'Cash' : undefined,
+      notCash: saleType === 'Credit' ? 'true' : undefined,
+      sortBy: 'date',
+      sortOrder: 'desc',
+    })}`,
+  );
+  return { items: res.data.map(toLegacyOrder), total: res.meta.total, totalPages: res.meta.totalPages };
+}
+
+export interface SalesSummary {
+  totalSales: number;
+  cashSales: number;
+  creditSales: number;
+  orderCount: number;
+  totalCollection: number;
+  collectionCount: number;
+  oldestDate: string | null;
+  byDay: { date: string; amount: number }[];
+  byMonth: { month: string; amount: number }[]; // YYYY-MM
+  topProducts: { label: string; value: number }[];
+}
+
+export async function getSalesSummary(filters: SalesFilters): Promise<SalesSummary> {
+  const res = await apiClient.get<{ data: SalesSummary }>(`/orders/sales-summary${toQueryString(filters)}`);
+  return res.data;
+}
+
+export interface StaffSales { userId: string; orderCount: number; totalSales: number; cashSales: number; collectionCount: number; totalCollected: number }
+
+export async function getSalesByStaff(fromDate: string, toDate: string): Promise<StaffSales[]> {
+  const res = await apiClient.get<{ data: StaffSales[] }>(`/orders/sales-by-staff${toQueryString({ fromDate, toDate })}`);
+  return res.data;
+}
+
+export async function getSalesMonthly(fyStartYear: number, userId: string): Promise<{ month: string; sales: number; cash: number; credit: number; collection: number }[]> {
+  const res = await apiClient.get<{ data: any[] }>(`/orders/sales-monthly${toQueryString({ fyStartYear, userId })}`);
+  return res.data;
+}
+
 export interface OrderCounts {
   all: { count: number; amount: number };
   byStatus: Record<string, { count: number; amount: number }>;

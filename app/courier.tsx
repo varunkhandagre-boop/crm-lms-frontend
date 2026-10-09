@@ -13,9 +13,11 @@ import {
     StyleSheet,
     Text,
     TextInput,
+    ToastAndroid,
     TouchableOpacity,
     View
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 
 // 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
 import { useSaaSDB } from '../hooks/useSaaSDB';
@@ -117,6 +119,13 @@ export default function CourierScreen() {
       role === 'Store' || role === 'Store Keeper' || role === 'SuperAdmin';    
 
   const isStrictAdmin = role === 'Admin' || role === 'Manager' || role === 'SuperAdmin';
+
+  const copyDocket = async (docketNo?: string) => {
+      if (!docketNo) return;
+      await Clipboard.setStringAsync(docketNo);
+      if (Platform.OS === 'android') ToastAndroid.show(`Copied ${docketNo}`, ToastAndroid.SHORT);
+      else Alert.alert('Copied', docketNo);
+  };
 
   // --- BADGE COUNTS ---
   const { inwardPending, outwardPending } = pendingCounts;
@@ -511,7 +520,11 @@ export default function CourierScreen() {
             <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:12}}>
                 <View>
                     <Text style={styles.courierName}>{item.courierName}</Text>
-                    <Text style={styles.docketNo}>#{item.docketNo}</Text>
+                    {/* Tap the tracking number to copy it (paste it on the courier's website). */}
+                    <TouchableOpacity onPress={() => copyDocket(item.docketNo)} hitSlop={8} style={{flexDirection:'row', alignItems:'center'}}>
+                        <Text style={styles.docketNo}>#{item.docketNo}</Text>
+                        <Ionicons name="copy-outline" size={14} color="#3b5998" style={{marginLeft: 6}} />
+                    </TouchableOpacity>
                 </View>
                 <View style={[styles.typeBadge, isInward ? styles.inBadge : styles.outBadge]}>
                     <Text style={[styles.typeText, isInward ? {color:'#2e7d32'} : {color:'#c62828'}]}>{item.type?.toUpperCase()}</Text>
@@ -727,7 +740,9 @@ export default function CourierScreen() {
                               <Text style={styles.modalTitle}>Courier Details</Text>
                               <TouchableOpacity onPress={() => setModalVisible(false)}><Ionicons name="close-circle" size={28} color="#d32f2f" /></TouchableOpacity>
                           </View>
-                          <DetailRow label="Docket No" value={selectedCourier.docketNo} icon="barcode" />
+                          <TouchableOpacity onPress={() => copyDocket(selectedCourier.docketNo)}>
+                              <DetailRow label="Docket No (tap to copy)" value={selectedCourier.docketNo} icon="barcode" />
+                          </TouchableOpacity>
                           <DetailRow label="Service" value={selectedCourier.courierName} icon="cube" />
                           <DetailRow label="Type" value={selectedCourier.type} icon="swap-vertical" />
                           <DetailRow label="Date" value={selectedCourier.date} icon="calendar" />

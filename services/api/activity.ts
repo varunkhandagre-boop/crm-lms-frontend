@@ -1,3 +1,4 @@
+import { toLegacyActivityPlan } from './activityPlans';
 import { toLegacyAdvance } from './advances';
 import { apiClient } from './client';
 import { toLegacyCourier } from './couriers';
@@ -16,7 +17,7 @@ import { toLegacyTravelNote } from './travelNotes';
 
 export type ActivityModule =
   | 'orders' | 'payments' | 'dues' | 'couriers' | 'serviceCalls' | 'demos' | 'installations' | 'pms'
-  | 'salesVisits' | 'leads' | 'expenses' | 'advances' | 'travelNotes' | 'tasks';
+  | 'salesVisits' | 'leads' | 'expenses' | 'advances' | 'travelNotes' | 'tasks' | 'activityPlans';
 
 const MAPPERS: Record<ActivityModule, (r: any) => any> = {
   orders: toLegacyOrder,
@@ -33,6 +34,7 @@ const MAPPERS: Record<ActivityModule, (r: any) => any> = {
   advances: toLegacyAdvance,
   travelNotes: toLegacyTravelNote,
   tasks: toLegacyTask,
+  activityPlans: toLegacyActivityPlan,
 };
 
 export type ActivityLists = Record<ActivityModule, any[]>;

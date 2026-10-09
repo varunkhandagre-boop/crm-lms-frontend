@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
+    Alert,
     FlatList,
     Modal,
     RefreshControl,
@@ -18,8 +19,9 @@ import {
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 orders + payment collections now come from the new Postgres backend
-import { listOrders } from '../services/api/orders';
-import { listPaymentCollections } from '../services/api/paymentCollections';
+import { getSalesByStaff, getSalesMonthly, listSoldOrdersPage, StaffSales } from '../services/api/orders';
+import { listPaymentCollectionsPage } from '../services/api/paymentCollections';
+import { localYmd } from '../utils/periodRange';
 import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -43,8 +45,6 @@ export default function SalesTeamReport() {
 
     const { isDbLoading } = useSaaSDB();
 
-    // orderList/paymentList now come from useCachedList below (cache-first,
-    // sharing keys with orders.tsx / payment_collection.tsx)
     // userList/usersLoading now come from useCachedList below (cache-first, shared 'team_members' key)
 
     const [viewMode, setViewMode] = useState<'Month' | 'FY'>('Month');
@@ -78,30 +78,38 @@ export default function SalesTeamReport() {
         setVisibleCount(20);
     }, [viewMode, currentDate, selectedUserId]);
 
-    // 🔥 ORDERS + PAYMENT COLLECTIONS — cache-first, deliberately sharing the
-    // SAME cache keys as app/orders.tsx and app/payment_collection.tsx (and
-    // app/sales_analysis.tsx), so visiting any of these screens warms the
-    // cache for the others. See hooks/useCachedList.ts.
-    const ordersCacheKey = buildCacheKey('orders', activeUser?.companyId);
-    const {
-        data: orderList,
-        loading: ordersLoading,
-        refresh: refreshOrders,
-    } = useCachedList({
-        cacheKey: ordersCacheKey,
-        enabled: !!activeUser?.companyId,
-        fetcher: listOrders,
-    });
-    const paymentsCacheKey = buildCacheKey('payment_collections', activeUser?.companyId);
-    const {
-        data: paymentList,
-        loading: paymentsLoading,
-        refresh: refreshPayments,
-    } = useCachedList({
-        cacheKey: paymentsCacheKey,
-        enabled: !!activeUser?.companyId,
-        fetcher: listPaymentCollections,
-    });
+    // 🔥 Per-person totals (orders, cash, collections) summed on the server for
+    // the month / FY — was: every order and receipt of the company downloaded.
+    const periodFromTo = () => {
+        if (viewMode === 'Month') {
+            return {
+                fromDate: localYmd(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1)),
+                toDate: localYmd(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0)),
+            };
+        }
+        const m = currentDate.getMonth();
+        const fy = m >= 3 ? currentDate.getFullYear() : currentDate.getFullYear() - 1;
+        return { fromDate: `${fy}-04-01`, toDate: `${fy + 1}-03-31` };
+    };
+    const { fromDate: periodFrom, toDate: periodTo } = periodFromTo();
+    const [staffStats, setStaffStats] = useState<StaffSales[]>([]);
+    const [statsLoading, setStatsLoading] = useState(true);
+    const statsReq = useRef(0);
+    const loadStats = useCallback(async () => {
+        if (!activeUser?.companyId) return;
+        const id = ++statsReq.current;
+        setStatsLoading(true);
+        try {
+            const rows = await getSalesByStaff(periodFrom, periodTo);
+            if (id === statsReq.current) setStaffStats(rows);
+        } catch (e) {
+            // keep the last numbers on a transient error
+        } finally {
+            if (id === statsReq.current) setStatsLoading(false);
+        }
+    }, [periodFrom, periodTo, activeUser?.companyId]);
+    useEffect(() => { loadStats(); }, [loadStats]);
+
     // 🔥 Users — cache-first, shares the SAME 'team_members' cache key as
     // manage_team.tsx/employee_timeline.tsx. Declared before loadingData
     // below, which reads usersLoading.
@@ -110,11 +118,11 @@ export default function SalesTeamReport() {
         enabled: !!activeUser?.companyId,
         fetcher: fetchTeamMembers,
     });
-    const loadingData = ordersLoading || paymentsLoading || usersLoading;
+    const loadingData = statsLoading || usersLoading;
     const [reportRefreshing, setReportRefreshing] = useState(false);
     const onRefresh = async () => {
         setReportRefreshing(true);
-        await Promise.all([refreshOrders(), refreshPayments()]);
+        await loadStats();
         setReportRefreshing(false);
     };
 
@@ -164,55 +172,11 @@ export default function SalesTeamReport() {
         return Math.floor(incentive);
     };
 
-    // 🔥 PERFORMANCE FIX: the previous version re-scanned the *entire*
-    // orderList/paymentList once per eligible staff member (O(staff ×
-    // orders) — e.g. 20 staff × 5,000 orders = 100,000 date-parses+compares,
-    // every time this ran). This version walks orders/payments exactly once
-    // each, grouping them into per-staff buckets first (O(orders +
-    // payments)), then each staff member does an O(1) map lookup instead of
-    // a fresh full-list scan. Also moved off a useEffect+setState pair and
-    // onto useMemo, so React skips recomputing entirely when none of the
-    // dependencies actually changed (e.g. a re-render triggered by something
-    // unrelated).
+    // Each card's numbers come from the server totals (staffStats) — one lookup per person.
     const incentiveData = useMemo(() => {
         if (loadingData || userList.length === 0) return [] as any[];
 
-        const targetMonth = currentDate.getMonth();
-        const targetYear = currentDate.getFullYear();
-
-        const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-        const fyStartDateStr = `${fyStartYear}-04-01`;
-        const fyEndDateStr = `${fyStartYear + 1}-03-31`;
-
-        const inRange = (dateStr: string) => {
-            if (!dateStr || dateStr === "1970-01-01") return false;
-            if (viewMode === 'Month') {
-                const d = new Date(dateStr);
-                return d.getMonth() === targetMonth && d.getFullYear() === targetYear;
-            }
-            return dateStr >= fyStartDateStr && dateStr <= fyEndDateStr;
-        };
-        const isCountedOrderStatus = (status: string) =>
-            status === 'Approved' || status === 'Completed' || status === 'Dispatched' || status === 'Billed';
-
-        // Single pass over orders/payments — bucket by senderId once.
-        const ordersByStaff = new Map<string, any[]>();
-        for (const order of orderList) {
-            if (!inRange(getValidDateStr(order)) || !isCountedOrderStatus(order.status)) continue;
-            const key = order.senderId;
-            if (!key) continue;
-            if (!ordersByStaff.has(key)) ordersByStaff.set(key, []);
-            ordersByStaff.get(key)!.push(order);
-        }
-        const paymentsByStaff = new Map<string, any[]>();
-        for (const payment of paymentList) {
-            if (!inRange(getValidDateStr(payment))) continue;
-            const key = payment.senderId;
-            if (!key) continue;
-            if (!paymentsByStaff.has(key)) paymentsByStaff.set(key, []);
-            paymentsByStaff.get(key)!.push(payment);
-        }
-
+        const statsById = new Map(staffStats.map((s) => [s.userId, s]));
         let eligibleStaff = [];
         if (isAdmin) {
             // Anyone with a management-style role (for visibility even at
@@ -223,7 +187,7 @@ export default function SalesTeamReport() {
             eligibleStaff = userList.filter((u: any) => {
                 const r = (u.role || '').toLowerCase();
                 const hasManagementRole = r.includes('manager') || r.includes('admin') || r.includes('account') || r.includes('hr');
-                const hasSalesActivity = ordersByStaff.has(u.id) || paymentsByStaff.has(u.id);
+                const hasSalesActivity = statsById.has(u.id);
                 return hasManagementRole || hasSalesActivity;
             });
         } else {
@@ -253,19 +217,11 @@ export default function SalesTeamReport() {
             // .id and .uid populated (legacy dual-id records) needs both
             // buckets merged, matching the original filter's `senderId === u.id
             // || senderId === u.uid` behavior exactly.
-            const userOrders = [
-                ...(ordersByStaff.get(u.id) || []),
-                ...(u.uid && u.uid !== u.id ? (ordersByStaff.get(u.uid) || []) : []),
-            ];
-            const userPayments = [
-                ...(paymentsByStaff.get(u.id) || []),
-                ...(u.uid && u.uid !== u.id ? (paymentsByStaff.get(u.uid) || []) : []),
-            ];
-
-            const totalSales = userOrders.reduce((sum: number, o: any) => sum + Number(o.amount || 0), 0);
-            const cashSales = userOrders.filter((o: any) => o.saleType === 'Cash').reduce((sum: number, o: any) => sum + Number(o.amount || 0), 0);
+            const s = statsById.get(u.id);
+            const totalSales = s?.totalSales ?? 0;
+            const cashSales = s?.cashSales ?? 0;
             const creditSales = totalSales - cashSales;
-            const totalCollected = userPayments.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
+            const totalCollected = s?.totalCollected ?? 0;
             const incentive = getIncentiveAmount(totalSales, effectiveTarget, effectiveTier2);
 
             return {
@@ -274,11 +230,11 @@ export default function SalesTeamReport() {
                 role: u.role,
                 target: effectiveTarget,
                 isCustomTarget: !!(u.monthlyTarget && Number(u.monthlyTarget) > 0),
-                orderCount: userOrders.length,
+                orderCount: s?.orderCount ?? 0,
                 totalSales: totalSales,
                 cashSales: cashSales,
                 creditSales: creditSales,
-                collectionCount: userPayments.length,
+                collectionCount: s?.collectionCount ?? 0,
                 totalCollected: totalCollected,
                 incentive: incentive,
                 percentage: effectiveTarget > 0 ? (totalSales / effectiveTarget) * 100 : 0
@@ -286,85 +242,41 @@ export default function SalesTeamReport() {
         });
 
         return processedData.sort((a: any, b: any) => b.totalSales - a.totalSales);
-    }, [rules, orderList, paymentList, userList, viewMode, currentDate, selectedUserId, loadingData, isAdmin, activeUser]);
+    }, [rules, staffStats, userList, viewMode, selectedUserId, loadingData, isAdmin, activeUser]);
 
-    const generateMonthlyStats = (u: any) => {
-        const fyMonths = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
-
-        const targetMonth = currentDate.getMonth();
-        const targetYear = currentDate.getFullYear();
-        const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-
-        const stats = fyMonths.map((m, index) => {
-            const actualYear = index > 8 ? fyStartYear + 1 : fyStartYear;
-            const monthIndex = index > 8 ? index - 9 : index + 3;
-
-            const monthlyOrders = orderList.filter((o: any) => {
-                const dStr = getValidDateStr(o);
-                const d = new Date(dStr);
-                return d.getMonth() === monthIndex && d.getFullYear() === actualYear &&
-                    (o.senderId === u.id || o.senderId === u.uid) &&
-                    (o.status === 'Approved' || o.status === 'Completed' || o.status === 'Dispatched' || o.status === 'Billed');
-            });
-
-            const monthlySales = monthlyOrders.reduce((sum: number, x: any) => sum + Number(x.amount || 0), 0);
-            const monthlyCash = monthlyOrders.filter((o: any) => o.saleType === 'Cash').reduce((sum: number, x: any) => sum + Number(x.amount || 0), 0);
-
-            const monthlyColl = paymentList.filter((p: any) => {
-                const dStr = getValidDateStr(p);
-                const d = new Date(dStr);
-                return d.getMonth() === monthIndex && d.getFullYear() === actualYear &&
-                    (p.senderId === u.id || p.senderId === u.uid);
-            }).reduce((sum: number, x: any) => sum + Number(x.amount || 0), 0);
-
-            return { month: m, sales: monthlySales, cash: monthlyCash, credit: monthlySales - monthlyCash, collection: monthlyColl };
-        });
-
-        setMonthlyStats(stats);
-    };
-
-    const handleCardClick = (item: any) => {
+    // One person's detail: 12 FY months summed on the server, plus their orders
+    // and receipts for the period (fetched when the card is opened).
+    const handleCardClick = async (item: any) => {
         setSelectedStaff(item);
-
-        const targetMonth = currentDate.getMonth();
-        const targetYear = currentDate.getFullYear();
-        const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-        const fyStartDateStr = `${fyStartYear}-04-01`;
-        const fyEndDateStr = `${fyStartYear + 1}-03-31`;
-
-        const allUserOrders = orderList.filter((o: any) => {
-            const isUser = (o.senderId === item.id || o.senderId === item.uid);
-            const isStatus = (o.status === 'Approved' || o.status === 'Completed' || o.status === 'Dispatched' || o.status === 'Billed');
-            if (!isUser || !isStatus) return false;
-
-            const dStr = getValidDateStr(o);
-            if (viewMode === 'Month') {
-                const d = new Date(dStr);
-                return d.getMonth() === targetMonth && d.getFullYear() === targetYear;
-            } else {
-                return dStr >= fyStartDateStr && dStr <= fyEndDateStr;
-            }
-        });
-
-        const allUserPayments = paymentList.filter((p: any) => {
-            const isUser = (p.senderId === item.id || p.senderId === item.uid);
-            if (!isUser) return false;
-
-            const dStr = getValidDateStr(p);
-            if (viewMode === 'Month') {
-                const d = new Date(dStr);
-                return d.getMonth() === targetMonth && d.getFullYear() === targetYear;
-            } else {
-                return dStr >= fyStartDateStr && dStr <= fyEndDateStr;
-            }
-        });
-
-        setStaffOrders(allUserOrders.sort((a: any, b: any) => getValidDateStr(b).localeCompare(getValidDateStr(a))));
-        setStaffPayments(allUserPayments.sort((a: any, b: any) => getValidDateStr(b).localeCompare(getValidDateStr(a))));
-
-        generateMonthlyStats(item);
+        setStaffOrders([]);
+        setStaffPayments([]);
+        setMonthlyStats([]);
         setDetailTab('Monthly');
         setDetailModalVisible(true);
+        const m = currentDate.getMonth();
+        const fy = m >= 3 ? currentDate.getFullYear() : currentDate.getFullYear() - 1;
+        const range = { fromDate: periodFrom, toDate: periodTo, createdById: item.id };
+        const fetchAll = async (fetchPage: (p: any) => Promise<{ items: any[]; totalPages: number }>) => {
+            const rows: any[] = [];
+            for (let page = 1; page <= 20; page++) {
+                const r = await fetchPage({ ...range, page, limit: 100 });
+                rows.push(...r.items);
+                if (page >= r.totalPages) break;
+            }
+            return rows;
+        };
+        try {
+            const [monthly, orders, payments] = await Promise.all([
+                getSalesMonthly(fy, item.id),
+                fetchAll(listSoldOrdersPage),
+                fetchAll(listPaymentCollectionsPage),
+            ]);
+            setMonthlyStats(monthly);
+            setStaffOrders(orders);
+            setStaffPayments(payments);
+        } catch (e: any) {
+            Alert.alert('Error', e?.message || 'Could not load the details.');
+        }
     };
 
     const dropdownList = [
