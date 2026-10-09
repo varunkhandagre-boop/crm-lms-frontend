@@ -15,7 +15,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker, PROVIDER_GOOGLE } from '../components/maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useServerPagedList } from '../hooks/useServerPagedList';
 import { getNearbyCities, getNearbyLeadsPage, NearbyLead } from '../services/api/leads';

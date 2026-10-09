@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { saveAndShareFile } from '../utils/saveFile';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -536,12 +537,7 @@ const [selectedDate, setSelectedDate] = useState(new Date());
           });
           const safeName = (empUser?.name || 'Employee').replace(/[^a-z0-9]/gi, '_').toLowerCase();
           const fileName = `${safeName}_360_Report_${Date.now()}.csv`;
-          const fs = FileSystem as any;
-          const fileUri = `${fs.cacheDirectory}${fileName}`;
-          await FileSystem.writeAsStringAsync(fileUri, csvString, { encoding: 'utf8' });
-          if (await Sharing.isAvailableAsync()) {
-              await Sharing.shareAsync(fileUri, { mimeType: 'text/csv', dialogTitle: `Export ${safeName} Data`, UTI: 'public.comma-separated-values-text' });
-          } else Alert.alert("Error", "Sharing is not supported.");
+          await saveAndShareFile({ content: csvString, fileName, mimeType: 'text/csv', dialogTitle: `Export ${safeName} Data`, UTI: 'public.comma-separated-values-text' });
       } catch (error: any) { Alert.alert("Report Error", "Could not generate report."); }
   };
 
@@ -686,10 +682,7 @@ const [selectedDate, setSelectedDate] = useState(new Date());
           const fyLabel = `FY${selectedYear.toString().slice(-2)}-${(selectedYear+1).toString().slice(-2)}`;
           const fileName = `Report_${selectedUserName}_${timeLabel}_${fyLabel}.xlsx`;
           const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-          const uri = (FileSystem as any).cacheDirectory + fileName;
-
-          await FileSystem.writeAsStringAsync(uri, wbout, { encoding: 'base64' });
-          await Sharing.shareAsync(uri, { mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle: 'Download Report Data' });
+          await saveAndShareFile({ content: wbout, base64: true, fileName, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle: 'Download Report Data' });
       } catch (error: any) { Alert.alert("Error", error.message); } 
       finally { setLoading(false); setProgress(''); }
   };

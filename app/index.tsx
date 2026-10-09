@@ -209,7 +209,8 @@ const [branding, setBranding] = useState({
 
   useEffect(() => {
       const checkOnboarding = async () => {
-          if (currentUser) { setCheckedOnboarding(true); return; }
+          // The intro slides are for the phone app; the web version goes straight to login.
+          if (currentUser || Platform.OS === 'web') { setCheckedOnboarding(true); return; }
           try {
               const seen = await AsyncStorage.getItem('hasSeenOnboarding');
               if (seen !== 'true') {

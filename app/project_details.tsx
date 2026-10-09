@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { saveAndShareFile } from '../utils/saveFile';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -169,11 +170,7 @@ export default function ProjectDetailsScreen() {
           });
 
           const fileName = `${project.name.replace(/\s+/g, '_')}_Report.csv`;
-          const dir = (FileSystem as any).cacheDirectory;
-          const fileUri = dir + fileName;
-
-          await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: 'utf8' });
-          if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(fileUri);
+          await saveAndShareFile({ content: csvContent, fileName, mimeType: 'text/csv' });
       } catch (error: any) {
           Alert.alert("Note", "File generated but sharing failed.");
       }

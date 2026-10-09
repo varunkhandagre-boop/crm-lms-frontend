@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { Platform } from 'react-native';
 
 // Builds a PDF from HTML and opens the share sheet.
 // expo-print saves into its own cache folder, which Expo Go (SDK 57) won't let
@@ -13,6 +14,11 @@ export async function sharePdfFromHtml(
   dialogTitle?: string,
   pageSize?: { width?: number; height?: number },
 ): Promise<void> {
+  // Web: open the browser's print window — choose "Save as PDF" there.
+  if (Platform.OS === 'web') {
+    await Print.printAsync({ html });
+    return;
+  }
   const { uri, base64 } = await Print.printToFileAsync({ html, base64: true, ...pageSize });
   const safeName = fileName.replace(/[^\w.-]+/g, '_').replace(/\.pdf$/i, '') + '.pdf';
   const target = `${FileSystem.cacheDirectory}${safeName}`;

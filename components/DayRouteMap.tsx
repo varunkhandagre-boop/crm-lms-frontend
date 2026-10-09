@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from './maps';
 import { DayPoint, DayPointKind, DayRoute, fetchDayRoute, fetchLatestPoints, LatestPoint } from '../services/api/locationLogs';
 
 const KIND_STYLE: Record<DayPointKind, { label: string; color: string; icon: keyof typeof Ionicons.glyphMap }> = {

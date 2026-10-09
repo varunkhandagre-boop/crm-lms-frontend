@@ -89,6 +89,7 @@ const GUIDE_SECTIONS = [
             'Go to Sidebar → Admin Control → Users tab.',
             'Tap on the employee whose details you want to change.',
             'From here you can change their Role, Monthly Sales Target, Leave Balance, Mobile Number, and other details.',
+            'For a Field User choose the Designation — "Sales Executive" or "Service Engineer". It decides their screens and the title on their profile and visiting card. They should log out and log in once after it changes.',
             'Also here: "Visits / day" and "Visits / month" targets, and "Weekly off & shift" (company default or their own schedule). Tap "📊 360" on the card to see everything about the employee.',
             'Tap Save after making changes — the employee will see updated details on their next app open.',
             'To reset or change their password, use the edit option and enter a new password.',
@@ -103,6 +104,7 @@ const GUIDE_SECTIONS = [
             'Select any role (Sales Executive, Service Engineer, Accountant, Store Keeper, etc.) to control what screens and features that role can access.',
             'Toggle any module ON or OFF — for example, hide "Payment Dues" from Sales team, or show "Orders" to Accountants.',
             'You can also set permissions for individual employees — user-specific settings override role settings.',
+            'Activity Plan and Tasks (bottom bar) are ON for everyone until you switch them off here.',
             'Employees need to close and reopen the app for permission changes to take effect.',
         ],
     },
@@ -215,6 +217,7 @@ const GUIDE_SECTIONS = [
             'To find a machine: enter the Serial Number in the search bar — all history (installation, service, PMS) appears.',
             'To find a client: tap the "Organization" tab, then type the organization/hospital name in the search bar.',
             'The client\'s full details appear — all orders, payments, installations, service calls, and PMS reports linked to that organization.',
+            'Every employee can see a machine\'s full installation, service and PMS history (so engineers know the past before a call). Order, payment and due amounts are shown only to Admin, Manager and Accounts.',
             'This is the fastest way to get a complete picture of any client or machine.',
         ],
     },
@@ -339,6 +342,7 @@ const GUIDE_SECTIONS = [
             'Go to "Courier" under HR & Operations.',
             'Add sender, receiver, and courier partner details.',
             'Track the status until it is marked delivered.',
+            'Tap the docket / tracking number to copy it, then paste it on the courier company\'s website to track the parcel.',
         ],
     },
     {
@@ -360,9 +364,10 @@ const GUIDE_SECTIONS = [
             'Users Tab: Add, edit, or disable employee accounts. Tap "Select Multiple" to deactivate several employees at once.',
             'Permissions Tab: Control what each role or employee can see in the app.',
             'Holidays Tab: Manage the company holiday list (holidays are skipped by attendance alerts).',
-            'Live Map Tab: See where your field team was on a selected day.',
+            'Live Map Tab: See where your field team was on a selected day. Approx. km skips GPS points that jump impossibly far (the line above the map says how many were ignored).',
             'History Tab: See a log of who made sensitive changes (salary edits, deletions, permission changes) and when.',
             'Alerts Tab (Admin only): switch each daily alert on/off and choose its time.',
+            'Setup Tab: all Excel uploads in one place — Company Profile, Employees, Products and Holidays. A new company can fill everything from here.',
             'Changes take effect immediately — employee may need to reopen the app.',
         ],
     },
@@ -448,13 +453,14 @@ const GUIDE_SECTIONS = [
     {
         icon: 'cloud-upload',
         color: '#00897b',
-        title: 'Bulk Import (Products / Employees / Holidays)',
+        title: 'Excel Import — Company, Employees, Products, Holidays',
         steps: [
-            'Products: open Product Master, tap the green cloud-upload icon in the header.',
-            'Employees: open Admin Control → Users tab, tap the green floating cloud-upload button.',
-            'Holidays: open Admin Control → Holidays tab, tap the green floating cloud-upload button.',
-            'Tap "Download Template" to get a ready-made Excel sheet with the correct columns, fill it in, then tap "Choose Excel File" to upload it back.',
-            'Review the preview screen before confirming — it shows which rows are new and which already exist.',
+            'Open Admin Control → Setup. All four Excel uploads are there (Products, Employees and Holidays also keep their own buttons in Product Master and Admin Control).',
+            'Company Profile: tap "Download Company Sheet" — it lists every detail (name, address, GST, contact, UPI, both bank accounts) with what is saved now. Fill the "Value" column and upload; you see each change before saving. Empty cells keep the old value. Logo, signature and QR code are added in Company Profile.',
+            'Employees: the template has every HR column — role, joining date, targets, salary, yearly leaves, personal contact, blood group, address, bank, IFSC, Aadhaar, PAN. Only Name and Email are required. Role: Admin, Manager, Account, HR, Store, Sales or Service.',
+            'To fill missing details for people already in the app: tap "Download Current Employees", fill the blanks, upload it, and turn on "Fill details for existing employees". Only filled cells are saved — name, role, email and password never change from Excel.',
+            'Dates can be typed as 2026-01-15 or 15/01/2026, or be normal Excel dates. Amounts can include ₹ and commas.',
+            'Review the preview screen before confirming — it shows which rows are new, which already exist and which have a problem.',
             'New employees created this way get the same default starting password, shown on screen after import.',
         ],
     },
@@ -561,9 +567,31 @@ const GUIDE_SECTIONS = [
         color: '#5d4037',
         title: 'Photos — PO, Service, Expense Bill, Installation, Cheque',
         steps: [
-            'Photos are compressed on the phone (about 200–300 KB) and uploaded when you save: Order PO (photo or PDF), Service Call photo, Expense bill photo, Installation photo (one photo for all machines of the report) and Payment cheque photo (when mode is Cheque).',
+            'Photos are compressed on the phone (about 100–200 KB) and uploaded when you save: Order PO (photo or PDF), Service Call photo, Expense bill photo, Installation photo (one photo for all machines of the report) and Payment cheque photo (when mode is Cheque).',
             'Open the saved record to view the photo full size, Replace it or Delete it (deleting also removes the file from storage).',
             'If an upload fails, the record is still saved — open it and add the photo again.',
+        ],
+    },
+    {
+        icon: 'receipt',
+        color: '#f44336',
+        title: 'Expenses — Claims, Day Out & Purchase Approval',
+        steps: [
+            'Expenses has four tabs: All (claims + Day Out expenses), Claims, Day Out and Requests. The boxes on top show Outstanding (claims still to be paid), Day Out total and Total Spent.',
+            'Day Out expenses (DA / Hotel / Misc entered at Day Out) appear automatically with a purple DAY OUT tag. They are paid with salary, so nobody needs to approve them here.',
+            'Already spent money on something else? Tap "Add Claim", add the bill photo and submit — Admin / Accounts approve it and later "Clear Due" pays it.',
+            'Before an important purchase, tap the orange 🛒 button: enter the estimated amount and why it is needed (a quotation photo is optional). Admin, Manager and Accounts get a notification.',
+            'After approval, buy it, open the request and tap "Add Bill / Claim". If the bill is within the approved amount the claim is approved straight away; if it is more, it waits for approval again.',
+            'Admin / Manager / Accounts can set a pre-approval limit with the ⚙️ button. Claims above it show a warning suggesting "Ask Approval" first.',
+        ],
+    },
+    {
+        icon: 'stats-chart',
+        color: '#1565c0',
+        title: 'Attendance & Leave — Tap a Box to Filter',
+        steps: [
+            'Attendance Report: tap Present, Absent, Leave, Short, Expense or Holiday — the list below shows only those days. Tap again (or ✕) to see everything.',
+            'Leave screen: tap Leave, Absent, Short or the earned (+) count — or CL / SL / EL / Comp Off / LWP when the Leave Policy is on — to see only those rows for the financial year.',
         ],
     },
     {
@@ -982,6 +1010,66 @@ const FAQS = [
         a: `In Expo Go the map may stay blank; the Play Store app uses the company's Google Maps key. Check that location is on and the internet is working.`,
     },
     {
+        category: 'Expenses',
+        q: 'Where can I see my Day Out expenses?',
+        a: `Open Expenses → "Day Out" (or "All"). Every day with DA / Hotel / Misc entered at Day Out is listed with a purple DAY OUT tag. These are paid with your salary, so they never need approval. To change one, edit that day's Day Out entry.`,
+    },
+    {
+        category: 'Expenses',
+        q: 'How do I ask approval before buying something?',
+        a: `In Expenses tap the orange 🛒 button, enter the estimated amount and the reason, and send it. After it is approved, buy it, open the request (Requests tab) and tap "Add Bill / Claim".`,
+    },
+    {
+        category: 'Expenses',
+        q: 'Why was my claim approved automatically?',
+        a: `It was made against an approved purchase request and the bill was within the approved amount. If the bill is more than approved, the claim waits for approval as usual.`,
+    },
+    {
+        category: 'Expenses',
+        q: 'The app says my expense needs approval first',
+        a: `Your company has set a pre-approval limit. For purchases above it, tap "Ask Approval" so your manager approves before you buy. You can still choose "Submit Claim Anyway" — it then waits for normal approval.`,
+    },
+    {
+        category: 'Admin Tools',
+        q: 'How do I fill missing details for all employees at once?',
+        a: `Admin Control → Setup → Employees → "Download Current Employees". Fill the empty columns in Excel, upload the file and turn on "Fill details for existing employees". Only the cells you filled are saved.`,
+    },
+    {
+        category: 'Admin Tools',
+        q: 'Joining dates from Excel are wrong or empty',
+        a: `Type dates as 2026-01-15 or 15/01/2026, or use a normal Excel date cell. If a date cannot be read, the preview lists it and leaves that date empty.`,
+    },
+    {
+        category: 'Admin Tools',
+        q: 'Can I fill the Company Profile from Excel?',
+        a: `Yes. Admin Control → Setup → Company Profile → "Download Company Sheet", fill the Value column and upload it. You see every change before saving. Logo, signature, QR code and office location are set in Company Profile itself.`,
+    },
+    {
+        category: 'Users & Access',
+        q: 'My visiting card / profile shows the wrong designation',
+        a: `Ask your Admin to open Admin Control → Users → your name and choose the right Designation (Sales Executive or Service Engineer), then log out and log in once.`,
+    },
+    {
+        category: 'Users & Access',
+        q: 'Activity Plan or Tasks button is missing from the bottom bar',
+        a: `They are on for everyone unless an Admin switched them off. Ask your Admin to check Admin Control → Permissions for your role (or for you), then close and reopen the app.`,
+    },
+    {
+        category: 'Leads & Sales',
+        q: 'A hospital / client is not in the list when I add a visit, lead or order',
+        a: `Type at least 2 letters of its name, city or mobile in the picker's search box — the app also searches all saved organizations on the server. If it still does not appear, add it as a new organization first.`,
+    },
+    {
+        category: 'Admin Tools',
+        q: 'Why does the Live Map ignore some points or show fewer km?',
+        a: `Sometimes a phone reports an old or rough location that jumps far away for a moment. Such impossible jumps are left out of the km and the route line, and the note above the map tells how many were ignored. Work records with such a location still appear in the list, marked "GPS location looked wrong".`,
+    },
+    {
+        category: 'General',
+        q: 'How do I copy a courier tracking number?',
+        a: `In Courier, tap the docket / tracking number — it is copied. Paste it on the courier company's website.`,
+    },
+    {
         category: 'Orders & Payments',
         q: 'How do I add or change the PO / cheque / bill photo after saving?',
         a: `Open the saved order, payment, expense, service call or installation. In its details tap Add / Replace / Delete under the photo — it saves immediately.`,
@@ -1010,6 +1098,7 @@ const CATEGORY_ICONS: Record<string, any> = {
     'Service & Spares': 'construct',
     Leaves: 'calendar-clear',
     'Alerts & Notifications': 'notifications',
+    Expenses: 'receipt',
 };
 
 type TabKey = 'contact' | 'guide' | 'faq';

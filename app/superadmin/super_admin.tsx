@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { saveAndShareFile } from '../../utils/saveFile';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
@@ -188,13 +189,7 @@ export default function SuperAdminDashboard() {
                 automationOnly: automationOnly || undefined,
             });
             const fileName = `Companies_Export_${new Date().toISOString().slice(0, 10)}.csv`;
-            const fileUri = FileSystem.documentDirectory + fileName;
-            await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: FileSystem.EncodingType.UTF8 });
-            if (await Sharing.isAvailableAsync()) {
-                await Sharing.shareAsync(fileUri, { mimeType: 'text/csv', dialogTitle: 'Export Companies List', UTI: 'public.comma-separated-values-text' });
-            } else {
-                Alert.alert('Saved', `File saved at: ${fileUri}`);
-            }
+            await saveAndShareFile({ content: csvContent, fileName, mimeType: 'text/csv', dialogTitle: 'Export Companies List', UTI: 'public.comma-separated-values-text' });
         } catch (e: any) {
             Alert.alert('Error', e.message || 'Could not export companies list.');
         }

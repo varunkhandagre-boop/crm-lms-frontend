@@ -532,9 +532,14 @@ export default function DayInScreen() {
     };
 
     const handleMainButton = () => {
+        // Day In / Day Out records the phone's GPS — a desktop browser only knows a rough network location.
+        if (Platform.OS === 'web') {
+            Alert.alert("Use the phone app", "Day In and Day Out can be marked only from the mobile app. The web version shows the attendance history.");
+            return;
+        }
         if (status === 'Out') handleDayIn();
         else if (status === 'In') setExpenseModalVisible(true);
-        else Alert.alert("Done", "Aaj ka kaam ho gaya hai.");
+        else Alert.alert("Done", "Today's Day In and Day Out are already marked.");
     };
 
     // 🔥 6. Day-Out — Phase 7: PATCHes /api/v1/attendance/:id via dayOutApi()

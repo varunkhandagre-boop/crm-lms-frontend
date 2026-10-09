@@ -52,6 +52,15 @@ export default function AddExpenseScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const expenseTypes = ["Travel", "Food", "Lodging/Hotel", "Fuel", "Mobile/Internet", "Office Stationary", "Equipment / Tools", "Misc"];
 
+  const pickRequest = (r: any | null) => {
+      setLinkedRequest(r);
+      setShowRequestPicker(false);
+      if (r) {
+          setType(expenseTypes.includes(r.type) ? r.type : r.type || 'Misc');
+          setAmount(String(r.amount));
+      }
+  };
+
   useEffect(() => {
       getExpenseSettings().then((s) => setApprovalLimit(s.approvalLimit)).catch(() => {});
       if (params.mode === 'request') return;
@@ -64,15 +73,6 @@ export default function AddExpenseScreen() {
           .catch(() => {});
       // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const pickRequest = (r: any | null) => {
-      setLinkedRequest(r);
-      setShowRequestPicker(false);
-      if (r) {
-          setType(expenseTypes.includes(r.type) ? r.type : r.type || 'Misc');
-          setAmount(String(r.amount));
-      }
-  };
 
   const formatDate = (rawDate: Date) => {
     let day = rawDate.getDate().toString().padStart(2, '0');

@@ -1,7 +1,6 @@
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
 import * as XLSX from 'xlsx';
 import { readFileBase64 } from './readFileBase64';
+import { saveAndShareFile } from './saveFile';
 
 /** First sheet of an .xlsx / .xls file as rows keyed by the header text (headers trimmed). */
 export async function readExcelRows(fileUri: string): Promise<Record<string, any>[]> {
@@ -24,11 +23,9 @@ export async function shareExcel(rows: Record<string, any>[], columns: string[],
     ws['!cols'] = columns.map((c) => ({ wch: Math.max(12, c.length + 2) }));
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
     const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-    const uri = FileSystem.cacheDirectory + fileName;
-    await FileSystem.writeAsStringAsync(uri, wbout, { encoding: FileSystem.EncodingType.Base64 });
-    await Sharing.shareAsync(uri, {
+    await saveAndShareFile({
+        content: wbout, base64: true, fileName, dialogTitle: fileName,
         mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        dialogTitle: fileName,
     });
 }
 

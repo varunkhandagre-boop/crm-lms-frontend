@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { saveAndShareFile } from '../utils/saveFile';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
@@ -64,7 +65,10 @@ export default function DownloadDetailsScreen() {
         advances: false,
         travel: false,
         leaves: false,
-        projects: false
+        projects: false,
+        visits: false,
+        activity: false,
+        dues: false,
     });
 
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -259,6 +263,30 @@ export default function DownloadDetailsScreen() {
                 } catch (e) { console.log("Leaves fetch error:", e); }
             }
 
+            if (modules.visits) {
+                setProgress("Fetching Visits...");
+                try {
+                    const data = await act('salesVisits');
+                    if (addSheetIfData(wb, data, "Visits")) hasData = true;
+                } catch (e) { console.log("Visits fetch error:", e); }
+            }
+
+            if (modules.activity) {
+                setProgress("Fetching Activity Plans...");
+                try {
+                    const data = await act('activityPlans');
+                    if (addSheetIfData(wb, data, "Activity Plans")) hasData = true;
+                } catch (e) { console.log("Activity plans fetch error:", e); }
+            }
+
+            if (modules.dues) {
+                setProgress("Fetching Pending Dues...");
+                try {
+                    const data = await act('dues');
+                    if (addSheetIfData(wb, data, "Dues")) hasData = true;
+                } catch (e) { console.log("Dues fetch error:", e); }
+            }
+
             if (modules.projects) {
                 setProgress("Fetching Projects...");
                 try {
@@ -280,14 +308,7 @@ export default function DownloadDetailsScreen() {
             const fileName = `Report_${timeLabel}_${selectedYear}.xlsx`;
 
             const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-            const uri = FileSystem.cacheDirectory + fileName;
-
-            await FileSystem.writeAsStringAsync(uri, wbout, { encoding: FileSystem.EncodingType.Base64 });
-
-            await Sharing.shareAsync(uri, {
-                mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                dialogTitle: `Download Report: ${fileName}`
-            });
+            await saveAndShareFile({ content: wbout, base64: true, fileName, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle: `Download Report: ${fileName}` });
 
         } catch (error: any) {
             Alert.alert("Error", error.message);
@@ -385,7 +406,14 @@ export default function DownloadDetailsScreen() {
                         <View style={styles.col}><ToggleRow label="Tasks" field="tasks" /></View>
                         <View style={styles.col}><ToggleRow label="Advances" field="advances" /></View>
                     </View>
-                    <View style={styles.grid}><View style={styles.col}><ToggleRow label="Projects" field="projects" /></View></View>
+                    <View style={styles.grid}>
+                        <View style={styles.col}><ToggleRow label="Projects" field="projects" /></View>
+                        <View style={styles.col}><ToggleRow label="Visits (DSR)" field="visits" /></View>
+                    </View>
+                    <View style={styles.grid}>
+                        <View style={styles.col}><ToggleRow label="Activity Plans" field="activity" /></View>
+                        <View style={styles.col}><ToggleRow label="Pending Dues" field="dues" /></View>
+                    </View>
                 </View>
 
                 <TouchableOpacity style={styles.downloadBtn} onPress={generateExcel} disabled={loading}>

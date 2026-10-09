@@ -128,7 +128,7 @@ export default function BulkImportCompanyScreen() {
                     <View style={styles.card}>
                         <Text style={styles.stepTitle}>Step 1 — Download Sheet</Text>
                         <Text style={styles.stepDesc}>
-                            The sheet lists every company detail (name, address, GST, contact, UPI, both bank accounts) with what is saved now. Fill or correct the "Value" column.
+                            The sheet lists every company detail (name, address, GST, contact, UPI, both bank accounts) with what is saved now. Fill or correct the “Value” column.
                         </Text>
                         <TouchableOpacity style={styles.primaryBtn} onPress={downloadSheet}>
                             <Ionicons name="download-outline" size={18} color="white" />

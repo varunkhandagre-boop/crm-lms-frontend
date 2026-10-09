@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { saveAndShareFile } from '../utils/saveFile';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -416,16 +417,7 @@ export default function SerialNumberScreen() {
       const safeName = (rawName || 'Report').replace(/[^a-z0-9]/gi, '_').toLowerCase();
       const fileName = `${safeName}_${Date.now()}.csv`;
       
-      const uri = FileSystem.cacheDirectory + fileName;
-
-      await FileSystem.writeAsStringAsync(uri, csvString, {
-        encoding: FileSystem.EncodingType.UTF8,
-      });
-
-      await Sharing.shareAsync(uri, {
-        mimeType: 'text/csv',
-        dialogTitle: 'Download Detailed Report'
-      });
+      await saveAndShareFile({ content: csvString, fileName, mimeType: 'text/csv', dialogTitle: 'Download Detailed Report' });
 
     } catch (error: any) {
       console.error("Export Error:", error);

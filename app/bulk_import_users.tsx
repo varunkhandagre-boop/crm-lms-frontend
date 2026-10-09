@@ -228,7 +228,7 @@ export default function BulkImportUsersScreen() {
           <View style={styles.noteBox}>
             <Ionicons name="information-circle-outline" size={18} color="#e65100" />
             <Text style={styles.noteText}>
-              Employees already in the app are matched by email. They are skipped unless you turn on "Fill details for existing employees" on the next screen — then only the filled-in columns are saved. Name, role, email and password never change from Excel.
+              Employees already in the app are matched by email. They are skipped unless you turn on “Fill details for existing employees” on the next screen — then only the filled-in columns are saved. Name, role, email and password never change from Excel.
             </Text>
           </View>
         </ScrollView>

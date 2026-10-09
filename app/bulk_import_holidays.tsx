@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { saveAndShareFile } from '../utils/saveFile';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { readFileBase64 } from '../utils/readFileBase64';
@@ -45,13 +46,7 @@ export default function BulkImportHolidaysScreen() {
       XLSX.utils.book_append_sheet(wb, ws, 'Holidays');
 
       const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-      const uri = FileSystem.cacheDirectory + 'Holiday_Import_Template.xlsx';
-      await FileSystem.writeAsStringAsync(uri, wbout, { encoding: FileSystem.EncodingType.Base64 });
-
-      await Sharing.shareAsync(uri, {
-        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        dialogTitle: 'Download Holiday Import Template',
-      });
+      await saveAndShareFile({ content: wbout, base64: true, fileName: 'Holiday_Import_Template.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle: 'Download Holiday Import Template' });
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Could not generate template.');
     }

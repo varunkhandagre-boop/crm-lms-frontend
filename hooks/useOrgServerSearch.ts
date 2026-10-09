@@ -9,9 +9,11 @@ import { fetchOrganizations, LegacyOrganization } from '../services/api/organiza
  */
 export function useOrgServerSearch(active: boolean, text: string, onResults: (list: LegacyOrganization[]) => void) {
     const latest = useRef(text);
-    latest.current = text;
     const onResultsRef = useRef(onResults);
-    useEffect(() => { onResultsRef.current = onResults; });
+    useEffect(() => {
+        latest.current = text;
+        onResultsRef.current = onResults;
+    });
 
     useEffect(() => {
         const q = text.trim();

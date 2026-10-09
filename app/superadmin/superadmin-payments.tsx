@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
+import { saveAndShareFile } from '../../utils/saveFile';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -14,7 +15,6 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { useHeaderTop } from '../../hooks/useHeaderTop';
 import {
     approveSubscriptionRequest,
     deleteSubscriptionRequest,
@@ -22,6 +22,7 @@ import {
     rejectSubscriptionRequest,
     SubscriptionRequest,
 } from '../../services/api/subscriptionRequests';
+import { useHeaderTop } from '../../hooks/useHeaderTop';
 
 type TabKey = 'PENDING' | 'APPROVED' | 'ALL';
 
@@ -127,13 +128,7 @@ export default function SuperAdminPayments() {
             });
             const csvContent = [headers.map(escapeCSV).join(','), ...rows].join('\n');
             const fileName = `Payment_History_${new Date().toISOString().slice(0, 10)}.csv`;
-            const fileUri = FileSystem.documentDirectory + fileName;
-            await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: FileSystem.EncodingType.UTF8 });
-            if (await Sharing.isAvailableAsync()) {
-                await Sharing.shareAsync(fileUri, { mimeType: 'text/csv', dialogTitle: 'Export Payment History', UTI: 'public.comma-separated-values-text' });
-            } else {
-                Alert.alert('Saved', `File saved at: ${fileUri}`);
-            }
+            await saveAndShareFile({ content: csvContent, fileName, mimeType: 'text/csv', dialogTitle: 'Export Payment History', UTI: 'public.comma-separated-values-text' });
         } catch (e) {
             Alert.alert('Error', 'Could not export.');
         }
@@ -144,7 +139,7 @@ export default function SuperAdminPayments() {
         const automationLine = item.automationRequested ? `\nAutomation Add-on: Yes (+₹${item.automationAmount || 3000})` : '';
         Alert.alert(
             'Approve Payment',
-            `Confirm payment received?\n\nCompany: ${companyLabel}\nPlan: ${item.planLabelSnapshot}\nModules: ${formatModules(item.modulesSnapshot)}\nAmount: ₹${item.amountPaid}\nEmployees: ${item.employeesRequested}${automationLine}\n\nApprove karte hi company ko EXACTLY ye modules milenge — isse zyada nahi. Alag chahiye ho to Approve ke baad Companies tab se badal sakte ho.`,
+            `Confirm that this payment was received?\n\nCompany: ${companyLabel}\nPlan: ${item.planLabelSnapshot}\nModules: ${formatModules(item.modulesSnapshot)}\nAmount: ₹${item.amountPaid}\nEmployees: ${item.employeesRequested}${automationLine}\n\nOn approval the company gets exactly these modules. To change them later, use the Companies tab.`,
             [
                 { text: 'Cancel', style: 'cancel' },
                 {
@@ -156,7 +151,7 @@ export default function SuperAdminPayments() {
                             const updated = await approveSubscriptionRequest(item.id);
                             setRequests(prev => prev.map(r => (r.id === item.id ? { ...r, ...updated } : r)));
                             loadCounts();
-                            Alert.alert('Success ✅', 'Payment approved and company plan activated!');
+                            Alert.alert('Success ✅', 'Payment approved aur company plan activate ho gaya!');
                         } catch (e: any) {
                             Alert.alert('Error', e.message || 'Something went wrong.');
                         } finally {
@@ -171,7 +166,7 @@ export default function SuperAdminPayments() {
     const handleNotReceived = async (item: SubscriptionRequest) => {
         Alert.alert(
             'Mark as Not Received',
-            "Mark payment as 'Not Received'? The record will be kept.",
+            "Mark this payment as 'Not Received'? The record is kept.",
             [
                 { text: 'Cancel', style: 'cancel' },
                 {

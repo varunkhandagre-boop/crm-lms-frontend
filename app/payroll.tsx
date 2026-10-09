@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { saveAndShareFile } from '../utils/saveFile';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import { useRouter } from 'expo-router';
@@ -210,10 +211,9 @@ export default function PayrollScreen() {
                 ws['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 20 }, { wch: 14 }, { wch: 12 }, { wch: 22 }, { wch: 12 }, { wch: 18 }];
                 XLSX.utils.book_append_sheet(wb, ws, 'Bank Transfer');
                 const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-                const uri = FileSystem.cacheDirectory + `Salary_Bank_Sheet_${MONTH_NAMES[selectedMonth - 1]}_${selectedYear}.xlsx`;
-                await FileSystem.writeAsStringAsync(uri, wbout, { encoding: FileSystem.EncodingType.Base64 });
-                await Sharing.shareAsync(uri, {
-                    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                await saveAndShareFile({
+                    content: wbout, base64: true, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    fileName: `Salary_Bank_Sheet_${MONTH_NAMES[selectedMonth - 1]}_${selectedYear}.xlsx`,
                     dialogTitle: `Bank sheet — ${monthLabel}`,
                 });
             };
@@ -450,11 +450,8 @@ export default function PayrollScreen() {
 
             const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
             const fileName = `Payroll_${MONTH_NAMES[selectedMonth - 1]}_${selectedYear}.xlsx`;
-            const uri = FileSystem.cacheDirectory + fileName;
-            await FileSystem.writeAsStringAsync(uri, wbout, { encoding: FileSystem.EncodingType.Base64 });
-
-            await Sharing.shareAsync(uri, {
-                mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            await saveAndShareFile({
+                content: wbout, base64: true, fileName, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 dialogTitle: `Payroll — ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`,
             });
         } catch (e: any) {

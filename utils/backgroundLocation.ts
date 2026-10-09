@@ -52,7 +52,7 @@ export async function recordThrottledLocation(coords: { latitude: number; longit
 
 // Must be defined at module load (imported from app/_layout.tsx), so Android
 // can run it when the app was closed.
-if (!isExpoGo) {
+if (!isExpoGo && Platform.OS !== 'web') {
     TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
         if (error) return;
         const locations = (data as { locations?: Location.LocationObject[] } | undefined)?.locations;
@@ -125,7 +125,7 @@ export async function startBackgroundTracking(): Promise<boolean> {
 /** Call at Day Out and logout. Safe to call when not running. */
 export async function stopBackgroundTracking(): Promise<void> {
     await AsyncStorage.removeItem(ACTIVE_DAY_KEY).catch(() => undefined);
-    if (isExpoGo) return;
+    if (isExpoGo || Platform.OS === 'web') return;
     try {
         if (await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK)) {
             await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);

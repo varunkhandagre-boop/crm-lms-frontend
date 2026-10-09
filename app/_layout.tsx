@@ -1,8 +1,9 @@
+import '../utils/webAlert';
 import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
 import { Slot, usePathname, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DataProvider, useData } from './context/DataContext';
 import { DEFAULT_ON_TABS, MENU_TAG_BUCKET } from '../constants/modules';
@@ -38,10 +39,17 @@ Notifications.setNotificationHandler({
 });
 
 export default function Layout() {
-  return (
+  const app = (
     <DataProvider>
       <NavigationLayout />
     </DataProvider>
+  );
+  if (Platform.OS !== 'web') return app;
+  // Web: the screens are built for phones, so on a wide monitor they sit in a centred column.
+  return (
+    <View style={{ flex: 1, backgroundColor: '#dfe3ea', alignItems: 'center' }}>
+      <View style={{ flex: 1, width: '100%', maxWidth: 1100, backgroundColor: '#f5f5f5' }}>{app}</View>
+    </View>
   );
 }
 function PlanExpiryIndicator() {

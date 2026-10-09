@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
+import { saveAndShareFile } from '../utils/saveFile';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -21,9 +22,10 @@ import {
 
 // 🔥 SAAS IMPORTS (No direct Firebase DB imports)
 import { useSaaSDB } from '../hooks/useSaaSDB';
-import { listOrders } from '../services/api/orders';
-import { fetchOrganizations } from '../services/api/organizations';
-import { listPaymentCollections } from '../services/api/paymentCollections';
+import { getSalesSummary, listSoldOrdersPage, SalesFilters, SalesSummary } from '../services/api/orders';
+import { listPaymentCollectionsPage, PaymentPageFilters } from '../services/api/paymentCollections';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { periodRange, useDebounced } from '../utils/periodRange';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
@@ -44,9 +46,6 @@ export default function SalesAnalysisScreen() {
   const { isDbLoading } = useSaaSDB();
 
   // STATES FOR DATA
-  // orderList/paymentList now come from useCachedList below (cache-first,
-  // sharing keys with orders.tsx / payment_collection.tsx)
-  // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
   // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
 
@@ -77,51 +76,75 @@ export default function SalesAnalysisScreen() {
   const [productData, setProductData] = useState<any[]>([]); 
 
   // PAGINATION & EXPORT STATE 
-  const [visibleCount, setVisibleCount] = useState(20);
   const [isDownloading, setIsDownloading] = useState(false);
 
   const userRole = currentUser?.role ? currentUser.role.toLowerCase() : 'unknown';
   const isAdmin = ['admin', 'manager', 'accountant', 'hr', 'superadmin'].includes(userRole);
 
   useEffect(() => {
-      if (viewMode === 'Day') {
-          setVisibleCount(500); 
-      } else {
-          setVisibleCount(20); 
-      }
       setSaleTypeFilter('All');
   }, [viewMode, currentDate, selectedEmployee, searchText]);
 
-  // 🔥 ORDERS + PAYMENT COLLECTIONS — cache-first, deliberately sharing the
-  // SAME cache keys as app/orders.tsx and app/payment_collection.tsx, so
-  // visiting any one of these three screens warms the cache for the others.
-  // See hooks/useCachedList.ts.
-  const ordersCacheKey = buildCacheKey('orders', currentUser?.companyId);
-  const {
-      data: orderList,
-      loading: ordersLoading,
-      refresh: refreshOrders,
-  } = useCachedList({
-      cacheKey: ordersCacheKey,
-      enabled: !!currentUser?.companyId,
-      fetcher: listOrders,
+  // 🔥 SALES + COLLECTIONS — totals, charts and top products are summed on the
+  // server for the date range / person / search; the list below is one page of
+  // sold orders (or receipts on the Collection tab) at a time.
+  const debouncedSearch = useDebounced(searchText.trim());
+  const salesFilters = useMemo<SalesFilters>(() => ({
+      ...periodRange(viewMode, currentDate),
+      createdById: isAdmin && selectedEmployee ? selectedEmployee : undefined,
+      search: debouncedSearch || undefined,
+  }), [viewMode, currentDate, isAdmin, selectedEmployee, debouncedSearch]);
+  const isCollectionTab = saleTypeFilter === 'Collection';
+  const orderFilters = useMemo(() => ({
+      ...salesFilters,
+      saleType: saleTypeFilter === 'Cash' ? 'Cash' as const : saleTypeFilter === 'Credit' ? 'Credit' as const : undefined,
+  }), [salesFilters, saleTypeFilter]);
+  const payFilters = useMemo<PaymentPageFilters>(() => ({
+      fromDate: salesFilters.fromDate, toDate: salesFilters.toDate, createdById: salesFilters.createdById,
+  }), [salesFilters]);
+  const orderPages = useServerPagedList<typeof orderFilters, any>({
+      fetchPage: listSoldOrdersPage, filters: orderFilters, enabled: !!currentUser?.companyId && !isCollectionTab,
   });
-  const paymentsCacheKey = buildCacheKey('payment_collections', currentUser?.companyId);
-  const {
-      data: paymentList,
-      loading: paymentsLoading,
-      refresh: refreshPayments,
-  } = useCachedList({
-      cacheKey: paymentsCacheKey,
-      enabled: !!currentUser?.companyId,
-      fetcher: listPaymentCollections,
+  const payPages = useServerPagedList<PaymentPageFilters, any>({
+      fetchPage: listPaymentCollectionsPage, filters: payFilters, enabled: !!currentUser?.companyId && isCollectionTab,
   });
-  const isAnalysisLoading = ordersLoading || paymentsLoading;
-  const [analysisRefreshing, setAnalysisRefreshing] = useState(false);
-  const onRefresh = async () => {
-      setAnalysisRefreshing(true);
-      await Promise.all([refreshOrders(), refreshPayments()]);
-      setAnalysisRefreshing(false);
+  const activePages = isCollectionTab ? payPages : orderPages;
+  const listData = activePages.items;
+
+  const [summary, setSummary] = useState<SalesSummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const summaryKey = JSON.stringify(salesFilters);
+  const summaryReq = useRef(0);
+  const loadSummary = useCallback(async () => {
+      if (!currentUser?.companyId) return;
+      const id = ++summaryReq.current;
+      setSummaryLoading(true);
+      try {
+          const s = await getSalesSummary(JSON.parse(summaryKey));
+          if (id === summaryReq.current) setSummary(s);
+      } catch (e) {
+          // keep the last numbers on a transient error
+      } finally {
+          if (id === summaryReq.current) setSummaryLoading(false);
+      }
+  }, [summaryKey, currentUser?.companyId]);
+  useEffect(() => { loadSummary(); }, [loadSummary]);
+
+  const isAnalysisLoading = activePages.loading || summaryLoading;
+  const analysisRefreshing = activePages.refreshing;
+  const onRefresh = () => { activePages.refresh(); loadSummary(); };
+
+  /** Every row of the current filter (bounded by the date range) — for PDF / CSV. */
+  const fetchAllRows = async (): Promise<any[]> => {
+      const rows: any[] = [];
+      for (let page = 1; page <= 50; page++) {
+          const r = isCollectionTab
+              ? await listPaymentCollectionsPage({ ...payFilters, page, limit: 100 })
+              : await listSoldOrdersPage({ ...orderFilters, page, limit: 100 });
+          rows.push(...r.items);
+          if (page >= r.totalPages) break;
+      }
+      return rows;
   };
 
   // 🔥 Users — cache-first, shares the SAME 'team_members' cache key as
@@ -141,28 +164,7 @@ export default function SalesAnalysisScreen() {
       }
   }, [userList, isAdmin]);
 
-  // Organizations — cache-first, shares the SAME 'organizations' cache key
-  // as organization.tsx/messaging_center.tsx.
-  const { data: orgList } = useCachedList({
-      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 500 }),
-  });
 
-  const getValidDateStr = (obj: any) => {
-      if (obj.dateIso) return obj.dateIso;
-      if (obj.createdAt) return obj.createdAt.split('T')[0];
-      if (obj.date && obj.date.includes('-')) {
-           const parts = obj.date.split('-');
-           if (parts[0].length === 4) return obj.date.split('T')[0]; 
-           if (parts[2].length === 4) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`; 
-      }
-      if (obj.date && obj.date.includes('/')) {
-          const parts = obj.date.split('/');
-          if(parts.length === 3) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-      }
-      return "1970-01-01";
-  };
 
   const parseAmount = (amountStr: any) => {
       if(!amountStr) return 0;
@@ -191,146 +193,13 @@ export default function SalesAnalysisScreen() {
       return "All Time";
   };
 
-  const getCity = (item: any) => {
-      if (item.city) return item.city;
-      const orgData = orgList.find((o: any) => 
-          (item.orgId && o.id === item.orgId) || 
-          o.orgName === item.hospitalName ||
-          o.name === item.hospitalName
-      );
-      return orgData?.city || '';
-  };
+  const getCity = (item: any) => item.city || ''; // stored on the order
 
-  const getFilteredData = () => {
-      let data = [...orderList];
-
-      data = data.filter(order => 
-          ['Approved', 'Completed', 'Dispatched', 'Billed'].includes(order.status)
-      );
-
-      if (isAdmin) {
-          if (selectedEmployee) {
-              const selectedUserObj = userList.find((u: any) => (u.uid === selectedEmployee || u.id === selectedEmployee));
-              const targetName = selectedUserObj?.name?.trim().toLowerCase();
-
-              data = data.filter((item: any) => {
-                  const idMatch = (String(item.senderId) === String(selectedEmployee)) || 
-                                  (String(item.userId) === String(selectedEmployee)) ||
-                                  (String(item.uid) === String(selectedEmployee));
-                  const itemName = (item.senderName || item.userName || '').trim().toLowerCase();
-                  const nameMatch = targetName && itemName === targetName;
-                  return idMatch || nameMatch;
-              });
-          }
-      } else {
-          data = data.filter((o: any) => 
-              // guard: undefined === undefined must not count as "mine"
-              (!!o.senderId && (o.senderId === currentUser?.uid || o.senderId === currentUser?.id)) || 
-              (!!o.userName && o.userName === currentUser?.name)
-          );
-      }
-
-      if (searchText) {
-          const lower = searchText.toLowerCase();
-          data = data.filter((item: any) => {
-              const fullString = `${item.hospitalName} ${item.poNumber} ${item.orderId} ${item.status}`.toLowerCase();
-              return fullString.includes(lower);
-          });
-      }
-
-      if (viewMode !== 'All') {
-          const targetYear = currentDate.getFullYear();
-          const targetMonth = currentDate.getMonth();
-          const targetDay = currentDate.getDate();
-
-          const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-          const fyStartDateStr = `${fyStartYear}-04-01`; 
-          const fyEndDateStr = `${fyStartYear + 1}-03-31`;
-          
-          const targetYM = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}`;
-          const targetYMD = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}`;
-
-          data = data.filter((item: any) => {
-              const dateStr = getValidDateStr(item);
-              if(dateStr === "1970-01-01") return false;
-              
-              if (viewMode === 'Month') return dateStr.startsWith(targetYM);
-              if (viewMode === 'Day') return dateStr === targetYMD;
-              if (viewMode === 'FY') return dateStr >= fyStartDateStr && dateStr <= fyEndDateStr;
-              return true;
-          });
-      }
-
-      return data.sort((a: any, b: any) => getValidDateStr(b).localeCompare(getValidDateStr(a)));
-  };
-
-  const getFilteredPayments = () => {
-      let pData = [...paymentList];
-
-      if (isAdmin) {
-          if (selectedEmployee) {
-              const selectedUserObj = userList.find((u: any) => (u.uid === selectedEmployee || u.id === selectedEmployee));
-              const targetName = selectedUserObj?.name?.trim().toLowerCase();
-
-              pData = pData.filter((item: any) => {
-                  const idMatch = (String(item.senderId) === String(selectedEmployee)) || 
-                                  (String(item.userId) === String(selectedEmployee));
-                  const itemName = (item.userName || item.senderName || '').trim().toLowerCase();
-                  const nameMatch = targetName && itemName === targetName;
-                  return idMatch || nameMatch;
-              });
-          }
-      } else {
-          pData = pData.filter((p: any) => 
-              // guard: undefined === undefined must not count as "mine"
-              (!!p.senderId && (p.senderId === currentUser?.uid || p.senderId === currentUser?.id)) || 
-              (!!p.userName && p.userName === currentUser?.name)
-          );
-      }
-
-      if (viewMode !== 'All') {
-          const targetYear = currentDate.getFullYear();
-          const targetMonth = currentDate.getMonth();
-          const targetDay = currentDate.getDate();
-
-          const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-          const fyStartDateStr = `${fyStartYear}-04-01`; 
-          const fyEndDateStr = `${fyStartYear + 1}-03-31`;
-          
-          const targetYM = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}`;
-          const targetYMD = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}`;
-
-          pData = pData.filter((item: any) => {
-              const dateStr = getValidDateStr(item);
-              if(dateStr === "1970-01-01") return false;
-              
-              if (viewMode === 'Month') return dateStr.startsWith(targetYM);
-              if (viewMode === 'Day') return dateStr === targetYMD;
-              if (viewMode === 'FY') return dateStr >= fyStartDateStr && dateStr <= fyEndDateStr;
-              return true;
-          });
-      }
-      return pData.sort((a: any, b: any) => getValidDateStr(b).localeCompare(getValidDateStr(a)));
-  };
-
-  const displayList = getFilteredData(); 
-  const displayPayments = getFilteredPayments(); 
-
-  const totalSales = displayList.reduce((sum, item) => sum + parseAmount(item.amount), 0);
-  const cashSales = displayList.filter(item => item.saleType === 'Cash').reduce((sum, item) => sum + parseAmount(item.amount), 0);
-  const creditSales = totalSales - cashSales; 
-  const totalCollection = displayPayments.reduce((sum, item) => sum + parseAmount(item.amount), 0);
-
-  const listData = saleTypeFilter === 'Collection' 
-      ? displayPayments 
-      : displayList.filter(item => {
-          if (saleTypeFilter === 'All') return true;
-          if (saleTypeFilter === 'Cash') return item.saleType === 'Cash';
-          if (saleTypeFilter === 'Credit') return item.saleType !== 'Cash';
-          return true;
-      });
-
-  const renderedList = listData.slice(0, visibleCount);
+  // Totals for the whole filter, from the server.
+  const totalSales = summary?.totalSales ?? 0;
+  const cashSales = summary?.cashSales ?? 0;
+  const creditSales = summary?.creditSales ?? 0;
+  const totalCollection = summary?.totalCollection ?? 0;
 
   let baseMonthlyTarget = 0;
   if (selectedEmployee) {
@@ -355,8 +224,8 @@ export default function SalesAnalysisScreen() {
   } else if (viewMode === 'Day') {
       target1 = baseMonthlyTarget / 25; 
   } else if (viewMode === 'All') {
-      if (displayList.length > 0) {
-          const oldestDateStr = getValidDateStr(displayList[displayList.length - 1]);
+      if (summary?.oldestDate) {
+          const oldestDateStr = summary.oldestDate;
           const oldestDate = new Date(oldestDateStr !== "1970-01-01" ? oldestDateStr : Date.now());
           const today = new Date();
           const monthsDiff = Math.abs((today.getFullYear() - oldestDate.getFullYear()) * 12 + (today.getMonth() - oldestDate.getMonth())) + 1;
@@ -371,22 +240,19 @@ export default function SalesAnalysisScreen() {
   const t2Percent = target2 > 0 ? (totalSales / target2) * 100 : 0;
 
   const handleGraph = () => {
-      let graphSourceList = [...displayList]; // Already filtered by SaaS and ViewMode
       let tData: any[] = [];
-      
       const targetMonth = currentDate.getMonth(); 
       const targetYear = currentDate.getFullYear();
       const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
 
       if (viewMode === 'Day') {
-          tData = graphSourceList.slice(0, 7).map((o:any, i) => ({ label: `Ord ${i+1}`, value: parseAmount(o.amount) }));
+          tData = (isCollectionTab ? [] : listData).slice(0, 7).map((o:any, i: number) => ({ label: `Ord ${i+1}`, value: parseAmount(o.amount) }));
       } else if (viewMode === 'Month') {
           tData = [1,2,3,4].map(week => ({label: `Wk ${week}`, value: 0})); 
-          graphSourceList.forEach(o => {
-              const dateStr = getValidDateStr(o);
-              const day = parseInt(dateStr.split('-')[2]); 
+          (summary?.byDay || []).forEach(d => {
+              const day = parseInt(d.date.split('-')[2]); 
               const weekIdx = Math.min(Math.floor((day-1)/7), 3);
-              tData[weekIdx].value += parseAmount(o.amount);
+              tData[weekIdx].value += d.amount;
           });
       } else {
           const fyMonthsStr = [
@@ -396,23 +262,14 @@ export default function SalesAnalysisScreen() {
               `${fyStartYear + 1}-01`, `${fyStartYear + 1}-02`, `${fyStartYear + 1}-03`
           ];
           const fyMonthLabels = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
-          
-          tData = fyMonthsStr.map((ym, i) => {
-              const monthSales = graphSourceList.filter((o:any) => getValidDateStr(o).startsWith(ym))
-                                                .reduce((sum, o:any) => sum + parseAmount(o.amount), 0);
-              return { label: fyMonthLabels[i], value: monthSales };
-          });
+          tData = fyMonthsStr.map((ym, i) => ({
+              label: fyMonthLabels[i],
+              value: (summary?.byMonth || []).find(m => m.month === ym)?.amount ?? 0,
+          }));
       }
       setTrendData(tData);
 
-      const stats: Record<string, number> = {};
-      graphSourceList.forEach((order: any) => {
-          const rawName = order.productDetails || "Unknown";
-          const name = rawName.split(',')[0].split('-')[0].trim().substring(0, 15);
-          stats[name] = (stats[name] || 0) + parseAmount(order.amount);
-      });
-      
-      const pData = Object.keys(stats).map(key => ({ label: key, value: stats[key] })).sort((a, b) => b.value - a.value).slice(0, 5);
+      const pData = summary?.topProducts || [];
       setProductData(pData.length ? pData : [{label:'No Data', value:0}]);
       
       setGraphTab('Trend'); 
@@ -425,13 +282,17 @@ export default function SalesAnalysisScreen() {
       return found ? found.name : 'Unknown User';
   };
 
-  const getOrderPayments = (order: any) => {
-      return paymentList.filter((p:any) => 
-          (p.orderId && p.orderId === order.id) || 
-          (p.orderId && p.orderId === order.orderId) ||
-          (p.orderRef && p.orderRef === order.orderId)
-      );
+  // Receipts linked to the order in the popup — fetched when it opens.
+  const [orderPayments, setOrderPayments] = useState<any[]>([]);
+  const openOrder = (order: any) => {
+      setSelectedOrder(order);
+      setOrderPayments([]);
+      setPoModalVisible(true);
+      listPaymentCollectionsPage({ linkedOrderId: order.id, page: 1, limit: 100 })
+          .then(r => setOrderPayments(r.items))
+          .catch(() => {});
   };
+  const getOrderPayments = (order: any) => (selectedOrder && order?.id === selectedOrder.id ? orderPayments : []);
 
   // 🔥 DOWNLOAD EXCEL (CSV) LOGIC
   const downloadReportCSV = async () => {
@@ -441,11 +302,12 @@ export default function SalesAnalysisScreen() {
       }
       setIsDownloading(true);
       try {
+          const rows = await fetchAllRows(); // the whole filter, not just the loaded page
           let csvString = "";
           
           if (saleTypeFilter === 'Collection') {
               csvString = "S.No,Date,Receipt No,Client / Hospital,Payment Mode,Collected By,Amount (Rs)\n";
-              listData.forEach((item, index) => {
+              rows.forEach((item, index) => {
                   const date = item.date || '-';
                   const receipt = item.receiptNo || '-';
                   const hospital = `"${(item.orgName || '').replace(/"/g, '""')}"`;
@@ -457,7 +319,7 @@ export default function SalesAnalysisScreen() {
               csvString += `\n,,,,,,Total Collection,Rs. ${totalCollection}\n`;
           } else {
               csvString = "S.No,Date,Order ID,Client / Hospital,City,Products,Type,Amount (Rs)\n";
-              listData.forEach((item, index) => {
+              rows.forEach((item, index) => {
                   const type = item.saleType === 'Cash' ? 'Cash' : 'Credit';
                   const date = item.date || '-';
                   const orderId = item.orderId || '-';
@@ -473,10 +335,7 @@ export default function SalesAnalysisScreen() {
           }
 
           const fileName = `${saleTypeFilter === 'Collection' ? 'Collection' : 'Sales'}_Report_${Date.now()}.csv`;
-          const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
-          
-          await FileSystem.writeAsStringAsync(fileUri, csvString, { encoding: FileSystem.EncodingType.UTF8 });
-          await Sharing.shareAsync(fileUri, { mimeType: 'text/csv', dialogTitle: 'Download Excel (CSV) Report' });
+          await saveAndShareFile({ content: csvString, fileName, mimeType: 'text/csv', dialogTitle: 'Download Excel (CSV) Report' });
       } catch (error) {
           Alert.alert("Error", "Could not generate Excel/CSV file");
       } finally {
@@ -492,6 +351,7 @@ export default function SalesAnalysisScreen() {
       }
       setIsDownloading(true);
       try {
+          const rows = await fetchAllRows(); // the whole filter, not just the loaded page
           
           let tableHTML = "";
           if (saleTypeFilter === 'Collection') {
@@ -509,7 +369,7 @@ export default function SalesAnalysisScreen() {
                       </tr>
                   </thead>
                   <tbody>
-                      ${listData.map((item, index) => `
+                      ${rows.map((item, index) => `
                       <tr>
                           <td class="center">${index + 1}</td>
                           <td>${item.date || '-'}</td>
@@ -542,7 +402,7 @@ export default function SalesAnalysisScreen() {
                       </tr>
                   </thead>
                   <tbody>
-                      ${listData.map((item, index) => {
+                      ${rows.map((item, index) => {
                           const isCash = item.saleType === 'Cash';
                           return `
                           <tr>
@@ -687,7 +547,7 @@ export default function SalesAnalysisScreen() {
           </View>
 
           <View style={{flexDirection:'row', justifyContent:'space-between', paddingHorizontal:14, marginTop:4}}>
-              <Text style={{fontSize:11, color:'gray'}}>Records: {listData.length}</Text>
+              <Text style={{fontSize:11, color:'gray'}}>Records: {activePages.total}</Text>
               {selectedEmployee && <Text style={{fontSize:11, color:'#3b5998', fontWeight:'bold'}}>Filter: {getSelectedEmployeeName()}</Text>}
           </View>
       </View>
@@ -802,7 +662,7 @@ export default function SalesAnalysisScreen() {
             </View>
 
             <FlatList 
-                data={renderedList}
+                data={listData}
                 keyExtractor={item => item.id}
                 scrollEnabled={false}
                 renderItem={({item}) => {
@@ -856,7 +716,7 @@ export default function SalesAnalysisScreen() {
                     const isCash = item.saleType === 'Cash';
 
                     return (
-                        <TouchableOpacity style={styles.card} onPress={() => { setSelectedOrder(item); setPoModalVisible(true); }}>
+                        <TouchableOpacity style={styles.card} onPress={() => openOrder(item)}>
                             <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:5}}>
                                 <View style={styles.idBadge}>
                                     <Text style={styles.idText}>{item.orderId || 'No ID'}</Text>
@@ -886,20 +746,21 @@ export default function SalesAnalysisScreen() {
                         </TouchableOpacity>
                     );
                 }}
-                ListEmptyComponent={<Text style={{textAlign:'center', color:'gray', marginTop:20}}>No records found for this filter.</Text>}
+                ListEmptyComponent={<Text style={{textAlign:'center', color:'gray', marginTop:20}}>{activePages.loading ? 'Loading...' : activePages.error ? 'Could not load — pull down to retry.' : 'No records found for this filter.'}</Text>}
                 
                 ListFooterComponent={
                     <View style={{ paddingBottom: 80 }}>
-                        {visibleCount < listData.length ? (
-                            <TouchableOpacity 
-                                onPress={() => setVisibleCount(prev => prev + 20)} 
+                        {activePages.hasMore ? (
+                            <TouchableOpacity
+                                onPress={activePages.loadMore}
+                                disabled={activePages.loadingMore}
                                 style={{
                                     padding: 12, backgroundColor: '#fff', alignItems: 'center', marginVertical: 15, borderRadius: 8, borderWidth: 1, borderColor: '#ddd', elevation: 1
                                 }}
                             >
-                                <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                                    👇 Load More Records ({listData.length - visibleCount} remaining)
-                                </Text>
+                                {activePages.loadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({activePages.total - listData.length} remaining)</Text>
+                        )}
                             </TouchableOpacity>
                         ) : (
                             listData.length > 0 ? (

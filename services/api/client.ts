@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 
 // Point this at your machine's LAN IP when testing on a physical device
 // (localhost only works in an iOS simulator / Android emulator on the same
@@ -8,16 +9,26 @@ const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 
 const TOKEN_KEY = 'backend_jwt';
 
+// SecureStore has no web version; the browser keeps the login token in localStorage.
+const isWeb = Platform.OS === 'web';
+const webStore = {
+  get: () => { try { return globalThis.localStorage?.getItem(TOKEN_KEY) ?? null; } catch { return null; } },
+  set: (v: string) => { try { globalThis.localStorage?.setItem(TOKEN_KEY, v); } catch { /* private mode */ } },
+  clear: () => { try { globalThis.localStorage?.removeItem(TOKEN_KEY); } catch { /* private mode */ } },
+};
+
 export async function getToken(): Promise<string | null> {
-  return SecureStore.getItemAsync(TOKEN_KEY);
+  return isWeb ? webStore.get() : SecureStore.getItemAsync(TOKEN_KEY);
 }
 
 export async function setToken(token: string): Promise<void> {
-  await SecureStore.setItemAsync(TOKEN_KEY, token);
+  if (isWeb) webStore.set(token);
+  else await SecureStore.setItemAsync(TOKEN_KEY, token);
 }
 
 export async function clearToken(): Promise<void> {
-  await SecureStore.deleteItemAsync(TOKEN_KEY);
+  if (isWeb) webStore.clear();
+  else await SecureStore.deleteItemAsync(TOKEN_KEY);
 }
 
 interface ApiErrorBody {

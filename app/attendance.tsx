@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { saveAndShareFile } from '../utils/saveFile';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Modal, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -485,9 +486,7 @@ export default function AttendanceScreen() {
               csvRows += `${date},${name},${status},${location},${inTime},${outTime},${hrs},${expense},${note}\n`;
           });
 
-          const fileUri = (FileSystem as any).cacheDirectory + `Attendance_${targetName || 'Report'}.csv`;
-          await FileSystem.writeAsStringAsync(fileUri, csvHeader + csvRows, { encoding: 'utf8' });
-          if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(fileUri);
+          await saveAndShareFile({ content: csvHeader + csvRows, fileName: `Attendance_${targetName || 'Report'}.csv`, mimeType: 'text/csv' });
       } catch (error: any) { Alert.alert("Error", error.message); }
   };
 
