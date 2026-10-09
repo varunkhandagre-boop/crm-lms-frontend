@@ -7,7 +7,8 @@ import { Platform } from 'react-native';
 
 type NotificationsModule = typeof import('expo-notifications');
 
-export const notificationsAvailable = !(Platform.OS === 'android' && isRunningInExpoGo());
+// The web version has no phone notifications either (reminders, push token) — same no-op stand-in.
+export const notificationsAvailable = Platform.OS !== 'web' && !(Platform.OS === 'android' && isRunningInExpoGo());
 
 // Every call returns an object that works both as a listener subscription
 // (.remove()) and as a permission/token result ({ status, data }).

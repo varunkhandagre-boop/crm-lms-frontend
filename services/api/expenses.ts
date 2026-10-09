@@ -164,7 +164,7 @@ export async function listExpenseFeedPage(
     items: res.data.map((r) => (r.kind === 'daily' ? toDailyRow(r.daily) : toLegacyExpense(r.expense as ApiExpense))),
     total: res.meta.total,
     totalPages: res.meta.totalPages,
-    totals: res.totals ?? NO_TOTALS,
+    totals: { ...NO_TOTALS, ...(res.totals ?? {}) },
   };
 }
 
