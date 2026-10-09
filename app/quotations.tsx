@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -10,7 +10,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: quotations now go through the new backend API
-import { listQuotations } from '../services/api/quotations';
+import { listQuotationsPage, QuotationPageFilters } from '../services/api/quotations';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { periodRange, useDebounced } from '../utils/periodRange';
 import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -43,31 +45,35 @@ export default function QuotationsListScreen() {
     const [selectedEmployeeName, setSelectedEmployeeName] = useState('All'); 
     const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-    const [visibleCount, setVisibleCount] = useState(20); 
     const canManage = ['Admin', 'Manager', 'Account', 'Accountant', 'SuperAdmin'].includes(currentUser?.role || '');
-
-    useEffect(() => {
-        if (viewMode === 'Day') setVisibleCount(100);
-        else setVisibleCount(20); 
-    }, [viewMode, currentDate, selectedEmployeeName, searchText]);
 
     // 🔥 QUOTATIONS — cache-first (instant from AsyncStorage, then
     // background refresh). See hooks/useCachedList.ts.
-    const quotationsCacheKey = buildCacheKey('quotations', currentUser?.companyId);
+    const quotationsCacheKey = buildCacheKey('quotations_page1_v1', currentUser?.companyId);
+    // 20 per page from the server: date range, person and search (was: up to 1000 downloaded, older ones missing).
+    const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | undefined>(undefined);
+    const debouncedSearch = useDebounced(searchText.trim());
+    const quoteFilters = useMemo<QuotationPageFilters>(() => ({
+        ...periodRange(viewMode, currentDate),
+        createdById: canManage ? selectedEmployeeId : undefined,
+        search: debouncedSearch || undefined,
+    }), [viewMode, currentDate, canManage, selectedEmployeeId, debouncedSearch]);
+    const isDefaultQuoteView = viewMode === 'Month' && !selectedEmployeeId && !debouncedSearch
+        && currentDate.getMonth() === new Date().getMonth() && currentDate.getFullYear() === new Date().getFullYear();
     const {
-        data: quotations,
-        setData: setQuotations,
+        items: quotations,
+        setItems: setQuotations,
         loading,
-        refreshing: quotationsRefreshing,
         refresh: refreshQuotations,
-    } = useCachedList({
-        cacheKey: quotationsCacheKey,
+        hasMore: quotesHaveMore,
+        loadMore: loadMoreQuotes,
+        loadingMore: quotesLoadingMore,
+        total: quotesTotal,
+    } = useServerPagedList<QuotationPageFilters, any>({
+        fetchPage: listQuotationsPage,
+        filters: quoteFilters,
         enabled: !!currentUser?.companyId,
-        fetcher: async () => {
-            const quotes = await listQuotations(); // was: fetchSaaSData("quotations")
-            quotes.sort((a: any, b: any) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
-            return quotes;
-        },
+        cacheKey: isDefaultQuoteView ? quotationsCacheKey : null,
     });
 
     // 🔥 Users — cache-first, shares the SAME 'team_members' cache key as
@@ -131,49 +137,8 @@ export default function QuotationsListScreen() {
         return "All Time";
     };
 
-    const getFilteredData = () => {
-        let data = [...quotations];
-        if (canManage) {
-            if(selectedEmployeeName !== 'All') data = data.filter((item: any) => item.senderName === selectedEmployeeName);
-        } else {
-            const myId = currentUser?.id || currentUser?.uid;
-            data = data.filter((item: any) => item.senderId === myId);
-        }
-
-        if (viewMode !== 'All') {
-            const targetYear = currentDate.getFullYear();
-            const targetMonth = currentDate.getMonth();
-            const targetDay = currentDate.getDate();
-            const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-            const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-            const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime();
-
-            data = data.filter(item => {
-                const dateField = item.dateIso || item.createdAt || item.date;
-                if(!dateField) return false;
-                
-                const itemDate = parseDate(dateField);
-                const itemTime = itemDate.getTime();
-                
-                if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-                if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-                if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-                return true;
-            });
-        }
-
-        if (searchText) {
-            const term = searchText.toLowerCase();
-            data = data.filter((item: any) => {
-                const row = `${item.date} ${item.orgName} ${item.estimateNo} ${item.grandTotal}`.toLowerCase();
-                return row.includes(term);
-            });
-        }
-        return data;
-    };
-
-    const fullFilteredList = getFilteredData();
-    const renderedList = fullFilteredList.slice(0, visibleCount);
+    // The server already filters (period, person, search) and pages.
+    const renderedList = quotations;
 
     const numberToWords = (num: number) => {
         const a = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen '];
@@ -431,7 +396,7 @@ export default function QuotationsListScreen() {
                         {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={20} color="gray" /></TouchableOpacity>}
                     </View>
                     <Text style={{textAlign:'right', fontSize:12, color:'gray', marginTop: 2}}>
-                        Total Quotes: <Text style={{fontWeight:'bold', color:'#3b5998'}}>{fullFilteredList.length}</Text>
+                        Total Quotes: <Text style={{fontWeight:'bold', color:'#3b5998'}}>{quotesTotal}</Text>
                     </Text>
                 </View>
             </View>
@@ -450,17 +415,20 @@ export default function QuotationsListScreen() {
                     }
                     ListFooterComponent={
                         <View style={{ paddingBottom: 80 }}>
-                            {visibleCount < fullFilteredList.length ? (
+                            {quotesHaveMore ? (
                                 <TouchableOpacity 
-                                    onPress={() => setVisibleCount(prev => prev + 20)} 
+                                    onPress={loadMoreQuotes}
+                                    disabled={quotesLoadingMore}
                                     style={styles.loadMoreBtn}
                                 >
+                                    {quotesLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
                                     <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                                        👇 Load More Records ({fullFilteredList.length - visibleCount} remaining)
+                                        👇 Load More Records ({quotesTotal - quotations.length} remaining)
                                     </Text>
+                                    )}
                                 </TouchableOpacity>
                             ) : (
-                                fullFilteredList.length > 0 ? (
+                                quotations.length > 0 ? (
                                     <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
                                         --- End of List ---
                                     </Text>
@@ -575,7 +543,7 @@ export default function QuotationsListScreen() {
                             data={employees} 
                             keyExtractor={(item, index) => index.toString()} 
                             renderItem={({item}) => (
-                                <TouchableOpacity style={styles.pickerItem} onPress={() => { setSelectedEmployeeName(item.name); setShowEmployeePicker(false); }}>
+                                <TouchableOpacity style={styles.pickerItem} onPress={() => { setSelectedEmployeeName(item.name); setSelectedEmployeeId(item.id === 'All' ? undefined : item.id); setShowEmployeePicker(false); }}>
                                     <Text style={{fontSize:16, color:'#333'}}>{item.name}</Text>
                                     {selectedEmployeeName === item.name && <Ionicons name="checkmark" size={18} color="green" />}
                                 </TouchableOpacity>

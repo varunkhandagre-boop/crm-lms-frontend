@@ -16,7 +16,7 @@ import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { listProducts } from '../services/api/products';
-import { createQuotation, listQuotations, updateQuotation } from '../services/api/quotations';
+import { createQuotation, getQuotation, updateQuotation } from '../services/api/quotations';
 import { buildCacheKey } from '../utils/listCache';
 
 export default function AddQuotationScreen() {
@@ -59,11 +59,12 @@ export default function AddQuotationScreen() {
     // Beyond the first 500: search the server while the organization picker is open.
     const [orgServerHits, setOrgServerHits] = useState<any[]>([]);
     useOrgServerSearch(showOrgModal, orgSearch, setOrgServerHits);
-    const { data: quotationList } = useCachedList({
-        cacheKey: buildCacheKey('quotations', currentUser?.companyId),
-        enabled: !!currentUser?.companyId,
-        fetcher: listQuotations, // was: fetchSaaSData("quotations")
-    });
+    // Edit / duplicate: only that one quotation (was: every quotation downloaded).
+    const [sourceQuote, setSourceQuote] = useState<any>(null);
+    useEffect(() => {
+        if (!id || mode === 'from_lead') return;
+        getQuotation(String(id)).then(setSourceQuote).catch(() => Alert.alert('Error', 'Could not load this quotation.'));
+    }, [id, mode]);
 
     // 🔥 Products — unchanged plain fetch-on-mount (out of scope for this pass).
     useEffect(() => {
@@ -102,8 +103,8 @@ export default function AddQuotationScreen() {
             }
             setTerms(defaultTC);
         } 
-        else if (id && quotationList.length > 0) {
-            const data = quotationList.find((q:any) => q.id === id);
+        else if (id && sourceQuote) {
+            const data = sourceQuote;
             if (data) {
                 setItems(data.items || []);
                 setTerms(data.termsAndConditions || defaultTC);
@@ -120,7 +121,7 @@ export default function AddQuotationScreen() {
         } else {
             setTerms(defaultTC);
         }
-    }, [id, mode, leadOrg, leadPerson, leadMobile, leadCity, leadAddress, leadProduct, orgList, quotationList, companyProfile]);
+    }, [id, mode, leadOrg, leadPerson, leadMobile, leadCity, leadAddress, leadProduct, orgList, sourceQuote, companyProfile]);
 
     const numberToWords = (num: number) => {
         const a = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen '];

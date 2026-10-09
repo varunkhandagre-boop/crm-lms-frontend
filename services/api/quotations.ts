@@ -116,6 +116,22 @@ export interface CreateQuotationPayload {
   validTill?: string;
 }
 
+export interface QuotationPageFilters { fromDate?: string; toDate?: string; createdById?: string; search?: string }
+
+/** One page of the Quotations screen (newest quotation date first); own quotations for field staff (server). */
+export async function listQuotationsPage(
+  params: QuotationPageFilters & { page: number; limit: number },
+): Promise<{ items: any[]; total: number; totalPages: number }> {
+  const res = await apiClient.get<ListResponse>(`/quotations${toQueryString({ ...params, newestFirst: 'true' })}`);
+  return { items: res.data.map(toLegacyQuotation), total: res.meta.total, totalPages: res.meta.totalPages };
+}
+
+/** One quotation (edit / duplicate). */
+export async function getQuotation(id: string): Promise<any> {
+  const res = await apiClient.get<OneResponse>(`/quotations/${id}`);
+  return toLegacyQuotation(res.data);
+}
+
 /** Quotations made for one lead (Lead Details) — small, server-filtered. */
 export async function listLeadQuotations(leadId: string): Promise<any[]> {
   const res = await apiClient.get<ListResponse>(`/quotations${toQueryString({ leadId, limit: 50, sortBy: 'createdAt', sortOrder: 'desc' })}`);

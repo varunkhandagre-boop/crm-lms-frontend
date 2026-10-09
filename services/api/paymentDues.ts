@@ -56,7 +56,7 @@ function toQueryString(params: Record<string, any>) {
 
 const PAYMENT_DUES_PAGE_SIZE = 200;
 
-export async function listPaymentDues(params: { status?: string; search?: string } = {}): Promise<any[]> {
+export async function listPaymentDues(params: { status?: string; search?: string; forOrgId?: string; forOrgName?: string } = {}): Promise<any[]> {
   const all: ApiPaymentDue[] = [];
   let page = 1;
   const MAX_PAGES = 100;

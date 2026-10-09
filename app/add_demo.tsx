@@ -26,7 +26,7 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: demos now go through the new backend API
 import { completeActivityPlan } from '../services/api/activityPlans';
-import { createDemo, listDemos, updateDemo } from '../services/api/demos';
+import { countDemos, createDemo, updateDemo } from '../services/api/demos';
 import { recordLocationLog } from '../services/api/locationLogs';
 import { findOrgByName, useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
@@ -101,11 +101,6 @@ export default function AddDemoScreen() {
   });
   // Beyond the first 500: search the server while the organization picker is open.
   useOrgServerSearch(modalVisible && currentModalType === 'Hospital', searchText, setFilteredData);
-  const { data: demoList } = useCachedList({
-      cacheKey: buildCacheKey('demos', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: listDemos, // was: fetchSaaSData("demos")
-  });
 
   // 🔥 Products — unchanged plain fetch-on-mount (out of scope for this pass).
   useEffect(() => {
@@ -173,7 +168,7 @@ export default function AddDemoScreen() {
   };
 
   // 🔥 SMART FY DEMO ID GENERATOR (still client-side, cosmetic reference number)
-  const generateDemoId = () => {
+  const generateDemoId = async () => {
       const targetMonth = demoDate.getMonth(); 
       const targetYear = demoDate.getFullYear();
       
@@ -182,11 +177,8 @@ export default function AddDemoScreen() {
       const fyStartDateStr = `${fyStartYear}-04-01`;
       const fyEndDateStr = `${fyStartYear + 1}-03-31`;
 
-      const count = demoList ? demoList.filter((d: any) => {
-          const dDate = d.dateIso || d.date;
-          if (!dDate) return false;
-          return dDate >= fyStartDateStr && dDate <= fyEndDateStr;
-      }).length + 1 : 1;
+      // Count on the server (was: every demo downloaded and counted here).
+      const count = (await countDemos(fyStartDateStr, fyEndDateStr).catch(() => 0)) + 1;
 
       const prefix = companyProfile?.shortName ? companyProfile.shortName.toUpperCase() : 'LMS';
       return `${prefix}-DEMO-${fyString}-${String(count).padStart(3, '0')}`;
@@ -509,7 +501,7 @@ export default function AddDemoScreen() {
           type: 'Demo',
       }).catch(() => {});
 
-      const newDemoId = generateDemoId();
+      const newDemoId = await generateDemoId();
 
       const createdDemo = await createDemo({
           demoRef: newDemoId,

@@ -98,6 +98,9 @@ export interface ListOrdersParams {
   saleType?: string;
   assignedToId?: string;
   search?: string;
+  // One client's orders (Collect Payment): same org id, or the same name.
+  forOrgId?: string;
+  forOrgName?: string;
 }
 
 function toQueryString(params: Record<string, any>) {

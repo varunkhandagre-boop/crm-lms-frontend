@@ -89,6 +89,12 @@ export async function listDemos(params: ListDemosParams = {}): Promise<any[]> {
   return res.data.map(toLegacyDemo);
 }
 
+/** How many demos fall between two dates (YYYY-MM-DD) — one row fetched, the count comes from meta. */
+export async function countDemos(fromDate: string, toDate: string): Promise<number> {
+  const res = await apiClient.get<ListResponse>(`/demos${toQueryString({ fromDate, toDate, limit: 1 })}`);
+  return res.meta.total;
+}
+
 export interface DemoFeedFilters {
   fromDate?: string; // YYYY-MM-DD
   toDate?: string;

@@ -25,7 +25,7 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: PMS reports & installations now via new backend API
 import { completeActivityPlan } from '../services/api/activityPlans';
-import { listInstallations } from '../services/api/installations';
+import { useOrgMachines } from '../hooks/useOrgMachines';
 import { recordLocationLog } from '../services/api/locationLogs';
 import { findOrgByName, useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
@@ -88,11 +88,8 @@ export default function AddPMSScreen() {
   });
   // Beyond the first 500: search the server while the organization picker is open.
   useOrgServerSearch(modalVisible && currentSelection === 'Org', searchText, setFilteredData);
-  const { data: installList } = useCachedList({
-      cacheKey: buildCacheKey('installations', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: listInstallations, // was: fetchSaaSData("installations")
-  });
+  // Machines of the chosen hospital (+ the one from params) — not every installation.
+  const installList = useOrgMachines(org, (params.serial as string) || serialNo);
 
   const formatDate = (rawDate: Date) => {
     let day = rawDate.getDate().toString().padStart(2, '0');
@@ -134,6 +131,21 @@ export default function AddPMSScreen() {
           }
       }
   }, [params, installList, orgList]); 
+
+  // The machine from params arrives from the server a moment later — fill its details once.
+  const filledFromParams = React.useRef(false);
+  useEffect(() => {
+      const serial = params.serial as string | undefined;
+      if (!serial || filledFromParams.current) return;
+      const m = installList.find((x: any) => x.serialNo === serial);
+      if (m) {
+          filledFromParams.current = true;
+          setMachineName(m.productName || m.machineName || '');
+          setModelName(m.model || '');
+          setDepartment(m.department || '');
+          if (m.orgId) setOrgId(m.orgId);
+      }
+  }, [params.serial, installList]);
 
   const getMachinesForOrg = () => {
       if (!org || installList.length === 0) return [];

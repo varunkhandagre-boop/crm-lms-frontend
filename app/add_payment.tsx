@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -89,16 +89,20 @@ export default function AddPaymentScreen() {
     });
     // Beyond the first 500: search the server while the organization picker is open.
     useOrgServerSearch(showOrgModal, searchOrg, setFilteredOrgs);
-    const { data: orderList } = useCachedList({
-        cacheKey: buildCacheKey('orders', currentUser?.companyId),
-        enabled: !!currentUser?.companyId,
-        fetcher: listOrders, // was: fetchSaaSData("orders")
-    });
-    const { data: dueList } = useCachedList({
-        cacheKey: buildCacheKey('payment_dues', currentUser?.companyId),
-        enabled: !!currentUser?.companyId,
-        fetcher: listPaymentDues, // was: fetchSaaSData("payment_dues")
-    });
+    // Only the chosen client's orders and manual dues (was: every order and due of the company).
+    const [orderList, setOrderList] = useState<any[]>([]);
+    const [dueList, setDueList] = useState<any[]>([]);
+    const orgKey = selectedOrg ? `${selectedOrg.id || ''}|${(selectedOrg.name || selectedOrg.orgName || '').trim()}` : '';
+    useEffect(() => {
+        if (!orgKey) { setOrderList([]); setDueList([]); return; }
+        const [id, name] = orgKey.split('|');
+        const filter = { forOrgId: /^[0-9a-f-]{36}$/i.test(id) ? id : undefined, forOrgName: name || undefined };
+        let alive = true;
+        Promise.all([listOrders(filter), listPaymentDues(filter)])
+            .then(([orders, dues]) => { if (alive) { setOrderList(orders); setDueList(dues); } })
+            .catch(() => { if (alive) { setOrderList([]); setDueList([]); } });
+        return () => { alive = false; };
+    }, [orgKey]);
     useEffect(() => {
         setFilteredOrgs(orgList);
     }, [orgList]);
@@ -125,24 +129,28 @@ export default function AddPaymentScreen() {
                 setAmount(params.amount as string); 
             }
             if (params.billNo) setBillRef(params.billNo as string);
-
-            if (params.linkedId && orderList.length > 0) {
-                const linkedOrder = orderList.find((o:any) => o.id === params.linkedId);
-                
-                if (linkedOrder) {
-                    setSelectedOrder({ ...linkedOrder, collectionName: 'orders' });
-                } else {
-                    const isManual = params.source === 'payment_dues';
-                    setSelectedOrder({ 
-                        id: params.linkedId, 
-                        orderId: isManual ? 'Manual Due' : 'Linked Order', 
-                        amount: params.amount,
-                        collectionName: params.source || 'payment_dues'
-                    });
-                }
-            }
         }
-    }, [params, orgList, orderList]);
+    }, [params, orgList]);
+
+    // Linked order / due from params — once that client's orders have loaded.
+    const hasLinkedFromParams = useRef(false);
+    useEffect(() => {
+        if (hasLinkedFromParams.current || !params.linkedId || !selectedOrg) return;
+        if (orderList.length === 0 && dueList.length === 0) return;
+        hasLinkedFromParams.current = true;
+        const linkedOrder = orderList.find((o:any) => o.id === params.linkedId);
+        if (linkedOrder) {
+            setSelectedOrder({ ...linkedOrder, collectionName: 'orders' });
+        } else {
+            const isManual = params.source === 'payment_dues';
+            setSelectedOrder({
+                id: params.linkedId,
+                orderId: isManual ? 'Manual Due' : 'Linked Order',
+                amount: params.amount,
+                collectionName: params.source || 'payment_dues'
+            });
+        }
+    }, [params, selectedOrg, orderList, dueList]);
 
     // BULLETPROOF ORDER & MANUAL DUE MATCHER (unchanged logic, now fed by API data)
     useEffect(() => {

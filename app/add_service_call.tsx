@@ -28,7 +28,8 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: service calls, installations, spare parts now via new backend API
 import { completeActivityPlan } from '../services/api/activityPlans';
-import { listInstallations } from '../services/api/installations';
+import { searchMachines } from '../services/api/installations';
+import { useOrgMachines } from '../hooks/useOrgMachines';
 import { findOrgByName, useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
@@ -109,11 +110,8 @@ export default function AddServiceCallScreen() {
   });
   // Beyond the first 500: search the server while the organization picker is open.
   useOrgServerSearch(modalVisible && currentSelection === 'Org', searchText, setFilteredData);
-  const { data: installList } = useCachedList({
-      cacheKey: buildCacheKey('installations', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: listInstallations, // was: fetchSaaSData("installations")
-  });
+  // Machines of the chosen hospital (+ the one from params) — not every installation.
+  const installList = useOrgMachines(org, (params.serial as string) || serialNo);
   const [partSearch, setPartSearch] = useState('');
   const { data: sparePartsList, refresh: refreshSpareParts } = useCachedList({
       cacheKey: buildCacheKey('spare_parts', currentUser?.companyId),
@@ -150,6 +148,22 @@ export default function AddServiceCallScreen() {
     return `${day}/${month}/${year}`;
   };
 
+  // The machine from params arrives from the server a moment later — fill its details once.
+  const filledFromParams = React.useRef(false);
+  useEffect(() => {
+      const serial = params.serial as string | undefined;
+      if (!serial || filledFromParams.current) return;
+      const m = installList.find((x: any) => x.serialNo === serial);
+      if (m) {
+          filledFromParams.current = true;
+          setMachineName(m.productName || m.machineName || '');
+          setModelName(m.model || '');
+          setDepartment(m.department || '');
+              setInstallDate(m.date || '');
+          if (m.orgId) setOrgId(m.orgId);
+      }
+  }, [params.serial, installList]);
+
   const getMachinesForOrg = () => {
       if (!org || installList.length === 0) return [];
       const target = org.toLowerCase().trim();
@@ -183,10 +197,12 @@ export default function AddServiceCallScreen() {
         // Warranty isn't stored on ServiceCall — looked up by matching
         // serialNo against the Installation record.
         let warrantyHTML = '';
-        const matchedInstall = installList.find((i: any) => 
-            i.serialNo && ticketData.serialNo && 
-            String(i.serialNo).trim().toLowerCase() === String(ticketData.serialNo).trim().toLowerCase()
-        );
+        const sameSerial = (i: any) => i.serialNo && ticketData.serialNo &&
+            String(i.serialNo).trim().toLowerCase() === String(ticketData.serialNo).trim().toLowerCase();
+        let matchedInstall = installList.find(sameSerial);
+        if (!matchedInstall && ticketData.serialNo) {
+            matchedInstall = (await searchMachines(String(ticketData.serialNo).trim(), 10).catch(() => [])).find(sameSerial);
+        }
         if (matchedInstall?.warrantyExpiry) {
             const expiryDate = new Date(matchedInstall.warrantyExpiry);
             const today = new Date();

@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { useData } from './context/DataContext';
 // 🔥 Phase 5: activity plans now via new backend API
-import { listActivityPlans, updateActivityPlanStatus } from '../services/api/activityPlans';
+import { ActivityPlanView, listActivityPlansPage, updateActivityPlanStatus } from '../services/api/activityPlans';
+import { useServerPagedList } from '../hooks/useServerPagedList';
 import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -18,19 +19,26 @@ export default function ActivityPlanScreen() {
   
   const { currentUser } = useData();
 
-  // 🔥 ACTIVITY PLANS — cache-first (instant from AsyncStorage, then
-  // background refresh). See hooks/useCachedList.ts.
-  const activitiesCacheKey = buildCacheKey('activity_plans', currentUser?.companyId);
+  const [filter, setFilter] = useState<'Today' | 'Upcoming' | 'Completed' | 'All'>('Today');
+
+  // 🔥 ACTIVITY PLANS — 20 per page from the server for the chosen tab
+  // (was: up to 1000 plans downloaded, older ones silently missing).
+  const planFilters = useMemo(() => ({ view: filter.toLowerCase() as ActivityPlanView }), [filter]);
   const {
-      data: activities,
-      setData: setActivities,
+      items: activities,
+      setItems: setActivities,
       loading: activitiesLoading,
       refreshing: activitiesRefreshing,
       refresh: refreshActivities,
-  } = useCachedList({
-      cacheKey: activitiesCacheKey,
+      hasMore: plansHaveMore,
+      loadMore: loadMorePlans,
+      loadingMore: plansLoadingMore,
+      total: plansTotal,
+  } = useServerPagedList<{ view: ActivityPlanView }, any>({
+      fetchPage: listActivityPlansPage,
+      filters: planFilters,
       enabled: !!currentUser?.companyId,
-      fetcher: listActivityPlans, // was: fetchSaaSData("activity_plans")
+      cacheKey: filter === 'Today' ? buildCacheKey('activity_plans_today_v1', currentUser?.companyId) : null,
   });
 
   // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
@@ -54,54 +62,13 @@ export default function ActivityPlanScreen() {
       })));
   }, [activities, teamMembersForActivity]);
 
-  const [filter, setFilter] = useState<'Today' | 'Upcoming' | 'Completed' | 'All'>('Today');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   
   const role = currentUser?.role || '';
   const canManage = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr', 'SuperAdmin'].includes(role);
 
-  const getTodayFormatted = () => {
-      const now = new Date();
-      const d = String(now.getDate()).padStart(2, '0');
-      const m = String(now.getMonth() + 1).padStart(2, '0');
-      const y = now.getFullYear();
-      return `${d}/${m}/${y}`; 
-  };
-
-  const parseDate = (dateStr: string) => {
-      if (!dateStr || !dateStr.includes('/')) return new Date(0);
-      const [d, m, y] = dateStr.split('/').map(Number);
-      return new Date(y, m - 1, d);
-  };
-
-  const getFilteredData = () => {
-      let data = [...activities];
-
-      if (!canManage && currentUser?.id) {
-          data = data.filter((item: any) => item.senderId === currentUser.id);
-      }
-
-      const todayStr = getTodayFormatted();
-      const todayDate = parseDate(todayStr).getTime();
-
-      return data.filter((item: any) => {
-          const itemDateStr = item.date || "";
-          const itemDateTime = parseDate(itemDateStr).getTime();
-
-          if (filter === 'All') return true;
-          if (filter === 'Completed') return item.status === 'Completed';
-
-          if (filter === 'Today') {
-              return itemDateStr === todayStr && item.status !== 'Completed';
-          }
-          if (filter === 'Upcoming') {
-              return itemDateTime > todayDate && item.status !== 'Completed';
-          }
-          return false;
-      }).sort((a: any, b: any) => parseDate(b.date).getTime() - parseDate(a.date).getTime());
-  };
-
-  const displayList = getFilteredData();
+  // The server already returns only this tab's plans (own plans for field staff), newest date first.
+  const displayList = activities;
 
   // 🔥 ACTIONS — via new backend API
   const handleAction = async (item: any) => {
@@ -241,6 +208,12 @@ export default function ActivityPlanScreen() {
                     <Ionicons name="calendar-outline" size={50} color="#ccc" />
                     <Text style={{color:'gray', marginTop:10}}>Nothing found in "{filter}" tab.</Text>
                 </View>
+            }
+            onEndReached={() => { if (plansHaveMore && !plansLoadingMore) loadMorePlans(); }}
+            onEndReachedThreshold={0.4}
+            ListFooterComponent={
+                plansLoadingMore ? <ActivityIndicator style={{ marginVertical: 16 }} color="#3b5998" />
+                : displayList.length > 0 ? <Text style={{ textAlign: 'center', color: '#aaa', fontSize: 12, paddingBottom: 90 }}>{displayList.length} of {plansTotal}</Text> : null
             }
           />
       )}
