@@ -25,6 +25,7 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 1/2: leads now go through the new backend API
 import { updateLead as apiUpdateLead, checkDuplicateLeads, createLead, DuplicateLeadMatch, getLead } from '../services/api/leads';
+import { useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 import { listProducts } from '../services/api/products';
 import { fetchTeamMembers } from '../services/api/users';
@@ -119,6 +120,8 @@ export default function AddLeadScreen() {
       enabled: !!currentUser?.companyId,
       fetcher: () => fetchOrganizations({ limit: 500 }),
   });
+  // Beyond the first 500: search the server while the organization picker is open.
+  useOrgServerSearch(modalVisible && currentModalType === 'Organization', searchText, setFilteredData);
 
   // 🔥 Products — unchanged plain fetch-on-mount (out of scope for this pass).
   useEffect(() => {

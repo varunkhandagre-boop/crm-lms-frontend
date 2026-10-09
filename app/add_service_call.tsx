@@ -29,6 +29,7 @@ import { useData } from './context/DataContext';
 // 🔥 Phase 4: service calls, installations, spare parts now via new backend API
 import { completeActivityPlan } from '../services/api/activityPlans';
 import { listInstallations } from '../services/api/installations';
+import { findOrgByName, useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -106,6 +107,8 @@ export default function AddServiceCallScreen() {
       enabled: !!currentUser?.companyId,
       fetcher: () => fetchOrganizations({ limit: 500 }),
   });
+  // Beyond the first 500: search the server while the organization picker is open.
+  useOrgServerSearch(modalVisible && currentSelection === 'Org', searchText, setFilteredData);
   const { data: installList } = useCachedList({
       cacheKey: buildCacheKey('installations', currentUser?.companyId),
       enabled: !!currentUser?.companyId,
@@ -121,10 +124,8 @@ export default function AddServiceCallScreen() {
   useEffect(() => {
       if (params.org && org !== params.org) {
           setOrg(params.org as string);
-          if(orgList.length > 0) {
-              const foundOrg = orgList.find((o:any) => (o.orgName === params.org || o.name === params.org));
-              if(foundOrg) selectOrganization(foundOrg);
-          }
+          // Also finds organizations beyond the first 500 (one server search).
+          findOrgByName(params.org as string, orgList).then((foundOrg) => { if (foundOrg) selectOrganization(foundOrg); });
       }
       if (params.serial && serialNo !== params.serial) {
           const serial = params.serial as string;

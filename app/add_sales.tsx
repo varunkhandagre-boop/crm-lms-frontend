@@ -27,6 +27,7 @@ import { useData } from './context/DataContext';
 // auto-creates/links a lead server-side for positive outcomes — no more
 // separate addSaaSData("leads", ...) call needed here.
 import { recordLocationLog } from '../services/api/locationLogs';
+import { useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -91,6 +92,8 @@ export default function AddSalesScreen() {
         enabled: !!currentUser?.companyId,
         fetcher: () => fetchOrganizations({ limit: 500 }),
     });
+    // Beyond the first 500: search the server while the organization picker is open.
+    useOrgServerSearch(modalVisible && currentModalType === 'Hospital', searchText, setFilteredData);
 
     // 🔥 Products — unchanged plain fetch-on-mount (out of scope for this pass).
     useEffect(() => {

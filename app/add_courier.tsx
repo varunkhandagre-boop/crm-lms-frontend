@@ -23,6 +23,7 @@ import { useData } from './context/DataContext';
 
 import { fetchCompanyProfile } from '../services/api/companies';
 import { createCourier } from '../services/api/couriers';
+import { mergeOrgs, useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -79,6 +80,9 @@ export default function AddCourierScreen() {
       enabled: !!currentUser?.companyId,
       fetcher: () => fetchOrganizations({ limit: 500 }),
   });
+  // Beyond the first 500: search the server while the organization picker is open.
+  const [orgServerHits, setOrgServerHits] = useState<any[]>([]);
+  useOrgServerSearch(showOrgModal, searchOrg, setOrgServerHits);
 
   useEffect(() => {
       const loadData = async () => {
@@ -438,7 +442,10 @@ export default function AddCourierScreen() {
       finally { setLoading(false); }
   };
 
-  const filteredOrgs = orgList.filter((o:any) => (o.name || '').toLowerCase().includes(searchOrg.toLowerCase()) || (o.orgName || '').toLowerCase().includes(searchOrg.toLowerCase()));
+  const filteredOrgs = mergeOrgs(
+      orgList.filter((o:any) => (o.name || '').toLowerCase().includes(searchOrg.toLowerCase()) || (o.orgName || '').toLowerCase().includes(searchOrg.toLowerCase())),
+      searchOrg.trim().length >= 2 ? orgServerHits : [],
+  );
   const filteredProducts = productList.filter((p:any) => (p.name || '').toLowerCase().includes(searchProduct.toLowerCase()));
 
   return (

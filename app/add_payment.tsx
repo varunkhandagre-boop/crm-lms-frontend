@@ -31,6 +31,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
+import { findOrgByName, useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -86,6 +87,8 @@ export default function AddPaymentScreen() {
         enabled: !!currentUser?.companyId,
         fetcher: () => fetchOrganizations({ limit: 500 }),
     });
+    // Beyond the first 500: search the server while the organization picker is open.
+    useOrgServerSearch(showOrgModal, searchOrg, setFilteredOrgs);
     const { data: orderList } = useCachedList({
         cacheKey: buildCacheKey('orders', currentUser?.companyId),
         enabled: !!currentUser?.companyId,
@@ -111,7 +114,11 @@ export default function AddPaymentScreen() {
             hasPrefilledFromParams.current = true;
             const org = orgList.find((o: any) => o.name === params.orgName || o.orgName === params.orgName);
             if (org) setSelectedOrg(org);
-            else setSelectedOrg({ name: params.orgName });
+            else {
+                setSelectedOrg({ name: params.orgName });
+                // Not in the first 500 — look it up so address / id are filled too.
+                findOrgByName(params.orgName as string, []).then((found) => { if (found) setSelectedOrg(found); });
+            }
 
             if (params.amount) {
                 setTotalDue(params.amount as string);
@@ -256,7 +263,7 @@ export default function AddPaymentScreen() {
         try {
             let orgAddr = paymentData.orgAddress || '';
             if (!orgAddr) {
-                const org = orgList.find((o: any) => o.name === paymentData.orgName || o.orgName === paymentData.orgName);
+                const org = await findOrgByName(paymentData.orgName || '', orgList);
                 if (org) orgAddr = org.address || org.city || '';
             }
 

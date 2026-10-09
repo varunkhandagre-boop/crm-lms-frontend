@@ -44,6 +44,8 @@ export interface DayPoint {
     title: string;
     subtitle?: string;
     address?: string;
+    /** Bad GPS fix (impossible jump) — kept out of km and the route line. */
+    outlier?: boolean;
 }
 
 export interface DayRoute {
@@ -59,6 +61,7 @@ export interface DayRoute {
         firstWorkAt: string | null;
         lastWorkAt: string | null;
         approxKm: number;
+        ignoredPoints?: number;
     };
 }
 

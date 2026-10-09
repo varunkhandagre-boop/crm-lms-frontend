@@ -22,10 +22,7 @@ import { useData } from './context/DataContext';
 // 🔥 Phase 10: organizations now go to Postgres via these adapters — the
 // cascading rename (into orders/leads/service_calls/etc.) happens server-side
 // inside the PATCH transaction now, so the old Firestore writeBatch code is gone.
-import { fetchOrganizations, createOrganization, updateOrganization } from '../services/api/organizations';
-// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
-import { useCachedList } from '../hooks/useCachedList';
-import { buildCacheKey } from '../utils/listCache';
+import { getOrganization, createOrganization, updateOrganization } from '../services/api/organizations';
 
 // 🔥 OCR & CAMERA IMPORT
 import * as ImagePicker from 'expo-image-picker';
@@ -46,7 +43,6 @@ export default function AddOrganizationScreen() {
   const { currentUser, addNotification } = useData();
 
   // 🔥 2. Local loading state (no more useSaaSDB here)
-  // isDbLoading/orgList now come from useCachedList below (cache-first, shared 'organizations' key)
 
   // 🔥 3. Lazy Loaded Organization List (For Edit Mode Auto-fill)
   const [isSaving, setIsSaving] = useState(false);
@@ -156,18 +152,17 @@ export default function AddOrganizationScreen() {
   ];
   const territoryOptions = ["North", "South", "East", "West", "Central"];
 
-  // 🔥 4. Organizations — cache-first, shares the SAME 'organizations'
-  // cache key as organization.tsx/messaging_center.tsx (needed for Edit
-  // Mode's duplicate-check against existing orgs).
-  const { data: orgList, loading: isDbLoading } = useCachedList({
-      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: fetchOrganizations,
-  });
+  // Edit mode loads just this organization (was: every organization of the company).
+  const [orgToEdit, setOrgToEdit] = useState<any>(null);
+  useEffect(() => {
+      if (!isEditMode || !params.editId) return;
+      getOrganization(String(params.editId))
+          .then(setOrgToEdit)
+          .catch(() => Alert.alert('Error', 'Could not load this organization. Go back and try again.'));
+  }, [isEditMode, params.editId]);
 
   useEffect(() => {
-      if (isEditMode && orgList.length > 0) {
-          const orgToEdit = orgList.find((o: any) => o.id === params.editId);
+      if (isEditMode) {
           if (orgToEdit) {
               setOrgName(orgToEdit.name); setCustomerGroup(orgToEdit.type); setBeds(orgToEdit.beds || 'Select');
               setCity(orgToEdit.city); setAddress1(orgToEdit.address1 || ''); setAddress2(orgToEdit.address2 || '');
@@ -187,7 +182,7 @@ export default function AddOrganizationScreen() {
               if (orgToEdit.anniversary) setAnniversary(new Date(orgToEdit.anniversary));
           }
       }
-  }, [isEditMode, orgList]);
+  }, [isEditMode, orgToEdit]);
 
   const formatDate = (rawDate: Date) => {
       let day = rawDate.getDate().toString().padStart(2, '0');

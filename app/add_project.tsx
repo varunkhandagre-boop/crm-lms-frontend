@@ -20,6 +20,7 @@ import {
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 5: projects now via new backend API
+import { useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -63,6 +64,8 @@ export default function AddProjectScreen() {
       enabled: !!currentUser?.companyId,
       fetcher: () => fetchOrganizations({ limit: 500 }),
   });
+  // Beyond the first 500: search the server while the organization picker is open.
+  useOrgServerSearch(modalVisible, searchText, setFilteredOrgs);
   useEffect(() => {
       setFilteredOrgs(orgList);
   }, [orgList]);

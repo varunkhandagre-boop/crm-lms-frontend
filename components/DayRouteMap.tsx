@@ -62,20 +62,22 @@ export default function DayRouteMap({ userId, date, refreshKey }: Props) {
     const error = loading ? null : result.error;
 
     const points = useMemo(() => route?.points ?? EMPTY_POINTS, [route]);
-    const pins = useMemo(() => points.filter((p) => showTrack || p.kind !== 'TRACK'), [points, showTrack]);
+    // Bad GPS fixes: path points are hidden; work records stay listed but are left off the map and line.
+    const goodPoints = useMemo(() => points.filter((p) => !p.outlier), [points]);
+    const pins = useMemo(() => goodPoints.filter((p) => showTrack || p.kind !== 'TRACK'), [goodPoints, showTrack]);
     const listItems = useMemo(() => points.filter((p) => p.kind !== 'TRACK'), [points]);
 
     // Fit the map to whatever is shown.
     useEffect(() => {
         const coords = userId === 'all'
             ? latest.map((p) => ({ latitude: p.latitude, longitude: p.longitude }))
-            : points.map((p) => ({ latitude: p.latitude, longitude: p.longitude }));
+            : goodPoints.map((p) => ({ latitude: p.latitude, longitude: p.longitude }));
         if (coords.length === 0) return;
         const t = setTimeout(() => {
             mapRef.current?.fitToCoordinates(coords, { edgePadding: { top: 50, right: 50, bottom: 50, left: 50 }, animated: true });
         }, 300);
         return () => clearTimeout(t);
-    }, [points, latest, userId]);
+    }, [goodPoints, latest, userId]);
 
     const focus = (p: { latitude: number; longitude: number }) => {
         mapRef.current?.animateToRegion({ latitude: p.latitude, longitude: p.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 }, 400);
@@ -97,11 +99,14 @@ export default function DayRouteMap({ userId, date, refreshKey }: Props) {
                     <SummaryItem label="Approx. km" value={String(summary?.approxKm ?? 0)} />
                 </View>
             )}
+            {userId !== 'all' && !!summary?.ignoredPoints && (
+                <Text style={styles.ignoredNote}>{summary.ignoredPoints} wrong GPS point(s) ignored in km and route</Text>
+            )}
 
             <View style={userId === 'all' ? { flex: 1 } : { flex: 1.2 }}>
                 <MapView ref={mapRef} style={{ flex: 1 }} provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined} initialRegion={INDIA}>
-                    {userId !== 'all' && points.length > 1 && (
-                        <Polyline coordinates={points.map((p) => ({ latitude: p.latitude, longitude: p.longitude }))} strokeColor="#3b5998" strokeWidth={3} />
+                    {userId !== 'all' && goodPoints.length > 1 && (
+                        <Polyline coordinates={goodPoints.map((p) => ({ latitude: p.latitude, longitude: p.longitude }))} strokeColor="#3b5998" strokeWidth={3} />
                     )}
                     {userId !== 'all' && pins.map((p) => (
                         <Marker
@@ -177,6 +182,7 @@ export default function DayRouteMap({ userId, date, refreshKey }: Props) {
                                     {(item.subtitle || item.address) ? (
                                         <Text style={styles.rowSub} numberOfLines={1}>{item.subtitle || item.address}</Text>
                                     ) : null}
+                                    {item.outlier && <Text style={styles.gpsWarn}>GPS location looked wrong — not on the map</Text>}
                                 </View>
                                 <Ionicons name="locate" size={16} color="#90a4ae" />
                             </TouchableOpacity>
@@ -198,6 +204,8 @@ function SummaryItem({ label, value }: { label: string; value: string }) {
 }
 
 const styles = StyleSheet.create({
+    gpsWarn: { fontSize: 10, color: '#e65100', marginTop: 1 },
+    ignoredNote: { fontSize: 11, color: '#e65100', backgroundColor: '#fff3e0', textAlign: 'center', paddingVertical: 3 },
     summary: { flexDirection: 'row', backgroundColor: 'white', paddingVertical: 8, borderBottomWidth: 1, borderColor: '#eee' },
     summaryValue: { fontSize: 15, fontWeight: 'bold', color: '#2c3e50' },
     summaryLabel: { fontSize: 10, color: 'gray', marginTop: 1 },

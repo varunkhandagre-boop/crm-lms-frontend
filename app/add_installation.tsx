@@ -28,6 +28,7 @@ import { useData } from './context/DataContext';
 import { completeActivityPlan } from '../services/api/activityPlans';
 import { createInstallationBatch, uploadInstallationPhoto } from '../services/api/installations';
 import PhotoPickerField, { PendingPhoto } from '../components/PhotoPickerField';
+import { findOrgByName, useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 import { listProducts } from '../services/api/products';
 
@@ -115,6 +116,8 @@ export default function AddInstallationScreen() {
       enabled: !!currentUser?.companyId,
       fetcher: () => fetchOrganizations({ limit: 500 }),
   });
+  // Beyond the first 500: search the server while the organization picker is open.
+  useOrgServerSearch(modalVisible && currentModalType === 'Hospital', searchText, setFilteredData);
 
   // 🔥 Products — unchanged plain fetch-on-mount (out of scope for this pass).
   useEffect(() => {
@@ -144,7 +147,7 @@ export default function AddInstallationScreen() {
   };
 
   useEffect(() => {
-      if (params.hospital && orgList.length > 0) {
+      if (params.hospital) {
           setHospital(params.hospital as string);
           setOrgId(params.orgId as string || '');
           setCity(params.city as string || '');
@@ -152,8 +155,8 @@ export default function AddInstallationScreen() {
           setMobile(params.mobile as string || '');
           setAddress(params.address as string || '');
 
-          const found = orgList.find((o:any) => (o.orgName === params.hospital || o.name === params.hospital));
-          if(found) selectOrganization(found);
+          // Also finds organizations beyond the first 500 (one server search).
+          findOrgByName(params.hospital as string, orgList).then((found) => { if (found) selectOrganization(found); });
       }
       if (params.product) {
           setProduct(params.product as string);

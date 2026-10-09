@@ -557,7 +557,8 @@ const [selectedDate, setSelectedDate] = useState(new Date());
       installations: false, pms: false, service: false, demos: false, couriers: false,
       tasks: false, advances: false, travel: false, leaves: false, projects: false, organizations: false,
       // 🔥 NEW EXPORT MODULES
-      dues: false, quotations: false, employees: false 
+      dues: false, quotations: false, employees: false,
+      visits: false, activity: false,
   });
 
   const filterDataForExport = (data: any[], dateField: string, userField: string, isOrg: boolean = false) => {
@@ -609,9 +610,12 @@ const [selectedDate, setSelectedDate] = useState(new Date());
     tasks: viaActivity('tasks'),
     advances: viaActivity('advances'),
     travel_notes: viaActivity('travelNotes'),
+    sales_visits: viaActivity('salesVisits'),
+    activity_plans: viaActivity('activityPlans'),
     projects: () => listProjects(),
     quotations: () => listQuotations(),
-    organizations: () => fetchOrganizations({ limit: 500 }),
+    // Export only (user taps Download): every organization, page by page.
+    organizations: () => fetchOrganizations(),
     users: () => fetchTeamMembers(),
 };
 
@@ -651,7 +655,6 @@ const [selectedDate, setSelectedDate] = useState(new Date());
           
           if(await fetchAndAddSheet(wb, "orders", "Orders", "dateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "payment_collections", "Collections", "dateIso", "senderId")) hasData = true;
-          if(await fetchAndAddSheet(wb, "payment_dues", "Dues", "dateIso", "addedBy")) hasData = true;
           if(await fetchAndAddSheet(wb, "expenses", "Expenses", "dateIso", "userId")) hasData = true;
           if(await fetchAndAddSheet(wb, "leads", "Leads", "dateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "attendance", "Attendance", "dateIso", "senderId")) hasData = true;
@@ -663,6 +666,8 @@ const [selectedDate, setSelectedDate] = useState(new Date());
           if(await fetchAndAddSheet(wb, "tasks", "Tasks", "dateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "advances", "Advances", "dateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "travel_notes", "Travel", "dateIso", "senderId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "sales_visits", "Visits", "dateIso", "senderId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "activity_plans", "Activity", "dateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "leaves", "Leaves", "fromDateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "projects", "Projects", "dateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "organizations", "Organizations", "dateIso", "addedBy", true)) hasData = true;
@@ -967,7 +972,11 @@ const [selectedDate, setSelectedDate] = useState(new Date());
                       </View>
                       <View style={styles.grid}>
                           <View style={styles.col}>
+                              <ToggleRow label="Visits (DSR)" field="visits" />
                               <ToggleRow label="Employees List" field="employees" />
+                          </View>
+                          <View style={styles.col}>
+                              <ToggleRow label="Activity Plans" field="activity" />
                           </View>
                       </View>
                   </View>

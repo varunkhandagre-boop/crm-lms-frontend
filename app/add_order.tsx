@@ -36,6 +36,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
 import { recordLocationLog } from '../services/api/locationLogs';
+import { useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTeamMembers } from '../services/api/users';
 import { urlToBase64Image } from '../utils/pdfImageHelper';
@@ -131,6 +132,8 @@ export default function AddOrderScreen() {
       enabled: !!currentUser?.companyId,
       fetcher: () => fetchOrganizations({ limit: 500 }),
   });
+  // Beyond the first 500: search the server while the organization picker is open.
+  useOrgServerSearch(modalVisible && currentModalType === 'Hospital', searchText, setFilteredData);
 
   // 🔥 Products — unchanged plain fetch-on-mount (out of scope for this pass).
   useEffect(() => {

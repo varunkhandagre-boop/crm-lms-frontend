@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import React, { useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -16,20 +17,20 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { pickerHandlers } from '../utils/datePickerHandlers';
 
 // 🔥 SAAS IMPORTS (organizations still Firestore)
 import * as Location from 'expo-location';
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { getCurrentLocation as getGpsFix, locationErrorMessage } from '../utils/getLocation';
+import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 5: activity plans now via new backend API
 import { createActivityPlan } from '../services/api/activityPlans';
+import { useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
-import { useHeaderTop } from '../hooks/useHeaderTop';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddActivityScreen() {
   const headerTop = useHeaderTop();
@@ -77,6 +78,8 @@ export default function AddActivityScreen() {
       enabled: !!currentUser?.companyId,
       fetcher: () => fetchOrganizations({ limit: 500 }),
   });
+  // Beyond the first 500: search the server while the organization picker is open.
+  useOrgServerSearch(modalVisible && currentModalType === 'Organization', searchText, setFilteredData);
 
   const formatDate = (rawDate: Date) => {
     let day = rawDate.getDate().toString().padStart(2, '0');
@@ -309,7 +312,7 @@ export default function AddActivityScreen() {
             <Text style={styles.label}>Planning Agenda / Notes</Text>
             <TextInput 
                 style={[styles.input, {height: 80, textAlignVertical:'top'}]} 
-                multiline placeholder="Plan / agenda before the meeting..."
+                multiline placeholder="Meeting se pehle ka plan/agenda..."
                 value={planningNotes}
                 onChangeText={setPlanningNotes}
             />

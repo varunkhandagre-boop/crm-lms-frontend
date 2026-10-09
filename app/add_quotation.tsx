@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: quotations now go through the new backend API
+import { mergeOrgs, useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -55,6 +56,9 @@ export default function AddQuotationScreen() {
         enabled: !!currentUser?.companyId,
         fetcher: () => fetchOrganizations({ limit: 500 }),
     });
+    // Beyond the first 500: search the server while the organization picker is open.
+    const [orgServerHits, setOrgServerHits] = useState<any[]>([]);
+    useOrgServerSearch(showOrgModal, orgSearch, setOrgServerHits);
     const { data: quotationList } = useCachedList({
         cacheKey: buildCacheKey('quotations', currentUser?.companyId),
         enabled: !!currentUser?.companyId,
@@ -155,7 +159,10 @@ export default function AddQuotationScreen() {
     }
 }, [selectedOrg, companyProfile]);
 
-    const filteredOrgs = orgList.filter((o: any) => (o.name || o.orgName || '').toLowerCase().includes(orgSearch.toLowerCase()));
+    const filteredOrgs = mergeOrgs(
+        orgList.filter((o: any) => (o.name || o.orgName || '').toLowerCase().includes(orgSearch.toLowerCase())),
+        orgSearch.trim().length >= 2 ? orgServerHits : [],
+    );
     
     const searchTxt = prodSearch.toLowerCase();
     const baseFilteredProds = productList.filter((p: any) => (p.name || p.model || '').toLowerCase().includes(searchTxt));
