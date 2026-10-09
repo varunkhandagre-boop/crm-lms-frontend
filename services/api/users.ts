@@ -18,6 +18,7 @@ export interface LegacyTeamMember {
   email: string;
   mobile: string;
   role: string;
+  jobTitle: string; // field users: Sales Executive / Service Engineer
   status: 'Active' | 'Disabled'; // mapped from isActive for the existing UI
   empId: string;
   joiningDate: string; // YYYY-MM-DD
@@ -54,6 +55,7 @@ function toLegacyTeamMember(u: any): LegacyTeamMember {
     email: u.email ?? '',
     mobile: u.mobile ?? '',
     role: u.role,
+    jobTitle: u.jobTitle ?? '',
     status: u.isActive === false ? 'Disabled' : 'Active',
     empId: u.empId ?? '',
     joiningDate: (u.joiningDate || '').slice(0, 10),
@@ -117,7 +119,7 @@ export async function fetchTeamMembers(): Promise<LegacyTeamMember[]> {
 }
 
 export async function createTeamMember(payload: {
-  name: string; email: string; password: string; mobile?: string; role: string;
+  name: string; email: string; password: string; mobile?: string; role: string; jobTitle?: string | null;
   empId?: string; joiningDate?: string; monthlyTarget?: number; baseSalary?: number; yearlyLeaves?: number;
   dailyVisitTarget?: number | null; monthlyVisitTarget?: number | null;
   workSchedule?: WorkSchedule | null;
@@ -131,7 +133,7 @@ export async function createTeamMember(payload: {
 }
 
 export async function updateTeamMember(id: string, payload: Partial<{
-  name: string; mobile: string; empId: string; joiningDate: string; monthlyTarget: number; baseSalary: number; yearlyLeaves: number;
+  name: string; mobile: string; jobTitle: string | null; empId: string; joiningDate: string; monthlyTarget: number; baseSalary: number; yearlyLeaves: number;
   dailyVisitTarget: number | null; monthlyVisitTarget: number | null;
   workSchedule: WorkSchedule | null;
   personalEmail: string; personalMobile: string; bloodGroup: string;

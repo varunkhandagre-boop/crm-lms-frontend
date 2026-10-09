@@ -20,7 +20,7 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: expenses now via new backend API
-import { deleteExpenseBillPhoto, ClaimPageFilters, getExpense, listExpensesPage, settleExpensesForEmployee, updateExpenseStatus, uploadExpenseBillPhoto } from '../services/api/expenses';
+import { deleteExpenseBillPhoto, ExpenseFeedFilters, ExpenseFeedTotals, ExpenseView, getExpense, getExpenseSettings, listExpenseFeedPage, saveExpenseSettings, settleExpensesForEmployee, updateExpenseStatus, uploadExpenseBillPhoto } from '../services/api/expenses';
 import RecordPhotoSection from '../components/RecordPhotoSection';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -63,24 +63,49 @@ export default function ExpenseScreen() {
   };
 
   const canManage = ['Admin', 'Manager', 'Hr', 'Account', 'Accountant', 'SuperAdmin'].includes(currentUser?.role || '');
+  const canSetLimit = ['Admin', 'Manager', 'Account', 'Accountant', 'SuperAdmin'].includes(currentUser?.role || '');
+
+  // All = claims + Day Out expenses; Requests = approvals asked before buying.
+  const [view, setView] = useState<ExpenseView>('all');
+  const [approvalLimit, setApprovalLimit] = useState<number | null>(null);
+  const [showLimitModal, setShowLimitModal] = useState(false);
+  const [limitInput, setLimitInput] = useState('');
+  const [savingLimit, setSavingLimit] = useState(false);
+  useEffect(() => {
+      getExpenseSettings().then((s) => setApprovalLimit(s.approvalLimit)).catch(() => {});
+  }, []);
+  const saveLimit = async () => {
+      setSavingLimit(true);
+      try {
+          const v = parseFloat(limitInput);
+          const s = await saveExpenseSettings(v > 0 ? v : null);
+          setApprovalLimit(s.approvalLimit);
+          setShowLimitModal(false);
+      } catch (e: any) {
+          Alert.alert("Error", e?.message || "Could not save the limit.");
+      } finally {
+          setSavingLimit(false);
+      }
+  };
 
 
   // 🔥 20 per page from the server: date range, employee (own records only for
   // field staff — enforced by the server), search, and both totals for the filter.
   const debouncedSearch = useDebounced(searchText.trim());
-  const claimFilters = useMemo<ClaimPageFilters>(() => ({
+  const claimFilters = useMemo<ExpenseFeedFilters>(() => ({
+      view,
       ...periodRange(viewMode, currentDate),
       createdById: canManage && selectedEmployeeId !== 'All' ? selectedEmployeeId : undefined,
       search: debouncedSearch || undefined,
-  }), [viewMode, currentDate, canManage, selectedEmployeeId, debouncedSearch]);
-  const [outstandingAmount, setOutstandingAmount] = useState(0);
-  const [totalHistoryAmount, setTotalHistoryAmount] = useState(0);
-  const fetchClaimsPage = useCallback(async (p: ClaimPageFilters & { page: number; limit: number }) => {
-      const r = await listExpensesPage(p);
-      if (p.page === 1) { setOutstandingAmount(r.outstanding); setTotalHistoryAmount(r.totalAmount); }
+  }), [view, viewMode, currentDate, canManage, selectedEmployeeId, debouncedSearch]);
+  const [totals, setTotals] = useState<ExpenseFeedTotals>({ outstanding: 0, claims: 0, daily: 0, total: 0, pendingRequests: 0, openRequests: 0 });
+  const outstandingAmount = totals.outstanding;
+  const fetchClaimsPage = useCallback(async (p: ExpenseFeedFilters & { page: number; limit: number }) => {
+      const r = await listExpenseFeedPage(p);
+      if (p.page === 1) setTotals(r.totals);
       return r;
   }, []);
-  const isDefaultView = (viewMode === 'All' || isCurrentFy(viewMode, currentDate)) && selectedEmployeeId === 'All' && !debouncedSearch;
+  const isDefaultView = view === 'all' && (viewMode === 'All' || isCurrentFy(viewMode, currentDate)) && selectedEmployeeId === 'All' && !debouncedSearch;
   const {
       items: expenseList,
       setItems: setExpenseList,
@@ -92,11 +117,11 @@ export default function ExpenseScreen() {
       refreshing: expensesRefreshing,
       refresh: refreshExpenses,
       error: listError,
-  } = useServerPagedList<ClaimPageFilters, any>({
+  } = useServerPagedList<ExpenseFeedFilters, any>({
       fetchPage: fetchClaimsPage,
       filters: claimFilters,
       enabled: !!currentUser?.companyId,
-      cacheKey: isDefaultView ? buildCacheKey(`expenses_page1_v2:${viewMode}`, currentUser?.companyId) : null,
+      cacheKey: isDefaultView ? buildCacheKey(`expenses_feed_page1_v1:${viewMode}`, currentUser?.companyId) : null,
   });
 
   // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
@@ -144,7 +169,7 @@ export default function ExpenseScreen() {
 
   // Names come from the team list (the API only returns the employee id).
   const fullFilteredList = useMemo(
-      () => expenseList.map((e: any) => ({ ...e, senderName: senderNameMap.get(e.senderId) || 'Unknown' })),
+      () => expenseList.map((e: any) => ({ ...e, senderName: e.senderName || senderNameMap.get(e.senderId) || 'Unknown' })),
       [expenseList, senderNameMap],
   );
 
@@ -210,7 +235,8 @@ export default function ExpenseScreen() {
           await updateExpenseStatus(selectedItem.id, status as 'Approved' | 'Rejected');
 
           const targetUserId = selectedItem.senderId;
-          if (addNotification && targetUserId && targetUserId !== currentUser?.id) {
+          // Requests: the server sends the employee's notification itself.
+          if (selectedItem.rowKind !== 'request' && addNotification && targetUserId && targetUserId !== currentUser?.id) {
               await addNotification({
                   title: `Expense Claim ${status}`,
                   message: `Your claim of ₹${selectedItem.amount} has been ${status}.`,
@@ -225,7 +251,7 @@ export default function ExpenseScreen() {
           
           refreshExpenses(); // totals change with the status
           setModalVisible(false);
-          Alert.alert("Updated", `Claim marked as ${status}`);
+          Alert.alert("Updated", `${selectedItem.rowKind === 'request' ? 'Request' : 'Claim'} marked as ${status}`);
       } catch (error) {
           Alert.alert("Error", "Could not update status.");
       } finally {
@@ -239,21 +265,34 @@ export default function ExpenseScreen() {
 
     if (item.status === 'Approved') { statusColor = '#e8f5e9'; statusTextCol = '#2e7d32'; }
     else if (item.status === 'Rejected') { statusColor = '#ffebee'; statusTextCol = '#c62828'; }
-    else if (item.status === 'Settled') { statusColor = '#e3f2fd'; statusTextCol = '#1565c0'; }
+    else if (item.status === 'Settled' || item.status === 'Used') { statusColor = '#e3f2fd'; statusTextCol = '#1565c0'; }
+    else if (item.rowKind === 'daily') { statusColor = '#f3e5f5'; statusTextCol = '#6a1b9a'; }
+    const statusLabel = item.rowKind === 'request' && item.status === 'Used' ? 'Bill Added' : item.status;
 
     return (
         <TouchableOpacity style={[styles.card, item.status === 'Settled' && {opacity: 0.7, backgroundColor:'#f9f9f9'}]} onPress={() => openDetails(item)}>
             <View style={styles.cardHeader}>
-                <Text style={styles.date}>{item.date}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={styles.date}>{item.date}</Text>
+                    {item.rowKind === 'daily' && <Text style={[styles.kindTag, { backgroundColor: '#6a1b9a' }]}>DAY OUT</Text>}
+                    {item.rowKind === 'request' && <Text style={[styles.kindTag, { backgroundColor: '#e65100' }]}>APPROVAL REQUEST</Text>}
+                    {item.rowKind === 'claim' && !!item.requestId && <Text style={[styles.kindTag, { backgroundColor: '#2e7d32' }]}>PRE-APPROVED</Text>}
+                </View>
                 <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
-                    <Text style={[styles.statusText, { color: statusTextCol }]}>{item.status}</Text>
+                    <Text style={[styles.statusText, { color: statusTextCol }]}>{statusLabel}</Text>
                 </View>
             </View>
             
             <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center'}}>
                 <View style={{flex:1}}>
                     <Text style={styles.type}>{item.type}</Text>
-                    <Text style={styles.reason} numberOfLines={1}>{item.remark}</Text>
+                    {item.rowKind === 'daily' ? (
+                        <Text style={styles.reason} numberOfLines={1}>
+                            {[item.da && `DA ₹${item.da}`, item.hotel && `Hotel ₹${item.hotel}`, item.misc && `Misc ₹${item.misc}`].filter(Boolean).join(' · ')}{item.remark ? ` — ${item.remark}` : ''}
+                        </Text>
+                    ) : (
+                        <Text style={styles.reason} numberOfLines={1}>{item.remark}</Text>
+                    )}
                     {canManage && <Text style={{fontSize:11, color:'#3b5998', fontWeight:'bold'}}>👤 {item.senderName}</Text>}
                 </View>
                 <Text style={styles.amount}>₹ {item.amount}</Text>
@@ -278,10 +317,20 @@ export default function ExpenseScreen() {
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Expense Claim</Text>
         </View>
-        <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_expense' as any)}>
-            <Ionicons name="add" size={20} color="white" />
-            <Text style={{color:'white', fontWeight:'bold', marginLeft:5}}>Add Claim</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            {canSetLimit && (
+                <TouchableOpacity style={{ marginRight: 10 }} onPress={() => { setLimitInput(approvalLimit ? String(approvalLimit) : ''); setShowLimitModal(true); }} accessibilityLabel="Approval limit">
+                    <Ionicons name="settings-outline" size={22} color="#3b5998" />
+                </TouchableOpacity>
+            )}
+            <TouchableOpacity style={[styles.addBtn, { backgroundColor: '#e65100', marginRight: 8 }]} onPress={() => router.push('/add_expense?mode=request' as any)} accessibilityLabel="Ask purchase approval">
+                <Ionicons name="cart-outline" size={18} color="white" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_expense' as any)}>
+                <Ionicons name="add" size={20} color="white" />
+                <Text style={{color:'white', fontWeight:'bold', marginLeft:5}}>Add Claim</Text>
+            </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.balanceContainer}>
@@ -294,8 +343,15 @@ export default function ExpenseScreen() {
               <View style={styles.vDivider} />
 
               <View style={{alignItems:'center', flex:1}}>
+                  <Text style={styles.statLabel}>Day Out</Text>
+                  <Text style={[styles.statValue, {color:'#6a1b9a'}]}>₹{totals.daily.toLocaleString()}</Text>
+              </View>
+
+              <View style={styles.vDivider} />
+
+              <View style={{alignItems:'center', flex:1}}>
                   <Text style={styles.statLabel}>Total Spent</Text>
-                  <Text style={[styles.statValue, {color:'#3b5998'}]}>₹{totalHistoryAmount.toLocaleString()}</Text>
+                  <Text style={[styles.statValue, {color:'#3b5998'}]}>₹{totals.total.toLocaleString()}</Text>
               </View>
           </View>
           
@@ -315,7 +371,28 @@ export default function ExpenseScreen() {
           </View>
       </View>
 
+      {(canManage ? totals.pendingRequests : totals.openRequests) > 0 && view !== 'requests' && (
+          <TouchableOpacity style={styles.requestBanner} onPress={() => setView('requests')}>
+              <Ionicons name="cart" size={18} color="#e65100" />
+              <Text style={styles.requestBannerText}>
+                  {canManage
+                      ? `${totals.pendingRequests} purchase request(s) waiting for approval`
+                      : `${totals.openRequests} approved purchase(s) — add the bill`}
+              </Text>
+              <Ionicons name="chevron-forward" size={16} color="#e65100" />
+          </TouchableOpacity>
+      )}
+
       <View style={{backgroundColor:'white', paddingBottom:6}}>
+          <View style={styles.viewChips}>
+              {([['all', 'All'], ['claims', 'Claims'], ['daily', 'Day Out'], ['requests', 'Requests']] as [ExpenseView, string][]).map(([v, label]) => (
+                  <TouchableOpacity key={v} style={[styles.viewChip, view === v && styles.viewChipActive]} onPress={() => setView(v)}>
+                      <Text style={[styles.viewChipText, view === v && { color: 'white' }]}>
+                          {label}{v === 'requests' && totals.pendingRequests > 0 ? ` (${totals.pendingRequests})` : ''}
+                      </Text>
+                  </TouchableOpacity>
+              ))}
+          </View>
           <PeriodTabs value={viewMode} onChange={setViewMode} />
           <StaffPeriodRow
               showStaff={canManage}
@@ -388,7 +465,7 @@ export default function ExpenseScreen() {
           <View style={styles.modalOverlay}>
               <View style={styles.modalContent}>
                   <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:15}}>
-                      <Text style={styles.modalTitle}>Claim Details</Text>
+                      <Text style={styles.modalTitle}>{selectedItem?.rowKind === 'daily' ? 'Day Out Expense' : selectedItem?.rowKind === 'request' ? 'Purchase Request' : 'Claim Details'}</Text>
                       <TouchableOpacity onPress={() => setModalVisible(false)}><Ionicons name="close-circle" size={28} color="#d32f2f" /></TouchableOpacity>
                   </View>
 
@@ -400,7 +477,20 @@ export default function ExpenseScreen() {
                           <DetailRow label="Type" value={selectedItem.type} icon="pricetag" />
                           <DetailRow label="Status" value={selectedItem.status} icon="information-circle" />
                           <View style={styles.divider} />
-                          <DetailRow label="Amount" value={`₹ ${selectedItem.amount}`} icon="cash" highlight />
+                          <DetailRow label={selectedItem.rowKind === 'request' ? 'Estimated Amount' : 'Amount'} value={`₹ ${selectedItem.amount}`} icon="cash" highlight />
+                          {selectedItem.rowKind === 'daily' && (
+                              <>
+                                  <Text style={{ fontSize: 13, color: '#555', marginBottom: 6 }}>
+                                      DA ₹{selectedItem.da} · Hotel ₹{selectedItem.hotel} · Misc ₹{selectedItem.misc}
+                                  </Text>
+                                  <Text style={{ fontSize: 12, color: '#6a1b9a', fontStyle: 'italic', marginBottom: 10 }}>
+                                      Entered at Day Out — paid with salary, no approval needed. To change it, edit the Day Out entry.
+                                  </Text>
+                              </>
+                          )}
+                          {selectedItem.rowKind === 'claim' && selectedItem.requestAmount != null && (
+                              <Text style={{ fontSize: 12, color: '#2e7d32', marginBottom: 10 }}>Pre-approved up to ₹{selectedItem.requestAmount}</Text>
+                          )}
                           
                           {selectedItem.status === 'Settled' && (
                               <Text style={{textAlign:'center', color:'green', fontWeight:'bold', marginBottom:10}}>( PAID / SETTLED )</Text>
@@ -410,7 +500,17 @@ export default function ExpenseScreen() {
                           <Text style={{fontSize:12, color:'gray', marginBottom:5, marginTop:5}}>Remark:</Text>
                           <Text style={{fontSize:14, fontStyle:'italic', marginBottom:15, color:'#333'}}>{selectedItem.remark}</Text>
 
-                          <RecordPhotoSection
+                          {selectedItem.rowKind === 'request' && selectedItem.status === 'Approved' && selectedItem.senderId === currentUser?.id && (
+                              <TouchableOpacity
+                                  style={[styles.approveBtn, { marginBottom: 15 }]}
+                                  onPress={() => { setModalVisible(false); router.push(`/add_expense?requestId=${selectedItem.id}` as any); }}
+                              >
+                                  <Ionicons name="receipt-outline" size={18} color="white" />
+                                  <Text style={styles.btnText}>Add Bill / Claim</Text>
+                              </TouchableOpacity>
+                          )}
+
+                          {selectedItem.rowKind !== 'daily' && <RecordPhotoSection
                               title="Attached Bill"
                               url={selectedItem.imageUri}
                               // Employee: own claim while Pending; office roles: any time (server checks the same).
@@ -418,12 +518,12 @@ export default function ExpenseScreen() {
                               addLabel="Add Bill Photo"
                               onUpload={async (dataUri) => applyBill(await uploadExpenseBillPhoto(selectedItem.id, dataUri))}
                               onDelete={async () => applyBill(await deleteExpenseBillPhoto(selectedItem.id))}
-                          />
-                          {!selectedItem.imageUri && !(canManage || (selectedItem.senderId === currentUser?.id && selectedItem.status === 'Pending')) && (
+                          />}
+                          {selectedItem.rowKind !== 'daily' && !selectedItem.imageUri && !(canManage || (selectedItem.senderId === currentUser?.id && selectedItem.status === 'Pending')) && (
                               <Text style={{fontSize:12, color:'gray', fontStyle:'italic'}}>No bill attached.</Text>
                           )}
 
-                          {canManage && selectedItem.status === 'Pending' && (
+                          {canManage && selectedItem.rowKind !== 'daily' && selectedItem.status === 'Pending' && (
                               <View style={styles.actionContainer}>
                                   <TouchableOpacity 
                                       style={[styles.rejectBtn, updatingStatus !== null && { opacity: 0.6 }]} 
@@ -444,6 +544,32 @@ export default function ExpenseScreen() {
                           )}
                       </ScrollView>
                   )}
+              </View>
+          </View>
+      </Modal>
+
+      <Modal visible={showLimitModal} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                  <Text style={styles.modalTitle}>Pre-approval Limit</Text>
+                  <Text style={{ color: 'gray', fontSize: 12, marginVertical: 10 }}>
+                      Employees are asked to get approval before buying anything above this amount. Leave empty for no limit.
+                  </Text>
+                  <TextInput
+                      style={styles.limitInput}
+                      value={limitInput}
+                      onChangeText={setLimitInput}
+                      keyboardType="numeric"
+                      placeholder="e.g. 2000"
+                  />
+                  <View style={styles.actionContainer}>
+                      <TouchableOpacity style={styles.rejectBtn} onPress={() => setShowLimitModal(false)}>
+                          <Text style={styles.btnText}>Cancel</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[styles.approveBtn, savingLimit && { opacity: 0.6 }]} onPress={saveLimit} disabled={savingLimit}>
+                          {savingLimit ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.btnText}>Save</Text>}
+                      </TouchableOpacity>
+                  </View>
               </View>
           </View>
       </Modal>
@@ -502,6 +628,14 @@ const styles = StyleSheet.create({
   type: { fontWeight:'bold', fontSize:16, color:'#333' },
   amount: { fontSize:18, fontWeight:'bold', color:'#3b5998' },
   reason: { color:'gray', fontSize:12, marginTop:2 },
+  kindTag: { color: 'white', fontSize: 9, fontWeight: 'bold', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8, overflow: 'hidden' },
+  viewChips: { flexDirection: 'row', paddingHorizontal: 12, paddingTop: 8, gap: 6 },
+  viewChip: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14, backgroundColor: '#f0f0f0' },
+  viewChipActive: { backgroundColor: '#3b5998' },
+  viewChipText: { fontSize: 12, fontWeight: '600', color: '#333' },
+  requestBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff3e0', marginHorizontal: 15, marginTop: -5, marginBottom: 10, padding: 10, borderRadius: 8, gap: 8 },
+  requestBannerText: { flex: 1, color: '#e65100', fontWeight: 'bold', fontSize: 13 },
+  limitInput: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, fontSize: 16, backgroundColor: '#f9f9f9' },
   attachBadge: { flexDirection:'row', alignItems:'center', backgroundColor:'gray', alignSelf:'flex-start', paddingHorizontal:6, paddingVertical:2, borderRadius:4, marginTop:10 },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },

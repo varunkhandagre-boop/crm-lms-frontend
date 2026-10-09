@@ -100,6 +100,9 @@ export default function ManageTeamScreen() {
     );
 }
 
+// Field users' designation — also decides which screens they get (sales vs service).
+const JOB_TITLES = ['Sales Executive', 'Service Engineer'];
+
 const ROLE_OPTIONS = [
     { label: "Admin", value: "ADMIN" },
     { label: "Manager", value: "MANAGER" },
@@ -125,7 +128,7 @@ const UsersTab = () => {
     const [visibleCount, setVisibleCount] = useState(15);
 
     const [formData, setFormData] = useState({
-        name: "", email: "", mobile: "", role: "FIELD_USER",
+        name: "", email: "", mobile: "", role: "FIELD_USER", jobTitle: "Sales Executive",
         empId: "", joiningDate: "", monthlyTarget: "0", baseSalary: "0", yearlyLeaves: "18",
         dailyVisitTarget: "", monthlyVisitTarget: "",
         workSchedule: null as WorkSchedule | null,
@@ -171,6 +174,7 @@ const UsersTab = () => {
                 const res = await updateTeamMember(editData.id, {
                     name: formData.name,
                     role: formData.role,
+                    jobTitle: formData.role === 'FIELD_USER' ? formData.jobTitle : undefined,
                     mobile: formData.mobile,
                     empId: formData.empId,
                     joiningDate: formData.joiningDate || undefined,
@@ -213,6 +217,7 @@ const UsersTab = () => {
                     password: formData.password,
                     mobile: formData.mobile,
                     role: formData.role,
+                    jobTitle: formData.role === 'FIELD_USER' ? formData.jobTitle : undefined,
                     empId: formData.empId,
                     joiningDate: formData.joiningDate || undefined,
                     monthlyTarget: Number(formData.monthlyTarget) || undefined,
@@ -277,6 +282,7 @@ const UsersTab = () => {
         setEditData(user);
         setFormData({
             ...user,
+            jobTitle: user.jobTitle || "Sales Executive",
             password: "",
             monthlyTarget: String(user.monthlyTarget || 0),
             dailyVisitTarget: user.dailyVisitTarget || "",
@@ -322,7 +328,7 @@ const handleBulkDeactivate = () => {
         setEditData(null);
         const randomId = `EMP-${new Date().getFullYear()}-${Math.floor(Math.random()*1000)}`;
         setFormData({
-            name: "", email: "", mobile: "", role: "FIELD_USER", empId: randomId, joiningDate: new Date().toISOString().split('T')[0],
+            name: "", email: "", mobile: "", role: "FIELD_USER", jobTitle: "Sales Executive", empId: randomId, joiningDate: new Date().toISOString().split('T')[0],
             password: "", city: "", monthlyTarget: "0", baseSalary: "0", yearlyLeaves: "18",
             dailyVisitTarget: "", monthlyVisitTarget: "",
         workSchedule: null as WorkSchedule | null,
@@ -375,7 +381,7 @@ const handleBulkDeactivate = () => {
                                         <Text style={[styles.cardTitle, isDisabled && {color: 'gray', textDecorationLine: 'line-through'}]}>
                                             {item.name} {isDisabled && "(Disabled)"}
                                         </Text>
-                                        <Text style={styles.cardSubtitle}>{item.role} • {item.empId}</Text>
+                                        <Text style={styles.cardSubtitle}>{item.role === 'FIELD_USER' ? (item.jobTitle || 'Sales Executive') : item.role} • {item.empId}</Text>
                                     </View>
                                 </View>
                                 {!bulkMode && (
@@ -471,6 +477,18 @@ const handleBulkDeactivate = () => {
                                     </TouchableOpacity>
                                 ))}
                             </View>
+                            {formData.role === 'FIELD_USER' && (
+                                <>
+                                    <Text style={styles.label}>Designation</Text>
+                                    <View style={styles.pickerRow}>
+                                        {JOB_TITLES.map(t => (
+                                            <TouchableOpacity key={t} onPress={() => setFormData({...formData, jobTitle: t})} style={[styles.roleChip, formData.jobTitle === t && styles.activeRoleChip]}>
+                                                <Text style={{fontSize:10, color: formData.jobTitle === t ? 'white' : '#333'}}>{t}</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                </>
+                            )}
 
                             <View style={styles.inputRow}>
                                 <View style={{flex:1}}><Text style={styles.label}>Emp ID</Text><TextInput style={[styles.input, {backgroundColor:'#eee'}]} value={formData.empId} editable={false} /></View>
