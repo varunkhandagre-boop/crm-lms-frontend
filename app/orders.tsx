@@ -70,7 +70,7 @@ export default function OrderListScreen() {
   const headerTop = useHeaderTop();
   const router = useRouter();
 
-  const { currentUser, addNotification, companyProfile } = useData();
+  const { currentUser, companyProfile } = useData();
 
   // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); orders/payments/users no longer go through this
   const { isDbLoading } = useSaaSDB();
@@ -406,16 +406,6 @@ export default function OrderListScreen() {
                   try {
                       await apiUpdateOrderStatus(selectedOrder.id, newStatus as any);
 
-                      if (addNotification && selectedOrder.senderId) {
-                          await addNotification({
-                              title: `Order ${newStatus}`, 
-                              message: `Order for ${selectedOrder.hospitalName} (PO: ${selectedOrder.poNumber}) has been ${newStatus}.`,
-                              type: newStatus === 'Approved' ? 'success' : newStatus === 'Rejected' ? 'alert' : 'info',
-                              userId: selectedOrder.senderId,
-                              to: selectedOrder.senderName, 
-                              route: '/orders'
-                          });
-                      }
                       setOrderList(prev => prev.map(item => item.id === selectedOrder.id ? { ...item, status: newStatus } : item));
                       reloadCounts();
                       setModalVisible(false);

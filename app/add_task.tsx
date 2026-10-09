@@ -34,7 +34,7 @@ export default function AddTaskScreen() {
   const headerTop = useHeaderTop();
   const router = useRouter();
   
-  const { currentUser, addNotification } = useData(); 
+  const { currentUser } = useData(); 
 
   // userList/loadingUsers now come from useCachedList below (cache-first, shared 'team_members' key)
 
@@ -137,15 +137,6 @@ export default function AddTaskScreen() {
           });
 
           if (res.success) {
-              if (addNotification) {
-                  await addNotification({
-                      title: "New Task Assigned 📋",
-                      message: `${currentUser?.name} assigned you a task: ${taskTitle}.`,
-                      to: assignedToId,
-                      route: "/tasks",
-                      type: "warning"
-                  });
-              }
 
               Alert.alert("Success", "Task Assigned & User Notified! 🚀");
               router.back();

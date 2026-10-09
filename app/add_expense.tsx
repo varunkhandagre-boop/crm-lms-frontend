@@ -29,7 +29,7 @@ export default function AddExpenseScreen() {
   const headerTop = useHeaderTop();
   const router = useRouter();
   
-  const { currentUser, addNotification } = useData();
+  const { currentUser } = useData();
   // mode=request → ask approval before buying; requestId → bill for an approved request.
   const params = useLocalSearchParams<{ mode?: string; requestId?: string }>();
   const [isRequest, setIsRequest] = useState(params.mode === 'request');
@@ -144,15 +144,6 @@ export default function AddExpenseScreen() {
               return;
           }
 
-          if (addNotification && saved.status === 'Pending') {
-              await addNotification({
-                  title: "New Expense Claim 💸",
-                  message: `${currentUser?.name} claimed ₹${amount} for ${type}.`,
-                  to: "Accountant",
-                  route: "/expense",
-                  type: "warning"
-              });
-          }
 
           Alert.alert(
               "Success",

@@ -42,7 +42,7 @@ export default function CourierScreen() {
   const router = useRouter();
   
   // 🔥 1. Context se sirf Profile, User & Notifications Nikala
-  const { currentUser, addNotification, companyProfile } = useData(); 
+  const { currentUser, companyProfile } = useData(); 
 
   // 🔥 2. "organizations" still Firestore; couriers are Postgres now
   const { isDbLoading: isOrgsLoading } = useSaaSDB();
@@ -462,16 +462,6 @@ export default function CourierScreen() {
                   const res = await updateCourierStatus(selectedCourier.id, newStatus as any, note);
                   
                   if (res.success) {
-                      if (addNotification) {
-                          const targetUser = selectedCourier.type === 'Inward' ? selectedCourier.receiver : selectedCourier.sender;
-                          await addNotification({
-                              title: `Courier ${newStatus}`, 
-                              message: `Docket: ${selectedCourier.docketNo} marked as ${newStatus}.`, 
-                              type: 'info', 
-                              to: targetUser, 
-                              route: '/courier'
-                          });
-                      }
                       setCourierList(prev => prev.map(item => item.id === selectedCourier.id ? mergeRecord(item, res.record) : item));
                       refreshCouriers(); // Pending badge + status chip
                       setModalVisible(false);

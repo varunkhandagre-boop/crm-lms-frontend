@@ -36,7 +36,7 @@ export default function AddActivityScreen() {
   const headerTop = useHeaderTop();
   const router = useRouter();
   
-  const { currentUser, addNotification } = useData();
+  const { currentUser } = useData();
   const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
   // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
@@ -199,15 +199,6 @@ export default function AddActivityScreen() {
               location: { latitude: locationData.lat, longitude: locationData.lng },
           });
 
-          if (addNotification) {
-              await addNotification({
-                  title: "New Activity Planned 📅",
-                  message: `${currentUser?.name} planned a ${selectedActivity} at ${organization}.`,
-                  to: "Admin",
-                  route: "/activity_plan",
-                  type: "info"
-              });
-          }
           Alert.alert("Success", "Activity Planned & Admin Notified!");
           router.back();
       } catch (error: any) {

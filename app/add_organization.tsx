@@ -40,7 +40,7 @@ export default function AddOrganizationScreen() {
   const isEditMode = params.editId ? true : false;
   
   // 🔥 1. Context se sirf User & Notification
-  const { currentUser, addNotification } = useData();
+  const { currentUser } = useData();
 
   // 🔥 2. Local loading state (no more useSaaSDB here)
 
@@ -418,15 +418,6 @@ export default function AddOrganizationScreen() {
           } else {
               const res = await createOrganization(orgData);
               if (res.success) {
-                  if (addNotification) {
-                      await addNotification({
-                          title: "New Organization 🏥",
-                          message: `New Hospital Added: ${orgName}`,
-                          type: "info",        
-                          to: "Admin",         
-                          route: "/organization" 
-                      });
-                  }
                   Alert.alert("Success", "Organization Added!");
               } else {
                   Alert.alert("Error", "Could not add organization.");

@@ -53,7 +53,7 @@ export default function AddServiceCallScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   
-  const { currentUser, companyProfile, addNotification } = useData();
+  const { currentUser, companyProfile } = useData();
   
   // 🔥 SaaS Engine kept for organizations only
   const { fetchSaaSData, isDbLoading } = useSaaSDB();
@@ -537,15 +537,6 @@ recordLocationLog({
               }
           }
 
-          if (addNotification) {
-              await addNotification({
-                  title: `Service Ticket #${saved.scrId} 🛠️`,
-                  message: `${currentUser?.name} created a service call for ${org} (${status}).`,
-                  to: "Admin",
-                  route: "/service_call",
-                  type: "alert"
-              });
-          }
 
           if (params.activityId) {
               await completeActivityPlan(params.activityId as string);

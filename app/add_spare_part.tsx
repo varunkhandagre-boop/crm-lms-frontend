@@ -21,8 +21,7 @@ export default function AddSparePartScreen() {
   const headerTop = useHeaderTop();
   const router = useRouter();
   
-  const { addNotification } = useData();
-
+  
   const [partName, setPartName] = useState('');
   const [partNo, setPartNo] = useState('');
   const [price, setPrice] = useState('');
@@ -49,15 +48,6 @@ export default function AddSparePartScreen() {
               minStock: parseInt(minStock) || 0,
           });
 
-          if (addNotification) {
-              await addNotification({
-                  title: "New Spare Part ⚙️",
-                  message: `${partName} (PN: ${partNo}) added to inventory.`,
-                  to: "Admin",
-                  route: "/spare_parts",
-                  type: "info"
-              });
-          }
 
           Alert.alert("Success", "Spare Part Added Successfully!", [
               { text: "OK", onPress: () => router.back() }

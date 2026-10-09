@@ -44,7 +44,7 @@ export default function AddPaymentScreen() {
     const router = useRouter();
     const params = useLocalSearchParams(); 
     
-    const { currentUser, companyProfile, addNotification } = useData();
+    const { currentUser, companyProfile } = useData();
     const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
     // orgList/orderList/dueList now come from useCachedList below (cache-first, shared keys)
@@ -451,15 +451,6 @@ export default function AddPaymentScreen() {
                 }
             }
 
-            if (addNotification) {
-                await addNotification({
-                    title: "Payment Received 💰",
-                    message: `₹${saved.amount} received from ${saved.orgName}. Receipt: ${saved.receiptNo}`,
-                    to: "Admin",
-                    type: "success",
-                    route: "/payment_collections"
-                });
-            }
 
             Alert.alert("Success ✅", "Payment Saved & Linked!" +
                 (photoFailed ? `\n\n⚠️ The cheque photo could not be uploaded. Open the payment in Payment Collections and tap "Add Cheque Photo".` : '') +

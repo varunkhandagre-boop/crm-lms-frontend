@@ -29,7 +29,7 @@ export default function AddVisitingCardScreen() {
   
   // 🔥 1. Context se User aur Notification engine (cardRequestList ab zaroori nahi —
   // reqId ab server-side generate hota hai, is FY ke count se)
-  const { currentUser, addNotification } = useData();
+  const { currentUser } = useData();
 
   // --- FORM DATA ---
   const [shippingAddress, setShippingAddress] = useState('');
@@ -105,17 +105,6 @@ export default function AddVisitingCardScreen() {
           const res = await createVisitingCardRequest({ shippingAddress, items: finalItems });
 
           if (res.success) {
-              // 🔥 REAL PUSH NOTIFICATION
-              if (addNotification) {
-                  const itemSummary = finalItems.map(i => `${i.type} (${i.quantity})`).join(', ');
-                  await addNotification({
-                      title: "New Stationery Request 📇",
-                      message: `${currentUser?.name} requested: ${itemSummary}.`,
-                      to: "Admin", // Ya 'Store'
-                      route: "/visiting_cards",
-                      type: "warning"
-                  });
-              }
 
               Alert.alert("Success", "Request Submitted & Admin Notified!");
               router.back();

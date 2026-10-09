@@ -160,11 +160,7 @@ export default function TravelNoteScreen() {
       );
   };
 
-  // --- 🔥 Phase 8: SETTLEMENT via settleTravelNotesForUser() — single atomic bulk update.
-  // (The old "notify employee their claims were settled" push is dropped here: the old
-  // code sourced the Firestore userId off the first pre-fetched note; the new bulk
-  // endpoint settles server-side without returning individual records to key off of.
-  // Re-add via addNotification once notifications move off Firestore in Phase 9.)
+  // Settlement: one atomic bulk update on the server, which also notifies the employee.
   const processSettlement = async () => {
       setIsSettling(true);
       try {

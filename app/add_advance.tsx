@@ -26,7 +26,7 @@ export default function AddAdvanceScreen() {
   const headerTop = useHeaderTop();
   const router = useRouter();
   
-  const { currentUser, addNotification } = useData();
+  const { currentUser } = useData();
 
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
@@ -57,15 +57,6 @@ export default function AddAdvanceScreen() {
               date: date.toISOString(),
           });
 
-          if (addNotification) {
-              await addNotification({
-                  title: "New Advance Request 💰",
-                  message: `${currentUser?.name} requested ₹${amount} advance.`,
-                  to: "Accountant",
-                  route: "/advance", 
-                  type: "warning"
-              });
-          }
 
           Alert.alert("Success", "Advance Request Sent & Admin Notified!");
           router.back();

@@ -47,10 +47,8 @@ import { buildCacheKey } from '../utils/listCache';
 // NOTIFICATION IMPORTS
 import * as Device from 'expo-device';
 import { Notifications } from '../utils/notificationsModule';
-import { doc, setDoc } from 'firebase/firestore';
 import { fetchNotifications } from '../services/api/notifications';
 import { savePushTokenToBackend } from '../services/api/users';
-import { auth, db } from './../firebaseConfig';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -248,17 +246,6 @@ const saveTokenToDatabase = async (token: string) => {
           console.log("❌ Error saving token to backend:", e);
       }
 
-      // Best-effort: also keep the Firestore copy in sync for legacy
-      // Firebase-linked users, since some not-yet-migrated features may
-      // still read pushToken from there. Silently skipped for Postgres-only
-      // sessions (no Firebase auth to write with — would always fail).
-      if (!auth.currentUser) return;
-      try {
-          const userRef = doc(db, "users", currentUser.id);
-          await setDoc(userRef, { pushToken: token }, { merge: true });
-      } catch (e) { 
-          console.log("❌ Error saving token to Firestore:", e); 
-      }
 };
 
   async function registerForPushNotificationsAsync() {

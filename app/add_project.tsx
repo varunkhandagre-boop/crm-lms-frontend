@@ -32,7 +32,7 @@ export default function AddProjectScreen() {
   const headerTop = useHeaderTop();
   const router = useRouter();
   
-  const { currentUser, addNotification } = useData(); 
+  const { currentUser } = useData(); 
   const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
   // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
@@ -123,15 +123,6 @@ export default function AddProjectScreen() {
               description,
           });
 
-          if (addNotification) {
-              await addNotification({
-                  title: "New Project Started 🏗️",
-                  message: `${currentUser?.name} started project: ${name} for ${client}.`,
-                  to: "Admin",
-                  route: "/projects",
-                  type: "success"
-              });
-          }
 
           Alert.alert("Success", "Project Started Successfully! 🏗️");
           router.back();

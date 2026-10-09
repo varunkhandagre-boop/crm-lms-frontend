@@ -1,7 +1,7 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Device from 'expo-device';
-import { Platform } from 'react-native';
 import { Notifications } from './notificationsModule';
+import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DEFAULT_SCHEDULE, isOffDay, localYmd, MY_SCHEDULE_KEY, WorkSchedule } from './workSchedule';
 
 // ==========================================
@@ -118,7 +118,7 @@ export const manageAttendanceReminders = async (
 
     // 🛑 CHECK 1: Aaj ke liye check (weekly off OR Holiday)
     if (isOffDay(localYmd(now), schedule) || isHoliday(now, holidayList)) {
-        console.log("Today is a holiday / weekly off 🌴 — no reminder today.");
+        console.log("Aaj Chutti hai (weekly off/Holiday) 🌴, No Reminder today!");
     } else {
         // --- CASE A: Login Reminder ---
         if (status === 'LOGIN_PENDING') {
@@ -168,7 +168,7 @@ export const manageAttendanceReminders = async (
 
     // 🛑 CHECK 2: Kal ke liye check (weekly off OR Holiday)
     if (isOffDay(localYmd(tomorrow), schedule) || isHoliday(tomorrow, holidayList)) {
-        console.log("Tomorrow is a holiday / weekly off 🌴 — alarm skipped.");
+        console.log("Kal Chutti hai (weekly off/Holiday) 🌴, Alarm skip kiya.");
         return; 
     }
     
@@ -182,34 +182,3 @@ export const manageAttendanceReminders = async (
     });
 };
 
-// ==========================================
-// 6. 🔥 SEND REAL PUSH NOTIFICATION
-// ==========================================
-export async function sendExpoPushNotification(expoPushToken: string, title: string, body: string, data: any = {}) {
-  const message = {
-    to: expoPushToken,
-    sound: 'default',
-    title: title,
-    body: body,
-    data: data,
-  };
-
-  try {
-    const response = await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Accept-encoding': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(message),
-    });
-    
-    // 🔥 NEW: Expo का जवाब (Response) प्रिंट करना
-    const responseData = await response.json();
-    console.log("🚀 Expo Push Response:", responseData);
-    
-  } catch (error) {
-    console.error("❌ Error sending push notification:", error);
-  }
-}

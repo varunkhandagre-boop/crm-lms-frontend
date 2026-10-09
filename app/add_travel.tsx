@@ -31,7 +31,7 @@ export default function AddTravelScreen() {
   const router = useRouter();
   
   // 🔥 1. Context se Current User aur Notification Engine nikala
-  const { currentUser, addNotification } = useData(); 
+  const { currentUser } = useData(); 
 
   // Form States
   const [date, setDate] = useState(new Date()); 
@@ -118,16 +118,6 @@ export default function AddTravelScreen() {
         });
         
         if (result.success) {
-            // 🔥 4. REAL PUSH NOTIFICATION
-            if (addNotification) {
-                await addNotification({
-                    title: "New Travel Logged 🚴",
-                    message: `${currentUser?.name} logged travel: ${fromLoc} to ${toLoc} (${distance} km).`,
-                    to: "Accountant", // Admin/Accountant ko alert jayega
-                    route: "/travel",
-                    type: "info"
-                });
-            }
 
             Alert.alert("Success", "Travel Note Added & Admin Notified!");
             router.back();

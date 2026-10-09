@@ -60,7 +60,7 @@ export default function AddOrderScreen() {
   const headerTop = useHeaderTop();
   const router = useRouter();
 
-  const { currentUser, addNotification, companyProfile } = useData();
+  const { currentUser, companyProfile } = useData();
 
   // 🔥 SaaS Engine kept for organizations/users + payment_collections (advance record)
   const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
@@ -537,15 +537,6 @@ if (locationData) {
               });
           }
 
-          if (addNotification) {
-              await addNotification({
-                  title: "New Order Received 📦",
-                  message: `Order ${savedOrder.orderId} added by ${finalSenderName} for ${hospitalName}.`,
-                  to: "Admin", 
-                  type: "info",
-                  route: "/orders"
-              });
-          }
 
           setIsSaving(false);
 

@@ -35,7 +35,7 @@ export default function LeaveApplicationScreen() {
   const router = useRouter();
 
   // 🔥 1. Context se sirf user aur notifications
-  const { currentUser, addNotification } = useData();
+  const { currentUser } = useData();
   // 🔥 2. "users" abhi bhi Firestore se (Phase 10 tak) — baaki sab Postgres se
   const { isDbLoading: isUsersLoading } = useSaaSDB();
 
@@ -224,17 +224,6 @@ export default function LeaveApplicationScreen() {
           const res = await updateLeaveStatusApi(selectedItem.id, status as 'Approved' | 'Rejected');
 
           if (res.success) {
-              const targetUserId = selectedItem.senderId || selectedItem.userId;
-              if (addNotification && targetUserId && targetUserId !== (currentUser?.id || currentUser?.uid)) {
-                  await addNotification({
-                      title: `Leave ${status}`, 
-                      message: `Your leave request for ${selectedItem.days} days has been ${status}.`,
-                      type: status === 'Approved' ? 'success' : 'alert',
-                      userId: targetUserId,
-                      to: selectedItem.senderName || 'Employee', 
-                      route: '/leave'
-                  });
-              }
               
               // Silent local reload
               setLeaveList(prev => prev.map(item => item.id === selectedItem.id ? { ...item, status: status } : item));

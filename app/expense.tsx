@@ -34,7 +34,7 @@ export default function ExpenseScreen() {
   const headerTop = useHeaderTop();
   const router = useRouter();
   
-  const { currentUser, addNotification } = useData();
+  const { currentUser } = useData();
   // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); expenses no longer go through this
   const { isDbLoading } = useSaaSDB();
 
@@ -234,18 +234,6 @@ export default function ExpenseScreen() {
       try {
           await updateExpenseStatus(selectedItem.id, status as 'Approved' | 'Rejected');
 
-          const targetUserId = selectedItem.senderId;
-          // Requests: the server sends the employee's notification itself.
-          if (selectedItem.rowKind !== 'request' && addNotification && targetUserId && targetUserId !== currentUser?.id) {
-              await addNotification({
-                  title: `Expense Claim ${status}`,
-                  message: `Your claim of ₹${selectedItem.amount} has been ${status}.`,
-                  type: status === 'Approved' ? 'success' : 'alert',
-                  userId: targetUserId,
-                  to: selectedItem.senderName,
-                  route: '/expense'
-              });
-          }
           
           setExpenseList(prev => prev.map(item => item.id === selectedItem.id ? { ...item, status: status } : item));
           

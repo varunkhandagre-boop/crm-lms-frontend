@@ -41,7 +41,7 @@ export default function AddSalesScreen() {
     const router = useRouter();
     
     // 🔥 Context se current user aur global Notification engine
-    const { currentUser, addNotification } = useData(); 
+    const { currentUser } = useData(); 
 
     // 🔥 SaaS Engine for organizations/products (still Firestore)
     const { fetchSaaSData, isDbLoading } = useSaaSDB();
@@ -253,15 +253,6 @@ if (locationData) {
             // An existing lead already got its welcome message when it was created.
             if (visit.leadId && mobile && !visit.attachedToExistingLead) triggerAutomatedMessages({ hospital, person, mobile, email });
 
-            if (addNotification) {
-                await addNotification({
-                    title: "New Cold Call 📍",
-                    message: `${currentUser?.name} visited ${hospital} (${outcome}).`,
-                    to: "Admin", 
-                    route: "/sales", 
-                    type: "info"
-                });
-            }
 
             Alert.alert(
                 "Success",

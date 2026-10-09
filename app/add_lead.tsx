@@ -53,7 +53,7 @@ export default function AddLeadScreen() {
   const router = useRouter();
   
   // 🔥 1. Context se sirf user aur notification nikala
-  const { currentUser, addNotification } = useData(); 
+  const { currentUser } = useData(); 
 
   // 🔥 2. SaaS Engine ab sirf organizations/users/products ke liye
   const { fetchSaaSData, isDbLoading } = useSaaSDB();
@@ -384,15 +384,6 @@ export default function AddLeadScreen() {
                   location: { latitude: locationData.lat, longitude: locationData.lng },
               });
 
-              if (addNotification) {
-                  await addNotification({
-                      title: "New Lead Added 👥",
-                      message: `${currentUser?.name} added a new lead: ${org}.`,
-                      to: "Admin",
-                      route: "/leads", 
-                      type: "info"
-                  });
-              }
               Alert.alert("Success", "New Lead Added!");
               router.back();
           } catch (err: any) {

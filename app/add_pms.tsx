@@ -47,7 +47,7 @@ export default function AddPMSScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   
-  const { currentUser, companyProfile, addNotification } = useData();
+  const { currentUser, companyProfile } = useData();
   const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
   // orgList/installList now come from useCachedList below (cache-first, shared keys)
@@ -424,15 +424,6 @@ recordLocationLog({
               location: locationData ? { latitude: locationData.lat, longitude: locationData.lng } : null,
           });
 
-          if (addNotification) {
-              await addNotification({
-                  title: "PMS Report Submitted ⚙️",
-                  message: `${currentUser?.name} submitted ${pmsType} report (${saved.pmsId}) for ${machineName} at ${org}.`,
-                  to: "Admin",
-                  route: "/pms_schedule",
-                  type: "info"
-              });
-          }
 
           if (params.activityId) {
               await completeActivityPlan(params.activityId as string);

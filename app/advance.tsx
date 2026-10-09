@@ -33,7 +33,7 @@ export default function EmployeeAdvanceScreen() {
   const headerTop = useHeaderTop();
   const router = useRouter();
   
-  const { currentUser, addNotification } = useData();
+  const { currentUser } = useData();
   // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); advances no longer go through this
   const { isDbLoading } = useSaaSDB();
 
@@ -206,17 +206,6 @@ export default function EmployeeAdvanceScreen() {
           const monthlyDeductionAmount = status === 'Approved' && installmentAmount ? Number(installmentAmount) : undefined;
           await updateAdvanceStatus(selectedItem.id, status as 'Approved' | 'Rejected', monthlyDeductionAmount);
           
-          const targetUserId = selectedItem.senderId;
-          if (addNotification && targetUserId && targetUserId !== currentUser?.id) {
-              await addNotification({
-                  title: `Advance ${status}`, 
-                  message: `Your advance request of ₹${selectedItem.amount} has been ${status}.`,
-                  type: status === 'Approved' ? 'success' : 'alert',
-                  userId: targetUserId, 
-                  to: selectedItem.senderName,
-                  route: '/advance'
-              });
-          }
 
           setAdvanceList(prev => prev.map(item => item.id === selectedItem.id ? { ...item, status: status } : item));
 

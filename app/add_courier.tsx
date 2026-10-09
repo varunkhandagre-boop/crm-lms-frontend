@@ -39,7 +39,7 @@ import { useHeaderTop } from '../hooks/useHeaderTop';
 export default function AddCourierScreen() {
   const headerTop = useHeaderTop();
   const router = useRouter();
-  const { currentUser, companyProfile, addNotification } = useData();
+  const { currentUser, companyProfile } = useData();
 
   // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
   const [productList, setProductList] = useState<any[]>([]);
@@ -412,20 +412,6 @@ export default function AddCourierScreen() {
           });
           
           if (res.success) {
-              const dcNumber = res.record.dcNo;
-
-              if (addNotification) {
-                  let notifTitle = type === 'Inward' ? "New Courier Received 📦" : "Courier Dispatched 🚀";
-                  let notifMsg = type === 'Inward' ? `Courier from ${fromName}` : `Outward to ${toName}. DC: ${dcNumber}`;
-                  await addNotification({
-                      title: notifTitle, 
-                      message: notifMsg, 
-                      to: "Admin", 
-                      route: "/courier", 
-                      type: "info"
-                  });
-              }
-
               if (type === 'Outward') {
                   Alert.alert("Success ✅", "Saved! Share Delivery Challan?", [
                       { text: "No", onPress: () => router.back(), style: 'cancel' },

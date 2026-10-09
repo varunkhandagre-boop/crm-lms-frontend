@@ -51,7 +51,7 @@ export default function AddDemoScreen() {
   const editId = params.editId as string | undefined;
   const isEditMode = !!editId;
 
-  const { currentUser, companyProfile, addNotification } = useData();
+  const { currentUser, companyProfile } = useData();
 
   // 🔥 SaaS Engine kept for organizations/products
   const { fetchSaaSData, isDbLoading } = useSaaSDB();
@@ -522,15 +522,6 @@ export default function AddDemoScreen() {
           notes: notes,
       });
 
-      if (addNotification) {
-          await addNotification({
-              title: "New Demo Report 📋",
-              message: `${currentUser?.name} submitted a demo report (${newDemoId}) for ${finalProduct} at ${hospital}.`,
-              to: "Admin",
-              route: "/demo",
-              type: "info"
-          });
-      }
       
       if (params.activityId) {
           await completeActivityPlan(params.activityId as string);

@@ -52,7 +52,7 @@ export default function AddInstallationScreen() {
   const router = useRouter();
   const params = useLocalSearchParams(); 
   
-  const { currentUser, companyProfile, addNotification } = useData();
+  const { currentUser, companyProfile } = useData();
   const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
   // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
@@ -593,15 +593,6 @@ export default function AddInstallationScreen() {
             }
         }
 
-        if (addNotification) {
-            await addNotification({
-                title: "Installation Completed 🛠️",
-                message: `${currentUser?.name} installed ${addedMachines.length} machine(s) at ${hospital}.`,
-                to: "Admin",
-                route: "/installations",
-                type: "success"
-            });
-        }
 
         if (params.activityId) {
             await completeActivityPlan(params.activityId as string);

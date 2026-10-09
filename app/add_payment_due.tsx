@@ -34,7 +34,7 @@ export default function AddPaymentDueScreen() {
     const headerTop = useHeaderTop();
     const router = useRouter();
     
-    const { currentUser, addNotification } = useData();
+    const { currentUser } = useData();
     const { fetchSaaSData } = useSaaSDB();
 
     // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
@@ -109,15 +109,6 @@ export default function AddPaymentDueScreen() {
                 notes,
             });
 
-            if (addNotification) {
-                await addNotification({
-                    title: "Manual Due Added 📝",
-                    message: `₹${amount} due added for ${saved.orgName} by ${currentUser?.name}.`,
-                    to: "Accountant",
-                    route: "/payment_duelist",
-                    type: "warning"
-                });
-            }
             Alert.alert("Success", `New Due Added Successfully! ID: ${saved.orderId}`);
             router.back();
         } catch (error: any) {

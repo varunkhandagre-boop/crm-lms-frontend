@@ -31,7 +31,7 @@ export default function AddLeaveScreen() {
   const router = useRouter();
   
   // 🔥 1. Context se Current User aur Notification Engine nikala
-  const { currentUser, addNotification } = useData();
+  const { currentUser } = useData();
   const { forUser: scheduleFor } = useWorkSchedules(currentUser?.companyId, currentUser?.id);
 
   // States
@@ -162,16 +162,6 @@ export default function AddLeaveScreen() {
           });
           
           if (result.success) {
-              // 🔥 5. REAL PUSH NOTIFICATION
-              if (addNotification) {
-                  await addNotification({
-                      title: "New Leave Application 📅",
-                      message: `${currentUser?.name} applied for ${days} day(s) leave (${type}).`,
-                      to: "Admin", // Manager ya HR ko bhi set kar sakte hain future me
-                      route: "/leave",
-                      type: "alert" // High priority
-                  });
-              }
 
               Alert.alert("Success", `Applied for ${days} Day(s) Leave & Admin Notified!`);
               router.back();

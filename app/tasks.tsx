@@ -203,10 +203,7 @@ export default function TaskScreen() {
       setCompletionNote('');
   };
 
-  // 🔥 5. SAAS COMPLETE TASK LOGIC — Phase 8: PATCHes via completeTaskApi().
-  // (Old "notify assigner" push dropped here too, same reasoning as travel.tsx's
-  // settlement notification — re-add via addNotification once notifications move
-  // off Firestore in Phase 9 and the Postgres/Firestore user-id mapping is settled.)
+  // Complete task: the server notifies whoever assigned it.
   const handleCompleteTask = async () => {
       if (!completionNote.trim()) return Alert.alert("Note Required", "Please enter what action you took.");
       

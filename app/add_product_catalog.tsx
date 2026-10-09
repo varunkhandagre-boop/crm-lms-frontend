@@ -24,8 +24,7 @@ export default function AddProductScreen() {
     const router = useRouter();
     
     // 🔥 1. Context se Notification Engine nikala
-    const { addNotification } = useData(); 
-
+    
     // 🔥 2. Naya SaaS Engine connect kiya
     const { addSaaSData } = useSaaSDB();
 
@@ -66,16 +65,6 @@ export default function AddProductScreen() {
             const result = await addSaaSData("products", newProduct);
 
             if (result.success) {
-                // 🔥 5. PUSH NOTIFICATION
-                if (addNotification) {
-                    await addNotification({
-                        title: "New Product Added 📦",
-                        message: `New Product: ${name} (${category}) has been added to catalog.`,
-                        to: "All",
-                        route: "/catalog",
-                        type: "success"
-                    });
-                }
                 Alert.alert("Success", "Product added to catalog!");
                 router.back();
             } else {

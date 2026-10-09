@@ -9,7 +9,6 @@ import { fetchPermissions } from '../../services/api/permissions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import {
-    addDoc,
     collection,
     doc,
     getDoc,
@@ -22,7 +21,6 @@ import {
 import { auth, db } from '../../firebaseConfig';
 import { bridgeLogin, bridgeLogout, getStoredPostgresUser } from '../../services/api/authBridge';
 import { clearAllListCaches } from '../../utils/listCache';
-import { registerForPushNotificationsAsync, sendExpoPushNotification } from '../../utils/notificationHelper';
 
 // --- DATA TYPES (🔥 SaaS Variables Added) ---
 type User = { 
@@ -55,14 +53,8 @@ const DataContext = createContext<any>(null);
 // What's left here is only what's still genuinely read from Context
 // somewhere: auth (currentUser/login/logout), companyProfile,
 // isSubscriptionExpired, appPermissions (both Postgres-backed),
-// activeSection/shouldOpenSidebar (sidebar UI state), and addNotification
-// (still called from ~28 screens — its in-app Firestore "notifications" doc
-// is redundant now that the backend creates that doc itself server-side on
-// these same actions, but addNotification is ALSO the only thing that
-// dispatches Expo push notifications for them, and the backend doesn't
-// send push itself — so this one function is deliberately left exactly as
-// it was, not trimmed, since getting that wrong would silently break push
-// notifications across ~28 screens).
+// activeSection/shouldOpenSidebar (sidebar UI state). Notifications (in-app
+// and push) are sent by the backend when a record is created or approved.
 // ---------------------------------------------------------------------------
 
 export const DataProvider = ({ children }: any) => {
@@ -285,19 +277,6 @@ export const DataProvider = ({ children }: any) => {
                 }
             }
             
-            try {
-                const token = await registerForPushNotificationsAsync();
-                if (token) {
-                    const userRefToUpdate = doc(db, "users", userDocId);
-                    await setDoc(userRefToUpdate, { 
-                        expoPushToken: token,
-                        lastActive: new Date().toISOString() 
-                    }, { merge: true });
-                }
-            } catch (tokenErr) {
-                console.log("⚠️ Could not fetch/save push token:", tokenErr);
-            }
-
         } catch (e) { console.log("⚠️ Auth Error:", e); }
         
         const newUser = {
@@ -439,72 +418,6 @@ export const DataProvider = ({ children }: any) => {
       
       return () => clearInterval(interval);
   }, [currentUser]);
-
-  // =========================================================
-  // 🔔 NOTIFICATIONS — still Firestore for now. The in-app notification
-  // list/badge itself is Postgres-backed (see app/notifications.tsx and
-  // index.tsx's own unreadCount) and the backend already creates these
-  // notification docs server-side for the actions that matter — but
-  // addNotification is ALSO the only thing that looks up the target
-  // user's Expo push token (from Firestore "users") and dispatches the
-  // actual push notification, which the backend does not do itself. Left
-  // exactly as it was; ~28 screens still call this specifically for that
-  // push-dispatch side effect.
-  // =========================================================
-  const addNotification = async (notifData: any) => {
-    try {
-        // Firestore rejects any field with value `undefined` outright — strip
-        // them before writing, since callers across the app don't always
-        // guarantee every field is defined (e.g. `to`/`userId` when no
-        // assignee was picked).
-        const cleanNotifData = Object.fromEntries(
-            Object.entries(notifData).filter(([, v]) => v !== undefined)
-        );
-        const docRef = await addDoc(collection(db, "notifications"), {
-            ...cleanNotifData,
-            companyId: currentUser?.companyId || '', 
-            createdAt: new Date().toISOString(),
-            read: false,
-            senderId: currentUser?.id || 'app',
-            senderName: currentUser?.name || 'App User'
-        });
-          await setDoc(docRef, { id: docRef.id }, { merge: true });
-
-          if (notifData.userId) {
-              const userDoc = await getDoc(doc(db, "users", notifData.userId));
-              if (userDoc.exists()) {
-                  const targetUser = userDoc.data();
-                  if (targetUser.expoPushToken) {
-                      await sendExpoPushNotification(
-                          targetUser.expoPushToken, 
-                          notifData.title, 
-                          notifData.message, 
-                          { route: notifData.route || '/' }
-                      );
-                  }
-              }
-          } else if (notifData.to) {
-              const roleQuery = query(collection(db, "users"), where("role", "==", notifData.to), where("companyId", "==", currentUser?.companyId || ''));
-              const roleSnap = await getDocs(roleQuery);
-              
-              roleSnap.forEach((userDoc: any) => {
-                  const targetUser = userDoc.data();
-                  if (targetUser.expoPushToken) {
-                      sendExpoPushNotification(
-                          targetUser.expoPushToken, 
-                          notifData.title, 
-                          notifData.message, 
-                          { route: notifData.route || '/' }
-                      );
-                  }
-              });
-          }
-          console.log("🔔 Notification Process Completed!");
-
-      } catch (e) {
-          console.error("❌ Add Notification Error:", e);
-      }
-  };
 
     const login = async (email: string, pass: string) => {
       const normalizedEmail = email.trim().toLowerCase();
@@ -667,7 +580,6 @@ export const DataProvider = ({ children }: any) => {
       isFirebaseSynced, isSubscriptionExpired,
       companyProfile,
       appPermissions,
-      addNotification,
   }), [
       currentUser, loading, activeSection, shouldOpenSidebar, isFirebaseSynced, isSubscriptionExpired,
       companyProfile, appPermissions
