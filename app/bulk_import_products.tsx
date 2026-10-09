@@ -18,6 +18,7 @@ import {
 import * as XLSX from 'xlsx';
 
 import { BulkImportPreviewItem, BulkProductRow, commitBulkImport, previewBulkImport } from '../services/api/products';
+import { cellNumber } from '../utils/excelImport';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 
 const TEMPLATE_COLUMNS = [
@@ -99,8 +100,8 @@ export default function BulkImportProductsScreen() {
           series: r['Series'] ? String(r['Series']).trim() : undefined,
           description: r['Description'] ? String(r['Description']).trim() : undefined,
           specifications: r['Specifications'] ? String(r['Specifications']).trim() : undefined,
-          price: r['Price'] ? Number(r['Price']) : undefined,
-          gstRate: r['GST %'] ? Number(r['GST %']) : undefined,
+          price: cellNumber(r['Price']),
+          gstRate: cellNumber(r['GST %']),
           catalogUrl: r['Catalog/PDF Link'] ? String(r['Catalog/PDF Link']).trim() : undefined,
           videoUrl: r['YouTube Link'] ? String(r['YouTube Link']).trim() : undefined,
         }));

@@ -48,9 +48,9 @@ export default function ManageTeamScreen() {
     const headerTop = useHeaderTop();
     const router = useRouter();
     const { currentUser } = useData();
-    const [activeTab, setActiveTab] = useState<'Users' | 'Permissions' | 'Holidays' | 'Tracking' | 'History' | 'Alerts'>('Users'); 
+    const [activeTab, setActiveTab] = useState<'Users' | 'Permissions' | 'Holidays' | 'Tracking' | 'History' | 'Alerts' | 'Setup'>('Users'); 
     // Alert settings are Admin-only (the API enforces it too).
-    const tabs = ['Users', 'Permissions', 'Holidays', 'Tracking', 'History', ...(['Admin', 'SuperAdmin'].includes(currentUser?.role || '') ? ['Alerts'] : [])];
+    const tabs = ['Users', 'Permissions', 'Holidays', 'Tracking', 'History', ...(['Admin', 'SuperAdmin'].includes(currentUser?.role || '') ? ['Alerts'] : []), 'Setup'];
     
     return (
         <View style={styles.container}>
@@ -95,6 +95,7 @@ export default function ManageTeamScreen() {
                 {activeTab === 'Tracking' && <TrackingTab />}
                 {activeTab === 'History' && <HistoryTab />}
                 {activeTab === 'Alerts' && <AlertSettingsTab />}
+                {activeTab === 'Setup' && <SetupTab />}
             </View>
         </View>
     );
@@ -780,6 +781,41 @@ const PermissionsTab = () => {
 // ====================================================================
 // 3️⃣ HOLIDAYS TAB — unchanged, already migrated
 // ====================================================================
+// =========================================================================
+// SETUP — every Excel template / upload in one place (new company: fill all at once)
+// =========================================================================
+const SETUP_ITEMS = [
+    { title: 'Company Profile', desc: 'Name, address, GST, contact, UPI and bank details', icon: 'business-outline', route: '/bulk_import_company' },
+    { title: 'Employees', desc: 'All HR details — role, salary, targets, bank, Aadhaar, PAN, address', icon: 'people-outline', route: '/bulk_import_users' },
+    { title: 'Products / Price List', desc: 'Product, model, price, GST, catalogue link', icon: 'cube-outline', route: '/bulk_import_products' },
+    { title: 'Holidays', desc: 'Company holiday list for the year', icon: 'calendar-outline', route: '/bulk_import_holidays' },
+];
+
+const SetupTab = () => {
+    const router = useRouter();
+    return (
+        <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+            <View style={styles.setupIntro}>
+                <Ionicons name="document-text-outline" size={22} color="#2e7d32" />
+                <Text style={styles.setupIntroText}>
+                    Fill your data in Excel and upload it. Each one has a template (or your current list) to download, and shows a preview before saving.
+                </Text>
+            </View>
+            {SETUP_ITEMS.map((x, i) => (
+                <TouchableOpacity key={x.route} style={styles.setupCard} onPress={() => router.push(x.route as any)}>
+                    <View style={styles.setupNum}><Text style={{ color: 'white', fontWeight: 'bold' }}>{i + 1}</Text></View>
+                    <Ionicons name={x.icon as any} size={24} color="#3b5998" />
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                        <Text style={styles.setupTitle}>{x.title}</Text>
+                        <Text style={styles.setupDesc}>{x.desc}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color="#999" />
+                </TouchableOpacity>
+            ))}
+        </ScrollView>
+    );
+};
+
 const HolidaysTab = () => {
     const router = useRouter();
     const { currentUser } = useData();
@@ -1023,6 +1059,12 @@ const HistoryTab = () => {
 };
 
 const styles = StyleSheet.create({
+    setupIntro: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#e8f5e9", borderRadius: 10, padding: 12, marginBottom: 12 },
+    setupIntroText: { flex: 1, fontSize: 12, color: "#2e7d32" },
+    setupCard: { flexDirection: "row", alignItems: "center", backgroundColor: "white", borderRadius: 10, padding: 14, marginBottom: 10, elevation: 1, gap: 8 },
+    setupNum: { width: 22, height: 22, borderRadius: 11, backgroundColor: "#3b5998", alignItems: "center", justifyContent: "center" },
+    setupTitle: { fontSize: 15, fontWeight: "bold", color: "#333" },
+    setupDesc: { fontSize: 12, color: "gray", marginTop: 2 },
     container: { flex: 1, backgroundColor: '#f4f6f8' },
     header: { backgroundColor: '#2c3e50', padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },

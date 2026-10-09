@@ -18,6 +18,7 @@ import {
 import * as XLSX from 'xlsx';
 
 import { BulkHolidayPreviewItem, BulkHolidayRow, commitBulkHolidayImport, previewBulkHolidayImport } from '../services/api/holidays';
+import { cellDate } from '../utils/excelImport';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 
 const TEMPLATE_COLUMNS = ['Holiday Name', 'Date'];
@@ -83,17 +84,8 @@ export default function BulkImportHolidaysScreen() {
 
       const rows: BulkHolidayRow[] = rawRows
         .filter((r) => r['Holiday Name'] && r['Date'])
-        .map((r) => {
-          let dateStr = r['Date'];
-          // Excel sometimes gives a JS Date object or a serial number for
-          // date cells depending on formatting — normalize to YYYY-MM-DD.
-          if (dateStr instanceof Date) {
-            dateStr = dateStr.toISOString().split('T')[0];
-          } else {
-            dateStr = String(dateStr).trim();
-          }
-          return { name: String(r['Holiday Name']).trim(), date: dateStr };
-        });
+        // Excel date cells arrive as day numbers; typed dates as 26/01/2027 etc. — all become YYYY-MM-DD.
+        .map((r) => ({ name: String(r['Holiday Name']).trim(), date: cellDate(r['Date']) || String(r['Date']).trim() }));
 
       if (rows.length === 0) {
         Alert.alert('No Valid Rows', 'Every row is missing a Holiday Name or Date — nothing to import.');

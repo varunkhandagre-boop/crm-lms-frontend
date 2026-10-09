@@ -165,9 +165,24 @@ export interface BulkUserRow {
   mobile?: string;
   roleText: string;
   empId?: string;
-  joiningDate?: string;
+  joiningDate?: string; // YYYY-MM-DD
   monthlyTarget?: number;
+  dailyVisitTarget?: number;
+  monthlyVisitTarget?: number;
   baseSalary?: number;
+  yearlyLeaves?: number;
+  personalEmail?: string;
+  personalMobile?: string;
+  bloodGroup?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  permanentAddress?: string;
+  bankName?: string;
+  bankAccountNo?: string;
+  bankIfsc?: string;
+  aadhar?: string;
+  pan?: string;
 }
 
 export interface BulkUserPreviewItem {
@@ -182,8 +197,11 @@ export async function previewBulkUserImport(rows: BulkUserRow[]): Promise<BulkUs
   return res.data;
 }
 
-export async function commitBulkUserImport(rows: BulkUserRow[]): Promise<{ created: number; skipped: number; defaultPassword: string; errors: string[] }> {
-  const res = await apiClient.post<{ data: { created: number; skipped: number; defaultPassword: string; errors: string[] } }>('/users/bulk-import/commit', { rows });
+export interface BulkUserResult { created: number; updated?: number; skipped: number; defaultPassword: string; errors: string[] }
+
+/** updateExisting: employees already in the app get the filled-in columns (name / role / email / password never change). */
+export async function commitBulkUserImport(rows: BulkUserRow[], updateExisting = false): Promise<BulkUserResult> {
+  const res = await apiClient.post<{ data: BulkUserResult }>('/users/bulk-import/commit', { rows, updateExisting });
   return res.data;
 }
 // ── Employee 360 (GET /users/:id/overview) ─────────────────────────────────
