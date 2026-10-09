@@ -82,8 +82,10 @@ export default function PaymentDueList() {
         fetchDueItemPayments(kind, selectedItem.id, selectedItem.billNo || selectedItem.poNumber || undefined)
             .then((rows) => {
                 if (cancelled) return;
-                // Order advances never become a payment row — show them as a display-only line.
-                const advance = kind === 'order' && Number(selectedItem.advanceAmount) > 0
+                // Old orders: the advance has no payment row, so show it as a display-only line.
+                // Orders booked since release 19 already have it as a real payment.
+                const hasAdvanceRow = rows.some((r: any) => /advance received at the time of order booking/i.test(r.note || ''));
+                const advance = kind === 'order' && Number(selectedItem.advanceAmount) > 0 && !hasAdvanceRow
                     ? [{
                         id: `advance-${selectedItem.id}`,
                         amount: Number(selectedItem.advanceAmount),

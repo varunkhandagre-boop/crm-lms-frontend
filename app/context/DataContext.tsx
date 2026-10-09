@@ -216,6 +216,11 @@ export const DataProvider = ({ children }: any) => {
 
   const logout = async () => {
       sessionGen.current += 1;
+      // The login screen shows the last company's name; the SuperAdmin's own
+      // company is the internal "PLATFORM" one, so don't keep that.
+      if (currentUserRef.current?.role === 'SuperAdmin') {
+          await AsyncStorage.removeItem('companyProfileLocal').catch(() => {});
+      }
       // Stop Day-In location tracking before the token goes away.
       await stopBackgroundTracking();
       setCurrentUser(null);
