@@ -1,3 +1,4 @@
+import { DEFAULT_ON_TABS } from '../constants/modules';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
@@ -582,10 +583,10 @@ const PermissionsTab = () => {
     const [selectedTarget, setSelectedTarget] = useState("Sales Executive"); 
     
     const allModules = [
-        { category: "📊 DASHBOARD & BASICS", items: [{ key: "dashboard", label: "Main Dashboard" }, { key: "calendar", label: "Calendar" }, { key: "map_view", label: "Live Map" }] },
+        { category: "📊 DASHBOARD & BASICS", items: [{ key: "dashboard", label: "Main Dashboard" }, { key: "activity", label: "Activity Plan (bottom bar)" }, { key: "tasks", label: "Task List (bottom bar)" }, { key: "calendar", label: "Calendar" }, { key: "map_view", label: "Live Map" }] },
         { category: "📞 SALES & LEADS", items: [{ key: "leads", label: "Leads Master" }, { key: "quotations", label: "Quotations / Estimates" }, { key: "orders", label: "Order Booking" }, { key: "visits", label: "Visits" }, { key: "demos", label: "Demos" }, { key: "sales_analysis", label: "Analysis" }, { key: "catalogs", label: "Catalogs" }, { key: "sales_team_report", label: "Sales Calc" }] },
         { category: "🛠️ SERVICE & SUPPORT", items: [{ key: "tickets", label: "Service Tickets" }, { key: "service_reports", label: "Service Analysis" }, { key: "pms", label: "PMS Schedule" }, { key: "installation", label: "Installation" }, { key: "amc_cmc", label: "AMC / CMC" }, { key: "spares", label: "Spare Parts" }] },
-        { category: "📦 OPERATIONS", items: [{ key: "courier", label: "Courier" }, { key: "organizations", label: "Projects" }, { key: "asset_history", label: "Machine/OrgName Details" }, { key: "company_profile", label: "Company Profile" }] },
+        { category: "📦 OPERATIONS", items: [{ key: "courier", label: "Courier" }, { key: "organizations", label: "Projects & Organizations" }, { key: "asset_history", label: "Machine/OrgName Details" }, { key: "company_profile", label: "Company Profile" }] },
         { category: "💰 FINANCE", items: [{ key: "payment_due", label: "Payment Dues" }, { key: "payment_coll", label: "Collections" }, { key: "expenses", label: "Expense Claims" }, { key: "advance", label: "Advance" }, { key: "payroll", label: "Payroll" }] },
         { category: "📝 HR & TEAM", items: [{ key: "attendance", label: "Attendance" }, { key: "leave", label: "Leaves" }, { key: "travel", label: "Travel Logs" }] },
         { category: "⚙️ ADMIN CONTROL", items: [{ key: "users", label: "Manage Users" }, { key: "settings", label: "App Settings" }] }
@@ -629,9 +630,11 @@ const PermissionsTab = () => {
     const loading = usersLoading || permissionsLoading;
     const onRefresh = () => Promise.all([refreshUsersForPermissions(), refreshPermissions()]);
 
+    // Undefined means "never set": Activity Plan / Tasks default to ON, everything else OFF.
+    const permOn = (v: any, key: string) => (v === undefined ? DEFAULT_ON_TABS.includes(key) : v === true);
     const getSwitchValue = (key: string) => {
         if (editMode === 'Role') {
-            return permissions[selectedTarget]?.[key] === true;
+            return permOn(permissions[selectedTarget]?.[key], key);
         } else {
             const userSpecific = permissions[selectedTarget]?.[key];
             if (userSpecific !== undefined) {
@@ -640,9 +643,9 @@ const PermissionsTab = () => {
             const currentUserObj = users.find(u => u.id === selectedTarget || u.email === selectedTarget);
             const userRole = currentUserObj ? currentUserObj.role : null;
             if (userRole) {
-                return permissions[userRole]?.[key] === true;
+                return permOn(permissions[userRole]?.[key], key);
             }
-            return false;
+            return DEFAULT_ON_TABS.includes(key);
         }
     };
 

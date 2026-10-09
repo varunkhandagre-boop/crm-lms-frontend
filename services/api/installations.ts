@@ -95,6 +95,12 @@ export async function listInstallationsPage(
   return { items: res.data.map(toLegacyInstallation), total: res.meta.total, totalPages: res.meta.totalPages };
 }
 
+/** Serial Number screen: search any machine of the company (every role). */
+export async function searchMachines(search: string, limit = 20): Promise<any[]> {
+  const res = await apiClient.get<ListResponse>(`/installations/machine-search${toQueryString({ search, limit, page: 1, sortBy: 'createdAt', sortOrder: 'desc' })}`);
+  return res.data.map(toLegacyInstallation);
+}
+
 export async function listInstallations(params: { search?: string } = {}): Promise<any[]> {
   const all: any[] = [];
   let page = 1;

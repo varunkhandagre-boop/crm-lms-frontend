@@ -86,7 +86,12 @@ export async function fetchLeaves(opts: {
   return (res.data ?? []).map(toLegacyLeave);
 }
 
-export interface LeaveFeedFilters { userId?: string; fromDate?: string; toDate?: string; search?: string }
+export type LeaveFeedKind = 'leave' | 'absent' | 'short' | 'earned' | 'cancelled';
+export interface LeaveFeedFilters {
+  userId?: string; fromDate?: string; toDate?: string; search?: string;
+  kind?: LeaveFeedKind;
+  bucket?: 'CL' | 'SL' | 'EL' | 'COMP' | 'LWP' | 'PAID';
+}
 
 /**
  * One page of the Leave screen: leave requests plus system rows (Absent /

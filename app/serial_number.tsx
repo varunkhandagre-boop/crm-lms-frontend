@@ -29,7 +29,7 @@ import { useData } from './context/DataContext';
 // those specific detail-modal lines may show blank/undefined until this
 // screen gets a full rewrite in a later phase; the org-level financial
 // totals and timeline dates/amounts are correct.
-import { listInstallationsPage } from '../services/api/installations';
+import { searchMachines } from '../services/api/installations';
 import { fetchMachineHistory, fetchOrgHistory } from '../services/api/history';
 import { useDebounced } from '../utils/periodRange';
 import { fetchOrganizations } from '../services/api/organizations';
@@ -115,7 +115,7 @@ export default function SerialNumberScreen() {
       if (!debouncedInput || !currentUser?.companyId) return;
       const id = ++suggestReq.current;
       const run = searchType === 'MACHINE'
-          ? listInstallationsPage({ search: debouncedInput, page: 1, limit: 5 }).then((r) => r.items)
+          ? searchMachines(debouncedInput, 5)
           : fetchOrganizations({ search: debouncedInput, limit: 5 });
       run.then((matches) => {
           if (id !== suggestReq.current) return; // a newer search is on its way
@@ -146,7 +146,7 @@ export default function SerialNumberScreen() {
       setIsDataFetching(true);
       try {
           if (searchType === 'MACHINE') {
-              const { items } = await listInstallationsPage({ search: query, page: 1, limit: 50 });
+              const items = await searchMachines(query, 50);
               const directMatch = items.find((item: any) => (item.serialNo || '').toLowerCase() === lowerQuery);
               if (directMatch) {
                   await openMachineHistory(directMatch);

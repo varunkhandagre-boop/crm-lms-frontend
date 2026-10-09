@@ -96,6 +96,13 @@ export async function fetchOrganizations(opts: { search?: string; limit?: number
   return all.map(toLegacyOrganization);
 }
 
+/** Number of organizations created on/after an IST day (YYYY-MM-DD) — one row fetched, total from meta. */
+export async function countOrganizationsSince(ymd: string): Promise<number> {
+  const qs = buildQuery({ createdFrom: ymd, limit: 1 });
+  const res = await apiClient.get<ListResponse<any>>(`/organizations${qs}`);
+  return res.meta?.total ?? 0;
+}
+
 export interface OrganizationPayload {
   name: string;
   type?: string;

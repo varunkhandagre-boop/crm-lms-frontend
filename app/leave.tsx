@@ -20,7 +20,7 @@ import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 // 🔥 Phase 7: leaves/attendance/holidays now come from Postgres via these adapters
-import { fetchLeaveSummary, getLeave, LeaveFeedFilters, listLeaveFeedPage, LeaveTypeBalance, updateLeaveStatus as updateLeaveStatusApi } from '../services/api/leaves';
+import { fetchLeaveSummary, getLeave, LeaveFeedFilters, LeaveFeedKind, listLeaveFeedPage, LeaveTypeBalance, updateLeaveStatus as updateLeaveStatusApi } from '../services/api/leaves';
 import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -83,18 +83,29 @@ export default function LeaveApplicationScreen() {
   };
   const targetUserId = resolveTargetUserId();
   const debouncedSearch = useDebounced(searchText.trim());
+  // Tap on a summary box → the list shows only that kind of row (tap again to clear).
+  type BoxFilter = { key: string; label: string; kind: LeaveFeedKind; bucket?: LeaveFeedFilters['bucket'] };
+  const [boxFilter, setBoxFilter] = useState<BoxFilter | null>(null);
+  const toggleBox = (f: BoxFilter) => {
+      if (boxFilter?.key === f.key) { setBoxFilter(null); return; }
+      setBoxFilter(f);
+      // The boxes count the financial year, so show the same FY in the list.
+      if (viewMode !== 'FY') setViewMode('FY');
+  };
   const leaveFilters = useMemo<LeaveFeedFilters>(() => ({
       ...periodRange(viewMode, currentDate),
       userId: targetUserId,
       search: debouncedSearch || undefined,
-  }), [viewMode, currentDate, targetUserId, debouncedSearch]);
+      kind: boxFilter?.kind,
+      bucket: boxFilter?.bucket,
+  }), [viewMode, currentDate, targetUserId, debouncedSearch, boxFilter]);
   const [pendingCount, setPendingCount] = useState(0);
   const fetchLeavePage = useCallback(async (p: LeaveFeedFilters & { page: number; limit: number }) => {
       const r = await listLeaveFeedPage(p);
       if (p.page === 1) setPendingCount(r.pending);
       return r;
   }, []);
-  const isDefaultView = viewMode === 'All' && selectedEmployeeName === 'All' && !debouncedSearch;
+  const isDefaultView = viewMode === 'All' && selectedEmployeeName === 'All' && !debouncedSearch && !boxFilter;
   const {
       items: leaveList,
       setItems: setLeaveList,
@@ -314,20 +325,26 @@ export default function LeaveApplicationScreen() {
               {stats.typed.map((b, i) => (
                   <React.Fragment key={b.type}>
                       {i > 0 && <View style={styles.vDivider}/>}
-                      <View style={styles.statBox}>
+                      <TouchableOpacity
+                          style={[styles.statBox, boxFilter?.key === b.type && styles.statBoxActive]}
+                          onPress={() => toggleBox({ key: b.type, label: b.type === 'COMP' ? 'Comp Off' : b.type, kind: 'leave', bucket: b.type })}
+                      >
                           <Text style={styles.statLabel}>{b.type === 'COMP' ? 'Comp Off' : b.type}</Text>
                           <Text style={[styles.statValue, {color:'#27ae60'}]}>{summaryLoading ? '...' : b.balance}</Text>
                           <Text style={{fontSize:9, color:'gray'}}>used {b.used} / {b.quota + b.opening}</Text>
-                      </View>
+                      </TouchableOpacity>
                   </React.Fragment>
               ))}
               {stats.lwp > 0 && (
                 <>
                   <View style={styles.vDivider}/>
-                  <View style={styles.statBox}>
+                  <TouchableOpacity
+                      style={[styles.statBox, boxFilter?.key === 'LWP' && styles.statBoxActive]}
+                      onPress={() => toggleBox({ key: 'LWP', label: 'Leave Without Pay', kind: 'leave', bucket: 'LWP' })}
+                  >
                       <Text style={[styles.statLabel, {color: '#c62828'}]}>LWP</Text>
                       <Text style={[styles.statValue, {color:'#c62828'}]}>{stats.lwp}</Text>
-                  </View>
+                  </TouchableOpacity>
                 </>
               )}
           </View>
@@ -335,28 +352,41 @@ export default function LeaveApplicationScreen() {
       ) : (
       <View style={styles.balanceContainer}>
           <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems:'center'}}>
-              <View style={styles.statBox}>
+              <TouchableOpacity
+                  style={[styles.statBox, boxFilter?.key === 'earned' && styles.statBoxActive]}
+                  disabled={!stats.earned}
+                  onPress={() => toggleBox({ key: 'earned', label: 'Earned', kind: 'earned' })}
+              >
                   <Text style={styles.statLabel}>Total Quota</Text>
                   <Text style={styles.statValue}>
                       {summaryLoading ? '...' : stats.total}
                       {stats.earned > 0 && <Text style={{fontSize:10, color:'#2e7d32'}}> (+{stats.earned})</Text>}
                   </Text>
-              </View>
+              </TouchableOpacity>
               <View style={styles.vDivider}/>
-              <View style={styles.statBox}>
+              <TouchableOpacity
+                  style={[styles.statBox, boxFilter?.key === 'leave' && styles.statBoxActive]}
+                  onPress={() => toggleBox({ key: 'leave', label: 'Leave', kind: 'leave' })}
+              >
                   <Text style={styles.statLabel}>Leave</Text>
                   <Text style={[styles.statValue, {color:'#e67e22'}]}>{stats.used}</Text>
-              </View>
+              </TouchableOpacity>
               <View style={styles.vDivider}/>
-              <View style={styles.statBox}>
+              <TouchableOpacity
+                  style={[styles.statBox, boxFilter?.key === 'absent' && styles.statBoxActive]}
+                  onPress={() => toggleBox({ key: 'absent', label: 'Absent', kind: 'absent' })}
+              >
                   <Text style={[styles.statLabel, {color: '#d32f2f'}]}>Absent</Text>
                   <Text style={[styles.statValue, {color:'#d32f2f'}]}>{stats.absents}</Text>
-              </View>
+              </TouchableOpacity>
               <View style={styles.vDivider}/>
-              <View style={styles.statBox}>
+              <TouchableOpacity
+                  style={[styles.statBox, boxFilter?.key === 'short' && styles.statBoxActive]}
+                  onPress={() => toggleBox({ key: 'short', label: 'Short', kind: 'short' })}
+              >
                   <Text style={[styles.statLabel, {color: '#ff9800'}]}>Short</Text>
                   <Text style={[styles.statValue, {color:'#ff9800'}]}>{stats.shortDays}</Text>
-              </View>
+              </TouchableOpacity>
               <View style={styles.vDivider}/>
               <View style={styles.statBox}>
                   <Text style={[styles.statLabel, {color: '#27ae60'}]}>Bal</Text>
@@ -366,10 +396,13 @@ export default function LeaveApplicationScreen() {
               {stats.lwp > 0 && (
                 <>
                   <View style={styles.vDivider}/>
-                  <View style={styles.statBox}>
+                  <TouchableOpacity
+                      style={[styles.statBox, boxFilter?.key === 'leave' && styles.statBoxActive]}
+                      onPress={() => toggleBox({ key: 'leave', label: 'Leave', kind: 'leave' })}
+                  >
                       <Text style={[styles.statLabel, {color: '#c62828'}]}>LWP</Text>
                       <Text style={[styles.statValue, {color:'#c62828'}]}>{stats.lwp}</Text>
-                  </View>
+                  </TouchableOpacity>
                 </>
               )}
           </View>
@@ -401,6 +434,12 @@ export default function LeaveApplicationScreen() {
                   {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={20} color="gray" /></TouchableOpacity>}
               </View>
           </View>
+          {boxFilter && (
+              <TouchableOpacity onPress={() => setBoxFilter(null)} style={styles.filterHint}>
+                  <Text style={styles.filterHintText}>Showing only {boxFilter.label} rows</Text>
+                  <Ionicons name="close-circle" size={16} color="#3b5998" />
+              </TouchableOpacity>
+          )}
           <TotalBar label="Found" count={leaveTotal} accent="#2e7d32" />
       </View>
 
@@ -516,7 +555,10 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 10 },
   addBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#3b5998', borderRadius:5, paddingHorizontal:12, paddingVertical:8 },
   balanceContainer: { backgroundColor: 'white', margin: 15, borderRadius: 10, padding: 15, elevation: 3 },
-  statBox: { alignItems: 'center', flex: 1 },
+  statBox: { alignItems: 'center', flex: 1, paddingVertical: 2, borderRadius: 8, borderWidth: 1, borderColor: 'transparent' },
+  statBoxActive: { borderColor: '#3b5998', backgroundColor: '#eef2fb' },
+  filterHint: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 6, marginHorizontal: 12, marginTop: 6, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: '#eef2fb' },
+  filterHintText: { fontSize: 12, color: '#3b5998', fontWeight: '600' },
   statLabel: { color: 'gray', fontSize: 10, textTransform:'uppercase', marginBottom:5, fontWeight: 'bold' },
   statValue: { fontSize: 18, fontWeight: 'bold', color: '#333' },
   vDivider: { width: 1, height: 30, backgroundColor: '#eee' },

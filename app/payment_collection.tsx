@@ -49,7 +49,6 @@ export default function PaymentCollection() {
     const { isDbLoading } = useSaaSDB();
 
     // paymentList now comes from useCachedList below (cache-first)
-    // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
     // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
 
     const [historySearch, setHistorySearch] = useState(''); 
@@ -139,14 +138,6 @@ export default function PaymentCollection() {
         setPaymentList(paymentList.map((p: any) => ({ ...p, senderName: nameById.get(p.senderId) || 'Unknown' })));
     }, [paymentList, userList]);
 
-    // Organizations — cache-first, shares the SAME 'organizations' cache
-    // key as organization.tsx/messaging_center.tsx.
-    const { data: orgList } = useCachedList({
-        cacheKey: buildCacheKey('organizations', currentUser?.companyId),
-        enabled: !!currentUser?.companyId,
-        fetcher: () => fetchOrganizations({ limit: 500 }),
-    });
-
     const qrImageSource = companyProfile?.qrCodeUrl 
         ? { uri: companyProfile.qrCodeUrl } 
         : require('../assets/images/icon.png'); 
@@ -204,13 +195,16 @@ export default function PaymentCollection() {
         return str + 'Only';
     };
 
-    const getFullOrgDetails = (item: any) => {
-        if (!orgList || !item) return null;
-        return orgList.find((o: any) => 
-            (item.orgId && o.id === item.orgId) || 
-            o.name === item.orgName || 
-            o.orgName === item.orgName
-        );
+    // Receipt address fallback: look up just this one organization by name (no full org download).
+    const getFullOrgDetails = async (item: any) => {
+        const name = (item?.orgName || '').trim();
+        if (!name) return null;
+        try {
+            const matches = await fetchOrganizations({ search: name, limit: 10 });
+            return matches.find((o: any) => (item.orgId && o.id === item.orgId) || o.name === name || o.orgName === name) || null;
+        } catch {
+            return null;
+        }
     };
 
     const generateAndShareReceipt = async (paymentData: any) => {
@@ -218,8 +212,8 @@ export default function PaymentCollection() {
         try {
             let orgAddr = paymentData.orgAddress || paymentData.address || '';
             if (!orgAddr) {
-                const org = getFullOrgDetails(paymentData);
-                if (org) orgAddr = org.address || org.city || '';
+                const org = await getFullOrgDetails(paymentData);
+                if (org) orgAddr = [org.address1, org.address2, org.city].filter(Boolean).join(', ');
             }
 
             let paymentDetailsHTML = `<div><b>${paymentData.mode}</b></div>`;
@@ -448,7 +442,14 @@ export default function PaymentCollection() {
         return "All Time";
     };
 
-    const linkedOrgDetails = selectedHistoryItem ? getFullOrgDetails(selectedHistoryItem) : null;
+    const [linkedOrgDetails, setLinkedOrgDetails] = useState<any>(null);
+    useEffect(() => {
+        let alive = true;
+        setLinkedOrgDetails(null);
+        if (selectedHistoryItem) getFullOrgDetails(selectedHistoryItem).then((o) => { if (alive) setLinkedOrgDetails(o); });
+        return () => { alive = false; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedHistoryItem]);
 
     const shareUPI = async () => {
         try {
@@ -492,8 +493,7 @@ export default function PaymentCollection() {
 
     const renderItem = ({item}: {item: any}) => {
         const modeStyle = getModeStyles(item.mode);
-        const orgDetails = getFullOrgDetails(item);
-        const city = orgDetails?.city || item.address || ''; 
+        const city = item.address || '';
 
         return (
             <TouchableOpacity style={styles.historyCard} onPress={() => setSelectedHistoryItem(item)}>

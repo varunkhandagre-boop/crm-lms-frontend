@@ -44,3 +44,6 @@ export const MENU_TAG_BUCKET: Record<string, ModuleKey> = {
     quotations: 'hr',
     personal_notes: 'hr',
 };
+
+/** Bottom-bar modules that are ON for every role until an admin switches them off in Permissions. */
+export const DEFAULT_ON_TABS: string[] = ['activity', 'tasks'];

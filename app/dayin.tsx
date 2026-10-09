@@ -1,8 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
+import { coordsText, getAddressFromCoords, getCurrentLocation as getGpsFix, LocationError, tryGetCurrentLocation } from '../utils/getLocation';
+import { startBackgroundTracking, stopBackgroundTracking } from '../utils/backgroundLocation';
+import { Notifications } from '../utils/notificationsModule';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -17,15 +20,12 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { startBackgroundTracking, stopBackgroundTracking } from '../utils/backgroundLocation';
-import { coordsText, getAddressFromCoords, getCurrentLocation as getGpsFix, LocationError, tryGetCurrentLocation } from '../utils/getLocation';
-import { Notifications } from '../utils/notificationsModule';
 
 // 🔥 SAAS IMPORTS ("users" stays on Firestore until Phase 10)
 import { useSaaSDB } from '../hooks/useSaaSDB';
+import { useData } from './context/DataContext';
 import { useWorkSchedules } from '../hooks/useWorkSchedules';
 import { isOffDay, offDayLabel } from '../utils/workSchedule';
-import { useData } from './context/DataContext';
 
 import { manageAttendanceReminders } from '../utils/notificationHelper';
 
@@ -36,8 +36,9 @@ import { fetchLeaves } from '../services/api/leaves';
 import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
-import { useHeaderTop } from '../hooks/useHeaderTop';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { localYmd } from '../utils/periodRange';
 
 export default function DayInScreen() {
     const headerTop = useHeaderTop();
@@ -103,17 +104,17 @@ export default function DayInScreen() {
     // 🔥 Bounded fetch range matching the currently selected history view
     const getFetchRange = () => {
         if (viewMode === 'Day') {
-            const d = currentDate.toISOString().split('T')[0];
+            const d = localYmd(currentDate);
             return { fromDate: d, toDate: d };
         }
         if (viewMode === 'Month') {
             const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
             const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-            return { fromDate: start.toISOString().split('T')[0], toDate: end.toISOString().split('T')[0] };
+            return { fromDate: localYmd(start), toDate: localYmd(end) };
         }
         const start = new Date(currentDate.getFullYear(), 0, 1);
         const end = new Date(currentDate.getFullYear(), 11, 31);
-        return { fromDate: start.toISOString().split('T')[0], toDate: end.toISOString().split('T')[0] };
+        return { fromDate: localYmd(start), toDate: localYmd(end) };
     };
 
     // 🔥 4b. Attendance/leaves/holidays — bounded date-range fetch, re-run when the
@@ -137,9 +138,10 @@ export default function DayInScreen() {
         setIsAttendanceLoading(true);
         try {
             const [attendance, holidays, leaves] = await Promise.all([
-                fetchAttendance({ userId: targetUserId, fromDate, toDate, limit: 500 }),
+                fetchAttendance({ userId: targetUserId, fromDate, toDate, limit: 5000 }),
                 fetchHolidays(fromDate, toDate),
-                fetchLeaves({ userId: targetUserId, limit: 200 }),
+                // Leaves are filtered by start date, so look back 60 days to catch ones that began earlier.
+                fetchLeaves({ userId: targetUserId, fromDate: localYmd(new Date(new Date(fromDate).getTime() - 60 * 86400000)), toDate, limit: 2000 }),
             ]);
             setAttendanceList(attendance);
             setHolidayList(holidays);
@@ -279,7 +281,7 @@ export default function DayInScreen() {
         if (item.type === 'HOLIDAY') return 'HOLIDAY';
         if (item.type === 'ABSENT') return 'ABSENT';
 
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = localYmd(new Date());
         const isToday = item.date === todayStr;
         const hasLoggedOut = item.outTime && item.outTime !== '--';
         const hours = getHours(item.workHrs);
@@ -294,7 +296,7 @@ export default function DayInScreen() {
         let rawData: any[] = [];
 
         if (viewMode === 'Day') {
-            const selectedDateStr = currentDate.toISOString().split('T')[0];
+            const selectedDateStr = localYmd(currentDate);
             const finalOutput: any[] = [];
             const usersToCheck = (filterUser !== 'All' && canManage) 
                 ? userList.filter((u:any) => isSameUser(u.name, filterUser)) 
@@ -336,7 +338,7 @@ export default function DayInScreen() {
                      return;
                 }
 
-                if (selectedDateStr <= new Date().toISOString().split('T')[0]) {
+                if (selectedDateStr <= localYmd(new Date())) {
                     finalOutput.push({ id: `absent-${selectedDateStr}-${emp.id}`, date: selectedDateStr, type: 'ABSENT', senderName: emp.name, inTime: '-', outTime: '-', workHrs: '0' });
                 }
             });
@@ -420,7 +422,7 @@ export default function DayInScreen() {
                 return fullMonthData.reverse();
             }
 
-            const filterPrefix = viewMode === 'Year' ? currentDate.getFullYear().toString() : currentDate.toISOString().slice(0, 7);
+            const filterPrefix = viewMode === 'Year' ? currentDate.getFullYear().toString() : localYmd(currentDate).slice(0, 7);
             rawData = rawData.filter(item => (item.date || "").startsWith(filterPrefix));
             return rawData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         }
@@ -532,7 +534,7 @@ export default function DayInScreen() {
     const handleMainButton = () => {
         if (status === 'Out') handleDayIn();
         else if (status === 'In') setExpenseModalVisible(true);
-        else Alert.alert("Done", "Your work for today is complete.");
+        else Alert.alert("Done", "Aaj ka kaam ho gaya hai.");
     };
 
     // 🔥 6. Day-Out — Phase 7: PATCHes /api/v1/attendance/:id via dayOutApi()

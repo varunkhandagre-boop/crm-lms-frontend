@@ -21,6 +21,7 @@ import { fetchHolidays } from '../services/api/holidays';
 import { fetchLeaves } from '../services/api/leaves';
 import { fetchTeamMembers } from '../services/api/users';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { PeriodTabs, StaffPeriodRow } from '../components/compact';
 
 export default function AttendanceScreen() {
   const headerTop = useHeaderTop();
@@ -73,10 +74,13 @@ export default function AttendanceScreen() {
 
   // PAGINATION STATE
   const [visibleCount, setVisibleCount] = useState(50); 
+  // Tapping a summary box (Present / Absent / …) shows only those rows; tap again for all.
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
   useEffect(() => {
       if (viewMode === 'Day') setVisibleCount(500); 
       else setVisibleCount(20);  
+      setStatusFilter(null);
   }, [viewMode, currentDate, filterUser]);
 
   const DEFAULT_QUOTA = 18;
@@ -132,9 +136,11 @@ export default function AttendanceScreen() {
 
   // 🔥 Resolved target-user-id — shared by the cache key below and the
   // fetch itself, so the cache key always matches what's actually fetched.
+  // Day view with "All" = every employee; Month / FY always show ONE person
+  // (the chosen one, else yourself), so only that person's rows are fetched.
   const resolveTargetUserId = (): string | undefined => {
       if (!canManage) return undefined; // self, enforced server-side
-      if (filterUser === 'All') return 'all';
+      if (filterUser === 'All') return viewMode === 'Day' ? 'all' : undefined;
       const match = userList.find((u: any) => u.name === filterUser);
       return match?.id; // if not found, adapter/route falls back to self — acceptable edge case
   };
@@ -160,7 +166,7 @@ export default function AttendanceScreen() {
   } = useCachedList({
       cacheKey: attendanceCacheKey,
       enabled: !!currentUser?.companyId && usersReady,
-      fetcher: () => fetchAttendance({ userId: targetUserId, fromDate, toDate, limit: 500 }),
+      fetcher: () => fetchAttendance({ userId: targetUserId, fromDate, toDate, limit: 2000 }),
   });
 
   // 🔥 Leaves/holidays — same date-range dependency as attendance above, but
@@ -169,9 +175,11 @@ export default function AttendanceScreen() {
   useEffect(() => {
       const loadLeavesAndHolidays = async () => {
           if (!currentUser?.companyId || !usersReady) return;
+          const leaveFy = currentDate.getMonth() >= 3 ? currentDate.getFullYear() : currentDate.getFullYear() - 1;
           try {
               const [leaves, holidays] = await Promise.all([
-                  fetchLeaves({ userId: targetUserId, limit: 200 }),
+                  // Whole FY: the list needs the range, the leave-quota card needs the year.
+                  fetchLeaves({ userId: targetUserId, fromDate: `${leaveFy}-04-01`, toDate: `${leaveFy + 1}-03-31`, limit: 2000 }),
                   fetchHolidays(fromDate, toDate),
               ]);
               setLeaveList(leaves);
@@ -406,7 +414,13 @@ export default function AttendanceScreen() {
   };
 
   const finalData = getDisplayData();
-  const displayData = finalData.slice(0, visibleCount);
+  const filteredData = statusFilter
+      ? finalData.filter((i: any) => statusFilter === 'EXPENSE'
+          ? i.type === 'ATTENDANCE' && parseFloat(i.expenses?.totalAmount) > 0
+          : getStatus(i) === statusFilter)
+      : finalData;
+  const displayData = filteredData.slice(0, visibleCount);
+  const toggleStatus = (s: string) => setStatusFilter((prev) => (prev === s ? null : s));
 
   // --- STATS CALCULATION ---
   const todayStr = getStandardDate(new Date());
@@ -603,17 +617,29 @@ export default function AttendanceScreen() {
         </View>
       </View>
 
-      {canManage && (
-          <TouchableOpacity style={styles.filterBtn} onPress={() => setShowUserModal(true)}>
-              <Ionicons name="person" size={16} color="white" /><Text style={styles.filterBtnText}>{filterUser === 'All' ? 'Filter: All Employees' : `User: ${filterUser}`}</Text><Ionicons name="chevron-down" size={16} color="white" />
-          </TouchableOpacity>
-      )}
-
-      <View style={styles.monthSelector}>
-          <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-          <View style={{flexDirection:'row', alignItems:'center'}}><Ionicons name="calendar" size={18} color="#3b5998" style={{marginRight:8}} /><Text style={styles.monthText}>{getHeaderDateText()}</Text></View>
-          <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-          {viewMode === 'Month' && filterUser !== 'All' && <TouchableOpacity onPress={() => setIsCalendarView(!isCalendarView)} style={{marginLeft:15}}><Ionicons name={isCalendarView ? "list" : "grid"} size={22} color="#3b5998" /></TouchableOpacity>}
+      <View style={{ backgroundColor: 'white', paddingBottom: 6 }}>
+          <PeriodTabs
+              value={viewMode}
+              options={['Day', 'Month', 'FY'] as const}
+              onChange={(m) => { setViewMode(m); if (m === 'Day') setIsCalendarView(false); setCurrentDate(new Date()); }}
+          />
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <View style={{ flex: 1 }}>
+                  <StaffPeriodRow
+                      showStaff={canManage}
+                      staffLabel={filterUser === 'All' ? 'All Employees' : filterUser}
+                      onStaffPress={() => setShowUserModal(true)}
+                      periodLabel={getHeaderDateText()}
+                      onPrev={() => changeDate(-1)}
+                      onNext={() => changeDate(1)}
+                  />
+              </View>
+              {viewMode === 'Month' && filterUser !== 'All' && (
+                  <TouchableOpacity onPress={() => setIsCalendarView(!isCalendarView)} style={{ paddingRight: 12, paddingTop: 6 }} accessibilityLabel="Calendar view">
+                      <Ionicons name={isCalendarView ? "list" : "grid"} size={22} color="#3b5998" />
+                  </TouchableOpacity>
+              )}
+          </View>
       </View>
 
       <ScrollView
@@ -646,27 +672,22 @@ export default function AttendanceScreen() {
                     </View>
                 )}
 
-                <View style={styles.tabContainer}>
-                    {['Day', 'Month', 'FY'].map(m => (
-                        <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => { setViewMode(m as any); if(m==='Day') setIsCalendarView(false); setCurrentDate(new Date()); }}>
-                            <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m === 'Day' ? 'Daily' : m === 'Month' ? 'Monthly' : 'FY (Yearly)'}</Text>
-                        </TouchableOpacity>
-                    ))}
-                </View>
 
-                <View style={{height: 70, marginBottom: 10}}>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingHorizontal: 15, alignItems: 'center'}}>
-                        <SummaryItem label="Present" value={daysPresent} color="#e8f5e9" textColor="green" />
-                        <SummaryItem label="Absent" value={daysAbsent} color="#ffebee" textColor="#d32f2f" />
-                        <SummaryItem label="Leave" value={daysLeave} color="#fff3e0" textColor="#e65100" />
-                        <SummaryItem label="Short" value={daysShort} color="#fff8e1" textColor="#ff9800" />
-                        <View style={[styles.summaryBox, { backgroundColor: '#fff8e1', borderColor: '#ffb300', borderWidth: 1 }]}>
-                            <Text style={[styles.summaryBoxValue, { color: '#ff6f00', fontSize: 13 }]}>₹{totalExpense}</Text>
-                            <Text style={[styles.summaryBoxLabel, { color: '#ff6f00' }]}>Expense</Text>
-                        </View>
-                        <SummaryItem label="Holiday" value={daysHoliday} color="#fce4ec" textColor="#c2185b" />
+                <View style={{marginVertical: 8}}>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingHorizontal: 12, alignItems: 'center'}}>
+                        <SummaryItem label="Present" value={daysPresent} color="#e8f5e9" textColor="green" active={statusFilter === 'PRESENT'} onPress={() => toggleStatus('PRESENT')} />
+                        <SummaryItem label="Absent" value={daysAbsent} color="#ffebee" textColor="#d32f2f" active={statusFilter === 'ABSENT'} onPress={() => toggleStatus('ABSENT')} />
+                        <SummaryItem label="Leave" value={daysLeave} color="#fff3e0" textColor="#e65100" active={statusFilter === 'LEAVE'} onPress={() => toggleStatus('LEAVE')} />
+                        <SummaryItem label="Short" value={daysShort} color="#fff8e1" textColor="#ff9800" active={statusFilter === 'SHORT'} onPress={() => toggleStatus('SHORT')} />
+                        <SummaryItem label="Expense" value={`₹${totalExpense}`} color="#fff8e1" textColor="#ff6f00" active={statusFilter === 'EXPENSE'} onPress={() => toggleStatus('EXPENSE')} />
+                        <SummaryItem label="Holiday" value={daysHoliday} color="#fce4ec" textColor="#c2185b" active={statusFilter === 'HOLIDAY'} onPress={() => toggleStatus('HOLIDAY')} />
                         <View style={{width: 10}} />
                     </ScrollView>
+                    {statusFilter && (
+                        <TouchableOpacity onPress={() => setStatusFilter(null)} style={{alignSelf: 'flex-start', marginLeft: 14, marginTop: 4}}>
+                            <Text style={{fontSize: 11, color: '#3b5998'}}>Showing only {statusFilter === 'EXPENSE' ? 'days with expense' : statusFilter.toLowerCase()} — tap to show all ✕</Text>
+                        </TouchableOpacity>
+                    )}
                 </View>
 
                 {viewMode === 'Month' && isCalendarView ? renderCalendar() : (
@@ -676,10 +697,10 @@ export default function AttendanceScreen() {
                         renderItem={renderItem} 
                         scrollEnabled={false} 
                         contentContainerStyle={{paddingHorizontal: 15}} 
-                        ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>No data for {getHeaderDateText()}</Text>} 
+                        ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>{statusFilter ? 'Nothing in this group' : `No data for ${getHeaderDateText()}`}</Text>} 
                         
                         ListFooterComponent={
-                            visibleCount < finalData.length ? (
+                            visibleCount < filteredData.length ? (
                                 <TouchableOpacity 
                                     onPress={() => setVisibleCount(prev => prev + 20)} 
                                     style={{
@@ -694,11 +715,11 @@ export default function AttendanceScreen() {
                                     }}
                                 >
                                     <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                                        👇 Load More Records ({finalData.length - visibleCount} remaining)
+                                        👇 Load More Records ({filteredData.length - visibleCount} remaining)
                                     </Text>
                                 </TouchableOpacity>
                             ) : (
-                                finalData.length > 0 ? (
+                                filteredData.length > 0 ? (
                                     <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
                                         --- End of List ---
                                     </Text>
@@ -860,11 +881,12 @@ export default function AttendanceScreen() {
   );
 }
 
-const SummaryItem = ({ label, value, color, textColor }: any) => (
-    <View style={[styles.summaryBox, { backgroundColor: color }]}>
+const SummaryItem = ({ label, value, color, textColor, active, onPress }: any) => (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.7}
+        style={[styles.summaryBox, { backgroundColor: color }, active && { borderWidth: 2, borderColor: textColor }]}>
         <Text style={[styles.summaryBoxValue, { color: textColor }]}>{value}</Text>
         <Text style={[styles.summaryBoxLabel, { color: textColor }]}>{label}</Text>
-    </View>
+    </TouchableOpacity>
 );
 
 const DetailRow = ({label, value, highlight, color, icon}: any) => (

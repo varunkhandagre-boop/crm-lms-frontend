@@ -5,7 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DataProvider, useData } from './context/DataContext';
-import { MENU_TAG_BUCKET } from '../constants/modules';
+import { DEFAULT_ON_TABS, MENU_TAG_BUCKET } from '../constants/modules';
 
 import { Notifications, notificationsAvailable } from '../utils/notificationsModule';
 import { manageAttendanceReminders, setupNotificationPermissions } from '../utils/notificationHelper';
@@ -18,8 +18,9 @@ import { recordThrottledLocation, syncBackgroundTracking } from '../utils/backgr
 import { fetchTodayAttendance } from '../services/api/attendance';
 import { getLeadCounts } from '../services/api/leads';
 import { getServiceCallCounts } from '../services/api/serviceCalls';
-import { fetchOrganizations } from '../services/api/organizations';
-import { fetchTasks } from '../services/api/tasks';
+import { countOrganizationsSince } from '../services/api/organizations';
+import { localYmd } from '../utils/periodRange';
+import { listTasksPage } from '../services/api/tasks';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
@@ -163,17 +164,18 @@ function NavigationLayout() {
           return rec ? [rec] : [];
       },
   });
-  const { data: taskList } = useCachedList({
-      cacheKey: buildCacheKey('all_tasks_merged', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: async () => {
-          const [given, received] = await Promise.all([
-              fetchTasks({ direction: 'given', userId: 'all', limit: 1000 }),
-              fetchTasks({ direction: 'received', userId: 'all', limit: 1000 }),
-          ]);
-          return Array.from(new Map([...given, ...received].map((t: any) => [t.id, t])).values());
-      },
-  });
+  // Tasks badge = pending counts from the server (two COUNT queries) — this used
+  // to download up to 2000 tasks at every app start just to count them.
+  // Admin / Manager: every pending task. Others: pending tasks given to them +
+  // pending tasks they gave to someone else.
+  const [taskCount, setTaskCount] = useState(0);
+  useEffect(() => {
+      if (!currentUser?.companyId) return;
+      const boss = currentUser?.role === 'Admin' || currentUser?.role === 'Manager';
+      listTasksPage({ view: 'received', userId: boss ? 'all' : undefined, status: 'Pending', page: 1, limit: 1 })
+          .then(r => setTaskCount(boss ? (r.counts?.receivedPending ?? 0) : (r.counts?.receivedPending ?? 0) + (r.counts?.givenPending ?? 0)))
+          .catch(() => {});
+  }, [currentUser?.companyId, currentUser?.role, pathname === '/']);
   // Leads badge = open-lead count from the server (one COUNT query) — this
   // used to download every lead at app start just to count them.
   const [leadCount, setLeadCount] = useState(0);
@@ -189,11 +191,12 @@ function NavigationLayout() {
       if (!currentUser?.companyId) return;
       getServiceCallCounts().then(c => setServiceCount(c.open)).catch(() => {});
   }, [currentUser?.companyId, pathname === '/']);
-  const { data: orgList } = useCachedList({
-      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 200 }),
-  });
+  const [orgCount, setOrgCount] = useState(0);
+  useEffect(() => {
+      if (!currentUser?.companyId) return;
+      countOrganizationsSince(localYmd(new Date())).then(setOrgCount).catch(() => {});
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.companyId, pathname === '/']);
   
   const insets = useSafeAreaInsets(); 
 
@@ -247,23 +250,10 @@ function NavigationLayout() {
 
   useEffect(() => { openPendingRoute(); }, [loading, currentUser]);
 
-  const isBoss = currentUser?.role === 'Admin' || currentUser?.role === 'Manager';
-  const todayStr = new Date().toISOString().split('T')[0];
-
-  const calculateTaskBadge = () => {
-      if (!currentUser) return 0;
-      const myPending = taskList.filter((t: any) => (t.to === 'Self' || t.to === currentUser?.name) && t.status === 'Pending').length;
-      const assignedPending = taskList.filter((t: any) => t.from === currentUser?.name && t.to !== 'Self' && t.to !== currentUser?.name && t.status === 'Pending').length;
-      return isBoss ? taskList.filter((t:any) => t.status === 'Pending').length : (myPending + assignedPending);
-  };
-  const taskCount = calculateTaskBadge();
 
 
 
-  const orgCount = orgList.filter((o: any) => {
-      const itemDate = o.createdAt ? o.createdAt.split('T')[0] : '';
-      return itemDate === todayStr; 
-  }).length;
+
 
   // ==========================================
   // 🕵️‍♂️ AUTO LOCATION TRACKER (🔥 UPGRADED TO SAAS)
@@ -358,8 +348,13 @@ if (currentUser && isSubscriptionExpired) {
       if (bucket && myRole !== 'superadmin' && !(companyProfile?.enabledModules || []).includes(bucket)) return false;
 
       if (userRole === 'Admin' || userRole === 'SuperAdmin') return true;
+      // A per-user switch in Manage Team → Permissions wins over the role switch.
+      const userPerms = appPermissions?.[currentUser?.id || ''] || appPermissions?.[currentUser?.email || ''];
+      if (userPerms?.[moduleKey] !== undefined) return userPerms[moduleKey] === true;
       const myPerms = appPermissions?.[userRole];
       if (!myPerms) return true;
+      // Activity Plan and Tasks are on for everyone unless an admin switched them off.
+      if (DEFAULT_ON_TABS.includes(moduleKey)) return myPerms[moduleKey] !== false;
       return myPerms[moduleKey] === true;
   };
 
