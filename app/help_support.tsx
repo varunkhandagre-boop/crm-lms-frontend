@@ -151,7 +151,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         cat: 'attendance',
         title: 'Employee Day Map (Tracking)',
         steps: [
-            'Admin / Manager: Admin Control → Tracking → choose an employee and a date to see the route on the map with the total km.',
+            'Admin / Manager: Admin Control → Live Map tab → choose an employee and a date to see the route on the map with the total km.',
             'Points come from Day In / Day Out, visits, orders, payments and the on-duty location every 30 minutes.',
             'Wrong GPS jumps (very far or too fast) are ignored, so the km may be less than the raw points suggest.',
         ],
@@ -577,11 +577,11 @@ const GUIDE_SECTIONS: GuideSection[] = [
         cat: 'admin',
         title: 'Subscription & Renewal',
         steps: [
-            'Go to "Subscription & Renewal" from the sidebar.',
+            'Open Company Profile — the Current Plan card at the top shows your plan, valid-till date and employees used. Admin taps "Upgrade / Renew Plan".',
             'Select a plan, enter number of employees, and optionally add the Automation add-on.',
             'Scan the UPI QR code to pay, then tap "I Have Paid".',
             'Your plan activates once the payment is verified (usually within 1 hour).',
-            'A warning badge appears in the sidebar showing days remaining when plan is within 30 days of expiry. Tap it to go directly to renewal.',
+            'When 30 days or less are left, a "Plan: N days left" badge shows on the Home screen and under your name in the sidebar. Tap it to go straight to renewal.',
         ],
     },
 
@@ -942,7 +942,7 @@ const FAQS: FaqItem[] = [
     {
         cat: 'admin',
         q: 'My plan is expiring soon — how do I renew?',
-        a: `1. Contact your Super Admin or support team via WhatsApp / phone.\n2. Make the payment as instructed.\n3. Your plan will be activated within 1 hour of payment confirmation.\n\nDo not wait until the last day — renew at least 2–3 days before expiry.`,
+        a: `1. Admin: open Company Profile — the Current Plan card is at the top. Tap "Upgrade / Renew Plan" (or tap the "Plan: N days left" badge on Home).\n2. Choose the plan and number of employees, pay with the UPI QR code and tap "I Have Paid".\n3. Your plan is activated after the payment is verified (usually within 1 hour).\n\nDo not wait until the last day — renew at least 2–3 days before expiry.`,
     },
     {
         cat: 'admin',
