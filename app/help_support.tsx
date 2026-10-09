@@ -1,18 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Linking,
     ScrollView,
     StyleSheet,
     Text,
+    TextInput,
     TouchableOpacity,
     View
 } from 'react-native';
 
 import { fetchPublicSupportSettings } from '../services/api/settings';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useData } from './context/DataContext';
 
 // =========================================================
 // 🔥 DEFAULT FALLBACK
@@ -25,12 +27,139 @@ const DEFAULTS = {
 };
 
 // =========================================================
+// 🗂 CATEGORIES — shared by User Guide and FAQ. A topic shows only when the
+// company has its module (HR / Sales / Service); 'common' is always shown.
+// `keywords` make search work with everyday / Hinglish words too.
+// =========================================================
+type HelpModule = 'common' | 'hr' | 'sales' | 'service';
+type CatKey = 'start' | 'attendance' | 'leaves' | 'payroll' | 'expenses' | 'office' | 'sales' | 'orders' | 'service' | 'reports' | 'admin';
+
+const CATEGORIES: { key: CatKey; label: string; icon: any; module: HelpModule; keywords: string }[] = [
+    { key: 'start', label: 'Getting Started', icon: 'rocket', module: 'common', keywords: 'login password app web laptop computer notification profile slow photo shuru' },
+    { key: 'attendance', label: 'Attendance & Tracking', icon: 'finger-print', module: 'hr', keywords: 'day in day out hajri haziri gps location map km shift weekly off' },
+    { key: 'leaves', label: 'Leaves', icon: 'calendar', module: 'hr', keywords: 'chutti leave cl sl el half day holiday balance' },
+    { key: 'payroll', label: 'Payroll & Salary', icon: 'cash', module: 'hr', keywords: 'salary tankhwah payslip overtime late deduction bank full final' },
+    { key: 'expenses', label: 'Expenses, Advance & Travel', icon: 'receipt', module: 'hr', keywords: 'kharcha bill claim advance travel petrol da hotel approval' },
+    { key: 'office', label: 'Courier, Quotations & Cards', icon: 'cube', module: 'hr', keywords: 'courier docket challan quotation estimate visiting card stationery' },
+    { key: 'sales', label: 'Leads & Sales', icon: 'trending-up', module: 'sales', keywords: 'lead customer hospital visit dsr cold call demo target pipeline website' },
+    { key: 'orders', label: 'Orders & Payments', icon: 'cart', module: 'sales', keywords: 'order po payment paisa receipt due balance cheque advance collection' },
+    { key: 'service', label: 'Service & Spares', icon: 'construct', module: 'service', keywords: 'service call complaint engineer machine installation pms spare part stock' },
+    { key: 'reports', label: 'Reports & PDFs', icon: 'document-text', module: 'common', keywords: 'report pdf excel export history timeline serial' },
+    { key: 'admin', label: 'Admin & Settings', icon: 'shield-checkmark', module: 'common', keywords: 'admin employee user role permission company profile logo subscription plan whatsapp email import' },
+];
+const CAT_BY_KEY = Object.fromEntries(CATEGORIES.map((c) => [c.key, c])) as Record<CatKey, (typeof CATEGORIES)[number]>;
+
+type GuideSection = { cat: CatKey; module?: HelpModule; icon: string; color: string; title: string; steps: string[] };
+type FaqItem = { cat: CatKey; module?: HelpModule; q: string; a: string };
+
+// =========================================================
 // 📋 USER GUIDE SECTIONS
 // =========================================================
-const GUIDE_SECTIONS = [
+const GUIDE_SECTIONS: GuideSection[] = [
+    {
+        icon: 'laptop',
+        color: '#37474f',
+        cat: 'start',
+        title: 'Use the App on a Laptop / Computer (Web)',
+        steps: [
+            'Open https://app.lifelinem.com in Chrome or Edge and log in with the same email and password as the phone app.',
+            'All your data is the same as on the phone — lists, reports, Excel export, approvals and PDFs (PDFs open the print window; choose "Save as PDF").',
+            'Maps, push notifications and Day In / Day Out location tracking work only in the phone app.',
+            'Tip: pin the page to your browser bookmarks bar for quick access.',
+        ],
+    },
+    {
+        icon: 'wallet',
+        color: '#9c27b0',
+        cat: 'expenses',
+        title: 'Advance Request',
+        steps: [
+            'Go to "Advance" and tap + to request money in advance. Enter the amount, date and reason.',
+            'Admin and Account get a notification. They approve or reject it and can set a monthly deduction amount.',
+            'You get a notification when it is approved or rejected. Approved advances are recovered from salary as set by the office.',
+        ],
+    },
+    {
+        icon: 'bicycle',
+        color: '#ff9800',
+        cat: 'expenses',
+        title: 'Travel Log',
+        steps: [
+            'Go to "Travel Log" and add each trip: from, to, mode, distance (km), amount and purpose.',
+            'Admin and Account are notified. They can settle all pending trips of an employee in one tap.',
+            'You get a notification when your travel claims are settled.',
+        ],
+    },
+    {
+        icon: 'briefcase',
+        color: '#3b5998',
+        cat: 'sales',
+        title: 'Visits DSR / Cold Call',
+        steps: [
+            'Go to "Visits DSR" and tap + to log a visit or cold call: hospital, contact person, outcome and next follow-up date.',
+            'A positive outcome creates a lead automatically. If you already have an open lead for that hospital, the visit is added to that lead instead of creating a duplicate.',
+            'Admin / Manager can filter by employee and period, and compare visits with targets.',
+        ],
+    },
+    {
+        icon: 'play-circle',
+        color: '#00bcd4',
+        cat: 'sales',
+        title: 'Demo Report',
+        steps: [
+            'Go to "Demo Report" and tap + after a product demo. Choose the hospital and product, and enter the result and notes.',
+            'A demo number for the financial year is created automatically and a PDF can be shared.',
+            'Admin and Manager get a notification for every demo.',
+        ],
+    },
+    {
+        icon: 'calendar-number',
+        color: '#5e35b1',
+        cat: 'start',
+        title: 'Activity Plan',
+        steps: [
+            'Open "Act Plan" from the bottom bar and tap + to plan a visit, demo, installation or service for a date.',
+            'Tabs: Today, Upcoming, Completed and All. Start Journey when you leave, then fill the report — the plan is marked Completed automatically.',
+            'Admin and Manager are notified when you plan an activity.',
+        ],
+    },
+    {
+        icon: 'checkbox',
+        color: '#e91e63',
+        cat: 'start',
+        title: 'Tasks',
+        steps: [
+            'Open "Task" from the bottom bar. "Received" shows tasks given to you, "Assigned" shows tasks you gave.',
+            'Tap + to assign a task to a colleague with a due date — they get a notification.',
+            'When done, open the task and tap Complete with a short note — the person who assigned it is notified.',
+        ],
+    },
+    {
+        icon: 'card',
+        color: '#795548',
+        cat: 'office',
+        title: 'Visiting Cards & Stationery',
+        steps: [
+            'Go to "Cards" and tap + to request visiting cards or stationery, with the delivery address.',
+            'Admin and Store are notified. When they dispatch it with the courier / tracking number, you get a notification.',
+            'Tap "Received" when it reaches you.',
+        ],
+    },
+    {
+        icon: 'map',
+        color: '#2e7d32',
+        cat: 'attendance',
+        title: 'Employee Day Map (Tracking)',
+        steps: [
+            'Admin / Manager: Admin Control → Tracking → choose an employee and a date to see the route on the map with the total km.',
+            'Points come from Day In / Day Out, visits, orders, payments and the on-duty location every 30 minutes.',
+            'Wrong GPS jumps (very far or too fast) are ignored, so the km may be less than the raw points suggest.',
+        ],
+    },
     {
         icon: 'finger-print',
         color: '#4caf50',
+        cat: 'attendance',
         title: 'Attendance (Day In / Day Out)',
         steps: [
             'Go to "Attendance" and tap Day In when you start work, Day Out when you finish.',
@@ -45,6 +174,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'business',
         color: '#1565c0',
+        cat: 'admin',
         title: 'Company Profile — Setup & Logo',
         steps: [
             'Go to Sidebar → "Company Profile" to set up your company details.',
@@ -59,6 +189,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'qr-code',
         color: '#00796b',
+        cat: 'admin',
         title: 'Company QR Code & Payment Sharing',
         steps: [
             'Your company UPI QR Code is visible at the top of the "Collect Payment" screen.',
@@ -70,6 +201,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'person-add',
         color: '#7b1fa2',
+        cat: 'admin',
         title: 'Adding New Users / Employees',
         steps: [
             'Go to Sidebar → Admin Control → Users tab.',
@@ -84,6 +216,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'create',
         color: '#f57c00',
+        cat: 'admin',
         title: 'Edit Employee — Role, Target, Leave Balance',
         steps: [
             'Go to Sidebar → Admin Control → Users tab.',
@@ -98,6 +231,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'shield-checkmark',
         color: '#c62828',
+        cat: 'admin',
         title: 'Permissions — Control What Each Employee Sees',
         steps: [
             'Go to Sidebar → Admin Control → Permissions tab. Only available to Admins.',
@@ -111,6 +245,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'eye',
         color: '#2e7d32',
+        cat: 'admin',
         title: 'Admin / Manager — Viewing All Team Data',
         steps: [
             'Admins and Managers can see data from all employees across all modules — Orders, Payments, Attendance, Leaves, Service Calls, etc.',
@@ -122,6 +257,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'cart',
         color: '#ff9800',
+        cat: 'orders',
         title: 'Order Booking',
         steps: [
             'Go to "Order Booking" from the Sales section.',
@@ -130,11 +266,13 @@ const GUIDE_SECTIONS = [
             'Tap Submit — the order is saved and the customer gets a WhatsApp/Email update automatically (if automation is enabled).',
             'The order PDF (Delivery Challan) will include your company name, logo, address, and bank details from Company Profile.',
             'Attaching the PO: a photo is best (it is compressed automatically). A PDF can be up to 2 MB — for a bigger scanned PDF, take a photo of the PO instead.',
+            'Advance received at booking: enter the amount and how it was paid (Cash / UPI / NEFT / Cheque). It is saved as a payment with its own receipt number — you will see it in Collect Payment and in the order\'s Pending Due.',
         ],
     },
     {
         icon: 'cash',
         color: '#27ae60',
+        cat: 'orders',
         title: 'Collect Payment',
         steps: [
             'Go to "Collect Payment" from the Sales section.',
@@ -147,6 +285,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'time',
         color: '#c0392b',
+        cat: 'orders',
         title: 'Pending Dues (Accountant)',
         steps: [
             'Go to "Pending Dues" under Sales Analysis.',
@@ -159,6 +298,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'construct',
         color: '#795548',
+        cat: 'service',
         title: 'Installation Report',
         steps: [
             'Go to "Installation" under Activity Report.',
@@ -171,6 +311,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'settings',
         color: '#607d8b',
+        cat: 'service',
         title: 'Service Call',
         steps: [
             'Go to "Service Call" under Activity Report and tap "+ New".',
@@ -187,6 +328,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'build',
         color: '#ef6c00',
+        cat: 'service',
         title: 'Spare Part Book & Stock',
         steps: [
             'Go to Sidebar → "Spare Part Book". Add parts with name, part number, price, compatible models and office stock.',
@@ -194,11 +336,13 @@ const GUIDE_SECTIONS = [
             'Set "Low-stock alert at" on a part (e.g. 3). When office + engineers\' stock falls to that level, the part shows LOW STOCK and Store / Admin get a morning alert. 0 = no alert.',
             'Parts used on service calls are deducted automatically. Changing the quantity or removing a part later gives the stock back.',
             'In the part picker, use search (name, part number or model). Parts you carry appear first, then parts for that machine\'s model.',
+            'Stock List → Office Stock: the list of machines kept at the office. Admin / Manager / Store can add a machine with its quantity or delete it.',
         ],
     },
     {
         icon: 'pie-chart',
         color: '#673ab7',
+        cat: 'service',
         title: 'Service Analysis',
         steps: [
             'Go to "Service Analysis" under Activity Report.',
@@ -211,6 +355,8 @@ const GUIDE_SECTIONS = [
     {
         icon: 'pricetag',
         color: '#00838f',
+        cat: 'reports',
+        module: 'sales',
         title: 'Serial Number — Full Client & Machine Data',
         steps: [
             'Go to Sidebar → "Serial Number".',
@@ -224,6 +370,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'time',
         color: '#37474f',
+        cat: 'reports',
         title: 'Employee Timeline',
         steps: [
             'Go to Sidebar → "Activity Timeline".',
@@ -236,6 +383,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'calculator',
         color: '#1565c0',
+        cat: 'sales',
         title: 'Sales Calculation',
         steps: [
             'Go to Sidebar → "Sales Calculation".',
@@ -248,6 +396,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'stats-chart',
         color: '#1a237e',
+        cat: 'sales',
         title: 'Live Dashboard & Sales Analysis',
         steps: [
             'Tap the blue "Live Dashboard" banner on the home screen.',
@@ -261,6 +410,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'people',
         color: '#e91e63',
+        cat: 'sales',
         title: 'Leads Management',
         steps: [
             'Open "Leads" from the bottom bar. The top cards show OVERDUE, DUE TODAY and HOT leads — tap a card to see only those.',
@@ -277,6 +427,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'albums',
         color: '#3949ab',
+        cat: 'sales',
         title: 'Leads Board (Pipeline)',
         steps: [
             'Leads → "Board" shows open leads as columns: New → Introduction → Technical Review → Quotation → Negotiation.',
@@ -288,6 +439,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'analytics',
         color: '#00897b',
+        cat: 'sales',
         title: 'Lead Insights',
         steps: [
             'Leads → "📊 Insights" shows conversion rate, win rate, pipeline value and weighted forecast.',
@@ -299,6 +451,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'globe',
         color: '#00838f',
+        cat: 'sales',
         title: 'Website Leads',
         steps: [
             'Enquiries and catalogue downloads from the company website arrive automatically as leads — nobody has to type them.',
@@ -314,6 +467,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'document-text',
         color: '#6d4c41',
+        cat: 'office',
         title: 'Quotations',
         steps: [
             'Create a quotation from inside a lead (Generate Quotation) so it stays linked to that lead.',
@@ -325,6 +479,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'shield-checkmark',
         color: '#4caf50',
+        cat: 'service',
         title: 'PMS Schedule (Preventive Maintenance)',
         steps: [
             'Go to "PMS Report" under Activity Report.',
@@ -337,6 +492,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'cube',
         color: '#e67e22',
+        cat: 'office',
         title: 'Courier Tracking',
         steps: [
             'Go to "Courier" under HR & Operations.',
@@ -348,6 +504,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'chatbubbles',
         color: '#2e7d32',
+        cat: 'admin',
         title: 'Automation Settings (WhatsApp / Email)',
         steps: [
             'Only visible to Admins with the Automation Add-on active.',
@@ -358,6 +515,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'people-circle',
         color: '#3b5998',
+        cat: 'admin',
         title: 'Admin Control (Overview)',
         steps: [
             'Go to Sidebar → "Admin Control" — only visible to Admins / Managers.',
@@ -374,17 +532,20 @@ const GUIDE_SECTIONS = [
     {
         icon: 'notifications',
         color: '#ff9800',
+        cat: 'start',
         title: 'Notifications',
         steps: [
             'Notifications arrive on your phone even when the app is closed, and are also saved under the bell icon (top right).',
             'The red badge shows how many unread notifications you have. Tap "Mark All Read" to clear it.',
             'Tap any notification to open the related screen — the lead, service call, attendance, leave, etc.',
             'If you are not getting notifications: allow Notifications for the app in your phone Settings and keep the app updated.',
+            'Notifications are sent automatically to the right people — e.g. a leave, advance or expense request goes to Admin / Account / HR, and the approval goes back to the employee. You do not get a notification for something you did yourself.',
         ],
     },
     {
         icon: 'alarm',
         color: '#d84315',
+        cat: 'start',
         title: 'Daily Alerts & Reminders',
         steps: [
             '09:00 Today\'s follow-ups → each salesperson.',
@@ -401,6 +562,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'person-circle',
         color: '#607d8b',
+        cat: 'start',
         title: 'My Profile',
         steps: [
             'Tap your avatar/initials (top right of home screen) to open your profile.',
@@ -412,6 +574,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'card',
         color: '#1565c0',
+        cat: 'admin',
         title: 'Subscription & Renewal',
         steps: [
             'Go to "Subscription & Renewal" from the sidebar.',
@@ -425,6 +588,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'cash',
         color: '#1565c0',
+        cat: 'payroll',
         title: 'Payroll — Generate, Lock, Bank Sheet & Paid',
         steps: [
             'Go to Sidebar → "Payroll". Admin / Manager / HR / Accounts see the Generate and Salary Rules tabs; employees see only their own payslips.',
@@ -440,6 +604,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'calendar',
         color: '#2196f3',
+        cat: 'leaves',
         title: 'Leave Application & Balance',
         steps: [
             'Go to "Leaves" and tap Apply. Choose the leave type and dates — total days are calculated automatically.',
@@ -453,6 +618,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'cloud-upload',
         color: '#00897b',
+        cat: 'admin',
         title: 'Excel Import — Company, Employees, Products, Holidays',
         steps: [
             'Open Admin Control → Setup. All four Excel uploads are there (Products, Employees and Holidays also keep their own buttons in Product Master and Admin Control).',
@@ -467,6 +633,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'location',
         color: '#c62828',
+        cat: 'attendance',
         title: 'Office / Field Attendance Tagging',
         steps: [
             'Admin: go to Company Profile and tap "Set Office Location" while standing at your office — this is a one-time setup.',
@@ -477,6 +644,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'chatbubbles',
         color: '#5e35b1',
+        cat: 'admin',
         title: 'Messaging Center (Templates & Broadcast)',
         steps: [
             'Go to Sidebar → "Messaging Center".',
@@ -489,6 +657,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'time',
         color: '#00897b',
+        cat: 'attendance',
         title: 'Weekly Off & Shift',
         steps: [
             'Company default: Payroll → Salary Rules → "Weekly Off & Shift". Choose the weekly off days (e.g. Sun, or Sat + Sun), extra Saturdays off (e.g. 2nd & 4th), shift start / end (24-hour, e.g. 09:30 – 18:30) and "Late after (min)" grace.',
@@ -499,6 +668,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'alarm',
         color: '#ef6c00',
+        cat: 'payroll',
         title: 'Salary Rules — Late, Absent & Overtime',
         steps: [
             'Late-Coming: turn it on, then choose how to cut — "½ day per late", "½ day per 3 lates" or "₹ per late" — and how many lates per month are free. Late = Day In after shift start + grace (or after the "late after" time).',
@@ -511,6 +681,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'briefcase',
         color: '#8e24aa',
+        cat: 'leaves',
         title: 'Leave Policy — CL / SL / EL & Carry Forward',
         steps: [
             'Payroll → Salary Rules → "Leave Policy (CL / SL / EL)" → turn on "Separate CL / SL / EL balances". Set the yearly days for each, and whether it carries forward (with a maximum).',
@@ -523,6 +694,8 @@ const GUIDE_SECTIONS = [
     {
         icon: 'analytics',
         color: '#6a1b9a',
+        cat: 'admin',
+        module: 'hr',
         title: 'Employee 360',
         steps: [
             'Manage Team → Users → tap "📊 360" on an employee card (or Activity & Reports → choose an employee → "📊 360").',
@@ -533,6 +706,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'exit',
         color: '#c62828',
+        cat: 'payroll',
         title: 'Full & Final Settlement (employee leaving)',
         steps: [
             'Employee 360 → "Full & Final settlement" (Admin / HR).',
@@ -545,6 +719,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'navigate',
         color: '#0277bd',
+        cat: 'sales',
         title: 'Nearby Leads',
         steps: [
             'Leads → 🧭 button. "Near me" shows open leads within 5 / 10 / 25 / 50 / 100 km, nearest first. "By city" shows open leads of one city.',
@@ -555,6 +730,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'trophy',
         color: '#ff9800',
+        cat: 'sales',
         title: 'Visit Targets',
         steps: [
             'Set targets: Manage Team → edit the employee → "Visits / day" and "Visits / month" (blank = no target).',
@@ -565,6 +741,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'camera',
         color: '#5d4037',
+        cat: 'start',
         title: 'Photos — PO, Service, Expense Bill, Installation, Cheque',
         steps: [
             'Photos are compressed on the phone (about 100–200 KB) and uploaded when you save: Order PO (photo or PDF), Service Call photo, Expense bill photo, Installation photo (one photo for all machines of the report) and Payment cheque photo (when mode is Cheque).',
@@ -575,6 +752,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'receipt',
         color: '#f44336',
+        cat: 'expenses',
         title: 'Expenses — Claims, Day Out & Purchase Approval',
         steps: [
             'Expenses has four tabs: All (claims + Day Out expenses), Claims, Day Out and Requests. The boxes on top show Outstanding (claims still to be paid), Day Out total and Total Spent.',
@@ -588,6 +766,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'stats-chart',
         color: '#1565c0',
+        cat: 'attendance',
         title: 'Attendance & Leave — Tap a Box to Filter',
         steps: [
             'Attendance Report: tap Present, Absent, Leave, Short, Expense or Holiday — the list below shows only those days. Tap again (or ✕) to see everything.',
@@ -597,6 +776,7 @@ const GUIDE_SECTIONS = [
     {
         icon: 'git-branch',
         color: '#455a64',
+        cat: 'sales',
         title: 'Leads Board — Days in Stage',
         steps: [
             'Each card on the Leads Board shows how long the lead has been in its current stage, e.g. "⏳ Quotation for 25 days". It turns red after 30 days.',
@@ -608,498 +788,514 @@ const GUIDE_SECTIONS = [
 // =========================================================
 // 📋 FAQ DATA
 // =========================================================
-const FAQS = [
+const FAQS: FaqItem[] = [
     {
-        category: 'Attendance',
+        cat: 'start',
+        q: 'Can I use the app on a laptop or computer?',
+        a: `Yes. Open https://app.lifelinem.com in Chrome or Edge and log in with your usual email and password. Maps, push notifications and Day In location tracking work only in the phone app.`,
+    },
+    {
+        cat: 'orders',
+        q: 'Where does the advance taken at order booking show?',
+        a: `It is saved as a payment linked to the order, with its own receipt number. You see it in Collect Payment and inside the order's Pending Due (Payments for this entry). The order balance already has the advance taken off.`,
+    },
+    {
+        cat: 'start',
+        q: 'I created something but did not get a notification',
+        a: `That is expected — notifications go to the people who need to act (for example Admin / Account for an advance request), not to the person who created it. Ask a colleague with that role to check their notifications.`,
+    },
+    {
+        cat: 'attendance',
         q: 'Problem with Day In — attendance is not marking',
         a: `Follow these steps in order:\n\n1. Make sure your internet is ON (mobile data or Wi-Fi).\n2. Fully close the app and reopen it (don't just minimise).\n3. Wait 5–10 seconds after the app loads, then try Day In again.\n4. Make sure Location / GPS is turned ON — attendance requires your location.\n5. If it still fails, go to Settings → Apps → [App Name] → Clear Cache, then restart the app.`,
     },
     {
-        category: 'Attendance',
+        cat: 'attendance',
         q: 'Problem with Day Out — button not responding or showing error',
         a: `Follow these steps:\n\n1. Check internet — if you are in a low-coverage area, move to a spot with better signal.\n2. Turn on GPS/Location if it is off (Settings → Location → Turn On).\n3. Close the app completely and restart it.\n4. Try Day Out again.\n\nTip: If you are in a basement or underground area, step outside briefly to get a GPS fix, then mark Day Out.`,
     },
     {
-        category: 'Attendance',
+        cat: 'attendance',
         q: 'GPS / Location not working for attendance',
         a: `1. Go to Settings → Location → make sure it is ON.\n2. Set Location Mode to "High Accuracy".\n3. For the app: Settings → Apps → [App Name] → Permissions → Location → Allow.\n4. Restart the app and try again.\n\nIf accuracy is poor, stand near a window or step outside.`,
     },
     {
-        category: 'Attendance',
+        cat: 'attendance',
         q: 'Why does "LMS — on duty" stay in my notifications after Day In?',
         a: `After Day In, LMS records your location every 30 minutes until Day Out, so your manager can see field visits on the Live Map — even if you minimise the app.\n\n• The notification shows that this is on. It cannot be swiped away while you are on duty.\n• It stops automatically when you mark Day Out or log out, and also at the end of the day.\n• Location is not recorded outside Day In → Day Out.\n• If your phone restarts, open the app once and tracking continues.`,
     },
     {
-        category: 'Attendance',
+        cat: 'attendance',
         q: 'What do the location messages mean?',
         a: `• "Location permission is off" → Settings → Apps → LMS → Permissions → Location → Allow.\n• "Phone location (GPS) is off" → turn on Location from the quick settings.\n• "Could not get your location" → turn on "Google Location Accuracy" (Settings → Location), step near a window or outside, and try again.\n\nDay In needs a location. Day Out always saves — the location is added when the phone can get it.`,
     },
     {
-        category: 'Attendance',
+        cat: 'attendance',
         q: 'I forgot to mark Day In / Day Out — what should I do?',
         a: `If you missed marking attendance:\n\n1. Contact your Admin or HR immediately and inform them.\n2. The Admin can manually update or note your attendance from the Admin Control panel.\n3. Do not try to mark it later on your own — the system records the actual time of marking.\n\nNote: Always mark Day In as soon as you start work to avoid discrepancies.`,
     },
     {
-        category: 'Attendance',
+        cat: 'attendance',
         q: 'My attendance is showing "Not Marked" on the home screen even after marking',
         a: `1. Pull down on the home screen to refresh the data.\n2. Close the app fully and reopen it.\n3. Check if your internet was ON when you marked attendance — if it was off, the entry may not have saved.\n4. Go to the Attendance screen and check if today's entry appears in the list.\n\nIf the entry is missing, contact your Admin to manually record it.`,
     },
     {
-        category: 'Connectivity',
+        cat: 'start',
         q: 'App is not loading or showing a blank screen',
         a: `1. Check if your internet is working — try opening a website in your browser.\n2. If internet is off, turn it on and wait 10 seconds.\n3. Close the app fully and reopen it.\n4. If still blank: Settings → Apps → [App Name] → Clear Cache, then restart.\n5. If nothing works, uninstall and reinstall the app.`,
     },
     {
-        category: 'Connectivity',
+        cat: 'start',
         q: 'Data is not syncing — I saved something but it is not showing',
         a: `This is almost always an internet issue.\n\n1. Check your connection — switch from mobile data to Wi-Fi (or vice versa).\n2. Pull down on the list screen to refresh.\n3. Close the app and reopen it.\n4. In a low-signal area, data will auto-sync once connectivity is restored — no data is lost.`,
     },
     {
-        category: 'Connectivity',
+        cat: 'start',
         q: 'The app works on Wi-Fi but not on mobile data',
         a: `1. Check if mobile data is enabled for this app: Settings → Apps → [App Name] → Data Usage → enable "Mobile Data".\n2. Some phones restrict background data — disable "Data Saver" mode temporarily.\n3. Check if your mobile data plan is active and has balance.\n4. Try turning mobile data off and on again.\n5. Restart the app after making these changes.`,
     },
     {
-        category: 'Company Profile & PDFs',
+        cat: 'admin',
         q: 'How do I update company details — name, address, contact?',
         a: `1. Go to Sidebar → "Company Profile".\n2. Update your Company Name, Address, Phone, Email, GST Number, and Website.\n3. Tap Save — these details reflect immediately on all new PDFs generated (Payment Receipt, Delivery Challan, Order, Installation, PMS, Service, Demo Reports).\n\nNote: Already generated PDFs will not change — only new ones will use the updated details.`,
     },
     {
-        category: 'Company Profile & PDFs',
+        cat: 'admin',
         q: 'Company logo is not appearing on PDFs',
         a: `1. Go to Sidebar → Company Profile.\n2. Tap the Logo field and upload your company logo (PNG or JPG recommended, square size preferred).\n3. Tap Save.\n4. Generate a new PDF — the logo should now appear at the top.\n\nIf the logo still does not show: make sure the image is under 1 MB and in JPG or PNG format.`,
     },
     {
-        category: 'Company Profile & PDFs',
+        cat: 'admin',
         q: 'PDF is showing wrong address or blank address',
         a: `1. Go to Sidebar → Company Profile.\n2. Check the Address field — make sure it is filled completely (Street, City, State, Pincode).\n3. Tap Save.\n4. Generate a new PDF — address will now appear correctly.\n\nTip: Fill the address in one complete line for best results on PDFs.`,
     },
     {
-        category: 'Company Profile & PDFs',
+        cat: 'admin',
         q: 'Bank details are not showing on Payment Receipt',
         a: `1. Go to Sidebar → Company Profile → scroll down to Bank Details.\n2. Fill in Bank Name, Account Number, IFSC Code, and Branch for Bank 1 (and Bank 2 if applicable).\n3. Tap Save.\n4. Generate a new Payment Receipt — bank details will now appear at the bottom.\n\nNote: Leave Bank 2 blank if you only have one account.`,
     },
     {
-        category: 'Company Profile & PDFs',
+        cat: 'admin',
         q: 'UPI QR Code is not showing in the app',
         a: `1. Go to Sidebar → Company Profile.\n2. Upload your UPI QR Code image in the "QR Code" field.\n3. Also enter your UPI ID in the UPI ID field.\n4. Tap Save.\n5. Open the Collect Payment screen — your QR code will now appear at the top.\n\nTo share the QR code: tap the Share button next to it to send via WhatsApp or any other app.`,
     },
     {
-        category: 'Company Profile & PDFs',
+        cat: 'admin',
         q: 'Signature is not appearing on PDFs',
         a: `1. Go to Sidebar → Company Profile.\n2. Upload your signature image in the "Signature" field (white background recommended).\n3. Tap Save.\n4. Generate a new PDF — the signature will appear at the bottom as the authorized signatory.\n\nTip: Use a clear signature on a white background for best print quality.`,
     },
     {
-        category: 'Reports & PDFs',
+        cat: 'reports',
         q: 'How do I generate and share a PDF (Receipt, Challan, Report)?',
         a: `1. Open the relevant record — Order, Payment, Installation, Service, PMS, or Demo.\n2. Tap the PDF or Share icon (top right of the detail screen).\n3. The PDF is generated automatically with your company details, logo, and data.\n4. A share sheet opens — choose WhatsApp, Email, or any other app to send it.\n5. You can also download it to your phone storage from the share options.`,
     },
     {
-        category: 'Reports & PDFs',
+        cat: 'orders',
         q: 'How do I generate a Payment Receipt for a client?',
         a: `1. Go to "Collect Payment" under Sales Analysis.\n2. Find the payment entry for which you need the receipt.\n3. Tap on it to open the details.\n4. Tap the PDF/Share icon — a Payment Receipt is generated with your company header, client details, amount, payment mode, and bank details.\n5. Share it directly with the client via WhatsApp or Email.`,
     },
     {
-        category: 'Reports & PDFs',
+        cat: 'orders',
         q: 'How do I generate a Delivery Challan / Order PDF?',
         a: `1. Go to "Order Booking" under Sales Analysis.\n2. Find the order entry.\n3. Tap on it to open the details.\n4. Tap the PDF/Share icon — a Delivery Challan is generated with your company logo, client details, products, and amounts.\n5. Share with the client or print it directly.`,
     },
     {
-        category: 'Reports & PDFs',
+        cat: 'reports',
         q: 'PDF is showing blank or missing data fields',
         a: `Blank fields in PDFs happen when the original record was saved without filling all details, OR when Company Profile is incomplete.\n\n1. First check Company Profile — make sure Name, Address, Phone, and Bank Details are filled.\n2. Open the specific record and check if all fields are filled.\n3. Edit the record and fill missing details, then regenerate the PDF.`,
     },
     {
-        category: 'Orders & Payments',
+        cat: 'orders',
         q: 'My PO PDF does not upload — "larger than 2 MB"',
         a: `PDFs can be up to 2 MB. Scanned PDFs are often bigger.\n\nTake a photo of the PO instead (camera or gallery) — photos are compressed automatically to about 100–200 KB and stay readable.`,
     },
     {
-        category: 'Orders & Payments',
+        cat: 'orders',
         q: 'I submitted an order but it is not showing in the list',
         a: `1. Check your internet connection — the order may not have saved if you were offline.\n2. Pull down on the Orders screen to refresh.\n3. Close the app and reopen it.\n4. If the order still does not appear, do NOT submit it again — contact your Admin first to avoid duplicates.`,
     },
     {
-        category: 'Orders & Payments',
+        cat: 'orders',
         q: 'Payment was collected but the due amount did not reduce',
         a: `1. Make sure the client name in the payment matches exactly with the client name in the due record.\n2. Check if the payment was saved successfully (it should appear in the Payment Collections list).\n3. If names are slightly different (e.g. "City Hospital" vs "City Hosp."), the system cannot match them — ask your Admin to manually adjust.\n4. Pull down to refresh the dues list after a few seconds.`,
     },
     {
-        category: 'Orders & Payments',
+        cat: 'orders',
         q: 'How do I check my payment collection history?',
         a: `1. Go to "Collect Payment" under Sales Analysis.\n2. The list shows all payments recorded.\n3. Admins and Accountants can see all payments across the team.\n4. Filter by date or client name to find specific records.`,
     },
     {
-        category: 'Automation',
+        cat: 'admin',
         q: 'WhatsApp / Email message was not sent to the customer',
         a: `1. Go to Admin → Settings → Automation Settings and check that WhatsApp / Email is turned ON.\n2. Verify the API key is entered correctly and saved.\n3. Make sure the customer's mobile number is correct (10 digits).\n4. Check the "Outbound Messages" log for status.\n5. If still failing, contact support.`,
     },
     {
-        category: 'Automation',
+        cat: 'admin',
         q: 'Customer is receiving duplicate WhatsApp messages',
         a: `1. Check the Orders or Payment list for duplicate entries — duplicate messages happen when the same entry is saved more than once.\n2. If duplicates exist, ask your Admin to delete the extra entry.\n3. Make sure the Submit button is not being tapped multiple times.`,
     },
     {
-        category: 'Automation',
+        cat: 'admin',
         q: 'I do not want to send WhatsApp messages for a specific entry',
         a: `1. Make sure the client's mobile number field is left blank — messages are only sent if a number is present.\n2. Alternatively, ask your Admin to temporarily turn off automation from Automation Settings, add the entry, then turn it back on.`,
     },
     {
-        category: 'Subscription',
+        cat: 'admin',
         q: 'My plan is expiring soon — how do I renew?',
         a: `1. Contact your Super Admin or support team via WhatsApp / phone.\n2. Make the payment as instructed.\n3. Your plan will be activated within 1 hour of payment confirmation.\n\nDo not wait until the last day — renew at least 2–3 days before expiry.`,
     },
     {
-        category: 'Subscription',
+        cat: 'admin',
         q: 'I am getting a "Plan Expired" message on login',
         a: `Your subscription has expired. You cannot login until it is renewed.\n\n1. Contact the Super Admin or support team immediately.\n2. Share your company name and registered email.\n3. Once renewed by the admin, you can login normally.\n\nAll your data is safe — nothing is deleted on expiry.`,
     },
     {
-        category: 'Subscription',
+        cat: 'admin',
         q: 'I made a payment but the plan is still not activated',
         a: `1. Make sure you tapped "I Have Paid" after scanning the QR code — this sends a notification to the admin.\n2. Share your payment screenshot on WhatsApp with the support team.\n3. Activation usually happens within 1 hour during business hours.\n4. If it has been more than 2 hours, contact support directly.`,
     },
     {
-        category: 'Subscription',
+        cat: 'admin',
         q: 'Can I add more employees without changing my plan?',
         a: `1. The number of employees allowed depends on your current plan's "Max Employees" limit.\n2. If you need more users, contact the Super Admin to increase your employee limit.\n3. The limit can be increased without changing the entire plan — a small upgrade fee may apply.\n4. Until the limit is increased, new employee accounts cannot be created.`,
     },
     {
-        category: 'Users & Access',
+        cat: 'admin',
         q: 'How do I add a new employee to the app?',
         a: `1. Go to Sidebar → Admin Control → Users tab.\n2. Tap the "+" icon at the top right.\n3. Fill in Name, Email ID, Password, Mobile Number, and Role.\n4. Tap Save — the account is created.\n5. The employee downloads the app from Google Play Store and logs in using the email and password you set.\n\nNote: Each employee must have a unique email ID.`,
     },
     {
-        category: 'Users & Access',
+        cat: 'admin',
         q: 'How do I change an employee\'s role, target, or leave balance?',
         a: `1. Go to Sidebar → Admin Control → Users tab.\n2. Tap on the employee you want to edit.\n3. Change their Role, Monthly Sales Target, Leave Balance, or any other detail.\n4. Tap Save — changes take effect immediately.\n5. The employee may need to close and reopen the app to see the updated role/permissions.`,
     },
     {
-        category: 'Users & Access',
+        cat: 'admin',
         q: 'I forgot my password — how do I reset it?',
-        a: `Option 1: On the Login screen, tap "Forgot Password" and enter your registered email. A reset link will be sent.\n\nOption 2: Ask your company Admin to go to Admin Control → Users → select your profile → change password.\n\nNote: Check your spam/junk folder if you don't receive the reset email within 2 minutes.`,
+        a: `Ask your company Admin to reset it: Admin Control → Users → select your profile → change password. Then log in with the new password and change it from My Profile if you like.\n\nIf you are the Admin, contact support from the Contact tab.`,
     },
     {
-        category: 'Users & Access',
+        cat: 'admin',
         q: 'An employee left the company — how do I disable their access?',
         a: `1. Go to Sidebar → Admin Control → Users tab.\n2. Tap on the employee's profile.\n3. Toggle their status to "Inactive" or disable their account.\n4. Their login is blocked immediately.\n5. Their past records are retained for your reference — nothing is deleted.`,
     },
     {
-        category: 'Users & Access',
+        cat: 'admin',
         q: 'An employee cannot see a certain screen or feature',
         a: `1. Go to Sidebar → Admin Control → Permissions tab.\n2. Select the employee's role.\n3. Enable the module/feature you want them to see.\n4. The employee needs to close and reopen the app for changes to take effect.\n\nIf the feature is still not visible, contact your Super Admin — some features are restricted at the plan level.`,
     },
     {
-        category: 'Admin Tools',
+        cat: 'reports',
+        module: 'sales',
         q: 'How do I see the complete history of a client or machine?',
         a: `1. Go to Sidebar → "Serial Number".\n2. To search by machine: enter the Serial Number in the search bar — all installation, service, and PMS history appears.\n3. To search by client: tap the "Organization" tab, then type the hospital or company name.\n4. All records linked to that client — orders, payments, installations, service calls, PMS — are shown in one place.`,
     },
     {
-        category: 'Admin Tools',
+        cat: 'reports',
         q: 'How do I check what a specific employee did on a particular day?',
         a: `1. Go to Sidebar → "Activity Timeline".\n2. Select the employee from the list.\n3. A complete timeline of their activities appears — visits, orders, payments, installations, service calls, attendance — sorted by date.\n4. Use the date filter to check activity for a specific day or date range.`,
     },
     {
-        category: 'Admin Tools',
+        cat: 'sales',
         q: 'How do I see all employees\' sales performance in one place?',
         a: `1. Go to Sidebar → "Sales Calculation".\n2. Shows every employee's Orders, Sales Target, Achievement %, Payment Collections, and Pending Dues.\n3. Tap on any employee to drill into their individual data.\n4. Filter by month to see monthly performance trends.\n\nYou can also go to Live Dashboard → Sales Analysis from the home screen for a quick visual overview.`,
     },
     {
-        category: 'Admin Tools',
+        cat: 'admin',
         q: 'How do I control what each employee or team can see in the app?',
         a: `1. Go to Sidebar → Admin Control → Permissions tab.\n2. Select a role (Sales Executive, Service Engineer, Accountant, Store Keeper, etc.).\n3. Toggle any module ON or OFF.\n4. You can also set permissions for individual employees — user-specific settings override role settings.\n5. Employees need to close and reopen the app for changes to take effect.`,
     },
     {
-        category: 'Admin Tools',
+        cat: 'service',
         q: 'How do I see all service history for a specific machine?',
         a: `Two ways:\n\n1. Go to Sidebar → Serial Number → enter the machine's Serial Number — all service, installation, and PMS records appear.\n\n2. Go to Activity Report → Service Analysis → search by machine model or serial number to see all tickets, their status, and resolution details.`,
     },
     {
-        category: 'General',
+        cat: 'start',
         q: 'The app is running slow or crashing',
         a: `1. Close all background apps to free up RAM.\n2. Clear app cache: Settings → Apps → [App Name] → Clear Cache.\n3. Make sure your phone has at least 1 GB of free storage.\n4. Update the app from the Play Store.\n5. Restart your phone and try again.\n\nIf crashes continue, note what action causes it and contact support with your phone model and Android version.`,
     },
     {
-        category: 'General',
+        cat: 'start',
         q: 'How do I update the app to the latest version?',
         a: `1. Open the Google Play Store.\n2. Search for the app name.\n3. If an "Update" button is visible, tap it.\n4. Wait for installation to complete.\n\nNo data is lost during updates.`,
     },
     {
-        category: 'General',
+        cat: 'start',
         q: 'I accidentally deleted a record — can it be recovered?',
         a: `Records deleted from the app are permanently removed and cannot be recovered from the app itself.\n\nIf deleted recently:\n1. Contact support immediately with the details (client name, date, type of record).\n2. We may be able to recover it from database backups.\n\nTo avoid accidental deletions, only Admins should have delete permissions — set this in Admin Control → Permissions.`,
     },
     {
-        category: 'General',
+        cat: 'start',
         q: 'Can I use the app on multiple phones at the same time?',
         a: `Yes, the same account can be logged in on multiple devices simultaneously.\n\nHowever:\n1. Attendance marking should be done from one device only to avoid location conflicts.\n2. Each employee should have their own login — sharing accounts causes mixed records.\n3. Contact your Admin if you need a separate account.`,
     },
     {
-        category: 'General',
+        cat: 'start',
         q: 'The date or time on my records is wrong',
         a: `Records use your phone's date and time at the moment of saving.\n\n1. Go to Settings → Date & Time → enable "Automatic Date & Time".\n2. Make sure your timezone is correct (Settings → Date & Time → Timezone).\n3. Restart the app after fixing.\n\nNote: Already saved records cannot have their timestamps changed.`,
     },
     {
-        category: 'General',
+        cat: 'start',
         q: 'How do I search for a specific record quickly?',
         a: `Every list screen has a Search Bar at the top.\n\n1. Type the client name, amount, date, or any keyword — results filter in real time.\n2. For a client's full history: Sidebar → Serial Number → Organization tab.\n3. For employee activity: Sidebar → Activity Timeline.\n4. For financial summary: Sidebar → Sales Calculation.`,
     },
     {
-        category: 'Leads & Sales',
+        cat: 'sales',
         q: 'I added a new lead but it is not at the top of the list',
         a: `The Leads list shows newest leads first by default.\n\n1. Check the sort chip next to the filters — if it says "Follow-up date", tap it to switch back to "Newest first".\n2. Clear any filter (Status, Stage, 🌐 Website) and the search box.\n3. Check the date tabs (Day / Month / FY) — a lead outside the selected period is not shown.\n4. Pull down to refresh.`,
     },
     {
-        category: 'Leads & Sales',
+        cat: 'sales',
         q: 'What does the 🌐 WEBSITE badge mean?',
         a: `The lead came from an enquiry or catalogue download on the company website — it was created automatically.\n\nLead Details shows which page it came from. Tap the 🌐 Website chip on the Leads screen to see only these leads.`,
     },
     {
-        category: 'Leads & Sales',
+        cat: 'sales',
         q: 'How do I make website leads go to a particular salesperson?',
         a: `Admin only:\n\n1. Leads → ⋮ (top right) → "Website Leads".\n2. Choose the employee — every new website lead goes to them, with a notification.\n3. Choose "Default" to send them to the Admin again.\n\nTo move a single lead, open it and tap the ✎ next to "Assigned To".`,
     },
     {
-        category: 'Leads & Sales',
+        cat: 'sales',
         q: 'How do we connect our company website?',
         a: `Admin only:\n\n1. Company Profile → scroll to 🌐 Website Leads.\n2. Type your website address (e.g. www.yourcompany.com) → Save website.\n3. Tap "Send setup to developer" and send it to whoever made or manages your website. They connect your Contact form to the link, or paste the ready-made form.\n4. Fill the form on your website once with your own number — the lead should appear within a minute.\n\nNo website? Leave it empty — nothing else changes.`,
     },
     {
-        category: 'Leads & Sales',
+        cat: 'sales',
         q: 'The app says a lead already exists for this hospital or mobile',
         a: `To avoid duplicate leads, the app checks open leads across the company.\n\n1. If it is your own lead, choose "Add to Existing" — your visit is added to that lead.\n2. If a colleague owns it, talk to them or your manager before creating a new one.\n3. Choose "Create New" only if it really is a different hospital (same name in another town is fine).`,
     },
     {
-        category: 'Leads & Sales',
+        cat: 'sales',
         q: 'Why do I have to choose a Lost Reason?',
         a: `Lost reasons show the company why deals are lost (price, competitor, budget…) in Lead Insights.\n\nLeads lost for "No Requirement Now" or "Budget Not Available" also come back as a re-contact reminder after 3 and 6 months — so choose the reason honestly.`,
     },
     {
-        category: 'Leads & Sales',
+        cat: 'sales',
         q: 'How do I move a lead to the next stage?',
         a: `Either:\n\n1. Leads → Board → long-press the card (or tap ⇄) → choose the stage, or\n2. Open the lead → Log Visit → choose the new stage.\n\nThe change is recorded in the lead's history.`,
     },
     {
-        category: 'Service & Spares',
+        cat: 'service',
         q: 'How do I assign a service call to an engineer?',
         a: `Admin / Manager:\n\n1. Open Service Call → tap the call.\n2. Next to "Assigned to", tap "Assign" (or "Change").\n3. Choose the engineer.\n\nThe call becomes "Assigned" and the engineer gets a notification that opens it directly.`,
     },
     {
-        category: 'Service & Spares',
+        cat: 'service',
         q: 'An engineer cannot see a service call',
         a: `Engineers see calls they logged and calls assigned to them.\n\n1. Make sure the call is assigned to that engineer (open the call → Assigned to).\n2. Ask them to pull down to refresh, or tap "My Calls".\n3. Check the Open / Closed / All tabs and the date tabs.`,
     },
     {
-        category: 'Service & Spares',
+        cat: 'service',
         q: 'What does "Open 3 days" in red mean?',
         a: `It is how long the call has been open since it was logged. It turns red after 48 hours.\n\nAdmin / Manager also get a 10 AM alert listing calls open for more than 2 days, and each engineer gets a list of their own.`,
     },
     {
-        category: 'Service & Spares',
+        cat: 'service',
         q: 'How is spare part stock reduced?',
         a: `When a service call is saved or closed with spare parts, stock is reduced automatically:\n\n1. First from the stock issued to the engineer who records it.\n2. Then from office stock.\n\nIf you later change the quantity or remove the part, the stock is given back. Stock never goes below zero.`,
     },
     {
-        category: 'Service & Spares',
+        cat: 'service',
         q: 'A spare part is not showing in the list when I add it to a call',
         a: `1. Type the name, part number or model in the search box of the part list.\n2. Make sure the part has been added in Sidebar → Spare Part Book.\n3. Close and reopen the part list — it reloads the latest parts.`,
     },
     {
-        category: 'Service & Spares',
+        cat: 'service',
         q: 'How do I get an alert when a spare part is running low?',
         a: `1. Sidebar → Spare Part Book → open the part.\n2. Set "Low-stock alert at" (e.g. 3) and tap Save.\n\nWhen total stock (office + engineers) falls to that number, the part shows LOW STOCK and Store / Admin get a morning alert. Set 0 to turn it off.`,
     },
     {
-        category: 'Leaves',
+        cat: 'leaves',
         q: 'What is the leave balance shown when applying for leave?',
         a: `It is your leave for this financial year: yearly quota + earned leave (worked on Sundays / holidays) − leave already used − absents − short days.\n\nDays waiting for approval are also taken off the "available" number so you don't apply twice against the same balance.`,
     },
     {
-        category: 'Leaves',
+        cat: 'leaves',
         q: 'The app warns that my leave is more than my balance',
         a: `You can still apply — tap "Apply anyway".\n\nThe extra days beyond your balance may be treated as Leave Without Pay at payroll time. Choosing the type "Leave Without Pay" shows no warning.`,
     },
     {
-        category: 'Alerts & Notifications',
+        cat: 'start',
         q: 'I am getting too many alerts, or at the wrong time',
         a: `Admin: Sidebar → Admin Control → Alerts tab.\n\n1. Switch off any alert you don't need.\n2. Tap the time to change it, or "Reset" to go back to the default.\n\nEach alert is sent only once a day.`,
     },
     {
-        category: 'Alerts & Notifications',
+        cat: 'start',
         q: 'I am not receiving notifications or daily alerts',
         a: `1. Phone Settings → Apps → [App Name] → Notifications → turn ON.\n2. Turn off battery optimisation for the app (Settings → Battery).\n3. Log out and log in once — this refreshes your notification registration.\n4. Check the bell icon in the app — all alerts are saved there too.\n5. Ask your Admin whether that alert is switched on in Admin Control → Alerts.`,
     },
     {
-        category: 'Alerts & Notifications',
+        cat: 'sales',
         q: 'Where can I see the evening team report?',
         a: `Admin / Manager get it at 8 PM as a notification (also under the bell icon). Tap it to open Sales Calculation for details.`,
     },
     {
-        category: 'Payroll',
+        cat: 'payroll',
         q: 'I can’t generate or recalculate a payslip — it says the month is locked',
         a: `That month was finalized (🔒). Ask an Admin to open Payroll → Generate → that month → Status → "Reopen (Admin)". A month already marked Paid can't be reopened.`,
     },
     {
-        category: 'Payroll',
+        cat: 'payroll',
         q: 'Why did a late deduction appear on the payslip?',
         a: `Late-Coming is on in Salary Rules. Late = Day In after the shift start + grace (or after the "late after" time). The cut depends on the chosen rule: ½ day per late, ½ day per N lates, or ₹ per late — after the free lates. It never reduces leave balance.`,
     },
     {
-        category: 'Payroll',
+        cat: 'payroll',
         q: 'An employee was absent without leave but no salary was cut',
         a: `Absent deduction is off by default. Turn on Payroll → Salary Rules → "Absent & One Day's Salary" → "Cut one day's salary for absent". It applies to payslips generated after saving.`,
     },
     {
-        category: 'Payroll',
+        cat: 'payroll',
         q: 'How is overtime calculated?',
         a: `Hours worked on a working day beyond the employee's shift (or the standard hours you set), at least the minimum minutes, rounded down, up to the maximum per day. Rate = hourly salary × 1 / 1.5 / 2, or a fixed ₹ per hour. Work on a weekly off or holiday earns leave instead of overtime.`,
     },
     {
-        category: 'Payroll',
+        cat: 'payroll',
         q: 'The bank sheet shows long numbers like 1.23E+11',
         a: `Account numbers are saved as text in the Bank Transfer Sheet. If your Excel still converts them, open the file and set that column to Text before editing.`,
     },
     {
-        category: 'Leaves',
+        cat: 'leaves',
         q: 'Where does a half-day leave go — which balance?',
         a: `Half day is not a separate type. Choose the leave type (CL / SL / EL / Comp Off) and tick "Half day" — 0.5 is taken from that type. With Leave Without Pay, half a day's salary is cut.`,
     },
     {
-        category: 'Leaves',
+        cat: 'leaves',
         q: 'I don’t see the "Half day" checkbox',
         a: `It appears only when From and To are the same date and the company allows half-day leave (Payroll → Salary Rules → Leave Policy → "Allow half-day leave").`,
     },
     {
-        category: 'Leaves',
+        cat: 'leaves',
         q: 'Leave days are counting Sundays / holidays',
         a: `Turn off "Count weekly offs / holidays inside a leave as leave days" in Salary Rules → Leave Policy. Only working days are then counted.`,
     },
     {
-        category: 'Leaves',
+        cat: 'leaves',
         q: 'How do I carry forward leave to the next year?',
         a: `After 31 March: Leaves → 💼 Leave Balances → choose the year that ended → "↪ Carry forward" → check the preview → Carry forward. Only types marked "Carry" move, up to their maximum.`,
     },
     {
-        category: 'Attendance',
+        cat: 'attendance',
         q: 'Someone has a different weekly off (e.g. Monday)',
         a: `Manage Team → edit the employee → "Weekly off & shift" → "Own schedule" → choose Mon. Their attendance, leave balance and Day-In alert then treat Monday as off.`,
     },
     {
-        category: 'Attendance',
+        cat: 'attendance',
         q: 'Day In / Day Out reminders come at the wrong time',
         a: `Reminders follow your shift time. Ask HR to set the shift in Salary Rules (company default) or on your profile in Manage Team. Reopen the app once after it changes.`,
     },
     {
-        category: 'Admin Tools',
+        cat: 'admin',
+        module: 'hr',
         q: 'How do I see everything about one employee?',
         a: `Manage Team → Users → "📊 360" on their card (or Activity & Reports → choose the employee → "📊 360"). Use the period chips for this month, this FY, last FY or all time.`,
     },
     {
-        category: 'Admin Tools',
+        cat: 'payroll',
         q: 'How do I settle an employee who is leaving?',
         a: `Employee 360 → "Full & Final settlement" → enter the last working day → Calculate → Save → Share PDF → Mark as Paid after paying. Delete it before it is paid if something is wrong.`,
     },
     {
-        category: 'Leads & Sales',
+        cat: 'sales',
         q: 'Nearby Leads shows "No open lead has a saved location yet"',
         a: `Leads get a location when created from a visit with GPS, or when a visit with GPS is logged for them. Meanwhile use the "By city" tab.`,
     },
     {
-        category: 'Leads & Sales',
+        cat: 'sales',
         q: 'The map is blank in Nearby Leads / live tracking',
         a: `In Expo Go the map may stay blank; the Play Store app uses the company's Google Maps key. Check that location is on and the internet is working.`,
     },
     {
-        category: 'Expenses',
+        cat: 'expenses',
         q: 'Where can I see my Day Out expenses?',
         a: `Open Expenses → "Day Out" (or "All"). Every day with DA / Hotel / Misc entered at Day Out is listed with a purple DAY OUT tag. These are paid with your salary, so they never need approval. To change one, edit that day's Day Out entry.`,
     },
     {
-        category: 'Expenses',
+        cat: 'expenses',
         q: 'How do I ask approval before buying something?',
         a: `In Expenses tap the orange 🛒 button, enter the estimated amount and the reason, and send it. After it is approved, buy it, open the request (Requests tab) and tap "Add Bill / Claim".`,
     },
     {
-        category: 'Expenses',
+        cat: 'expenses',
         q: 'Why was my claim approved automatically?',
         a: `It was made against an approved purchase request and the bill was within the approved amount. If the bill is more than approved, the claim waits for approval as usual.`,
     },
     {
-        category: 'Expenses',
+        cat: 'expenses',
         q: 'The app says my expense needs approval first',
         a: `Your company has set a pre-approval limit. For purchases above it, tap "Ask Approval" so your manager approves before you buy. You can still choose "Submit Claim Anyway" — it then waits for normal approval.`,
     },
     {
-        category: 'Admin Tools',
+        cat: 'admin',
         q: 'How do I fill missing details for all employees at once?',
         a: `Admin Control → Setup → Employees → "Download Current Employees". Fill the empty columns in Excel, upload the file and turn on "Fill details for existing employees". Only the cells you filled are saved.`,
     },
     {
-        category: 'Admin Tools',
+        cat: 'admin',
         q: 'Joining dates from Excel are wrong or empty',
         a: `Type dates as 2026-01-15 or 15/01/2026, or use a normal Excel date cell. If a date cannot be read, the preview lists it and leaves that date empty.`,
     },
     {
-        category: 'Admin Tools',
+        cat: 'admin',
         q: 'Can I fill the Company Profile from Excel?',
         a: `Yes. Admin Control → Setup → Company Profile → "Download Company Sheet", fill the Value column and upload it. You see every change before saving. Logo, signature, QR code and office location are set in Company Profile itself.`,
     },
     {
-        category: 'Users & Access',
+        cat: 'start',
         q: 'My visiting card / profile shows the wrong designation',
         a: `Ask your Admin to open Admin Control → Users → your name and choose the right Designation (Sales Executive or Service Engineer), then log out and log in once.`,
     },
     {
-        category: 'Users & Access',
+        cat: 'start',
         q: 'Activity Plan or Tasks button is missing from the bottom bar',
         a: `They are on for everyone unless an Admin switched them off. Ask your Admin to check Admin Control → Permissions for your role (or for you), then close and reopen the app.`,
     },
     {
-        category: 'Leads & Sales',
+        cat: 'sales',
         q: 'A hospital / client is not in the list when I add a visit, lead or order',
         a: `Type at least 2 letters of its name, city or mobile in the picker's search box — the app also searches all saved organizations on the server. If it still does not appear, add it as a new organization first.`,
     },
     {
-        category: 'Admin Tools',
+        cat: 'attendance',
         q: 'Why does the Live Map ignore some points or show fewer km?',
         a: `Sometimes a phone reports an old or rough location that jumps far away for a moment. Such impossible jumps are left out of the km and the route line, and the note above the map tells how many were ignored. Work records with such a location still appear in the list, marked "GPS location looked wrong".`,
     },
     {
-        category: 'General',
+        cat: 'office',
         q: 'How do I copy a courier tracking number?',
         a: `In Courier, tap the docket / tracking number — it is copied. Paste it on the courier company's website.`,
     },
     {
-        category: 'Orders & Payments',
+        cat: 'orders',
         q: 'How do I add or change the PO / cheque / bill photo after saving?',
         a: `Open the saved order, payment, expense, service call or installation. In its details tap Add / Replace / Delete under the photo — it saves immediately.`,
     },
 ];
 
-const groupedFaqs = FAQS.reduce((acc: Record<string, typeof FAQS>, item) => {
-    if (!acc[item.category]) acc[item.category] = [];
-    acc[item.category].push(item);
-    return acc;
-}, {});
+/** Lower-case words of the search box; every word must match. */
+const searchWords = (q: string) => q.toLowerCase().split(/\s+/).filter(Boolean);
 
-const CATEGORY_ICONS: Record<string, any> = {
-    'Payroll': 'cash',
-    Attendance: 'calendar',
-    Connectivity: 'wifi',
-    'Company Profile & PDFs': 'business',
-    'Reports & PDFs': 'document-text',
-    'Orders & Payments': 'cash',
-    Automation: 'chatbubbles',
-    Subscription: 'card',
-    'Users & Access': 'people',
-    'Admin Tools': 'shield',
-    General: 'settings',
-    'Leads & Sales': 'trending-up',
-    'Service & Spares': 'construct',
-    Leaves: 'calendar-clear',
-    'Alerts & Notifications': 'notifications',
-    Expenses: 'receipt',
-};
+const escapeRe = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Every word must appear at the start of a word ("late" finds "Late", not "recalculate"). */
+const matchesAll = (haystack: string, words: string[]) =>
+    words.every((w) => new RegExp(`(^|[^a-z0-9])${escapeRe(w)}`).test(haystack));
+
+/** Shows text with the searched words in bold yellow. */
+function Highlight({ text, words, style }: { text: string; words: string[]; style?: any }) {
+    if (!words.length) return <Text style={style}>{text}</Text>;
+    const escaped = words.map(escapeRe);
+    const parts = text.split(new RegExp(`(${escaped.join('|')})`, 'gi'));
+    return (
+        <Text style={style}>
+            {parts.map((part, i) =>
+                words.includes(part.toLowerCase())
+                    ? <Text key={i} style={{ backgroundColor: '#fff3a0', fontWeight: 'bold' }}>{part}</Text>
+                    : part
+            )}
+        </Text>
+    );
+}
 
 type TabKey = 'contact' | 'guide' | 'faq';
 
@@ -1109,8 +1305,36 @@ export default function HelpSupportScreen() {
 
     const [activeTab, setActiveTab] = useState<TabKey>('contact');
     const [expandedFaq, setExpandedFaq] = useState<string | null>(null);
-    const [openCategory, setOpenCategory] = useState<string | null>('Attendance');
-    const [expandedGuide, setExpandedGuide] = useState<number | null>(null);
+    const [expandedGuide, setExpandedGuide] = useState<string | null>(null);
+    const [activeCat, setActiveCat] = useState<CatKey | 'all'>('all');
+    const [query, setQuery] = useState('');
+    const { currentUser, companyProfile } = useData();
+
+    // Only topics for the modules this company has (SuperAdmin sees everything).
+    const isVisible = (item: { cat: CatKey; module?: HelpModule }) => {
+        const mod = item.module || CAT_BY_KEY[item.cat].module;
+        if (mod === 'common' || currentUser?.role === 'SuperAdmin') return true;
+        const enabled: string[] = companyProfile?.enabledModules || ['sales', 'service', 'hr'];
+        return enabled.includes(mod);
+    };
+    const guides = useMemo(() => GUIDE_SECTIONS.filter(isVisible), [companyProfile, currentUser]); // eslint-disable-line react-hooks/exhaustive-deps
+    const faqs = useMemo(() => FAQS.filter(isVisible), [companyProfile, currentUser]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const words = useMemo(() => searchWords(query), [query]);
+    const searching = words.length > 0;
+    const guideHits = useMemo(() => !searching ? [] : guides
+        .filter((g) => matchesAll(`${g.title} ${g.steps.join(' ')} ${CAT_BY_KEY[g.cat].label} ${CAT_BY_KEY[g.cat].keywords}`.toLowerCase(), words))
+        .sort((x, y) => Number(matchesAll(y.title.toLowerCase(), words)) - Number(matchesAll(x.title.toLowerCase(), words))),
+        [guides, words, searching]);
+    const faqHits = useMemo(() => !searching ? [] : faqs
+        .filter((f) => matchesAll(`${f.q} ${f.a} ${CAT_BY_KEY[f.cat].label} ${CAT_BY_KEY[f.cat].keywords}`.toLowerCase(), words))
+        .sort((x, y) => Number(matchesAll(y.q.toLowerCase(), words)) - Number(matchesAll(x.q.toLowerCase(), words))),
+        [faqs, words, searching]);
+
+    // Category chips: only categories that have something in the open tab.
+    const tabItems: { cat: CatKey }[] = activeTab === 'faq' ? faqs : guides;
+    const chipCats = CATEGORIES.filter((c) => tabItems.some((i) => i.cat === c.key));
+    const shownCats = activeCat === 'all' ? chipCats : chipCats.filter((c) => c.key === activeCat);
     const [supportConfig, setSupportConfig] = useState(DEFAULTS);
     const [loadingConfig, setLoadingConfig] = useState(true);
 
@@ -1141,7 +1365,73 @@ export default function HelpSupportScreen() {
     const openVideo = () => Linking.openURL(supportConfig.videoTutorialUrl);
 
     const toggleFaq = (key: string) => setExpandedFaq(prev => prev === key ? null : key);
-    const toggleCategory = (cat: string) => { setOpenCategory(prev => prev === cat ? null : cat); setExpandedFaq(null); };
+    const toggleGuide = (key: string) => setExpandedGuide(prev => prev === key ? null : key);
+
+    const renderGuide = (section: GuideSection) => {
+        const key = section.title;
+        const isOpen = expandedGuide === key;
+        return (
+            <TouchableOpacity
+                key={key}
+                style={[styles.guideCardFull, isOpen && styles.guideCardFullOpen]}
+                onPress={() => toggleGuide(key)}
+                activeOpacity={0.85}
+            >
+                <View style={styles.guideCardHeader}>
+                    <View style={[styles.guideIconBoxColored, { backgroundColor: section.color }]}>
+                        <Ionicons name={section.icon as any} size={18} color="white" />
+                    </View>
+                    <Highlight text={section.title} words={words} style={styles.guideCardTitle} />
+                    <Ionicons name={isOpen ? 'chevron-up' : 'chevron-down'} size={18} color="#aaa" />
+                </View>
+                {isOpen && (
+                    <View style={styles.stepsBox}>
+                        {section.steps.map((step, stepIndex) => (
+                            <View key={stepIndex} style={styles.stepRow}>
+                                <View style={[styles.stepNum, { backgroundColor: section.color }]}>
+                                    <Text style={styles.stepNumText}>{stepIndex + 1}</Text>
+                                </View>
+                                <Highlight text={step} words={words} style={styles.stepText} />
+                            </View>
+                        ))}
+                    </View>
+                )}
+            </TouchableOpacity>
+        );
+    };
+
+    const renderFaq = (item: FaqItem) => {
+        const key = item.q;
+        const isOpen = expandedFaq === key;
+        return (
+            <TouchableOpacity
+                key={key}
+                style={[styles.faqCard, isOpen && styles.faqCardOpen]}
+                onPress={() => toggleFaq(key)}
+                activeOpacity={0.85}
+            >
+                <View style={styles.faqHeader}>
+                    <Highlight text={item.q} words={words} style={[styles.faqQuestion, isOpen && { color: '#3b5998' }]} />
+                    <Ionicons name={isOpen ? 'chevron-up' : 'chevron-down'} size={14} color={isOpen ? '#3b5998' : '#aaa'} />
+                </View>
+                {isOpen && (
+                    <View style={styles.answerBox}>
+                        <Highlight text={item.a} words={words} style={styles.faqAnswer} />
+                    </View>
+                )}
+            </TouchableOpacity>
+        );
+    };
+
+    const catHeader = (c: (typeof CATEGORIES)[number], count: number) => (
+        <View key={`h-${c.key}`} style={styles.catHeaderRow}>
+            <View style={styles.categoryIconBox}>
+                <Ionicons name={c.icon} size={15} color="#3b5998" />
+            </View>
+            <Text style={styles.catHeaderText}>{c.label}</Text>
+            <View style={styles.categoryCount}><Text style={styles.categoryCountText}>{count}</Text></View>
+        </View>
+    );
 
     const TABS: { key: TabKey; label: string; icon: any }[] = [
         { key: 'contact', label: 'Contact', icon: 'call' },
@@ -1183,7 +1473,56 @@ export default function HelpSupportScreen() {
                 })}
             </View>
 
-            <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+            <View style={styles.searchWrap}>
+                <View style={styles.searchBox}>
+                    <Ionicons name="search" size={18} color="#888" />
+                    <TextInput
+                        style={styles.searchInput}
+                        placeholder="Search help — e.g. salary, day in, password, order"
+                        placeholderTextColor="#aaa"
+                        value={query}
+                        onChangeText={setQuery}
+                        autoCorrect={false}
+                        returnKeyType="search"
+                    />
+                    {query.length > 0 && (
+                        <TouchableOpacity onPress={() => setQuery('')}>
+                            <Ionicons name="close-circle" size={18} color="#aaa" />
+                        </TouchableOpacity>
+                    )}
+                </View>
+                {!searching && activeTab !== 'contact' && (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow} keyboardShouldPersistTaps="handled">
+                        {[{ key: 'all', label: 'All', icon: 'apps' } as const, ...chipCats].map((c) => {
+                            const on = activeCat === c.key;
+                            return (
+                                <TouchableOpacity key={c.key} style={[styles.chip, on && styles.chipOn]} onPress={() => setActiveCat(c.key as CatKey | 'all')}>
+                                    <Ionicons name={c.icon as any} size={13} color={on ? 'white' : '#3b5998'} />
+                                    <Text style={[styles.chipText, on && styles.chipTextOn]}>{c.label}</Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </ScrollView>
+                )}
+            </View>
+
+            <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+
+                {searching && (
+                    <>
+                        <Text style={styles.introText}>
+                            {guideHits.length + faqHits.length === 0
+                                ? `Nothing found for "${query.trim()}". Try another word, or contact us from the Contact tab.`
+                                : `${guideHits.length + faqHits.length} result(s) for "${query.trim()}"`}
+                        </Text>
+                        {guideHits.length > 0 && <Text style={styles.sectionTitle}>User Guide ({guideHits.length})</Text>}
+                        {guideHits.map(renderGuide)}
+                        {faqHits.length > 0 && <Text style={styles.sectionTitle}>FAQ ({faqHits.length})</Text>}
+                        {faqHits.map(renderFaq)}
+                    </>
+                )}
+
+                {!searching && (<>
 
                 {activeTab === 'contact' && (
                     <>
@@ -1250,36 +1589,13 @@ export default function HelpSupportScreen() {
                         <Text style={styles.introText}>
                             Tap any feature below to see how to use it step by step.
                         </Text>
-                        {GUIDE_SECTIONS.map((section, index) => {
-                            const isOpen = expandedGuide === index;
+                        {shownCats.map((c) => {
+                            const items = guides.filter((g) => g.cat === c.key);
                             return (
-                                <TouchableOpacity
-                                    key={index}
-                                    style={[styles.guideCardFull, isOpen && styles.guideCardFullOpen]}
-                                    onPress={() => setExpandedGuide(isOpen ? null : index)}
-                                    activeOpacity={0.85}
-                                >
-                                    <View style={styles.guideCardHeader}>
-                                        <View style={[styles.guideIconBoxColored, { backgroundColor: section.color }]}>
-                                            <Ionicons name={section.icon as any} size={18} color="white" />
-                                        </View>
-                                        <Text style={styles.guideCardTitle}>{section.title}</Text>
-                                        <Ionicons name={isOpen ? 'chevron-up' : 'chevron-down'} size={18} color="#aaa" />
-                                    </View>
-
-                                    {isOpen && (
-                                        <View style={styles.stepsBox}>
-                                            {section.steps.map((step, stepIndex) => (
-                                                <View key={stepIndex} style={styles.stepRow}>
-                                                    <View style={[styles.stepNum, { backgroundColor: section.color }]}>
-                                                        <Text style={styles.stepNumText}>{stepIndex + 1}</Text>
-                                                    </View>
-                                                    <Text style={styles.stepText}>{step}</Text>
-                                                </View>
-                                            ))}
-                                        </View>
-                                    )}
-                                </TouchableOpacity>
+                                <View key={c.key}>
+                                    {catHeader(c, items.length)}
+                                    {items.map(renderGuide)}
+                                </View>
                             );
                         })}
                         <Text style={styles.footerNote}>
@@ -1291,53 +1607,14 @@ export default function HelpSupportScreen() {
                 {activeTab === 'faq' && (
                     <>
                         <Text style={styles.introText}>
-                            Browse common questions by category. Tap to expand.
+                            Common questions by topic. Tap a question to see the answer.
                         </Text>
-                        {Object.entries(groupedFaqs).map(([category, items]) => {
-                            const isCatOpen = openCategory === category;
+                        {shownCats.map((c) => {
+                            const items = faqs.filter((f) => f.cat === c.key);
                             return (
-                                <View key={category} style={styles.categoryBlock}>
-                                    <TouchableOpacity
-                                        style={styles.categoryHeader}
-                                        onPress={() => toggleCategory(category)}
-                                        activeOpacity={0.8}
-                                    >
-                                        <View style={styles.categoryLeft}>
-                                            <View style={styles.categoryIconBox}>
-                                                <Ionicons name={CATEGORY_ICONS[category] || 'help-circle'} size={16} color="#3b5998" />
-                                            </View>
-                                            <Text style={styles.categoryTitle}>{category}</Text>
-                                            <View style={styles.categoryCount}>
-                                                <Text style={styles.categoryCountText}>{items.length}</Text>
-                                            </View>
-                                        </View>
-                                        <Ionicons name={isCatOpen ? 'chevron-up' : 'chevron-down'} size={16} color="#3b5998" />
-                                    </TouchableOpacity>
-
-                                    {isCatOpen && items.map((item, idx) => {
-                                        const key = `${category}-${idx}`;
-                                        const isOpen = expandedFaq === key;
-                                        return (
-                                            <TouchableOpacity
-                                                key={key}
-                                                style={[styles.faqCard, isOpen && styles.faqCardOpen]}
-                                                onPress={() => toggleFaq(key)}
-                                                activeOpacity={0.85}
-                                            >
-                                                <View style={styles.faqHeader}>
-                                                    <Text style={[styles.faqQuestion, isOpen && { color: '#3b5998' }]}>
-                                                        {item.q}
-                                                    </Text>
-                                                    <Ionicons name={isOpen ? 'chevron-up' : 'chevron-down'} size={14} color={isOpen ? '#3b5998' : '#aaa'} />
-                                                </View>
-                                                {isOpen && (
-                                                    <View style={styles.answerBox}>
-                                                        <Text style={styles.faqAnswer}>{item.a}</Text>
-                                                    </View>
-                                                )}
-                                            </TouchableOpacity>
-                                        );
-                                    })}
+                                <View key={c.key} style={styles.categoryBlock}>
+                                    {catHeader(c, items.length)}
+                                    {items.map(renderFaq)}
                                 </View>
                             );
                         })}
@@ -1346,6 +1623,7 @@ export default function HelpSupportScreen() {
                         </Text>
                     </>
                 )}
+                </>)}
 
             </ScrollView>
         </View>
@@ -1390,6 +1668,16 @@ const styles = StyleSheet.create({
     tabText: { fontSize: 12, fontWeight: '600', color: '#aaa' },
     tabTextActive: { color: '#3b5998' },
     content: { padding: 16, paddingBottom: 60 },
+    searchWrap: { backgroundColor: 'white', paddingHorizontal: 15, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#eee' },
+    searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f5f6fa', borderRadius: 10, paddingHorizontal: 10, height: 40, gap: 8, borderWidth: 1, borderColor: '#e3e6ef' },
+    searchInput: { flex: 1, fontSize: 14, color: '#333', paddingVertical: 0 },
+    chipRow: { gap: 8, paddingTop: 10 },
+    chip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 11, paddingVertical: 6, borderRadius: 16, backgroundColor: '#eef1fb' },
+    chipOn: { backgroundColor: '#3b5998' },
+    chipText: { fontSize: 12, fontWeight: '600', color: '#3b5998' },
+    chipTextOn: { color: 'white' },
+    catHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, marginBottom: 8 },
+    catHeaderText: { flex: 1, fontSize: 14, fontWeight: '700', color: '#3b5998' },
     introText: { fontSize: 13, color: '#888', marginBottom: 14, lineHeight: 19 },
     sectionTitle: {
         fontSize: 13,
