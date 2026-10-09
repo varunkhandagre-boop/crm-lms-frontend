@@ -16,7 +16,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (organizations/users still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: demos & sales visits now go through the new backend API
 import { DemoFeedFilters, listDemoFeedPage } from '../services/api/demos';
@@ -41,8 +40,6 @@ export default function DemoScreen() {
   
   const { currentUser, companyProfile } = useData(); 
 
-  // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); demos no longer go through this
-  const { isDbLoading } = useSaaSDB();
 
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
 
@@ -396,7 +393,7 @@ export default function DemoScreen() {
 
           <View style={{paddingHorizontal:12, marginTop:6}}>
               <View style={styles.searchBar}>
-                  {(isDbLoading || demosLoading) ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+                  {demosLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
                   <TextInput 
                     style={styles.input} 
                     placeholder={isAdmin ? "Search Hospital, Product, Employee..." : "Search Hospital, Product..."}

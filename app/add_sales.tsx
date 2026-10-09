@@ -21,7 +21,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (organizations/products still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: sales visits now go through the new backend API, which
 // auto-creates/links a lead server-side for positive outcomes — no more
@@ -44,7 +43,6 @@ export default function AddSalesScreen() {
     const { currentUser } = useData(); 
 
     // 🔥 SaaS Engine for organizations/products (still Firestore)
-    const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
     // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
     const [productList, setProductList] = useState<any[]>([]);
@@ -284,7 +282,7 @@ if (locationData) {
                     <Text style={styles.label}>Hospital / Clinic *</Text>
                     <TouchableOpacity style={styles.dropdown} onPress={() => openModal('Hospital', orgList)}>
                         <Text style={{color: hospital ? '#333' : 'gray', flex:1}}>{hospital || "Search..."}</Text>
-                        {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+                        {<Ionicons name="search" size={20} color="gray" />}
                     </TouchableOpacity>
 
                     {hospital ? (

@@ -19,7 +19,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (organizations still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: orders (Phase 3), payment dues, payment collections now via new backend API
 import { listOrders } from '../services/api/orders';
@@ -45,7 +44,6 @@ export default function AddPaymentScreen() {
     const params = useLocalSearchParams(); 
     
     const { currentUser, companyProfile } = useData();
-    const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
     // orgList/orderList/dueList now come from useCachedList below (cache-first, shared keys)
 
@@ -523,7 +521,7 @@ export default function AddPaymentScreen() {
                                 <Text style={[styles.selectorValue, !selectedOrg && {color:'#999'}]}>{selectedOrg ? (selectedOrg.name || selectedOrg.orgName) : "Choose Party..."}</Text>
                                 {selectedOrg && <Text style={{fontSize:11, color:'gray', marginTop:2}}>{selectedOrg.city} • {selectedOrg.contactPerson}</Text>}
                             </View>
-                            {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="#3b5998" />}
+                            {<Ionicons name="search" size={20} color="#3b5998" />}
                         </TouchableOpacity>
 
                         {selectedOrg && (

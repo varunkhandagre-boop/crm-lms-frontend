@@ -17,7 +17,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (users still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // Leads are filtered + paginated on the server (hooks/useServerLeads.ts)
 import { getLeadCounts, LeadCounts } from '../services/api/leads';
@@ -43,7 +42,6 @@ export default function LeadsScreen() {
 
     // 🔥 2. SaaS Engine — only isDbLoading (search-icon spinner) still used here;
     // leads no longer go through this (see useCachedList below)
-    const { isDbLoading } = useSaaSDB();
 
     // 🔥 3. Lazy Loaded States
     // Leads come from useServerLeads below (server-side filtered pages)
@@ -301,7 +299,7 @@ export default function LeadsScreen() {
                 </View>
 
                 <View style={styles.searchBar}>
-                    {isDbLoading ? <ActivityIndicator size="small" color="#1565c0" /> : <Ionicons name="search" size={20} color="#1565c0" />}
+                    {<Ionicons name="search" size={20} color="#1565c0" />}
                     <TextInput style={styles.input} placeholder="Search Leads..." value={searchText} onChangeText={setSearchText} />
                     <Text style={styles.totalInline}>{leadsTotal}{leadsLoading && leadItems.length > 0 ? ' ⏳' : ''}</Text>
                     {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText('')} style={{ marginLeft: 6 }}><Ionicons name="close-circle" size={20} color="#d32f2f" /></TouchableOpacity>}

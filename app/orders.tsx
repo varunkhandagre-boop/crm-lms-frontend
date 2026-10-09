@@ -28,7 +28,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { compressPhoto, isPdfUrl, isUploadedFile, pdfToDataUri } from '../utils/attachments';
 
 // 🔥 SAAS IMPORTS (payments/users still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
@@ -72,8 +71,6 @@ export default function OrderListScreen() {
 
   const { currentUser, companyProfile } = useData();
 
-  // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); orders/payments/users no longer go through this
-  const { isDbLoading } = useSaaSDB();
 
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
 
@@ -729,7 +726,7 @@ export default function OrderListScreen() {
           />
 
           <View style={styles.searchBar}>
-              {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+              {<Ionicons name="search" size={20} color="gray" />}
               <TextInput style={styles.searchInput} placeholder="Search Hospital, PO, ID..." value={searchText} onChangeText={setSearchText} />
               {searchText.length > 0 && (
                   <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={18} color="gray" /></TouchableOpacity>

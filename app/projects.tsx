@@ -3,8 +3,6 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-// 🔥 SAAS IMPORTS (kept only for isDbLoading UX)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 5: projects now via new backend API
 import { listProjectsPage, ProjectPageFilters } from '../services/api/projects';
@@ -19,7 +17,6 @@ export default function ProjectsScreen() {
   const router = useRouter();
   
   const { currentUser } = useData(); 
-  const { isDbLoading } = useSaaSDB();
 
 
   const [searchText, setSearchText] = useState('');
@@ -155,7 +152,7 @@ export default function ProjectsScreen() {
 
       <View style={{backgroundColor:'white', paddingBottom:5}}>
           <View style={styles.searchContainer}>
-              {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" style={{marginRight: 10}}/> : <Ionicons name="search" size={20} color="gray" style={{marginRight: 10}} />}
+              {<Ionicons name="search" size={20} color="gray" style={{marginRight: 10}} />}
               <TextInput 
                   style={styles.searchInput} 
                   placeholder="Search Project, Client, City, ID..." 
@@ -205,7 +202,7 @@ export default function ProjectsScreen() {
         contentContainerStyle={{padding: 15, paddingBottom: 50}}
         ListEmptyComponent={
             <View style={{alignItems:'center', marginTop:50}}>
-                {(isDbLoading || projectsLoading) ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                {projectsLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
                     <>
                         <Ionicons name="business-outline" size={60} color="#ccc" />
                         <Text style={{color:'gray', marginTop:10}}>{projectsError ? 'Could not load projects — pull down to retry.' : 'No Projects Found.'}</Text>

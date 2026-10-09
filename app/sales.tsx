@@ -17,7 +17,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (organizations/users still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { markAllNotificationsRead } from '../services/api/notifications';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
@@ -37,8 +36,6 @@ export default function SalesReportScreen() {
   
   const { currentUser } = useData();
 
-  // 🔥 SaaS Engine kept for organizations/users only
-  const { isDbLoading } = useSaaSDB();
 
   // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
@@ -350,7 +347,7 @@ export default function SalesReportScreen() {
 
       <View style={{backgroundColor:'white', paddingTop:6, paddingBottom:6, marginBottom:2}}>
           <View style={styles.searchBar}>
-              {(isDbLoading || salesVisitsLoading) ? <ActivityIndicator size="small" color="#1565c0" style={{marginRight: 5}}/> : <Ionicons name="search" size={20} color="#1565c0" />} 
+              {salesVisitsLoading ? <ActivityIndicator size="small" color="#1565c0" style={{marginRight: 5}}/> : <Ionicons name="search" size={20} color="#1565c0" />} 
               <TextInput style={styles.input} placeholder="Search: Hospital, City..." value={searchText} onChangeText={setSearchText} />
               {searchText.length > 0 && (
                   <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={20} color="#d32f2f" /></TouchableOpacity>

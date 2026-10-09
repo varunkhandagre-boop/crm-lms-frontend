@@ -24,7 +24,6 @@ import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 
 // 🔥 SAAS IMPORTS (organizations/users still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: payment collections now via new backend API
 import { deleteChequePhoto, deletePaymentCollection, listPaymentCollectionsPage, markChequeBounced, markChequeCleared, PaymentPageFilters, updatePaymentCollection, uploadChequePhoto } from '../services/api/paymentCollections';
@@ -46,7 +45,6 @@ export default function PaymentCollection() {
     const router = useRouter();
 
     const { currentUser, companyProfile } = useData();
-    const { isDbLoading } = useSaaSDB();
 
     // paymentList now comes from useCachedList below (cache-first)
     // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
@@ -549,7 +547,7 @@ export default function PaymentCollection() {
                 />
 
                 <View style={styles.searchBar}>
-                    {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={18} color="gray" />}
+                    {<Ionicons name="search" size={18} color="gray" />}
                     <TextInput style={styles.searchInput} placeholder="Search Party, Amount, Bill..." value={historySearch} onChangeText={setHistorySearch} />
                     {historySearch.length > 0 && <TouchableOpacity onPress={() => setHistorySearch('')}><Ionicons name="close-circle" size={18} color="gray" /></TouchableOpacity>}
                 </View>

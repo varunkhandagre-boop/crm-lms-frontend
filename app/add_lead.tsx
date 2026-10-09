@@ -21,7 +21,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (organizations/users/products still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 1/2: leads now go through the new backend API
 import { updateLead as apiUpdateLead, checkDuplicateLeads, createLead, DuplicateLeadMatch, getLead } from '../services/api/leads';
@@ -56,7 +55,6 @@ export default function AddLeadScreen() {
   const { currentUser } = useData(); 
 
   // 🔥 2. SaaS Engine ab sirf organizations/users/products ke liye
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
   // 🔥 3. Lazy Loaded States
   // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
@@ -411,7 +409,7 @@ export default function AddLeadScreen() {
             <Text style={styles.label}>Select Organization <Text style={{color:'red'}}>*</Text></Text>
             <TouchableOpacity style={[styles.dropdown, errors.org && styles.errorBorder]} onPress={() => openModal('Organization', orgList)}>
                 <Text style={{color: org ? '#333' : 'gray', flex:1}}>{org || "Search Hospital / Clinic..."}</Text>
-                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998"/> : <Ionicons name="search" size={20} color="gray" />}
+                {<Ionicons name="search" size={20} color="gray" />}
             </TouchableOpacity>
             {errors.org && <Text style={styles.errorText}>Organization is required</Text>}
 

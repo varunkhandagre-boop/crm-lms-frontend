@@ -14,9 +14,6 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (kept for isDbLoading UX only — everything else, including
-// team members, is on Postgres now)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: this screen is now FULLY migrated — all four data sources
 // (service calls, PMS, demos, installations) come from the new backend API.
@@ -58,7 +55,6 @@ export default function AnalysisScreen() {
     const router = useRouter();
     
     const { currentUser } = useData(); 
-    const { isDbLoading } = useSaaSDB();
 
     // below, sharing cache keys with service_call.tsx / pms_schedule.tsx /
     // demo.tsx / installation.tsx respectively.
@@ -247,7 +243,7 @@ export default function AnalysisScreen() {
                     </View>
 
                     <View style={styles.searchBox}>
-                        {(isDbLoading || isAnalysisLoading) ? <ActivityIndicator size="small" color="#1565c0" /> : <Ionicons name="search" size={18} color="gray" />}
+                        {isAnalysisLoading ? <ActivityIndicator size="small" color="#1565c0" /> : <Ionicons name="search" size={18} color="gray" />}
                         <TextInput 
                             style={styles.input} 
                             placeholder="Search Hospital, Serial..." 

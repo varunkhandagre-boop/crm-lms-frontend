@@ -21,8 +21,6 @@ import {
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
-// 🔥 SAAS IMPORTS (kept for isDbLoading UX only)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 5: projects + expenses/payments/items now via new backend API
 import {
@@ -63,7 +61,6 @@ export default function ProjectDetailsScreen() {
   const id = Array.isArray(rawId) ? rawId[0] : rawId; 
 
   const { currentUser } = useData();
-  const { isDbLoading } = useSaaSDB();
 
   const [project, setProject] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<'Overview' | 'Expenses' | 'Order'>('Overview'); 
@@ -415,7 +412,7 @@ export default function ProjectDetailsScreen() {
       </View>
 
       <View style={styles.searchBar}>
-          {isDbLoading ? <ActivityIndicator size="small" color="#1565c0" /> : <Ionicons name="search" size={20} color="gray" />}
+          {<Ionicons name="search" size={20} color="gray" />}
           <TextInput style={{flex:1, marginLeft:10}} placeholder="Search..." value={searchText} onChangeText={setSearchText} />
           {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={18} color="gray" /></TouchableOpacity>}
       </View>

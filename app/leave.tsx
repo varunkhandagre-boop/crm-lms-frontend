@@ -16,7 +16,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (still used for "users" — user profile master list stays on Firestore until Phase 10)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 // 🔥 Phase 7: leaves/attendance/holidays now come from Postgres via these adapters
@@ -37,7 +36,6 @@ export default function LeaveApplicationScreen() {
   // 🔥 1. Context se sirf user aur notifications
   const { currentUser } = useData();
   // 🔥 2. "users" abhi bhi Firestore se (Phase 10 tak) — baaki sab Postgres se
-  const { isDbLoading: isUsersLoading } = useSaaSDB();
 
   // STATES
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All'); 
@@ -123,7 +121,7 @@ export default function LeaveApplicationScreen() {
       enabled: !!currentUser?.companyId && usersReady,
       cacheKey: isDefaultView ? buildCacheKey('leave_feed_page1_v1', currentUser?.companyId) : null,
   });
-  const isDbLoading = isUsersLoading || leaveLoading;
+  const isDbLoading = leaveLoading;
 
   // 🔥 Users list (+ derived employee picker options) — cache-first, shares
   // the SAME 'team_members' cache key as manage_team.tsx/employee_timeline.tsx.

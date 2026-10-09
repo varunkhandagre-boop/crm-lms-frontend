@@ -16,7 +16,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (users still Firestore — not yet migrated)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 orders + payment collections now come from the new Postgres backend
 import { getSalesByStaff, getSalesMonthly, listSoldOrdersPage, StaffSales } from '../services/api/orders';
@@ -43,7 +42,6 @@ export default function SalesTeamReport() {
     const { currentUser, user } = useData();
     const activeUser = currentUser || user;
 
-    const { isDbLoading } = useSaaSDB();
 
     // userList/usersLoading now come from useCachedList below (cache-first, shared 'team_members' key)
 
@@ -285,7 +283,7 @@ export default function SalesTeamReport() {
     ];
 
     const renderedList = incentiveData.slice(0, visibleCount);
-    const isLoading = loadingData || isDbLoading;
+    const isLoading = loadingData;
 
     return (
         <View style={styles.container}>

@@ -24,7 +24,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (organizations/users still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 3: orders & products now go through the new backend API
 import { createOrder, uploadOrderPoFile } from '../services/api/orders';
@@ -62,8 +61,6 @@ export default function AddOrderScreen() {
 
   const { currentUser, companyProfile } = useData();
 
-  // 🔥 SaaS Engine kept for organizations/users + payment_collections (advance record)
-  const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
 
   const { mode, leadId, leadOrg, leadOrgId, leadPerson, leadMobile, leadEmail, leadCity, leadAddress, leadProduct } = useLocalSearchParams(); 
 
@@ -502,6 +499,13 @@ if (locationData) {
               location: locationData ? { latitude: locationData.lat, longitude: locationData.lng } : null,
               leadId: (leadId as string) || undefined,
               assignedToId,
+              // Saved by the server as a payment linked to this order.
+              advancePayment: cleanAdvance > 0 ? {
+                  mode: advanceMode as 'Cash' | 'Cheque' | 'NEFT' | 'UPI',
+                  refNumber: advanceMode !== 'Cash' ? advanceRef || undefined : undefined,
+                  bankName: advanceMode !== 'Cash' ? advanceBankName || undefined : undefined,
+                  pdcDate: advanceMode !== 'Cash' ? formatDate(advancePdcDate) : undefined,
+              } : undefined,
           });
 
           let poUploadFailed = false;
@@ -513,30 +517,6 @@ if (locationData) {
                   poUploadFailed = true;
               }
           }
-
-          // Record Advance Payment (still Firestore until Phase 6)
-          if (cleanAdvance > 0) {
-              await addSaaSData("payment_collections", {
-                  orgId: orgId,
-                  orgName: hospitalName,
-                  amount: cleanAdvance,
-                  paymentType: 'Advance',
-                  mode: advanceMode,            
-                  refNumber: advanceMode !== 'Cash' ? advanceRef : '',        
-                  bankName: advanceMode !== 'Cash' ? advanceBankName : '',
-                  pdcDate: advanceMode !== 'Cash' ? formatDate(advancePdcDate) : '',
-                  date: new Date().toISOString().split('T')[0],
-                  dateIso: new Date().toISOString().split('T')[0],
-                  orderId: savedOrder.orderId,
-                  orderRef: savedOrder.id,
-                  addedBy: currentUser?.name || 'Unknown',
-                  userName: finalSenderName,
-                  senderId: assignedToId || currentUser?.id,
-                  timestamp: Date.now(),
-                  note: 'Advance received at the time of Order Booking'
-              });
-          }
-
 
           setIsSaving(false);
 
@@ -644,7 +624,7 @@ if (locationData) {
                 <Text style={{color: hospitalName ? '#333' : 'gray', fontSize:16}}>
                     {hospitalName || "Select from Organization List"}
                 </Text>
-                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998"/> : <Ionicons name="search" size={20} color="gray" />}
+                {<Ionicons name="search" size={20} color="gray" />}
             </TouchableOpacity>
 
             <Text style={styles.label}>Order Type (Cash / Billed) *</Text>

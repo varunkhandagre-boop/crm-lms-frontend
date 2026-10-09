@@ -17,7 +17,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (organizations still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 5: projects now via new backend API
 import { useOrgServerSearch } from '../hooks/useOrgServerSearch';
@@ -33,7 +32,6 @@ export default function AddProjectScreen() {
   const router = useRouter();
   
   const { currentUser } = useData(); 
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
   // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
 
@@ -162,7 +160,7 @@ export default function AddProjectScreen() {
                     </Text>
                     {location ? <Text style={{fontSize:12, color:'gray', marginTop: 2}}>📍 {location}</Text> : null}
                 </View>
-                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="#3b5998" />}
+                {<Ionicons name="search" size={20} color="#3b5998" />}
             </TouchableOpacity>
 
             {client ? (

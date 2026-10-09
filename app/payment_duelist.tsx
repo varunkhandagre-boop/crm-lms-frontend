@@ -16,7 +16,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (organizations still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: orders (Phase 3), payment dues, payment collections now via new backend API
 import { remindOrder } from '../services/api/orders';
@@ -32,8 +31,6 @@ export default function PaymentDueList() {
     const router = useRouter();
     
     const { currentUser, companyProfile } = useData(); 
-    // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); dues/orders/payments no longer go through this
-    const { isDbLoading } = useSaaSDB();
 
 
     const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All');
@@ -287,7 +284,7 @@ export default function PaymentDueList() {
                     onNext={() => changeDate(1)}
                 />
                 <View style={styles.searchBar}>
-                    {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={18} color="gray" />}
+                    {<Ionicons name="search" size={18} color="gray" />}
                     <TextInput style={styles.searchInput} placeholder="Search Party, Bill No..." value={searchTerm} onChangeText={setSearchTerm} />
                     {searchTerm.length > 0 && <TouchableOpacity onPress={()=>setSearchTerm('')}><Ionicons name="close-circle" size={18} color="gray"/></TouchableOpacity>}
                 </View>

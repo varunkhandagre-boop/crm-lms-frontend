@@ -16,7 +16,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (users still Firestore, needed for employee names)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: expenses now via new backend API
@@ -35,8 +34,6 @@ export default function ExpenseScreen() {
   const router = useRouter();
   
   const { currentUser } = useData();
-  // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); expenses no longer go through this
-  const { isDbLoading } = useSaaSDB();
 
   // expenseList now comes from useCachedList below (cache-first, raw — senderName enrichment happens at filter time)
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
@@ -392,7 +389,7 @@ export default function ExpenseScreen() {
           />
           <View style={{paddingHorizontal:12, marginTop:6}}>
               <View style={styles.searchBar}>
-                  {(isDbLoading || expensesLoading) ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+                  {expensesLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
                   <TextInput 
                       style={styles.searchInput}
                       placeholder={canManage ? "Search Name, Amount..." : "Search Amount, Type..."}

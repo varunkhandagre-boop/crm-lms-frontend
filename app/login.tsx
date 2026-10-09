@@ -17,10 +17,6 @@ import {
     View
 } from 'react-native';
 
-// 🔥 FIREBASE AUTH IMPORT FOR FORGOT PASSWORD
-import { sendPasswordResetEmail } from 'firebase/auth';
-import { auth } from '../firebaseConfig'; // Path check kar lein agar galat ho toh
-
 // 🔥 SAAS IMPORTS
 import { useData } from './context/DataContext';
 
@@ -84,35 +80,12 @@ export default function LoginScreen() {
   }, []);
 
   // 🔥 FORGOT PASSWORD FUNCTION
-    const handleForgotPassword = async () => {
-      if (!email) {
-          Alert.alert("Email Required", "Please enter your registered email ID in the box above to reset your password.");
-          return;
-      }
-      
-      try {
-          await sendPasswordResetEmail(auth, email.trim().toLowerCase());
-          Alert.alert(
-              "Email Sent ✅", 
-              "A password reset link has been sent to your email address. Please check your inbox (and spam folder) to create a new password."
-          );
-      } catch (error: any) {
-          // Employees created via the migrated Users tab have no Firebase
-          // account, so this always fails with "user-not-found" for them —
-          // that's expected, not a real error. Guide them to the one
-          // reset path that always works instead of showing a confusing
-          // Firebase-specific message.
-          if (error.message?.includes('user-not-found')) {
-              Alert.alert(
-                  "Contact Your Admin",
-                  "We couldn't find a self-service reset for this account. Please ask your company Admin to reset your password from Manage Team."
-              );
-              return;
-          }
-          let msg = error.message;
-          if (msg.includes('invalid-email')) msg = "Please enter a valid email address.";
-          Alert.alert("Error", msg);
-      }
+    // No self-service reset yet: passwords are reset by the company Admin.
+    const handleForgotPassword = () => {
+      Alert.alert(
+          "Reset Password",
+          "Please ask your company Admin to reset your password from Manage Team. If you are the Admin, contact support."
+      );
   };
 
   // 🔥 SAAS LOGIN LOGIC

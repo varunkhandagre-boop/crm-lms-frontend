@@ -19,7 +19,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (organizations/users still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: service calls now via new backend API
 import { assignServiceCall, closeServiceCall as apiCloseServiceCall, deleteServiceCallPhoto, getServiceCall, getServiceCallCounts, listServiceCallsPage, ServiceCallPageParams, uploadServiceCallPhoto } from '../services/api/serviceCalls';
@@ -80,8 +79,6 @@ export default function ServiceCallScreen() {
   
   const { currentUser, companyProfile } = useData(); 
 
-  // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); service calls no longer go through this
-  const { isDbLoading } = useSaaSDB();
 
   // Service calls come page by page from the server (useServerPagedList below)
   const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
@@ -738,7 +735,7 @@ export default function ServiceCallScreen() {
 
         <View style={styles.searchRow}>
           <View style={styles.searchBar}>
-            {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+            {<Ionicons name="search" size={20} color="gray" />}
             <TextInput style={styles.input} placeholder="Search Ticket, Hospital..." value={searchText} onChangeText={setSearchText} />
             {searchText.length > 0 && (
               <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={18} color="gray" /></TouchableOpacity>

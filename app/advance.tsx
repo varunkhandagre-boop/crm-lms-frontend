@@ -16,7 +16,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (users still Firestore, needed for employee names)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: advances now via new backend API
@@ -34,8 +33,6 @@ export default function EmployeeAdvanceScreen() {
   const router = useRouter();
   
   const { currentUser } = useData();
-  // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); advances no longer go through this
-  const { isDbLoading } = useSaaSDB();
 
   // advanceList now comes from useCachedList below (cache-first, raw — senderName enrichment happens at filter time)
   // usersList now comes from useCachedList too (see the team-members hook further below)
@@ -304,7 +301,7 @@ export default function EmployeeAdvanceScreen() {
           />
           <View style={{paddingHorizontal:12, marginTop:6}}>
               <View style={styles.searchBar}>
-                  {(isDbLoading || advancesLoading) ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+                  {advancesLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
                   <TextInput 
                       style={styles.searchInput}
                       placeholder={canManage ? "Search Name, Amount..." : "Search Amount, Date..."}

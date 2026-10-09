@@ -16,7 +16,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (Direct DB imports removed)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 
@@ -37,8 +36,6 @@ export default function TravelNoteScreen() {
   // 🔥 1. Context se current user nikala
   const { currentUser } = useData(); 
 
-  // 🔥 2. SaaS Engine kept only for isDbLoading (search-icon spinner); travel notes no longer go through this
-  const { isDbLoading } = useSaaSDB();
 
   // 🔥 3. Lazy Loaded States for DB
   // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
@@ -323,7 +320,7 @@ export default function TravelNoteScreen() {
           />
           <View style={{paddingHorizontal:12, marginTop:6}}>
               <View style={styles.searchBar}>
-                  {(isDbLoading || travelLoading) ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+                  {travelLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
                   <TextInput 
                       style={styles.searchInput}
                       placeholder="Search..."

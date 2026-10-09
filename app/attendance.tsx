@@ -5,7 +5,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Modal, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 // 🔥 SAAS IMPORTS ("users" stays on Firestore until Phase 10)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 import { useWorkSchedules } from '../hooks/useWorkSchedules';
 import { isOffDay, offDayLabel } from '../utils/workSchedule';
@@ -38,9 +37,7 @@ export default function AttendanceScreen() {
   // every time regardless of the attendance cache, since it was also waiting
   // on the (uncached) Firestore team-members fetch below. The visible
   // content only actually depends on attendance data, so the loading gate
-  // now uses attendanceLoading alone (see below) — useSaaSDB() is kept only
-  // in case other code in this file relies on it being called.
-  useSaaSDB();
+  // now uses attendanceLoading alone (see below).
 
   // 🔥 3. Lazy Loaded Lists
   // attendanceList now comes from useCachedList below (cache-first)

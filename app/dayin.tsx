@@ -22,7 +22,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS ("users" stays on Firestore until Phase 10)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 import { useWorkSchedules } from '../hooks/useWorkSchedules';
 import { isOffDay, offDayLabel } from '../utils/workSchedule';
@@ -51,9 +50,8 @@ export default function DayInScreen() {
     const { forUser: scheduleFor } = useWorkSchedules(currentUser?.companyId, currentUser?.id);
 
     // 🔥 2. "users" still Firestore; attendance/leaves/holidays are Postgres now
-    const { fetchSaaSData, isDbLoading: isUsersLoading } = useSaaSDB();
     const [isAttendanceLoading, setIsAttendanceLoading] = useState(true);
-    const isDbLoading = isUsersLoading || isAttendanceLoading;
+    const isDbLoading = isAttendanceLoading;
 
     // 🔥 3. Lazy Loaded Lists
     const [attendanceList, setAttendanceList] = useState<any[]>([]);

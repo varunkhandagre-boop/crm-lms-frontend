@@ -18,7 +18,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (Firebase DB imports removed)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 
@@ -40,7 +39,6 @@ export default function TaskScreen() {
   const { currentUser } = useData();
 
   // 🔥 2. "users" still Firestore; tasks are Postgres now
-  const { isDbLoading } = useSaaSDB();
 
   // 🔥 3. Lazy Loaded States
   // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
@@ -273,7 +271,7 @@ export default function TaskScreen() {
 
           <View style={styles.searchRow}>
               <View style={styles.searchBar}>
-                  {(isDbLoading || tasksLoading) ? <ActivityIndicator size="small" color="#3b5998" style={{marginRight: 5}}/> : <Ionicons name="search" size={20} color="gray" />}
+                  {tasksLoading ? <ActivityIndicator size="small" color="#3b5998" style={{marginRight: 5}}/> : <Ionicons name="search" size={20} color="gray" />}
                   <TextInput 
                       style={styles.input}
                       placeholder="Search tasks..."

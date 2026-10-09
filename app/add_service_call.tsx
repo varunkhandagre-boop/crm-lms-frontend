@@ -24,7 +24,6 @@ import { urlToBase64Image } from '../utils/pdfImageHelper';
 // 🔥 SAAS IMPORTS (organizations still Firestore)
 import * as Location from 'expo-location';
 import { getCurrentLocation as getGpsFix, locationErrorMessage } from '../utils/getLocation';
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: service calls, installations, spare parts now via new backend API
 import { completeActivityPlan } from '../services/api/activityPlans';
@@ -55,8 +54,6 @@ export default function AddServiceCallScreen() {
   
   const { currentUser, companyProfile } = useData();
   
-  // 🔥 SaaS Engine kept for organizations only
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
   // orgList/installList/sparePartsList now come from useCachedList below (cache-first, shared keys)
 
@@ -619,7 +616,7 @@ recordLocationLog({
             <Text style={styles.label}>Organization *</Text>
             <TouchableOpacity style={[styles.dropdown, errors.org && styles.errorBorder]} onPress={() => openModal('Org')}>
                 <Text style={{color: org ? 'black' : 'gray'}}>{org || 'Select Organization'}</Text>
-                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={18} color="gray" />}
+                {<Ionicons name="search" size={18} color="gray" />}
             </TouchableOpacity>
 
             <Text style={styles.label}>Machine Serial No *</Text>

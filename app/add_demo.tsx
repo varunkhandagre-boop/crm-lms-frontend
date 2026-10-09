@@ -22,7 +22,6 @@ import {
 import { urlToBase64Image } from '../utils/pdfImageHelper';
 
 // 🔥 SAAS IMPORTS (organizations/products still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: demos now go through the new backend API
 import { completeActivityPlan } from '../services/api/activityPlans';
@@ -53,8 +52,6 @@ export default function AddDemoScreen() {
 
   const { currentUser, companyProfile } = useData();
 
-  // 🔥 SaaS Engine kept for organizations/products
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
   // orgList/demoList now come from useCachedList below (cache-first, shared keys)
   const [productList, setProductList] = useState<any[]>([]);
@@ -581,7 +578,7 @@ export default function AddDemoScreen() {
                 <Text style={styles.label}>Organization / Hospital *</Text>
                 <TouchableOpacity style={styles.selector} onPress={() => openModal('Hospital', orgList)}>
                     <Text style={{color: hospital ? '#333' : '#999', flex:1}}>{hospital || 'Select Organization'}</Text>
-                    {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+                    {<Ionicons name="search" size={20} color="gray" />}
                 </TouchableOpacity>
 
                 <View style={styles.row}>
@@ -631,7 +628,7 @@ export default function AddDemoScreen() {
                 <Text style={styles.label}>Product Name *</Text>
                 <TouchableOpacity style={styles.selector} onPress={() => openModal('Product', getUniqueProductNames())}>
                     <Text style={{color: product ? '#333' : '#999', flex:1}}>{product || 'Select Product'}</Text>
-                    {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="cube-outline" size={20} color="gray" />}
+                    {<Ionicons name="cube-outline" size={20} color="gray" />}
                 </TouchableOpacity>
 
                 {product === 'Other' && <TextInput key="stable-demo-product" style={[styles.input, {marginTop:5, borderColor:'#3b5998'}]} placeholder="Type Product Name..." value={customProduct} onChangeText={setCustomProduct} />}

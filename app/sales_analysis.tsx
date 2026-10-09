@@ -21,7 +21,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (No direct Firebase DB imports)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { getSalesSummary, listSoldOrdersPage, SalesFilters, SalesSummary } from '../services/api/orders';
 import { listPaymentCollectionsPage, PaymentPageFilters } from '../services/api/paymentCollections';
 import { useServerPagedList } from '../hooks/useServerPagedList';
@@ -43,7 +42,6 @@ export default function SalesAnalysisScreen() {
   const { currentUser } = useData();
 
   // 🔥 SaaS Engine
-  const { isDbLoading } = useSaaSDB();
 
   // STATES FOR DATA
   // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
@@ -529,7 +527,7 @@ export default function SalesAnalysisScreen() {
 
           <View style={styles.searchRow}>
               <View style={styles.searchBar}>
-                  {isDbLoading ? <ActivityIndicator size="small" color="#1565c0" /> : <Ionicons name="search" size={20} color="gray" />}
+                  {<Ionicons name="search" size={20} color="gray" />}
                   <TextInput 
                       style={styles.input}
                       placeholder="Search ID, Hospital..."

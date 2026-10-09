@@ -22,7 +22,6 @@ import {
 import { urlToBase64Image } from '../utils/pdfImageHelper';
 
 // 🔥 SAAS IMPORTS (organizations/users still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: installations & products now via new backend API
 import { completeActivityPlan } from '../services/api/activityPlans';
@@ -53,7 +52,6 @@ export default function AddInstallationScreen() {
   const params = useLocalSearchParams(); 
   
   const { currentUser, companyProfile } = useData();
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
   // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
   const [productList, setProductList] = useState<any[]>([]);
@@ -632,7 +630,7 @@ export default function AddInstallationScreen() {
             <Text style={styles.label}>Hospital / Client *</Text>
             <TouchableOpacity style={styles.dropdown} onPress={() => openModal('Hospital')}>
                 <Text style={{color: hospital ? 'black' : 'gray'}}>{hospital || 'Select from List'}</Text>
-                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998"/> : <Ionicons name="search" size={18} color="gray" />}
+                {<Ionicons name="search" size={18} color="gray" />}
             </TouchableOpacity>
 
             {hospital ? (

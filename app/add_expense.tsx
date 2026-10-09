@@ -18,7 +18,6 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (kept for parity, not used for writes anymore)
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: expenses now via new backend API
 import { createExpense, getExpenseSettings, listOpenRequests, uploadExpenseBillPhoto } from '../services/api/expenses';

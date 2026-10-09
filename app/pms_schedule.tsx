@@ -16,7 +16,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (organizations/users still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: PMS reports now via new backend API
 import { listPmsReportsPage, PmsPageFilters } from '../services/api/pmsReports';
@@ -41,7 +40,6 @@ export default function PMSScheduleScreen() {
   const router = useRouter();
   
   const { currentUser, companyProfile } = useData(); 
-  const { isDbLoading } = useSaaSDB();
 
   const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
 
@@ -514,7 +512,7 @@ export default function PMSScheduleScreen() {
         />
 
         <View style={styles.searchBar}>
-          {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+          {<Ionicons name="search" size={20} color="gray" />}
           <TextInput
             style={styles.input}
             placeholder="Search Hospital, Machine, Serial..."

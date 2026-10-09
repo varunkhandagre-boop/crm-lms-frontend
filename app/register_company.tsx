@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
 import React, { useState } from 'react';
 import {
     ActivityIndicator,
@@ -16,26 +15,19 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { auth } from '../firebaseConfig';
 
 // 🔥 SAAS IMPORTS
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 // 🔥 INDIAN STATES & DISTRICTS DATA
 import { districtPincodes, indianStatesAndDistricts } from '../constants/indianStatesData';
 
-// 🆕 PHASE 11 — Postgres backend registration (additive, non-blocking —
-// see registerCompanyOnBackend()'s comment in services/api/registration.ts)
 import { registerCompanyOnBackend } from '../services/api/registration';
 
 export default function RegisterCompanyScreen() {
     const router = useRouter();
     const { login } = useData();
     const [loading, setLoading] = useState(false);
-
-    // 🔥 Naya SaaS Engine
-    const { addSaaSData } = useSaaSDB();
 
     // Form State
     const [stateSearchQuery, setStateSearchQuery] = useState('');
@@ -66,123 +58,34 @@ export default function RegisterCompanyScreen() {
             return;
         }
 
+        if (password.length < 8) {
+            Alert.alert("Weak Password", "Password must be at least 8 characters.");
+            return;
+        }
+
         setLoading(true);
         try {
             const cleanEmail = email.trim().toLowerCase();
             const cleanEmpCount = employeesCount ? Number(employeesCount) : 10;
 
-            // 1. Create Auth User
-            await createUserWithEmailAndPassword(auth, cleanEmail, password);
-
-            const companyId = `COMP-${Date.now()}`;
-            
-            // 🔥 SMART 7-DAY FREE TRIAL LOGIC
-            const startDate = new Date();
-            const expiryDate = new Date();
-            expiryDate.setDate(startDate.getDate() + 7); // Aaj se exactly 7 din baad ka time
-
-            // 2. Create COMPANY Document 
-            const companyData = {
-                id: companyId, 
-                companyId: companyId, 
-                companyName: companyName,
-                ownerName: ownerName,
-                ownerEmail: cleanEmail,
-                ownerMobile: mobile,
-                address: address || "",
-                city: city,
-                pinCode: pinCode, 
-                state: state,
-                gstNumber: gstNumber || "",
-                maxEmployees: cleanEmpCount,
-                
-                // 🔥 Auto-Approve & Set Trial
-                isActive: true, // Turant chaloo ho jayega
-                plan: 'Free Trial', // Plan ka naam
-                
-                startDate: startDate.toISOString(),
-                expiryDate: expiryDate.toISOString(), // 7 din baad app band ho jayegi
-                
-                createdAt: new Date().toISOString(),
-                senderId: cleanEmail, 
-                senderName: ownerName 
-            };
-            
-            const companyRes = await addSaaSData("companies", companyData, true);
-            if (!companyRes.success) throw new Error(companyRes.error);
-
-            // 3. Create USER Document 
-            const userData = {
-                id: cleanEmail, 
-                name: ownerName,
+            // One call creates the company (7-day free trial) and its Admin user.
+            const { company } = await registerCompanyOnBackend({
+                companyName: companyName.trim(),
+                ownerName: ownerName.trim(),
                 email: cleanEmail,
-                mobile: mobile,
-                role: 'Admin', 
-                companyId: companyId, 
-                companyName: companyName,
-                createdAt: new Date().toISOString(),
-                status: 'Active',
-                senderId: cleanEmail,
-                senderName: ownerName
-            };
-            
-            const userRes = await addSaaSData("users", userData, true);
-            if (!userRes.success) throw new Error(userRes.error);
+                password,
+                mobile: mobile.trim(),
+                address: address || undefined,
+                state,
+                city,
+                pincode: pinCode || undefined,
+                gstNumber: gstNumber || undefined,
+                employeeLimit: cleanEmpCount,
+            });
+            const companyId = company.id;
 
-            // 4. CREATE DEFAULT COMPANY PROFILE 
-            const profileData = {
-                companyId: companyId,
-                companyName: companyName,
-                shortName: companyName, 
-                ownerName: ownerName,
-                email: cleanEmail,
-                mobile: mobile,
-                address: address || "",
-                city: city,
-                pinCode: pinCode,
-                state: state,
-                gstNumber: gstNumber || "",
-                createdAt: new Date().toISOString(),
-                senderId: cleanEmail,
-                senderName: ownerName
-            };
-            await addSaaSData("company_profile", profileData, true);
-
-            // 🆕 5. PHASE 11 — mirror this signup into the Postgres backend too,
-            // so SuperAdmin's panel sees the company and this login can later
-            // bridge over. Non-blocking: a failure here must NOT stop the
-            // person's actual (Firestore) registration from succeeding.
-            try {
-                await registerCompanyOnBackend({
-                    companyName,
-                    ownerName,
-                    email: cleanEmail,
-                    password,
-                    mobile,
-                    address: address || undefined,
-                    state,
-                    city,
-                    pincode: pinCode || undefined,
-                    gstNumber: gstNumber || undefined,
-                    employeeLimit: cleanEmpCount,
-                });
-            } catch (backendErr) {
-                console.warn('Backend registration failed (Firestore signup still succeeded):', backendErr);
-            }
-
-            // Establish a proper Postgres session (JWT) so SubscriptionScreen's
-            // API calls (plans list, gateway config) are authenticated — the
-            // Firestore signup alone doesn't give apiClient a token to use.
-            // Awaited BEFORE the alert below (not fired alongside it) so
-            // currentUser is guaranteed set by the time the person can tap
-            // through to SubscriptionScreen — otherwise that screen's own
-            // `currentUser ? '/' : '/login'` check could still see a stale
-            // null and bounce them to the login screen instead.
-            try {
-                await login(email, password);
-            } catch (loginErr) {
-                console.warn('Post-registration auto-login failed:', loginErr);
-            }
+            // Signed in before the alert, so the plan screen's API calls have a token.
+            await login(cleanEmail, password);
 
             // 6. Success aur direct login option
             // 🔥 LINKED TO SUBSCRIPTION: User register hote hi direct Subscription page par jayega data lekar
@@ -205,9 +108,7 @@ export default function RegisterCompanyScreen() {
             );
 
         } catch (error: any) {
-            let msg = error.message;
-            if (msg.includes("email-already-in-use")) msg = "Email already registered.";
-            Alert.alert("Registration Failed", msg);
+            Alert.alert("Registration Failed", error?.message || "Could not register. Please try again.");
         }
         setLoading(false);
     };

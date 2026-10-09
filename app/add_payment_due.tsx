@@ -19,7 +19,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (organizations still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: payment dues now via new backend API
 import { useOrgServerSearch } from '../hooks/useOrgServerSearch';
@@ -35,7 +34,6 @@ export default function AddPaymentDueScreen() {
     const router = useRouter();
     
     const { currentUser } = useData();
-    const { fetchSaaSData } = useSaaSDB();
 
     // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
 

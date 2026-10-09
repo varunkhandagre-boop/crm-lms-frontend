@@ -235,6 +235,7 @@ export interface CreateOrderPayload {
   location?: { latitude: number; longitude: number } | null;
   leadId?: string;
   assignedToId?: string;
+  advancePayment?: { mode: 'Cash' | 'Cheque' | 'NEFT' | 'UPI' | 'RTGS'; bankName?: string; refNumber?: string; pdcDate?: string };
 }
 
 export async function createOrder(payload: CreateOrderPayload): Promise<any> {
@@ -242,7 +243,7 @@ export async function createOrder(payload: CreateOrderPayload): Promise<any> {
   return toLegacyOrder(res.data);
 }
 
-export async function updateOrder(id: string, payload: Partial<CreateOrderPayload>): Promise<any> {
+export async function updateOrder(id: string, payload: Partial<Omit<CreateOrderPayload, 'advancePayment'>>): Promise<any> {
   const res = await apiClient.patch<OneResponse>(`/orders/${id}`, payload);
   return toLegacyOrder(res.data);
 }

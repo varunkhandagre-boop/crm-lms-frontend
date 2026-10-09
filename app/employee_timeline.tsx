@@ -25,7 +25,6 @@ import { buildCacheKey } from '../utils/listCache';
 // travel_notes/organizations) already calls the Postgres backend, same as
 // attendance/leaves. Kept fetchSaaSData only for one export-flow fallback
 // further down (a module type outside MODULE_FETCHERS).
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 // 🔥 Phase 7: attendance/leaves now come from Postgres via these adapters
@@ -56,7 +55,6 @@ export default function CombinedActivityScreen() {
   const { currentUser, companyProfile } = useData();
 
   // 🔥 2. SaaS Engine connect kiya
-  const { fetchSaaSData } = useSaaSDB();
 
   // 🔥 3. Lazy Loaded Master States — now come from useCachedList below
   // (cache-first). Read-only screen (confirmed no optimistic mutations
@@ -628,7 +626,7 @@ const [selectedDate, setSelectedDate] = useState(new Date());
             ? await fetchLeaves({ userId: 'all', fromDate: range.fromDate, toDate: range.toDate, limit: 2000 })
             : MODULE_FETCHERS[colName]
             ? await MODULE_FETCHERS[colName]()
-            : await fetchSaaSData(colName);
+            : [];
           const cleanRawData = rawData.map((d: any) => {
               const { location, items, history, ...cleanData } = d; 
               return cleanData;

@@ -15,13 +15,11 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (users + office_machines still Firestore — office_machines
-// is explicitly out of scope for this phase, see spareParts.ts adapter note)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 3: spare parts catalog + stock now go through the new backend API
 import { issueStock as apiIssueStock, listSpareParts, updateSparePart } from '../services/api/spareParts';
 import { fetchTeamMembers } from '../services/api/users';
+import { createOfficeMachine, deleteOfficeMachine, listOfficeMachines } from '../services/api/officeMachines';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
@@ -33,8 +31,6 @@ export default function SparePartsScreen() {
   
   const { currentUser } = useData();
 
-  // 🔥 SaaS Engine kept for users + office_machines only
-  const { fetchSaaSData, addSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
 
   // sparePartsList now comes from useCachedList below (cache-first)
   // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
@@ -93,12 +89,14 @@ export default function SparePartsScreen() {
       fetcher: fetchTeamMembers,
   });
 
-  // office_machines — unchanged plain fetch-on-mount (stays Firestore CRUD,
-  // out of scope for this pass).
+  // Office Stock machines — a short list, loaded on open and on pull-to-refresh.
   const loadRest = async () => {
       if (currentUser?.companyId) {
-          const machines = await fetchSaaSData("office_machines");
-          setMachinesList(machines);
+          try {
+              setMachinesList(await listOfficeMachines());
+          } catch (e) {
+              console.log("Office machines load failed:", e);
+          }
       }
   };
 
@@ -166,7 +164,7 @@ export default function SparePartsScreen() {
 
   const renderedList = currentList.slice(0, visibleCount);
 
-  // --- ADD MACHINE (still Firestore — office_machines out of scope) ---
+  // --- ADD MACHINE ---
   const handleAddMachine = async () => {
       if (!newMachineName || !newQuantity) {
           Alert.alert("Error", "Please fill Name and Quantity");
@@ -174,21 +172,12 @@ export default function SparePartsScreen() {
       }
       setLoading(true);
       try {
-          const res = await addSaaSData("office_machines", {
-              name: newMachineName,
-              quantity: parseInt(newQuantity) || 1,
-              addedBy: currentUser?.name,
-              createdAt: new Date().toISOString()
-          });
-          if (res.success) {
-              setModalVisible(false);
-              setNewMachineName('');
-              setNewQuantity('');
-              await loadRest();
-              Alert.alert("Success", "Machine Added to Office Stock List");
-          } else {
-              Alert.alert("Error", "Failed to add machine.");
-          }
+          await createOfficeMachine(newMachineName.trim(), parseInt(newQuantity) || 1);
+          setModalVisible(false);
+          setNewMachineName('');
+          setNewQuantity('');
+          await loadRest();
+          Alert.alert("Success", "Machine Added to Office Stock List");
       } catch (e: any) {
           Alert.alert("Error", e.message);
       } finally {
@@ -196,16 +185,16 @@ export default function SparePartsScreen() {
       }
   };
 
-  // --- DELETE MACHINE (still Firestore) ---
+  // --- DELETE MACHINE ---
   const handleDeleteMachine = async (id: string) => {
       Alert.alert("Confirm", "Delete this machine?", [
           { text: "Cancel" },
           { text: "Delete", style: 'destructive', onPress: async () => {
-              const res = await deleteSaaSData("office_machines", id);
-              if (res.success) {
+              try {
+                  await deleteOfficeMachine(id);
                   setMachinesList(prev => prev.filter(m => m.id !== id));
-              } else {
-                  Alert.alert("Error", "Could not delete.");
+              } catch (e: any) {
+                  Alert.alert("Error", e?.message || "Could not delete.");
               }
           }}
       ]);
@@ -347,7 +336,7 @@ export default function SparePartsScreen() {
         </View>
 
         <View style={styles.searchBar}>
-            {isDbLoading ? <ActivityIndicator size="small" color="#3b5998"/> : <Ionicons name="search" size={20} color="gray" />}
+            {<Ionicons name="search" size={20} color="gray" />}
             <TextInput style={styles.input} placeholder="Search..." value={searchText} onChangeText={setSearchText} />
             {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={18} color="gray"/></TouchableOpacity>}
         </View>

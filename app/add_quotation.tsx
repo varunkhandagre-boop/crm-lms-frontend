@@ -8,7 +8,6 @@ import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Modal, Platfo
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // 🔥 SAAS IMPORTS (organizations/products still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: quotations now go through the new backend API
 import { mergeOrgs, useOrgServerSearch } from '../hooks/useOrgServerSearch';
@@ -25,7 +24,6 @@ export default function AddQuotationScreen() {
     
     const { id, mode, leadId, leadOrg, leadPerson, leadMobile, leadCity, leadAddress, leadProduct } = useLocalSearchParams(); 
     const { companyProfile, currentUser } = useData();
-    const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
     // orgList/quotationList now come from useCachedList below (cache-first, shared keys)
     const [productList, setProductList] = useState<any[]>([]);
@@ -569,7 +567,7 @@ export default function AddQuotationScreen() {
                                 </Text>
                             </View>
                         </View>
-                        {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="chevron-down" size={20} color="gray" />}
+                        {<Ionicons name="chevron-down" size={20} color="gray" />}
                     </TouchableOpacity>
 
                     <View style={styles.divider} />

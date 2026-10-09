@@ -21,7 +21,6 @@ import {
 // 🔥 SAAS IMPORTS (organizations still Firestore)
 import * as Location from 'expo-location';
 import { getCurrentLocation as getGpsFix, locationErrorMessage } from '../utils/getLocation';
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 5: activity plans now via new backend API
 import { createActivityPlan } from '../services/api/activityPlans';
@@ -37,7 +36,6 @@ export default function AddActivityScreen() {
   const router = useRouter();
   
   const { currentUser } = useData();
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
   // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
 
@@ -253,7 +251,7 @@ export default function AddActivityScreen() {
             <Text style={styles.label}>Organization Name *</Text>
             <TouchableOpacity style={styles.inputBox} onPress={() => openModal('Organization')}>
                 <Text style={{flex:1, color: organization ? 'black' : 'gray'}}>{organization || 'Select Organization'}</Text>
-                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+                {<Ionicons name="search" size={20} color="gray" />}
             </TouchableOpacity>
 
             <Text style={styles.label}>Address</Text>

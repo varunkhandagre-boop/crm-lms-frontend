@@ -27,7 +27,6 @@ import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 
 // 🔥 SAAS IMPORT
-import { useSaaSDB } from '../hooks/useSaaSDB';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -58,7 +57,6 @@ function PlanExpiryIndicator() {
     const router = useRouter();
     const pathname = usePathname();
     const { currentUser } = useData();
-    const { fetchSaaSData } = useSaaSDB();
 
     useEffect(() => {
     const check = async () => {
@@ -104,7 +102,7 @@ function NetworkIndicator() {
     const insets = useSafeAreaInsets();
     const pathname = usePathname();
     
-    const { isFirebaseSynced, currentUser } = useData(); 
+    const { isSessionReady, currentUser } = useData(); 
 
     useEffect(() => {
         // 🔥 '(state: any)' add kar diya gaya hai TS error hatane ke liye
@@ -125,7 +123,7 @@ function NetworkIndicator() {
         );
     }
 
-    if (isConnected === true && currentUser && isFirebaseSynced === false) {
+    if (isConnected === true && currentUser && isSessionReady === false) {
          return (
              <View style={[styles.networkPill, { top: insets.top + 50 }]}>
                  <ActivityIndicator size="small" color="#f57c00" style={{ marginRight: 6, transform: [{ scale: 0.6 }] }} />
@@ -146,9 +144,6 @@ function NavigationLayout() {
   const router = useRouter();
   const pathname = usePathname();
   
-  // 🔥 SAAS ENGINE HOOK INJECTED HERE
-  const { addSaaSData } = useSaaSDB();
-
   const { 
       currentUser, 
       appPermissions, 

@@ -24,9 +24,7 @@ interface OneResponse {
 }
 
 // Maps an ApiSparePart back to the old Firestore `spare_parts` doc shape.
-// `office_machines` (a separate, unrelated internal-equipment list this
-// screen also used to manage) is intentionally NOT covered here — still
-// Firestore-only for now.
+// Office Stock machines are a separate list: see officeMachines.ts.
 export function toLegacySparePart(p: ApiSparePart): any {
   return {
     id: p.id,

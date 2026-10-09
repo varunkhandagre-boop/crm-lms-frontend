@@ -7,7 +7,6 @@ import { ActivityIndicator, Alert, FlatList, Modal, RefreshControl, ScrollView, 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // 🔥 SAAS IMPORTS (users still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: quotations now go through the new backend API
 import { listQuotationsPage, QuotationPageFilters } from '../services/api/quotations';
@@ -27,8 +26,6 @@ export default function QuotationsListScreen() {
     
     const { companyProfile, currentUser } = useData(); 
     
-    // 🔥 SaaS Engine kept only for users
-    const { isDbLoading } = useSaaSDB();
 
     // quotations now comes from useCachedList below (cache-first)
     const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
@@ -386,7 +383,7 @@ export default function QuotationsListScreen() {
 
                 <View style={{paddingHorizontal:12, marginTop:6}}>
                     <View style={styles.searchBar}>
-                        {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+                        {<Ionicons name="search" size={20} color="gray" />}
                         <TextInput 
                             style={styles.searchInput}
                             placeholder="Search Client, Estimate No..."

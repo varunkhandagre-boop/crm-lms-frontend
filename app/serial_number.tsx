@@ -22,7 +22,6 @@ import * as Sharing from 'expo-sharing';
 
 // 🔥 SAAS IMPORTS (installations/organizations/service_calls/pms_reports/
 // payments/dues/couriers still Firestore — out of scope until Phase 4/6/8)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Light Phase 3 patch: sales visits (Phase 2) and orders (Phase 3) now
 // come from the new backend API. NOTE: order detail fields here (name,
@@ -46,7 +45,6 @@ export default function SerialNumberScreen() {
   
   const { currentUser } = useData();
 
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
   const userRole = (currentUser?.role || '').toLowerCase().trim();
   const isFinanceRole = ['admin', 'manager', 'account', 'accountant', 'superadmin'].includes(userRole);

@@ -20,7 +20,6 @@ import {
 import * as Clipboard from 'expo-clipboard';
 
 // 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 // 🔥 Phase 8: couriers now come from Postgres via these adapters
@@ -45,7 +44,6 @@ export default function CourierScreen() {
   const { currentUser, companyProfile } = useData(); 
 
   // 🔥 2. "organizations" still Firestore; couriers are Postgres now
-  const { isDbLoading: isOrgsLoading } = useSaaSDB();
   // isDbLoading (courier-specific) is computed below, once courierLoading is available
 
   // 🔥 3. Lazy Loaded Lists
@@ -107,7 +105,7 @@ export default function CourierScreen() {
   // Update / status responses don't carry the creator's name or org address — keep them from the list row.
   const mergeRecord = (item: any, rec: any) => ({ ...item, ...rec, senderName: rec.senderName || item.senderName, orgAddress: item.orgAddress, orgCity: item.orgCity });
 
-  const isDbLoading = isOrgsLoading || courierLoading;
+  const isDbLoading = courierLoading;
 
   // POWER USER CHECK
   const role = currentUser?.role || ''; 

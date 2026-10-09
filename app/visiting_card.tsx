@@ -18,7 +18,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 
@@ -38,10 +37,6 @@ export default function VisitingCardScreen() {
   
   // 🔥 1. Context se sirf Current User lenge
   const { currentUser } = useData(); 
-
-  // 🔥 2. "users" still Firestore; visiting card requests are Postgres now.
-  // addSaaSData kept only for "notifications" — that collection isn't migrated until Phase 9.
-  const { addSaaSData } = useSaaSDB();
 
   // 🔥 3. Local States for independent loading
   // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
@@ -163,16 +158,7 @@ export default function VisitingCardScreen() {
           const res = await dispatchVisitingCardRequest(selectedRequest.id, dispatchTracking);
            
           if (res.success) {
-              if (selectedRequest.senderId) {
-                  await addSaaSData("notifications", {
-                      title: "Cards Dispatched 🚀",
-                      message: `Your visiting cards have been sent via ${dispatchTracking}.`,
-                      type: "success",
-                      userId: selectedRequest.senderId,
-                      to: selectedRequest.userName,
-                      route: '/visiting_card'
-                  });
-              }
+              // The server notifies the employee.
               setModalVisible(false);
               await refreshCards(); // Data reload manually
               Alert.alert("Success", "Request Dispatched Successfully! 🚀");

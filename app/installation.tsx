@@ -20,7 +20,6 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (users still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: installations now via new backend API
 import {
@@ -52,7 +51,6 @@ export default function InstallationListScreen() {
   const router = useRouter();
   
   const { currentUser, companyProfile } = useData(); 
-  const { isDbLoading } = useSaaSDB();
 
   const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
 
@@ -584,7 +582,7 @@ export default function InstallationListScreen() {
 
         <View style={{ paddingHorizontal: 12, marginTop: 6 }}>
           <View style={styles.searchBar}>
-            {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+            {<Ionicons name="search" size={20} color="gray" />}
             <TextInput
               style={styles.input}
               placeholder="Search Hospital, Serial, Product..."
