@@ -14,49 +14,65 @@ function companyHas(moduleKey: string, ctx: MenuAccessCtx): boolean {
     return !bucket || myRole === 'superadmin' || (ctx.companyProfile?.enabledModules || []).includes(bucket);
 }
 
-/** Home grid / sidebar items (was canSee() in index.tsx). */
-export function canSeeModule(moduleKey: string, ctx: MenuAccessCtx): boolean {
+/** Maps any stored role / designation to the key used in Team & Settings → Permissions. */
+export function permissionRoleKey(role: string): string {
+    const r = role.toLowerCase().trim();
+    if (r.includes('sales')) return 'Sales Executive';
+    if (r.includes('engineer') || r.includes('service')) return 'Service Engineer';
+    if (r.includes('account')) return 'Accountant';
+    if (r.includes('store') || r.includes('back office')) return 'Store Keeper';
+    if (r.includes('hr')) return 'Hr';
+    if (r.includes('manager')) return 'Manager';
+    return role;
+}
+
+/** Per-user switch, then the role's saved switches, then the role's starting defaults. */
+function permitted(moduleKey: string, ctx: MenuAccessCtx, defaultOn: boolean): boolean {
     const { currentUser, appPermissions } = ctx;
+    const roleKey = permissionRoleKey(currentUser?.role || '');
+    const userPerms = appPermissions?.[currentUser?.id || ''] || appPermissions?.[currentUser?.email || ''] || {};
+    if (userPerms[moduleKey] !== undefined) return userPerms[moduleKey] === true;
+    const rolePerms = appPermissions?.[roleKey];
+    if (rolePerms === undefined) return defaultOn || (DEFAULT_ROLE_PERMISSIONS[roleKey] || []).includes(moduleKey);
+    if (defaultOn) return rolePerms[moduleKey] !== false;
+    return rolePerms[moduleKey] === true;
+}
+
+const isAdminRole = (role?: string) => ['admin', 'superadmin'].includes((role || '').toLowerCase().trim());
+
+/** Home grid / sidebar items. */
+export function canSeeModule(moduleKey: string, ctx: MenuAccessCtx): boolean {
+    const { currentUser } = ctx;
     if (!currentUser?.role) return false;
     if (moduleKey === 'common') return true;
     if (moduleKey === 'superadmin_only') return currentUser.role === 'SuperAdmin';
     if (!companyHas(moduleKey, ctx)) return false;
     // Personal Notes: every employee, as long as the company has HR at all.
     if (moduleKey === 'personal_notes') return true;
-
-    const myRole = currentUser.role.toLowerCase().trim();
-    if (myRole === 'admin' || myRole === 'superadmin') return true;
-
-    let userRoleKey = currentUser.role;
-    if (myRole.includes('sales')) userRoleKey = 'Sales Executive';
-    else if (myRole.includes('engineer') || myRole.includes('service')) userRoleKey = 'Service Engineer';
-    else if (myRole.includes('account')) userRoleKey = 'Accountant';
-    else if (myRole.includes('store') || myRole.includes('back office')) userRoleKey = 'Store Keeper';
-    else if (myRole.includes('hr')) userRoleKey = 'Hr';
-    else if (myRole.includes('manager')) userRoleKey = 'Manager';
-
-    const rolePerms = appPermissions?.[userRoleKey];
-    const userPerms = appPermissions?.[currentUser.id || ''] || appPermissions?.[currentUser.email || ''] || {};
-    if (userPerms[moduleKey] !== undefined) return userPerms[moduleKey] === true;
-    // Role never configured by Admin → starting defaults.
-    if (rolePerms === undefined) return (DEFAULT_ROLE_PERMISSIONS[userRoleKey] || []).includes(moduleKey);
-    return rolePerms[moduleKey] === true;
+    if (isAdminRole(currentUser.role)) return true;
+    return permitted(moduleKey, ctx, false);
 }
 
-/** Bottom-bar tabs (was canSeeTab() in _layout.tsx). */
+/**
+ * Bottom-bar tabs. Same rules as the home grid; Activity Plan and Tasks are on
+ * for everyone until switched off in Permissions.
+ */
 export function canSeeTab(moduleKey: string, ctx: MenuAccessCtx): boolean {
     if (moduleKey === 'common') return true;
-    const userRole = ctx.currentUser?.role || 'Service Engineer';
-    if (!companyHas(moduleKey, { ...ctx, currentUser: { ...ctx.currentUser, role: userRole } })) return false;
-    if (userRole === 'Admin' || userRole === 'SuperAdmin') return true;
-    // A per-user switch in Team & Settings → Permissions wins over the role switch.
-    const userPerms = ctx.appPermissions?.[ctx.currentUser?.id || ''] || ctx.appPermissions?.[ctx.currentUser?.email || ''];
-    if (userPerms?.[moduleKey] !== undefined) return userPerms[moduleKey] === true;
-    const myPerms = ctx.appPermissions?.[userRole];
-    if (!myPerms) return true;
-    // Activity Plan and Tasks are on for everyone unless an admin switched them off.
-    if (DEFAULT_ON_TABS.includes(moduleKey)) return myPerms[moduleKey] !== false;
-    return myPerms[moduleKey] === true;
+    if (!ctx.currentUser?.role) return false;
+    if (!companyHas(moduleKey, ctx)) return false;
+    if (isAdminRole(ctx.currentUser.role)) return true;
+    return permitted(moduleKey, ctx, DEFAULT_ON_TABS.includes(moduleKey));
 }
 
-export const visibleItems = (items: MenuItemDef[], ctx: MenuAccessCtx) => items.filter((i) => canSeeModule(i.module, ctx));
+/** Modules the company's plan does not include are hidden from Permissions too. */
+export function planIncludes(moduleKey: string, ctx: MenuAccessCtx): boolean {
+    return companyHas(moduleKey, ctx);
+}
+
+const bucketOk = (item: MenuItemDef, ctx: MenuAccessCtx) =>
+    !item.bucket || (ctx.currentUser?.role || '').toLowerCase().trim() === 'superadmin' || (ctx.companyProfile?.enabledModules || []).includes(item.bucket);
+
+// 'plan_renewal' has no permission switch, so only Admin passes canSeeModule.
+export const visibleItems = (items: MenuItemDef[], ctx: MenuAccessCtx) =>
+    items.filter((i) => bucketOk(i, ctx) && canSeeModule(i.module, ctx));

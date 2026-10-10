@@ -17,6 +17,7 @@ export const MODULE_LABELS: Record<ModuleKey, string> = {
 // superadmin_only), not CRM/ops features tied to a particular kind of work.
 export const MENU_TAG_BUCKET: Record<string, ModuleKey> = {
     // Sales
+    leads: 'sales',
     asset_history: 'sales',
     catalogs: 'sales',
     sales_team_report: 'sales',

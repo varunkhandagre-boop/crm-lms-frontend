@@ -1,4 +1,5 @@
 import { DEFAULT_ON_TABS } from '../constants/modules';
+import { DEFAULT_ROLE_PERMISSIONS } from '../constants/menuItems';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
@@ -44,6 +45,7 @@ import { buildCacheKey } from '../utils/listCache';
 import AlertSettingsTab from '../components/AlertSettingsTab';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 import { useIsDesktop } from '../hooks/useIsDesktop';
+import { permissionRoleKey, planIncludes } from '../utils/menuAccess';
 import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function ManageTeamScreen() {
@@ -629,7 +631,7 @@ const handleBulkDeactivate = () => {
 // 2️⃣ PERMISSIONS TAB — migrated to Postgres via permissions.ts adapter
 // ====================================================================
 const PermissionsTab = () => {
-    const { currentUser } = useData();
+    const { currentUser, companyProfile } = useData();
 
     // loading/users/permissions now come from the hooks below (cache-first for users)
     const [editMode, setEditMode] = useState<'Role' | 'User'>('Role');
@@ -639,12 +641,12 @@ const PermissionsTab = () => {
     
     const allModules = [
         { category: "📊 DASHBOARD & BASICS", items: [{ key: "dashboard", label: "Main Dashboard" }, { key: "activity", label: "Activity Plan (bottom bar)" }, { key: "tasks", label: "Task List (bottom bar)" }, { key: "calendar", label: "Calendar" }, { key: "map_view", label: "Live Map" }] },
-        { category: "📞 SALES & LEADS", items: [{ key: "leads", label: "Leads Master" }, { key: "quotations", label: "Quotations / Estimates" }, { key: "orders", label: "Order Booking" }, { key: "visits", label: "Visits" }, { key: "demos", label: "Demos" }, { key: "sales_analysis", label: "Analysis" }, { key: "catalogs", label: "Catalogs" }, { key: "sales_team_report", label: "Sales Calc" }] },
+        { category: "📞 SALES & LEADS", items: [{ key: "leads", label: "Leads & Leads Board" }, { key: "quotations", label: "Quotations / Estimates" }, { key: "orders", label: "Order Booking" }, { key: "visits", label: "Visits" }, { key: "demos", label: "Demos" }, { key: "sales_analysis", label: "Sales Trends" }, { key: "catalogs", label: "Catalogs" }, { key: "sales_team_report", label: "Team Performance" }] },
         { category: "🛠️ SERVICE & SUPPORT", items: [{ key: "tickets", label: "Service Tickets" }, { key: "service_reports", label: "Service Analysis" }, { key: "pms", label: "PMS Schedule" }, { key: "installation", label: "Installation" }, { key: "amc_cmc", label: "AMC / CMC" }, { key: "spares", label: "Spare Parts" }] },
-        { category: "📦 OPERATIONS", items: [{ key: "courier", label: "Courier" }, { key: "organizations", label: "Projects & Organizations" }, { key: "asset_history", label: "Machine/OrgName Details" }, { key: "company_profile", label: "Company Profile" }] },
+        { category: "📦 OPERATIONS", items: [{ key: "courier", label: "Courier" }, { key: "organizations", label: "Projects & Organizations" }, { key: "asset_history", label: "Machine/OrgName Details" }, { key: "company_profile", label: "Company Profile, WhatsApp & Email" }] },
         { category: "💰 FINANCE", items: [{ key: "payment_due", label: "Payment Dues" }, { key: "payment_coll", label: "Collections" }, { key: "expenses", label: "Expense Claims" }, { key: "advance", label: "Advance" }, { key: "payroll", label: "Payroll" }] },
         { category: "📝 HR & TEAM", items: [{ key: "attendance", label: "Attendance" }, { key: "leave", label: "Leaves" }, { key: "travel", label: "Travel Logs" }] },
-        { category: "⚙️ ADMIN CONTROL", items: [{ key: "users", label: "Manage Users" }, { key: "settings", label: "App Settings" }] }
+        { category: "⚙️ TEAM & SETTINGS", items: [{ key: "users", label: "Team & Settings, Activity Timeline" }, { key: "settings", label: "App Settings" }] }
     ];
 
     // 🔥 TEAM MEMBERS — shares the SAME 'team_members' cache key as
@@ -686,10 +688,15 @@ const PermissionsTab = () => {
     const onRefresh = () => Promise.all([refreshUsersForPermissions(), refreshPermissions()]);
 
     // Undefined means "never set": Activity Plan / Tasks default to ON, everything else OFF.
-    const permOn = (v: any, key: string) => (v === undefined ? DEFAULT_ON_TABS.includes(key) : v === true);
+    // A role Admin never saved still runs on its starting defaults — show those.
+    const roleOn = (roleKey: string, key: string) => {
+        const saved = permissions[roleKey];
+        if (saved === undefined) return DEFAULT_ON_TABS.includes(key) || (DEFAULT_ROLE_PERMISSIONS[roleKey] || []).includes(key);
+        return saved[key] === undefined ? DEFAULT_ON_TABS.includes(key) : saved[key] === true;
+    };
     const getSwitchValue = (key: string) => {
         if (editMode === 'Role') {
-            return permOn(permissions[selectedTarget]?.[key], key);
+            return roleOn(selectedTarget, key);
         } else {
             const userSpecific = permissions[selectedTarget]?.[key];
             if (userSpecific !== undefined) {
@@ -698,7 +705,7 @@ const PermissionsTab = () => {
             const currentUserObj = users.find(u => u.id === selectedTarget || u.email === selectedTarget);
             const userRole = currentUserObj ? currentUserObj.role : null;
             if (userRole) {
-                return permOn(permissions[userRole]?.[key], key);
+                return roleOn(permissionRoleKey(userRole), key);
             }
             return DEFAULT_ON_TABS.includes(key);
         }
@@ -709,7 +716,11 @@ const PermissionsTab = () => {
         setPermissions((prev) => {
             const newPerms = { ...prev };
             if (!newPerms[selectedTarget]) {
+                // First change for a role: save its current defaults too, or they would all switch off.
                 newPerms[selectedTarget] = {};
+                if (editMode === 'Role') {
+                    allModules.forEach((g) => g.items.forEach((m) => { newPerms[selectedTarget][m.key] = roleOn(selectedTarget, m.key); }));
+                }
             }
             newPerms[selectedTarget][key] = !currentValue;
             return newPerms;
@@ -784,7 +795,10 @@ const PermissionsTab = () => {
                     </Text>
                 )}
 
-                {allModules.map((group, index) => (
+                {allModules
+                    .map((group) => ({ ...group, items: group.items.filter((m) => planIncludes(m.key, { currentUser, companyProfile, appPermissions: null })) }))
+                    .filter((group) => group.items.length > 0)
+                    .map((group, index) => (
                     <View key={index} style={{marginBottom: 20}}>
                         <Text style={{backgroundColor: '#f0f4ff', padding: 8, fontWeight: 'bold', color: '#3b5998', borderRadius: 5, marginBottom: 5, fontSize: 13}}>{group.category}</Text>
                         {group.items.map((mod) => (

@@ -1,7 +1,8 @@
 // The app's menu, in one place: Home grid sections, the sidebar list, the
 // bottom bar and the desktop (web) sidebar all read these. `module` is the
 // permission key checked by utils/menuAccess.ts.
-export type MenuItemDef = { title: string; icon: string; color?: string; route: string; module: string; id?: string };
+// bucket: plan module the item needs when its permission key is shared with other screens (e.g. 'organizations').
+export type MenuItemDef = { title: string; icon: string; color?: string; route: string; module: string; id?: string; bucket?: 'hr' | 'sales' | 'service' };
 
 export const HR_ITEMS: MenuItemDef[] = [
     { title: 'Attendance', icon: 'finger-print', color: '#4caf50', route: '/dayin', module: 'attendance' },
@@ -21,7 +22,7 @@ export const ACTIVITY_ITEMS: MenuItemDef[] = [
     { title: 'Demo Report', icon: 'play-circle', color: '#00bcd4', route: '/demo', module: 'demos' },
     { title: 'PMS Report', icon: 'shield-checkmark', color: '#4caf50', route: '/pms_schedule', module: 'pms' },
     { title: 'Service Analysis', icon: 'pie-chart', color: '#673ab7', route: '/service_analysis', module: 'service_reports' },
-    { title: 'Project Report', icon: 'business', color: '#607d8b', route: '/projects', module: 'organizations' },
+    { title: 'Project Report', icon: 'business', color: '#607d8b', route: '/projects', module: 'organizations', bucket: 'sales' },
 ];
 
 // Lead → quotation → order → payment → dues, then the two reports.
@@ -47,7 +48,7 @@ export const SIDEBAR_ITEMS: MenuItemDef[] = [
     { id: '103', title: 'WhatsApp & Email', icon: 'chatbubbles', route: '/messaging_center', module: 'company_profile' },
     { id: '92', title: 'Team & Settings', icon: 'settings', route: '/manage_team', module: 'users' },
     { id: '90', title: 'Company Profile', icon: 'business', route: '/company_profile', module: 'company_profile' },
-    { id: '104', title: 'Plan & Renewal', icon: 'rocket', route: '/SubscriptionScreen', module: 'company_profile' },
+    { id: '104', title: 'Plan & Renewal', icon: 'rocket', route: '/SubscriptionScreen', module: 'plan_renewal' },
     { id: '102', title: 'Help & Support', icon: 'help-circle', route: '/help_support', module: 'common' },
 ];
 
@@ -67,10 +68,10 @@ export const NAV_TABS: MenuItemDef[] = [
 // that role's saved settings take over completely.
 const COMMON_DEFAULTS = ['dashboard', 'calendar', 'attendance', 'leave', 'travel', 'payroll', 'advance', 'expenses'];
 export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
-    'Sales Executive': [...COMMON_DEFAULTS, 'leads', 'quotations', 'orders', 'visits', 'demos', 'sales_analysis', 'catalogs', 'sales_team_report', 'map_view', 'courier', 'asset_history', 'payment_due', 'payment_coll'],
-    'Service Engineer': [...COMMON_DEFAULTS, 'tickets', 'service_reports', 'pms', 'installation', 'amc_cmc', 'spares', 'map_view', 'courier', 'asset_history'],
-    'Accountant': [...COMMON_DEFAULTS, 'payment_due', 'payment_coll', 'orders'],
-    'Store Keeper': [...COMMON_DEFAULTS, 'spares', 'courier', 'asset_history', 'installation'],
+    'Sales Executive': [...COMMON_DEFAULTS, 'organizations', 'leads', 'quotations', 'orders', 'visits', 'demos', 'sales_analysis', 'catalogs', 'sales_team_report', 'map_view', 'courier', 'asset_history', 'payment_due', 'payment_coll'],
+    'Service Engineer': [...COMMON_DEFAULTS, 'organizations', 'tickets', 'service_reports', 'pms', 'installation', 'amc_cmc', 'spares', 'map_view', 'courier', 'asset_history'],
+    'Accountant': [...COMMON_DEFAULTS, 'organizations', 'payment_due', 'payment_coll', 'orders'],
+    'Store Keeper': [...COMMON_DEFAULTS, 'organizations', 'spares', 'courier', 'asset_history', 'installation'],
     'Hr': [...COMMON_DEFAULTS],
     'Manager': [...COMMON_DEFAULTS, 'leads', 'quotations', 'orders', 'visits', 'demos', 'sales_analysis', 'catalogs', 'sales_team_report', 'map_view', 'tickets', 'service_reports', 'pms', 'installation', 'amc_cmc', 'spares', 'courier', 'organizations', 'asset_history', 'company_profile', 'payment_due', 'payment_coll'],
 };
