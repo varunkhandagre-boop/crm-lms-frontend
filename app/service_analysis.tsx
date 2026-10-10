@@ -27,6 +27,8 @@ import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
+import { useIsDesktop } from '../hooks/useIsDesktop';
 
 const parseDateOnly = (dateStr: any) => {
     if (!dateStr) return 0;
@@ -169,6 +171,20 @@ export default function AnalysisScreen() {
     };
 
 
+    const isDesktop = useIsDesktop();
+    const DONE = ['Done', 'Completed', 'Closed', 'Installed', 'Successful', 'Resolved'];
+    const columns: TableColumn<any>[] = [
+        { key: 'date', label: 'Date', width: 110, render: (i) => formatDate(i.displayDate) },
+        { key: 'type', label: 'Type', width: 130, render: (i) => <Pill text={i.reportType || '-'} color="#fff" bg={getColor(i.reportType)} /> },
+        { key: 'party', label: 'Hospital / Client', flex: 2, render: (i) => i.hospital || '-' },
+        { key: 'machine', label: 'Machine / Serial', flex: 2, render: (i) => <TwoLine main={i.machineDisplay || '-'} sub={i.serialDisplay && i.serialDisplay !== '-' ? i.serialDisplay : undefined} /> },
+        { key: 'details', label: 'Details', flex: 2, render: (i) => i.details || '-' },
+        { key: 'engineer', label: 'Engineer', flex: 1, render: (i) => i.engineer || '-' },
+        { key: 'status', label: 'Status', width: 120, render: (i) => DONE.includes(i.status)
+            ? <Pill text={i.status} color="#2e7d32" bg="#e8f5e9" />
+            : <Pill text={i.status || '-'} color="#e65100" bg="#fff3e0" /> },
+    ];
+
     const renderItem = ({ item }: any) => {
         const isDone = ['Done', 'Completed', 'Closed', 'Installed', 'Successful', 'Resolved'].includes(item.status);
         const color = getColor(item.reportType);
@@ -262,7 +278,11 @@ export default function AnalysisScreen() {
                     data={filteredData}
                     keyExtractor={(item, index) => item.rowKey || item.id || index.toString()}
                     contentContainerStyle={{ padding: 15, paddingBottom: 100 }}
-                    renderItem={renderItem}
+                    renderItem={isDesktop
+                        ? ({ item, index }) => <TableRow columns={columns} item={item} index={index} tint={getColor(item.reportType)} onPress={() => handleItemClick(item)} />
+                        : renderItem}
+                    ListHeaderComponent={isDesktop && filteredData.length > 0 ? <TableHeader columns={columns} /> : null}
+                    stickyHeaderIndices={isDesktop && filteredData.length > 0 ? [0] : undefined}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                     ListEmptyComponent={
                         <View style={{ alignItems: 'center', marginTop: 50 }}>

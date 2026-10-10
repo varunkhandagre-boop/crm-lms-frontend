@@ -90,6 +90,7 @@ const styles = StyleSheet.create({
     cellText: { fontSize: 13, color: '#2d3748' },
     mainText: { fontSize: 13, fontWeight: '600', color: '#2d3748' },
     subText: { fontSize: 11, color: '#8a93a6', marginTop: 1 },
-    pill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, alignSelf: 'flex-start' },
+    // No alignSelf: the table cell's alignItems (left / right / center) places the pill.
+    pill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
     pillText: { fontSize: 11, fontWeight: '700' },
 });

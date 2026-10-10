@@ -26,6 +26,8 @@ import { fetchTeamMembers } from '../services/api/users';
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
+import { useIsDesktop } from '../hooks/useIsDesktop';
 
 export default function SalesTeamReport() {
     const headerTop = useHeaderTop();
@@ -283,6 +285,19 @@ export default function SalesTeamReport() {
     ];
 
     const renderedList = incentiveData.slice(0, visibleCount);
+
+    // Laptop table (phone keeps the cards).
+    const isDesktop = useIsDesktop();
+    const rupee = (n: number) => '₹' + Math.round(n || 0).toLocaleString('en-IN');
+    const teamColumns: TableColumn<any>[] = [
+        { key: 'rank', label: '#', width: 56, align: 'center', render: (i) => isAdmin && i._rank <= 3 ? <Pill text={'#' + i._rank} color="#fff" bg={i._rank === 1 ? '#c9a400' : i._rank === 2 ? '#9e9e9e' : '#a0522d'} /> : String(i._rank) },
+        { key: 'name', label: 'Employee', flex: 2, render: (i) => <TwoLine main={i.name} sub={i.role} /> },
+        { key: 'goal', label: 'Goal', width: 150, align: 'right', render: (i) => <TwoLine main={rupee(i.target)} sub={i.isCustomTarget ? 'Custom goal' : 'Default'} /> },
+        { key: 'sales', label: 'Sales', width: 130, align: 'right', render: (i) => rupee(i.totalSales) },
+        { key: 'pct', label: 'Achieved', width: 110, align: 'right', render: (i) => i.percentage >= 100 ? <Pill text={i.percentage.toFixed(0) + '%'} color="#2e7d32" bg="#e8f5e9" /> : i.percentage.toFixed(0) + '%' },
+        { key: 'coll', label: 'Collection', width: 130, align: 'right', render: (i) => rupee(i.totalCollected) },
+        { key: 'inc', label: 'Incentive', width: 120, align: 'right', render: (i) => rupee(i.incentive) },
+    ];
     const isLoading = loadingData;
 
     return (
@@ -349,13 +364,17 @@ export default function SalesTeamReport() {
 
             <FlatList
                 data={renderedList}
+                ListHeaderComponent={isDesktop && renderedList.length > 0 ? <TableHeader columns={teamColumns} /> : null}
+                stickyHeaderIndices={isDesktop && renderedList.length > 0 ? [0] : undefined}
                 keyExtractor={item => item.id}
                 contentContainerStyle={{ padding: 15, paddingBottom: 20 }}
                 refreshControl={
                     <RefreshControl refreshing={reportRefreshing} onRefresh={onRefresh} colors={['#3b5998']} tintColor="#3b5998" />
                 }
                 ListEmptyComponent={<Text style={{ textAlign: 'center', marginTop: 20, color: 'gray' }}>{isLoading ? 'Loading Analytics...' : 'No Data Found.'}</Text>}
-                renderItem={({ item, index }) => (
+                renderItem={({ item, index }) => isDesktop ? (
+                    <TableRow columns={teamColumns} item={{ ...item, _rank: index + 1 }} index={index} onPress={() => handleCardClick(item)} />
+                ) : (
                     <TouchableOpacity style={styles.card} onPress={() => handleCardClick(item)} activeOpacity={0.7}>
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
                             <View style={{ flexDirection: 'row', alignItems: 'center' }}>

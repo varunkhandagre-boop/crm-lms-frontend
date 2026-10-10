@@ -32,6 +32,8 @@ import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
+import { useIsDesktop } from '../hooks/useIsDesktop';
 
 
 export default function SalesAnalysisScreen() {
@@ -192,6 +194,33 @@ export default function SalesAnalysisScreen() {
   };
 
   const getCity = (item: any) => item.city || ''; // stored on the order
+
+  // Laptop table (phone keeps the cards below).
+  const isDesktop = useIsDesktop();
+  const orderMoney = (item: any) => {
+      const total = parseAmount(item.amount);
+      if (item.balance !== undefined) { const pending = parseFloat(item.balance); return { total, paid: total - pending, pending }; }
+      const paid = getOrderPayments(item).reduce((s: number, p: any) => s + parseAmount(p.amount), 0);
+      return { total, paid, pending: total - paid };
+  };
+  const rupee = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
+  const orderColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Date', width: 110, render: (i) => i.date || '-' },
+      { key: 'id', label: 'Order ID', width: 140, render: (i) => i.orderId || '-' },
+      { key: 'party', label: 'Hospital / Client', flex: 2, render: (i) => <TwoLine main={i.hospitalName || '-'} sub={getCity(i) || undefined} /> },
+      { key: 'type', label: 'Type', width: 100, render: (i) => i.saleType === 'Cash' ? <Pill text="Cash" color="#2e7d32" bg="#e8f5e9" /> : <Pill text="Credit" color="#1565c0" bg="#e3f2fd" /> },
+      { key: 'value', label: 'Value', width: 120, align: 'right', render: (i) => rupee(orderMoney(i).total) },
+      { key: 'paid', label: 'Received', width: 120, align: 'right', render: (i) => rupee(orderMoney(i).paid) },
+      { key: 'pending', label: 'Pending', width: 130, align: 'right', render: (i) => { const m = orderMoney(i); return m.pending <= 0 ? <Pill text="Fully Paid" color="#2e7d32" bg="#e8f5e9" /> : rupee(m.pending); } },
+  ];
+  const paymentColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Date', width: 110, render: (i) => i.date || '-' },
+      { key: 'receipt', label: 'Receipt', width: 140, render: (i) => i.receiptNo || '-' },
+      { key: 'party', label: 'Hospital / Client', flex: 2, render: (i) => <TwoLine main={i.orgName || '-'} sub={i.orderRef ? 'Ref: ' + i.orderRef : undefined} /> },
+      { key: 'mode', label: 'Mode', flex: 1, render: (i) => <TwoLine main={i.mode || '-'} sub={i.bankName || undefined} /> },
+      { key: 'user', label: 'Collected by', flex: 1, render: (i) => i.userName || '-' },
+      { key: 'amount', label: 'Amount', width: 130, align: 'right', render: (i) => rupee(parseAmount(i.amount)) },
+  ];
 
   // Totals for the whole filter, from the server.
   const totalSales = summary?.totalSales ?? 0;
@@ -663,7 +692,13 @@ export default function SalesAnalysisScreen() {
                 data={listData}
                 keyExtractor={item => item.id}
                 scrollEnabled={false}
-                renderItem={({item}) => {
+                ListHeaderComponent={isDesktop && listData.length > 0 ? <TableHeader columns={saleTypeFilter === 'Collection' ? paymentColumns : orderColumns} /> : null}
+                renderItem={({item, index}) => {
+                    if (isDesktop) {
+                        return saleTypeFilter === 'Collection'
+                            ? <TableRow columns={paymentColumns} item={item} index={index} onPress={() => { setSelectedPayment(item); setPaymentModalVisible(true); }} />
+                            : <TableRow columns={orderColumns} item={item} index={index} onPress={() => openOrder(item)} />;
+                    }
                     
                     // 🔥 RENDER PAYMENT CARD
                     if (saleTypeFilter === 'Collection') {
