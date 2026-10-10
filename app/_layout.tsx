@@ -3,7 +3,8 @@ import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
 import { Slot, usePathname, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Dimensions, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DataProvider, useData } from './context/DataContext';
 import { canSeeTab as canSeeTabFor } from '../utils/menuAccess';
@@ -41,6 +42,16 @@ Notifications.setNotificationHandler({
 
 export default function Layout() {
   const isDesktop = useIsDesktop();
+  // Phones stay upright (the screens are designed for portrait). Tablets and
+  // foldables may rotate — the manifest has no orientation lock, as Play asks
+  // for Android 16 large screens.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const { width, height } = Dimensions.get('screen');
+    if (Math.min(width, height) < 600) {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+    }
+  }, []);
   const app = (
     <DataProvider>
       <NavigationLayout />
