@@ -29,6 +29,8 @@ export default function RegisterCompanyScreen() {
     // "Buy now" on the landing page opens /register_company?plan=<id>&team=<n>;
     // both are handed to the plan screen so that plan is already selected.
     const { plan: wantedPlan, team: wantedTeam } = useLocalSearchParams<{ plan?: string; team?: string }>();
+    const isBuying = typeof wantedPlan === 'string' && wantedPlan.length > 0;
+    const teamFromLink = typeof wantedTeam === 'string' && /^\d{1,4}$/.test(wantedTeam) && Number(wantedTeam) > 0 ? wantedTeam : '';
     const { login } = useData();
     const [loading, setLoading] = useState(false);
 
@@ -46,7 +48,7 @@ export default function RegisterCompanyScreen() {
     const [city, setCity] = useState(''); 
     const [pinCode, setPinCode] = useState('');
     const [gstNumber, setGstNumber] = useState('');
-    const [employeesCount, setEmployeesCount] = useState('10'); 
+    const [employeesCount, setEmployeesCount] = useState(teamFromLink || '10'); 
 
     // Dropdown Modal States
     const [stateModalVisible, setStateModalVisible] = useState(false);
@@ -93,11 +95,13 @@ export default function RegisterCompanyScreen() {
             // 6. Success aur direct login option
             // 🔥 LINKED TO SUBSCRIPTION: User register hote hi direct Subscription page par jayega data lekar
             Alert.alert(
-                "Registration Successful ✅", 
-                "Your organization is registered. Please select your subscription plan to proceed.", 
+                isBuying ? "Account Created ✅" : "Registration Successful ✅",
+                isBuying
+                    ? "Your company account is ready. Next, pay for your plan."
+                    : "Your organization is registered. Please select your subscription plan to proceed.",
                 [
                     { 
-                        text: "Choose Plan", 
+                        text: isBuying ? "Continue to Payment" : "Choose Plan",
                         onPress: () => {
                             // Isse companyId automatic naye screen par send ho jayegi
                             router.replace({
@@ -131,8 +135,15 @@ export default function RegisterCompanyScreen() {
                     <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
                         <Ionicons name="arrow-back" size={24} color="#333" />
                     </TouchableOpacity>
-                    <Text style={styles.title}>Register Organization</Text>
+                    <Text style={styles.title}>{isBuying ? 'Create Your Account' : 'Register Organization'}</Text>
                 </View>
+
+                {isBuying && (
+                    <View style={styles.buyNote}>
+                        <Text style={styles.buyNoteTitle}>Step 1 of 2: create your company account</Text>
+                        <Text style={styles.buyNoteText}>Step 2 is payment for the plan you chose. You can start using the app right away while we confirm your payment.</Text>
+                    </View>
+                )}
 
                 <View style={styles.form}>
                     <Text style={styles.sectionHeader}>Basic Info</Text>
@@ -193,7 +204,7 @@ export default function RegisterCompanyScreen() {
                     <TextInput style={styles.input} placeholder="Max Employees (Default: 10)" keyboardType="numeric" value={employeesCount} onChangeText={setEmployeesCount} />
 
                     <TouchableOpacity style={styles.btn} onPress={handleRegister} disabled={loading}>
-                        {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Start 7-Day Free Trial</Text>}
+                        {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>{isBuying ? 'Continue to Payment' : 'Start 7-Day Free Trial'}</Text>}
                     </TouchableOpacity>
                 </View>
                 <View style={{height: 50}} />
@@ -304,5 +315,8 @@ const styles = StyleSheet.create({
     modalListItem: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#f5f5f5' },
     modalListText: { fontSize: 16, color: '#333' },
     btn: { backgroundColor: '#3b5998', padding: 18, borderRadius: 10, alignItems: 'center', marginTop: 20, elevation: 2 },
-    btnText: { color: 'white', fontSize: 18, fontWeight: 'bold' }
+    btnText: { color: 'white', fontSize: 18, fontWeight: 'bold' },
+    buyNote: { backgroundColor: '#EEF3FB', borderColor: '#C9D6EE', borderWidth: 1, borderRadius: 10, padding: 14, marginBottom: 16 },
+    buyNoteTitle: { fontSize: 15, fontWeight: 'bold', color: '#3b5998' },
+    buyNoteText: { fontSize: 14, color: '#555', marginTop: 4, lineHeight: 20 }
 });
