@@ -12,6 +12,7 @@ export const HR_ITEMS: MenuItemDef[] = [
     { title: 'Cards', icon: 'card', color: '#795548', route: '/visiting_card', module: 'common' },
     { title: 'Courier', icon: 'cube', color: '#e67e22', route: '/courier', module: 'courier' },
     { title: 'Task List', icon: 'checkbox', color: '#e91e63', route: '/tasks', module: 'dashboard' },
+    { title: 'Payroll', icon: 'cash', color: '#009688', route: '/payroll', module: 'payroll' },
 ];
 
 export const ACTIVITY_ITEMS: MenuItemDef[] = [
@@ -26,6 +27,7 @@ export const ACTIVITY_ITEMS: MenuItemDef[] = [
 // Lead → quotation → order → payment → dues, then the two reports.
 // Leads (and Service Call / Task) live in the bottom bar, so not repeated here.
 export const SALES_ITEMS: MenuItemDef[] = [
+    { title: 'Leads Board', icon: 'albums', color: '#00897b', route: '/leads_board', module: 'leads' },
     { title: 'Quotations', icon: 'document-text', color: '#1565c0', route: '/quotations', module: 'quotations' },
     { title: 'Order Booking', icon: 'cart', color: '#ff9800', route: '/orders', module: 'orders' },
     { title: 'Collect Payment', icon: 'cash', color: '#27ae60', route: '/payment_collection', module: 'payment_coll' },
@@ -43,7 +45,6 @@ export const SIDEBAR_ITEMS: MenuItemDef[] = [
     { id: '96', title: 'Personal Notes', icon: 'journal', route: '/personal_notes', module: 'personal_notes' },
     { id: '93', title: 'Activity Timeline', icon: 'time', route: '/employee_timeline', module: 'users' },
     { id: '103', title: 'WhatsApp & Email', icon: 'chatbubbles', route: '/messaging_center', module: 'company_profile' },
-    { id: '91', title: 'Payroll', icon: 'cash', route: '/payroll', module: 'payroll' },
     { id: '92', title: 'Team & Settings', icon: 'settings', route: '/manage_team', module: 'users' },
     { id: '90', title: 'Company Profile', icon: 'business', route: '/company_profile', module: 'company_profile' },
     { id: '104', title: 'Plan & Renewal', icon: 'rocket', route: '/SubscriptionScreen', module: 'company_profile' },

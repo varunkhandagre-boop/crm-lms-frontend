@@ -457,7 +457,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         cat: 'sales',
         title: 'Leads Board (Pipeline)',
         steps: [
-            'Leads → "Board" shows open leads as columns: New → Introduction → Technical Review → Quotation → Negotiation.',
+            'Home → Sales → "Leads Board" (or Leads → "Board") shows open leads as columns: New → Introduction → Technical Review → Quotation → Negotiation.',
             'Each card shows the deal value; each column shows its total value.',
             'Long-press a card (or tap ⇄) to move it to another stage, with an optional note that goes into the lead\'s history.',
             'Use the search bar to find a lead across all columns. Admin / Manager can filter by employee.',
@@ -618,7 +618,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         cat: 'payroll',
         title: 'Payroll — Generate, Lock, Bank Sheet & Paid',
         steps: [
-            'Go to Sidebar → "Payroll". Admin / Manager / HR / Accounts see the Generate and Salary Rules tabs; employees see only their own payslips.',
+            'Home → HR & Operations → "Payroll". Admin / Manager / HR / Accounts see the Generate and Salary Rules tabs; employees see only their own payslips.',
             'Set the rules once in the "Salary Rules" tab (each section has its own colour): Incentive, Late-Coming, Short Hours, Weekly Off & Shift, Overtime, Absent & One Day’s Salary, Leave Quota / Leave Policy. Tap "Save Rules".',
             'Generate tab: pick Month & Year → select an employee → "Calculate Preview" shows the full breakdown (late, absent, overtime, incentive, advance…). "Generate Payslip" saves it.',
             'Found a mistake (attendance or leave corrected)? Open the payslip → "↻ Recalculate this payslip". Any advance it recovered is put back and recovered again.',
