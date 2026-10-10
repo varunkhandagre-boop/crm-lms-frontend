@@ -237,7 +237,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
             'The email and password you set here are the login credentials for that employee.',
             'The new employee downloads the app from the Google Play Store and logs in using the email and password you created.',
             'Each employee must have a unique email ID — duplicate emails are not allowed.',
-            'If "Max Employees" limit is reached, contact the Super Admin to increase the limit.',
+            'If the employee limit is reached, increase employees in Sidebar → Plan & Renewal, or contact support.',
         ],
     },
     {
@@ -989,7 +989,7 @@ const FAQS: FaqItem[] = [
     {
         cat: 'admin',
         q: 'Can I add more employees without changing my plan?',
-        a: `1. The number of employees allowed depends on your current plan's "Max Employees" limit.\n2. If you need more users, contact the Super Admin to increase your employee limit.\n3. The limit can be increased without changing the entire plan — a small upgrade fee may apply.\n4. Until the limit is increased, new employee accounts cannot be created.`,
+        a: `1. The number of employees allowed depends on your plan.\n2. Admin: Sidebar → Plan & Renewal → choose your plan, enter the new number of employees and pay.\n3. Or contact support to increase the limit.\n4. Until the limit is increased, new employee accounts cannot be created.`,
     },
     {
         cat: 'admin',

@@ -313,26 +313,43 @@ export default function SubscriptionScreen() {
 
                     <Text style={styles.sectionTitle}>Select Plan</Text>
                     <View style={styles.planContainer}>
-                        {plans.map((plan) => (
+                        {plans.map((plan) => {
+                            const mods = plan.modules || [];
+                            const tone = planTone(mods);
+                            const selected = selectedPlanId === plan.id;
+                            const yearly = Math.round(plan.pricePerEmployee * (1 - (plan.discountPercent || 0) / 100));
+                            const years = plan.durationMonths % 12 === 0 ? plan.durationMonths / 12 : 0;
+                            return (
                             <TouchableOpacity
                                 key={plan.id}
-                                style={[styles.planCard, selectedPlanId === plan.id && styles.selectedCard]}
+                                style={[styles.planCard, { borderColor: selected ? tone.color : tone.soft, backgroundColor: selected ? tone.bg : '#fff' }, selected && styles.selectedCard]}
                                 onPress={() => setSelectedPlanId(plan.id)}
                             >
-                                {plan.discountPercent > 0 && (
-                                    <View style={styles.discountBadge}>
-                                        <Text style={styles.badgeText}>Save {plan.discountPercent}%</Text>
+                                <View style={[styles.planBand, { backgroundColor: tone.color }]}>
+                                    <Ionicons name={selected ? 'checkmark-circle' : 'ellipse-outline'} size={18} color="white" />
+                                    <Text style={styles.planBandText} numberOfLines={1}>{years ? `${years} YEAR${years > 1 ? 'S' : ''}` : `${plan.durationMonths} MONTHS`}</Text>
+                                    {plan.discountPercent > 0 && (
+                                        <View style={styles.discountBadge}>
+                                            <Text style={styles.badgeText}>{plan.discountPercent}% OFF</Text>
+                                        </View>
+                                    )}
+                                </View>
+                                <View style={{ padding: 12 }}>
+                                    <Text style={styles.planTitle}>{plan.label}</Text>
+                                    <Text style={[styles.planPriceBig, { color: tone.color }]}>₹{yearly.toLocaleString('en-IN')}</Text>
+                                    <Text style={styles.planPrice}>per employee / year</Text>
+                                    {plan.discountPercent > 0 && (
+                                        <Text style={styles.planWas}>₹{Number(plan.pricePerEmployee).toLocaleString('en-IN')}</Text>
+                                    )}
+                                    <View style={styles.modRow}>
+                                        {(['hr', 'sales', 'service'] as const).filter((m) => mods.includes(m)).map((m) => (
+                                            <Text key={m} style={[styles.modChip, { color: MODULE_STYLE[m].color, backgroundColor: MODULE_STYLE[m].bg }]}>{MODULE_STYLE[m].label}</Text>
+                                        ))}
                                     </View>
-                                )}
-                                <Ionicons
-                                    name={selectedPlanId === plan.id ? 'radio-button-on' : 'radio-button-off'}
-                                    size={22}
-                                    color="#3b5998"
-                                />
-                                <Text style={styles.planTitle}>{plan.label}</Text>
-                                <Text style={styles.planPrice}>₹{plan.pricePerEmployee} / Emp / Year</Text>
+                                </View>
                             </TouchableOpacity>
-                        ))}
+                            );
+                        })}
                     </View>
 
                     <Text style={styles.sectionTitle}>Number of Employees</Text>
@@ -481,6 +498,19 @@ export default function SubscriptionScreen() {
     );
 }
 
+const MODULE_STYLE: Record<'hr' | 'sales' | 'service', { label: string; color: string; bg: string }> = {
+    hr: { label: 'HR', color: '#2e7d32', bg: '#e8f5e9' },
+    sales: { label: 'Sales', color: '#1565c0', bg: '#e3f2fd' },
+    service: { label: 'Service', color: '#6a1b9a', bg: '#f3e5f5' },
+};
+
+// Card colour follows the richest module in the plan (same as SuperAdmin → Manage Plans).
+function planTone(mods: string[]) {
+    if (mods.includes('service')) return { color: '#6a1b9a', bg: '#f8f1fb', soft: '#e1bee7' };
+    if (mods.includes('sales')) return { color: '#1565c0', bg: '#f0f6fd', soft: '#bbdefb' };
+    return { color: '#2e7d32', bg: '#f1f8f1', soft: '#c8e6c9' };
+}
+
 const styles = StyleSheet.create({
     currentCard: { backgroundColor: '#f0f4ff', borderColor: '#d0d9ff', borderWidth: 1, borderRadius: 12, padding: 15, marginBottom: 18 },
     currentLabel: { fontSize: 12, color: '#555', fontWeight: 'bold' },
@@ -491,12 +521,18 @@ const styles = StyleSheet.create({
     scroll: { padding: 20, paddingBottom: 60 },
     sectionTitle: { fontSize: 15, fontWeight: 'bold', color: '#333', marginTop: 18, marginBottom: 10 },
     planContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 10 },
-    planCard: { flexBasis: '47%', backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd', borderRadius: 12, padding: 15, position: 'relative' },
-    selectedCard: { borderColor: '#3b5998', backgroundColor: '#f0f4f8', borderWidth: 2 },
-    planTitle: { fontSize: 15, fontWeight: 'bold', color: '#333', marginTop: 10 },
-    planPrice: { fontSize: 12, color: '#666', marginTop: 4 },
-    discountBadge: { position: 'absolute', top: -10, right: 10, backgroundColor: 'orange', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
-    badgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
+    planCard: { flexBasis: '47%', flexGrow: 1, backgroundColor: '#fff', borderWidth: 1.5, borderRadius: 14, overflow: 'hidden' },
+    selectedCard: { borderWidth: 3, elevation: 4 },
+    planBand: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 7 },
+    planBandText: { color: 'white', fontWeight: 'bold', fontSize: 12, flex: 1 },
+    planTitle: { fontSize: 14, fontWeight: 'bold', color: '#333' },
+    planPriceBig: { fontSize: 26, fontWeight: 'bold', marginTop: 6 },
+    planPrice: { fontSize: 12, color: '#555', marginTop: -2 },
+    planWas: { fontSize: 12, color: '#999', textDecorationLine: 'line-through', marginTop: 2 },
+    modRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 8 },
+    modChip: { fontSize: 11, fontWeight: 'bold', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, overflow: 'hidden' },
+    discountBadge: { backgroundColor: '#ff9800', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 10 },
+    badgeText: { color: 'white', fontSize: 11, fontWeight: 'bold' },
     input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 10, padding: 15, fontSize: 16, backgroundColor: '#fff', marginBottom: 10 },
     addonCard: { flexDirection: 'row', backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd', borderRadius: 12, padding: 15, marginBottom: 10, alignItems: 'center' },
     addonCardActive: { borderColor: '#2e7d32', borderWidth: 2, backgroundColor: '#f0f8f0' },

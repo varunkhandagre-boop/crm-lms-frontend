@@ -511,7 +511,7 @@ const styles = StyleSheet.create({
   gridContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', backgroundColor:'#f9f9f9', padding: 10, borderBottomLeftRadius:10, borderBottomRightRadius:10, marginBottom:0, paddingTop: 10, paddingBottom: 2 },
   menuItem: { width: '31%', alignItems: 'center', marginBottom: 4, marginHorizontal: '1%' },
   gridContainerDesktop: { justifyContent: 'flex-start' },
-  menuItemDesktop: { width: 112, marginHorizontal: 0, marginRight: 12, marginBottom: 10 },
+  menuItemDesktop: { width: 100, marginHorizontal: 0, marginRight: 8, marginBottom: 10 },
   iconCircle: { width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center', marginBottom: 6, elevation: 2, position:'relative' },
   menuText: { fontSize: 11, color: '#333', textAlign: 'center', fontWeight:'600', height: 30 },
   menuBadge: { 

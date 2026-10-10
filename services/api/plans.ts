@@ -11,6 +11,7 @@ export interface ActivePlan {
     discountPercent: number;
     active: boolean;
     sortOrder: number;
+    modules?: string[];
 }
 
 interface ListResponse<T> { data: T[] }
