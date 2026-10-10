@@ -92,13 +92,8 @@ export default function PaymentGatewaySettings() {
 
     const validate = (): string | null => {
         if (!config.keyId.trim()) return 'Razorpay Key ID is required.';
-        // The backend never returns the real secret, so every save must
-        // include it fresh — even when one is already configured.
-        if (!config.keySecret.trim()) {
-            return hasExistingSecret
-                ? 'Please re-enter your Key Secret to confirm this save (it is never shown back to you).'
-                : 'Razorpay Key Secret is required.';
-        }
+        // Blank keeps the secret already saved on the server.
+        if (!config.keySecret.trim() && !hasExistingSecret) return 'Razorpay Key Secret is required.';
         if (!config.companyName.trim()) return 'Company Name is required for checkout display.';
 
         const prefix = config.isTestMode ? 'rzp_test_' : 'rzp_live_';
@@ -129,7 +124,7 @@ export default function PaymentGatewaySettings() {
                                 isEnabled: config.isEnabled,
                                 isTestMode: config.isTestMode,
                                 keyId: config.keyId.trim(),
-                                keySecret: config.keySecret.trim(),
+                                keySecret: config.keySecret.trim() || undefined,
                                 webhookSecret: config.webhookSecret.trim() || undefined,
                                 currency: config.currency,
                                 companyName: config.companyName.trim(),
@@ -261,7 +256,7 @@ export default function PaymentGatewaySettings() {
                     <View style={styles.fieldHeader}>
                         <Ionicons name="lock-closed" size={18} color="#d32f2f" />
                         <Text style={styles.fieldLabel}>Key Secret</Text>
-                        <Text style={styles.fieldRequired}>{hasExistingSecret ? 're-enter to change' : 'required'}</Text>
+                        <Text style={styles.fieldRequired}>{hasExistingSecret ? 'saved' : 'required'}</Text>
                         <TouchableOpacity onPress={() => setShowSecret(p => !p)} style={{ marginLeft: 'auto' }}>
                             <Ionicons name={showSecret ? 'eye-off' : 'eye'} size={18} color="#888" />
                         </TouchableOpacity>
