@@ -194,7 +194,7 @@ export default function SubscriptionScreen() {
                     if (error.code === 2) {
                         console.log('Payment cancelled by user');
                     } else {
-                        console.log('Razorpay error (raw):', JSON.stringify(error));
+                        console.log('Razorpay error (raw):', error?.message || JSON.stringify(error));
                         Alert.alert('Payment Failed', friendlyRazorpayError(error));
                     }
                 });
