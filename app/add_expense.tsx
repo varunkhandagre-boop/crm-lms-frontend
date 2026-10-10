@@ -1,3 +1,4 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
@@ -161,7 +162,7 @@ export default function AddExpenseScreen() {
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#333" />
+            <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{isRequest ? 'Ask Purchase Approval' : 'New Expense Claim'}</Text>
         <View style={{width:24}} /> 
@@ -306,7 +307,7 @@ export default function AddExpenseScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
   header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
@@ -331,4 +332,4 @@ const styles = StyleSheet.create({
   infoBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e3f2fd', padding: 10, borderRadius: 8, gap: 8 },
   infoText: { flex: 1, color: '#1565c0', fontSize: 12 },
   limitHint: { color: '#e65100', fontSize: 12, marginTop: 4 },
-});
+}), FORM_ACCENT.expense);

@@ -1,3 +1,4 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -135,7 +136,7 @@ export default function AddProjectScreen() {
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#333" />
+            <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Start New Project</Text>
         <View style={{width:24}} />
@@ -259,7 +260,7 @@ export default function AddProjectScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
   header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
@@ -284,4 +285,4 @@ const styles = StyleSheet.create({
   orgItem: { padding: 15, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
   orgName: { fontSize: 16, fontWeight: 'bold', color: '#333' },
   orgSub: { fontSize: 13, color: 'gray', marginTop: 4 }
-});
+}), FORM_ACCENT.project);

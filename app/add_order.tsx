@@ -1,3 +1,4 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
@@ -585,7 +586,7 @@ if (locationData) {
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#333" />
+            <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{mode === 'from_lead' ? 'Book Order from Lead' : 'New Order Booking'}</Text>
         <View style={{width:24}} /> 
@@ -870,7 +871,7 @@ if (locationData) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
   header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
@@ -901,4 +902,4 @@ const styles = StyleSheet.create({
   modalSubText: { fontSize: 12, color: 'gray' },
   iconBox: { width: 35, height: 35, borderRadius: 8, justifyContent:'center', alignItems:'center', backgroundColor:'#e3f2fd' },
   closeBtn: { marginTop: 15, alignItems: 'center', padding: 10 }
-});
+}), FORM_ACCENT.order);

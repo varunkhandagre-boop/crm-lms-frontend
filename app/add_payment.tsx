@@ -1,3 +1,4 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
@@ -497,7 +498,7 @@ export default function AddPaymentScreen() {
     return (
         <View style={styles.container}>
             <View style={[styles.header, { paddingTop: headerTop }]}>
-                <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
+                <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="white" /></TouchableOpacity>
                 <Text style={styles.headerTitle}>Add New Payment</Text>
                 <View style={{ width: 24 }} />
             </View>
@@ -678,7 +679,7 @@ export default function AddPaymentScreen() {
     );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
     header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, backgroundColor: 'white', elevation: 2, alignItems:'center' },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
@@ -719,4 +720,4 @@ const styles = StyleSheet.create({
     modalTitleSmall: { fontSize: 18, fontWeight: 'bold', marginBottom: 5, color:'#3b5998', textAlign:'center' },
     modalItem: { padding: 15, borderBottomWidth: 1, borderBottomColor: '#eee' },
     closeBtnSmall: { marginTop: 15, alignItems: 'center', padding: 10 }
-});
+}), FORM_ACCENT.payment);

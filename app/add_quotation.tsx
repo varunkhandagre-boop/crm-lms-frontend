@@ -1,3 +1,4 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -547,7 +548,7 @@ export default function AddQuotationScreen() {
     return (
         <View style={styles.container}>
             <View style={[styles.header, {paddingTop: insets.top + 10}]}>
-                <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={28} color="#333" /></TouchableOpacity>
+                <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={28} color="white" /></TouchableOpacity>
                 <Text style={styles.headerTitle}>
                     {mode === 'edit' ? 'Edit Estimate' : mode === 'from_lead' ? 'Quote for Lead' : 'Create Estimate'}
                 </Text>
@@ -785,7 +786,7 @@ export default function AddQuotationScreen() {
     );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f5f5f5' },
     header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, backgroundColor: 'white', elevation: 2, alignItems:'center' },
     headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
@@ -827,4 +828,4 @@ const styles = StyleSheet.create({
     searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', margin: 15, paddingHorizontal: 15, borderRadius: 10, height: 45, borderWidth: 1, borderColor: '#ddd' },
     searchInput: { flex: 1, marginLeft: 10, fontSize: 15 },
     modalListItem: { backgroundColor: 'white', padding: 15, borderBottomWidth: 1, borderColor: '#eee', flexDirection: 'row', alignItems: 'center' }
-});
+}), FORM_ACCENT.quotation);

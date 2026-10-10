@@ -1,3 +1,4 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
@@ -120,7 +121,7 @@ export default function AddPaymentDueScreen() {
         <View style={styles.container}>
             <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-                    <Ionicons name="arrow-back" size={24} color="#333" />
+                    <Ionicons name="arrow-back" size={24} color="white" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Add Manual Due</Text>
                 <View style={{ width: 24 }} />
@@ -264,7 +265,7 @@ export default function AddPaymentDueScreen() {
     );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
     header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, backgroundColor: 'white', elevation: 4, alignItems:'center' },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
@@ -291,4 +292,4 @@ const styles = StyleSheet.create({
     orgIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#e3f2fd', justifyContent: 'center', alignItems: 'center', marginRight: 15 },
     orgName: { fontSize: 16, fontWeight: 'bold', color: '#333' },
     orgCity: { fontSize: 12, color: 'gray', marginTop: 2 }
-});
+}), FORM_ACCENT.paymentDue);

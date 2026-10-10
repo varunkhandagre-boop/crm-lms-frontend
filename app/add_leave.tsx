@@ -1,3 +1,4 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
@@ -180,7 +181,7 @@ export default function AddLeaveScreen() {
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#333" />
+            <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>New Leave Application</Text>
         <View style={{width:24}} /> 
@@ -331,7 +332,7 @@ export default function AddLeaveScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
   typeChip: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, backgroundColor: '#e8f5e9' },
   typeChipOn: { backgroundColor: '#2e7d32' },
   typeChipText: { fontSize: 12, fontWeight: 'bold', color: '#2e7d32' },
@@ -359,4 +360,4 @@ const styles = StyleSheet.create({
   modalItem: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#eee', flexDirection:'row', justifyContent:'space-between' },
   modalItemText: { fontSize: 16, color: '#333' },
   closeBtn: { marginTop:15, alignItems:'center', padding:10 }
-});
+}), FORM_ACCENT.leave);
