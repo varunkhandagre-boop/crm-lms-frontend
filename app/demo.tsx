@@ -33,6 +33,8 @@ import { sharePdfFromHtml } from '../utils/sharePdf';
 import { fetchTeamMembers } from '../services/api/users';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function DemoScreen() {
   const headerTop = useHeaderTop();
@@ -316,6 +318,20 @@ export default function DemoScreen() {
       if(num) Linking.openURL(`tel:${num}`);
   };
 
+  // Laptop: the same list as a table (tap a row → same details popup).
+  const isDesktop = useIsDesktop();
+  const demoColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Date', width: 96, render: (d) => d.date || '-' },
+      { key: 'source', label: 'Source', width: 110, render: (d) => d.isFromSales
+          ? <Pill text="From Sales" color="#e65100" bg="#fff3e0" />
+          : <Pill text="Direct Demo" color="#1565c0" bg="#e3f2fd" /> },
+      { key: 'hospital', label: 'Hospital', flex: 2, render: (d) => <TwoLine main={d.hospital || 'Unknown Hospital'} sub={[d.department, d.city].filter(Boolean).join(' · ') || undefined} /> },
+      { key: 'contact', label: 'Contact', width: 150, render: (d) => <TwoLine main={d.contactPerson || '-'} sub={d.contactNumber || undefined} /> },
+      { key: 'product', label: 'Product', flex: 2, render: (d) => <TwoLine main={d.product || '-'} sub={d.model ? `Model: ${d.model}` : undefined} /> },
+      { key: 'result', label: 'Result', flex: 1, render: (d) => d.result || 'Pending' },
+      ...(isAdmin ? [{ key: 'staff', label: 'Staff', width: 130, render: (d: any) => d.senderName || 'Unknown' }] : []),
+  ];
+
   const renderItem = ({ item }: any) => (
     <TouchableOpacity style={styles.card} onPress={() => openDetails(item)}>
         <View style={styles.row}>
@@ -415,7 +431,11 @@ export default function DemoScreen() {
       <FlatList 
         data={demoList}
         keyExtractor={(item, index) => (item.id || index.toString()) + index} 
-        renderItem={renderItem}
+        renderItem={isDesktop
+            ? ({ item, index }) => <TableRow columns={demoColumns} item={item} index={index} onPress={() => openDetails(item)} />
+            : renderItem}
+        ListHeaderComponent={isDesktop && demoList.length > 0 ? <TableHeader columns={demoColumns} /> : null}
+        stickyHeaderIndices={isDesktop && demoList.length > 0 ? [0] : undefined}
         contentContainerStyle={{padding: 15}}
         refreshControl={
             <RefreshControl refreshing={demosRefreshing} onRefresh={refreshDemos} colors={['#3b5998']} tintColor="#3b5998" />

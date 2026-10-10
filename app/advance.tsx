@@ -27,6 +27,8 @@ import { useHeaderTop } from '../hooks/useHeaderTop';
 import { useServerPagedList } from '../hooks/useServerPagedList';
 import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { inr, Pill, TableColumn, TableHeader, TableRow } from '../components/DesktopTable';
 
 export default function EmployeeAdvanceScreen() {
   const headerTop = useHeaderTop();
@@ -216,6 +218,22 @@ export default function EmployeeAdvanceScreen() {
       }
   };
 
+  // Laptop: the same list as a table (tap a row → same details popup).
+  const isDesktop = useIsDesktop();
+  const advanceStatusPill = (st: string) => {
+    if (st === 'Approved') return <Pill text={st} color="#2e7d32" bg="#e8f5e9" />;
+    if (st === 'Rejected') return <Pill text={st} color="#c62828" bg="#ffebee" />;
+    if (st === 'Settled') return <Pill text={st} color="#1565c0" bg="#e3f2fd" />;
+    return <Pill text={st || 'Pending'} color="#ef6c00" bg="#fff3e0" />;
+  };
+  const advanceColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Date', width: 100, render: (i) => i.date || '-' },
+      ...(canManage ? [{ key: 'staff', label: 'Staff', width: 170, render: (i: any) => i.senderName || '-' }] : []),
+      { key: 'amount', label: 'Amount', width: 120, align: 'right', render: (i) => inr(i.amount) },
+      { key: 'reason', label: 'Reason', flex: 3, render: (i) => i.reason || '-' },
+      { key: 'status', label: 'Status', width: 110, render: (i) => advanceStatusPill(i.status) },
+  ];
+
   const renderItem = ({ item }: any) => {
     let statusColor = '#fff3e0'; 
     let statusTextCol = '#ef6c00';
@@ -316,7 +334,11 @@ export default function EmployeeAdvanceScreen() {
       <FlatList 
         data={fullFilteredList}
         keyExtractor={item => item.id}
-        renderItem={renderItem}
+        renderItem={isDesktop
+            ? ({ item, index }) => <TableRow columns={advanceColumns} item={item} index={index} onPress={() => openDetails(item)} />
+            : renderItem}
+        ListHeaderComponent={isDesktop && fullFilteredList.length > 0 ? <TableHeader columns={advanceColumns} /> : null}
+        stickyHeaderIndices={isDesktop && fullFilteredList.length > 0 ? [0] : undefined}
         contentContainerStyle={{padding: 12, paddingBottom: 50}} 
         refreshControl={
             <RefreshControl refreshing={advancesRefreshing} onRefresh={refreshAdvances} colors={['#3b5998']} tintColor="#3b5998" />

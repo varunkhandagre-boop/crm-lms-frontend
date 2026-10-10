@@ -30,6 +30,8 @@ import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
 import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function TaskScreen() {
   const headerTop = useHeaderTop();
@@ -224,6 +226,19 @@ export default function TaskScreen() {
       }
   };
 
+  // Laptop: the same list as a table (tap a row → same task details popup).
+  const isDesktop = useIsDesktop();
+  const taskColumns: TableColumn<any>[] = [
+      { key: 'assigned', label: 'Assigned', width: 96, render: (t) => (t.date || t.createdAt) ? String(t.date || t.createdAt).split('T')[0] : '-' },
+      { key: 'task', label: 'Task', flex: 3, render: (t) => <TwoLine main={t.task} sub={t.remark || undefined} /> },
+      { key: 'priority', label: 'Priority', width: 110, render: (t) => { const c = getPriorityColor(t.priority); return <Pill text={t.priority || '-'} color={c} bg={c + '20'} />; } },
+      { key: 'from', label: 'From', width: 140, render: (t) => t.from || '-' },
+      { key: 'to', label: 'To', width: 140, render: (t) => t.to || '-' },
+      { key: 'due', label: 'Due', width: 100, render: (t) => t.dueDate || '-' },
+      { key: 'timing', label: 'Status', width: 160, render: (t) => { const tm = getTaskTiming(t); return <Pill text={tm.label} color={tm.color} bg={tm.bg} />; } },
+      { key: 'done', label: 'Done By', width: 140, render: (t) => t.status === 'Completed' ? <TwoLine main={t.completedBy || 'Unknown'} sub={t.completedAt ? String(t.completedAt).split('T')[0] : undefined} /> : '-' },
+  ];
+
   return (
     <View style={styles.container}>
       
@@ -326,7 +341,9 @@ export default function TaskScreen() {
                 )}
             </View>
         }
-        renderItem={({item}) => {
+        renderItem={isDesktop
+            ? ({ item, index }) => <TableRow columns={taskColumns} item={item} index={index} tint={getPriorityColor(item.priority)} onPress={() => handleOpenTask(item)} />
+            : ({item}) => {
             const pColor = getPriorityColor(item.priority);
             const timing = getTaskTiming(item); 
             return (
@@ -376,6 +393,8 @@ export default function TaskScreen() {
                 </TouchableOpacity>
             );
         }}
+        ListHeaderComponent={isDesktop && taskList.length > 0 ? <TableHeader columns={taskColumns} /> : null}
+        stickyHeaderIndices={isDesktop && taskList.length > 0 ? [0] : undefined}
         
         ListFooterComponent={
           <View style={{ paddingBottom: 80 }}>

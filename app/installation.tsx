@@ -45,6 +45,8 @@ import { fetchTeamMembers } from '../services/api/users';
 import { urlToBase64Image } from '../utils/pdfImageHelper';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function InstallationListScreen() {
   const headerTop = useHeaderTop();
@@ -489,6 +491,25 @@ export default function InstallationListScreen() {
     }
   };
 
+  // Laptop: the same list as a table (tap a row → same details popup).
+  const isDesktop = useIsDesktop();
+  const installColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Install Date', width: 100, render: (i) => i.date || i.displayDate || i.dateIso || '-' },
+      { key: 'party', label: 'Hospital / Client', flex: 2, render: (i) => <TwoLine main={i.orgName || i.hospital} sub={[i.city, i.department].filter(Boolean).join(' • ') || undefined} /> },
+      { key: 'product', label: 'Product / Model', flex: 2, render: (i) => <TwoLine main={i.product || i.productName || '-'} sub={i.model ? `Model: ${i.model}` : undefined} /> },
+      { key: 'serial', label: 'Serial No', width: 130, render: (i) => i.serialNo || '-' },
+      { key: 'expiry', label: 'Warranty Expiry', width: 120, render: (i) => i.warrantyExpiry || '-' },
+      { key: 'warranty', label: 'Warranty', width: 90, render: (i) => {
+          const w = getWarrantyStatus(i.warrantyExpiry);
+          return <Pill text={w.label} color={w.color} bg={w.color + '20'} />;
+      } },
+      { key: 'eng', label: 'Engineer', width: 130, render: (i) => i.engineer || i.senderName || '-' },
+      { key: 'staff', label: 'Added By', width: 130, render: (i) => i.senderName || 'Unknown' },
+      { key: 'act', label: '', width: 44, align: 'center', render: (i) => isStrictAdmin
+          ? <TouchableOpacity onPress={() => openEditModal(i)}><Ionicons name="create" size={18} color="#d32f2f" /></TouchableOpacity>
+          : null },
+  ];
+
   const renderItem = ({ item, index }: any) => {
     const warranty = getWarrantyStatus(item.warrantyExpiry);
     const isNewEntry = !searchText && index < 3;
@@ -604,7 +625,11 @@ export default function InstallationListScreen() {
       <FlatList
         data={installList}
         keyExtractor={item => item.id}
-        renderItem={renderItem}
+        renderItem={isDesktop
+            ? ({ item, index }) => <TableRow columns={installColumns} item={item} index={index} onPress={() => openDetails(item)} />
+            : renderItem}
+        ListHeaderComponent={isDesktop && installList.length > 0 ? <TableHeader columns={installColumns} /> : null}
+        stickyHeaderIndices={isDesktop && installList.length > 0 ? [0] : undefined}
         contentContainerStyle={{ padding: 5, paddingBottom: 50 }}
         refreshControl={
             <RefreshControl refreshing={installsRefreshing} onRefresh={refreshInstalls} colors={['#3b5998']} tintColor="#3b5998" />

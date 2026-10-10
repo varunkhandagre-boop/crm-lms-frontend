@@ -43,6 +43,8 @@ import { buildCacheKey } from '../utils/listCache';
 
 import { TemplatesTab } from '../components/TemplatesTab';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function MessagingCenterScreen() {
     const headerTop = useHeaderTop();
@@ -190,6 +192,29 @@ const PendingEmailsTab = () => {
         ]);
     };
 
+    // Laptop: the same list as a table (no row tap, same as the card; Send / Cancel in the last column).
+    const isDesktop = useIsDesktop();
+    const pendingColumns: TableColumn<any>[] = [
+        { key: 'to', label: 'To', flex: 2, render: (m) => <TwoLine main={m.to} /> },
+        { key: 'tpl', label: 'Template', flex: 2, render: (m) => m.templateName || '-' },
+        { key: 'date', label: 'Generated', width: 170, render: (m) => new Date(m.createdAt).toLocaleString() },
+        { key: 'act', label: '', width: 130, align: 'center', render: (m) => (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <TouchableOpacity style={styles.sendBtn} onPress={() => handleSendEmail(m)} disabled={processingId === m.id}>
+                    {processingId === m.id ? <ActivityIndicator color="white" size="small" /> : (
+                        <>
+                            <Ionicons name="paper-plane" size={14} color="white" />
+                            <Text style={styles.sendText}>Send</Text>
+                        </>
+                    )}
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => handleCancel(m.id)}>
+                    <Ionicons name="close-circle" size={22} color="#ccc" />
+                </TouchableOpacity>
+            </View>
+        ) },
+    ];
+
     if (loading) return <ActivityIndicator size="large" color="#1565c0" style={{ marginTop: 50 }} />;
 
     return (
@@ -204,7 +229,7 @@ const PendingEmailsTab = () => {
                 refreshControl={
                     <RefreshControl refreshing={pendingRefreshing} onRefresh={onRefresh} colors={['#1565c0']} tintColor="#1565c0" />
                 }
-                ListHeaderComponent={pendingTotal - handledCount > 0 ? <Text style={{ textAlign: 'right', fontSize: 12, color: 'gray', marginBottom: 6 }}>Pending: {pendingTotal - handledCount}</Text> : null}
+                ListHeaderComponent={<>{pendingTotal - handledCount > 0 ? <Text style={{ textAlign: 'right', fontSize: 12, color: 'gray', marginBottom: 6 }}>Pending: {pendingTotal - handledCount}</Text> : null}{isDesktop && pendingList.length > 0 ? <TableHeader columns={pendingColumns} /> : null}</>}
                 ListFooterComponent={pendingHasMore ? (
                     <TouchableOpacity style={styles.loadMoreBtn} onPress={loadMorePending} disabled={pendingLoadingMore}>
                         {pendingLoadingMore ? <ActivityIndicator color="#3b5998" /> : <Text style={styles.loadMoreText}>Load more ({pendingTotal - handledCount - pendingList.length} remaining)</Text>}
@@ -216,7 +241,9 @@ const PendingEmailsTab = () => {
                         <Text style={{ color: 'gray', marginTop: 10 }}>All emails are sent! You're caught up.</Text>
                     </View>
                 }
-                renderItem={({ item }) => (
+                renderItem={isDesktop
+                    ? ({ item, index }) => <TableRow columns={pendingColumns} item={item} index={index} />
+                    : ({ item }) => (
                     <View style={styles.card}>
                         <View style={{ flex: 1 }}>
                             <Text style={styles.toText}>✉️ {item.to}</Text>
@@ -280,6 +307,23 @@ const SentHistoryTab = () => {
         cacheKey: channelFilter === 'all' && statusFilter === 'all' ? buildCacheKey('message_history_page1', currentUser?.companyId) : null,
     });
 
+    // Laptop: the same list as a table (no row tap, same as the card).
+    const isDesktop = useIsDesktop();
+    const historyColumns: TableColumn<any>[] = [
+        { key: 'ch', label: 'Channel', width: 100, render: (m) => (
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name={m.channel === 'whatsapp' ? 'logo-whatsapp' : 'mail'} size={16} color={m.channel === 'whatsapp' ? '#25D366' : '#1565c0'} />
+                <Text style={{ fontSize: 12, marginLeft: 4 }}>{m.channel === 'whatsapp' ? 'WhatsApp' : 'Email'}</Text>
+            </View>
+        ) },
+        { key: 'to', label: 'To', flex: 2, render: (m) => <TwoLine main={m.to} /> },
+        { key: 'tpl', label: 'Template', flex: 2, render: (m) => m.templateName || '-' },
+        { key: 'status', label: 'Status', width: 100, render: (m) => <Pill text={m.status} color={STATUS_COLORS[m.status] || '#999'} bg={(STATUS_COLORS[m.status] || '#999') + '20'} /> },
+        { key: 'date', label: 'Created', width: 170, render: (m) => new Date(m.createdAt).toLocaleString() },
+        { key: 'sent', label: 'Sent At', width: 170, render: (m) => (m.sentAt ? new Date(m.sentAt).toLocaleString() : '-') },
+        { key: 'fail', label: 'Failure Reason', flex: 2, render: (m) => (m.status === 'FAILED' && m.failureReason ? m.failureReason : '-') },
+    ];
+
     return (
         <View style={{ flex: 1 }}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8, maxHeight: 40 }} contentContainerStyle={{ alignItems: 'center' }}>
@@ -307,13 +351,15 @@ const SentHistoryTab = () => {
                         <RefreshControl refreshing={historyRefreshing} onRefresh={refreshHistory} colors={['#3b5998']} tintColor="#3b5998" />
                     }
                     ListEmptyComponent={<Text style={{ textAlign: 'center', color: 'gray', marginTop: 30 }}>No messages found.</Text>}
-                    ListHeaderComponent={historyTotal > 0 ? <Text style={{ textAlign: 'right', fontSize: 12, color: 'gray', marginBottom: 6 }}>Total: {historyTotal}</Text> : null}
+                    ListHeaderComponent={<>{historyTotal > 0 ? <Text style={{ textAlign: 'right', fontSize: 12, color: 'gray', marginBottom: 6 }}>Total: {historyTotal}</Text> : null}{isDesktop && messages.length > 0 ? <TableHeader columns={historyColumns} /> : null}</>}
                     ListFooterComponent={historyHasMore ? (
                         <TouchableOpacity style={styles.loadMoreBtn} onPress={loadMoreHistory} disabled={historyLoadingMore}>
                             {historyLoadingMore ? <ActivityIndicator color="#3b5998" /> : <Text style={styles.loadMoreText}>Load more ({historyTotal - messages.length} remaining)</Text>}
                         </TouchableOpacity>
                     ) : <View style={{ height: 30 }} />}
-                    renderItem={({ item }) => (
+                    renderItem={isDesktop
+                        ? ({ item, index }) => <TableRow columns={historyColumns} item={item} index={index} />
+                        : ({ item }) => (
                         <View style={styles.historyCard}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
                                 <Ionicons name={item.channel === 'whatsapp' ? 'logo-whatsapp' : 'mail'} size={16} color={item.channel === 'whatsapp' ? '#25D366' : '#1565c0'} />

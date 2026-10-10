@@ -22,6 +22,8 @@ import { useData } from './context/DataContext';
 // (getMyNotifications) is gone, it's just the fetched list now.
 import { fetchNotifications, markNotificationRead as markNotificationReadApi, markAllNotificationsRead } from '../services/api/notifications';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 // Tab State Memory
 let savedTabState = 'Unread'; 
@@ -192,6 +194,25 @@ export default function NotificationScreen() {
       }
   };
 
+  // Laptop: the same list as a table (tap a row → same navigation as the card; unread rows get a blue left edge).
+  const isDesktop = useIsDesktop();
+  const notificationColumns: TableColumn<any>[] = [
+      { key: 'icon', label: '', width: 40, align: 'center', render: (n) => {
+          const config = getIconConfig(n.type);
+          return <Ionicons name={config.name as any} size={18} color={config.color} />;
+      } },
+      { key: 'title', label: 'Notification', flex: 3, render: (n) => <TwoLine main={n.title} sub={n.message} /> },
+      { key: 'type', label: 'Type', width: 90, render: (n) => {
+          const config = getIconConfig(n.type);
+          return <Pill text={n.type || 'general'} color={config.color} bg={config.bg} />;
+      } },
+      { key: 'time', label: 'Time', width: 100, render: (n) => formatTimeAgo(n.createdAt) },
+      { key: 'read', label: 'Status', width: 80, render: (n) => n.read
+          ? <Pill text="Read" color="#555" bg="#F5F5F5" />
+          : <Pill text="Unread" color="#1A237E" bg="#E8EAF6" /> },
+      { key: 'go', label: '', width: 40, align: 'center', render: (n) => (n.route || n.screen) ? <Ionicons name="chevron-forward" size={14} color="#1A237E" /> : null },
+  ];
+
   return (
     <View style={styles.container}>
       {/* HEADER */}
@@ -272,7 +293,11 @@ export default function NotificationScreen() {
                 )}
             </View>
         }
-        renderItem={({ item }: any) => {
+        ListHeaderComponent={isDesktop && renderedList.length > 0 ? <TableHeader columns={notificationColumns} /> : null}
+        stickyHeaderIndices={isDesktop && renderedList.length > 0 ? [0] : undefined}
+        renderItem={isDesktop
+          ? ({ item, index }: any) => <TableRow columns={notificationColumns} item={item} index={index} tint={!item.read ? '#1A237E' : undefined} onPress={() => handlePress(item)} />
+          : ({ item }: any) => {
             const config = getIconConfig(item.type);
             
             return (

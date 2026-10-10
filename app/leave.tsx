@@ -28,6 +28,8 @@ import { useHeaderTop } from '../hooks/useHeaderTop';
 import { useServerPagedList } from '../hooks/useServerPagedList';
 import { periodRange, useDebounced } from '../utils/periodRange';
 import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow } from '../components/DesktopTable';
 
 export default function LeaveApplicationScreen() {
   const headerTop = useHeaderTop();
@@ -254,6 +256,34 @@ export default function LeaveApplicationScreen() {
       getLeave(id).then(openDetails).catch(() => {});
   }, [linkParams.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Laptop: the same list as a table (tap a row → same details popup).
+  const isDesktop = useIsDesktop();
+  const leaveRowTint = (item: any) => {
+    if (item.isCancelled) return '#1565c0';
+    if (item.isEarned) return '#2e7d32';
+    if (item.status === 'Absent') return item.type === 'Half Day' ? '#ff9800' : '#d32f2f';
+    return undefined;
+  };
+  const leaveStatusPill = (item: any) => {
+    const isShortRecord = item.isAutoRecord && item.type === 'Half Day';
+    let statusInfo = getStatusColor(item.status);
+    if (item.isCancelled) statusInfo = { bg: '#e3f2fd', text: '#1565c0' };
+    if (isShortRecord) statusInfo = { bg: '#fff3e0', text: '#e65100' };
+    if (item.isEarned) statusInfo = { bg: '#e8f5e9', text: 'green' };
+    return <Pill text={isShortRecord ? 'Short' : (item.status || '-')} color={statusInfo.text} bg={statusInfo.bg} />;
+  };
+  const leaveColumns: TableColumn<any>[] = [
+      { key: 'from', label: 'From', width: 100, render: (i) => i.fromDate || '-' },
+      { key: 'to', label: 'To', width: 100, render: (i) => i.toDate || i.fromDate || '-' },
+      { key: 'days', label: 'Days', width: 60, align: 'right', render: (i) => i.days ?? '-' },
+      { key: 'type', label: 'Type', width: 140, render: (i) => (
+          <Text style={{ fontSize: 13, fontWeight: '600', color: leaveRowTint(i) || '#2d3748' }} numberOfLines={1}>{i.type || '-'}</Text>
+      ) },
+      { key: 'reason', label: 'Reason', flex: 3, render: (i) => i.reason || '-' },
+      { key: 'status', label: 'Status', width: 110, render: leaveStatusPill },
+      ...(canManage ? [{ key: 'staff', label: 'Staff', width: 150, render: (i: any) => i.senderName || '-' }] : []),
+  ];
+
   const renderItem = ({ item }: any) => {
     const isAbsentRecord = item.status === 'Absent';
     const isEarnedRecord = item.isEarned;
@@ -433,7 +463,11 @@ export default function LeaveApplicationScreen() {
       <FlatList 
         data={leaveList} 
         keyExtractor={(item, index) => item.id || index.toString()} 
-        renderItem={renderItem}
+        renderItem={isDesktop
+            ? ({ item, index }) => <TableRow columns={leaveColumns} item={item} index={index} tint={leaveRowTint(item)} onPress={() => openDetails(item)} />
+            : renderItem}
+        ListHeaderComponent={isDesktop && leaveList.length > 0 ? <TableHeader columns={leaveColumns} /> : null}
+        stickyHeaderIndices={isDesktop && leaveList.length > 0 ? [0] : undefined}
         contentContainerStyle={{padding: 12}}
         refreshControl={
             <RefreshControl refreshing={leaveRefreshing} onRefresh={refreshLeaves} colors={['#3b5998']} tintColor="#3b5998" />

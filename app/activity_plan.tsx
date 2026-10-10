@@ -12,6 +12,8 @@ import { fetchTeamMembers } from '../services/api/users';
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function ActivityPlanScreen() {
   const headerTop = useHeaderTop();
@@ -130,6 +132,32 @@ export default function ActivityPlanScreen() {
       return 'gray';
   };
 
+  // Laptop: the same list as a table (no row tap, like the card; action button in last column).
+  const isDesktop = useIsDesktop();
+  const planColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Date', width: 96, render: (a) => a.date || '-' },
+      { key: 'hospital', label: 'Hospital / Client', flex: 2, render: (a) => <TwoLine main={a.hospital} sub={[a.city, a.state].filter(Boolean).join(', ') || undefined} /> },
+      { key: 'contact', label: 'Contact', width: 150, render: (a) => <TwoLine main={a.contactPerson || '-'} sub={a.contactNumber || undefined} /> },
+      { key: 'type', label: 'Type', width: 120, render: (a) => a.type || '-' },
+      { key: 'note', label: 'Note', flex: 2, render: (a) => a.planningNotes || '-' },
+      ...(canManage ? [{ key: 'by', label: 'By', width: 130, render: (a: any) => a.senderName || '-' }] : []),
+      { key: 'status', label: 'Status', width: 100, render: (a) => <Pill text={a.status || '-'} color="white" bg={getStatusColor(a.status)} /> },
+      { key: 'act', label: '', width: 150, align: 'center', render: (a) => a.status === 'Completed' ? null : (
+          <TouchableOpacity
+              style={[styles.actionBtn, { marginTop: 0, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: a.status === 'Started' ? '#e91e63' : '#3b5998' }]}
+              onPress={() => handleAction(a)}
+              disabled={updatingId === a.id}
+          >
+              {updatingId === a.id ? <ActivityIndicator color="white" size="small" /> : (
+                  <>
+                      <Ionicons name={a.status === 'Started' ? "checkmark-circle" : "play-circle"} size={16} color="white" />
+                      <Text style={[styles.btnText, { fontSize: 12, marginLeft: 5 }]}>{a.status === 'Planned' ? 'Start Journey' : 'Complete & Report'}</Text>
+                  </>
+              )}
+          </TouchableOpacity>
+      ) },
+  ];
+
   const renderItem = ({ item }: any) => (
       <View style={[styles.card, item.status === 'Completed' && {opacity: 0.7, borderLeftColor: '#4caf50'}]}>
           <View style={styles.cardHeader}>
@@ -199,7 +227,11 @@ export default function ActivityPlanScreen() {
             data={displayList}
             keyExtractor={item => item.id}
             contentContainerStyle={{padding: 15}}
-            renderItem={renderItem}
+            renderItem={isDesktop
+                ? ({ item, index }) => <TableRow columns={planColumns} item={item} index={index} tint={item.status === 'Completed' ? '#4caf50' : undefined} />
+                : renderItem}
+            ListHeaderComponent={isDesktop && displayList.length > 0 ? <TableHeader columns={planColumns} /> : null}
+            stickyHeaderIndices={isDesktop && displayList.length > 0 ? [0] : undefined}
             refreshControl={
                 <RefreshControl refreshing={activitiesRefreshing} onRefresh={refreshActivities} colors={['#3b5998']} tintColor="#3b5998" />
             }

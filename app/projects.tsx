@@ -10,6 +10,8 @@ import { useServerPagedList } from '../hooks/useServerPagedList';
 import { buildCacheKey } from '../utils/listCache';
 import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
 
 export default function ProjectsScreen() {
@@ -70,6 +72,9 @@ export default function ProjectsScreen() {
       cacheKey: isDefaultView ? buildCacheKey('projects_page1_v1', currentUser?.companyId) : null,
   });
 
+  // Laptop table view (hook must run before the early return below).
+  const isDesktop = useIsDesktop();
+
   if (!hasAccess) {
       return null; 
   }
@@ -100,6 +105,18 @@ export default function ProjectsScreen() {
       return "All Time";
   };
 
+
+  const openProject = (item: any) => router.push(`/project_details?id=${item.id}` as any);
+  const projectColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Created', width: 96, render: (p) => p.dateIso ? p.dateIso.split('-').reverse().join('/') : '-' },
+      { key: 'name', label: 'Project', flex: 2, render: (p) => <TwoLine main={p.name} sub={p.description || undefined} /> },
+      { key: 'client', label: 'Client', flex: 2, render: (p) => <TwoLine main={p.client} sub={p.contactPerson ? `${p.contactPerson}${p.mobile ? ' · ' + p.mobile : ''}` : (p.mobile || undefined)} /> },
+      { key: 'location', label: 'Location', flex: 1, render: (p) => <TwoLine main={p.location || '-'} sub={p.state || undefined} /> },
+      { key: 'value', label: 'Order Value', width: 120, align: 'right', render: (p) => inr(parseInt(p.totalValue) || 0) },
+      { key: 'received', label: 'Received', width: 110, align: 'right', render: (p) => inr(parseInt(p.totalReceived) || 0) },
+      { key: 'expense', label: 'Expense', width: 110, align: 'right', render: (p) => inr(p.totalExpense ? parseInt(p.totalExpense) : 0) },
+      { key: 'status', label: 'Status', width: 100, render: (p) => <Pill text={p.status || '-'} color="white" bg={getStatusColor(p.status)} /> },
+  ];
 
   const renderProjectCard = ({ item }: any) => (
       <TouchableOpacity 
@@ -210,7 +227,11 @@ export default function ProjectsScreen() {
                 )}
             </View>
         }
-        renderItem={renderProjectCard}
+        renderItem={isDesktop
+            ? ({ item, index }) => <TableRow columns={projectColumns} item={item} index={index} onPress={() => openProject(item)} />
+            : renderProjectCard}
+        ListHeaderComponent={isDesktop && fullList.length > 0 ? <TableHeader columns={projectColumns} /> : null}
+        stickyHeaderIndices={isDesktop && fullList.length > 0 ? [0] : undefined}
         
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>

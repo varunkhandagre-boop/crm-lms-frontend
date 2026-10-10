@@ -30,6 +30,8 @@ import { periodRange, useDebounced } from '../utils/periodRange';
 import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function VisitingCardScreen() {
   const headerTop = useHeaderTop();
@@ -205,6 +207,18 @@ export default function VisitingCardScreen() {
       }
   };
 
+  // Laptop: the same list as a table (tap a row → same details popup).
+  const isDesktop = useIsDesktop();
+  const cardColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Date', width: 100, render: (r) => r.dateIso || r.date || r.createdAt?.split('T')[0] || '-' },
+      { key: 'req', label: 'Request ID', width: 140, render: (r) => r.reqId || 'REQ' },
+      { key: 'user', label: 'Employee', width: 160, render: (r) => r.userName || 'Unknown' },
+      { key: 'items', label: 'Items', flex: 2, render: (r) => (r.items || []).map((i: any) => `${i.type} × ${i.quantity}`).join(', ') || '-' },
+      { key: 'address', label: 'Shipping Address', flex: 3, render: (r) => r.shippingAddress || '-' },
+      { key: 'tracking', label: 'Tracking', width: 140, render: (r) => r.trackingNo ? <TwoLine main={r.trackingNo} sub={r.outDate ? `Sent ${r.outDate}` : undefined} /> : '-' },
+      { key: 'status', label: 'Status', width: 100, render: (r) => { const t = getStatusTheme(r.status); return <Pill text={r.status || '-'} color={t.text} bg={t.bg} />; } },
+  ];
+
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: headerTop }]}>
@@ -269,7 +283,9 @@ export default function VisitingCardScreen() {
                 )}
             </View>
         }
-        renderItem={({item}) => {
+        renderItem={isDesktop
+            ? ({ item, index }) => <TableRow columns={cardColumns} item={item} index={index} tint={getStatusTheme(item.status).text} onPress={() => openDetails(item)} />
+            : ({item}) => {
             const theme = getStatusTheme(item.status);
             return (
                 <TouchableOpacity style={styles.card} onPress={() => openDetails(item)}>
@@ -299,6 +315,8 @@ export default function VisitingCardScreen() {
                 </TouchableOpacity>
             );
         }}
+        ListHeaderComponent={isDesktop && cardRequestList.length > 0 ? <TableHeader columns={cardColumns} /> : null}
+        stickyHeaderIndices={isDesktop && cardRequestList.length > 0 ? [0] : undefined}
         
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>

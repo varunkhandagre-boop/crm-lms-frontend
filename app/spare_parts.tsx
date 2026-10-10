@@ -24,6 +24,8 @@ import { createOfficeMachine, deleteOfficeMachine, listOfficeMachines } from '..
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function SparePartsScreen() {
   const headerTop = useHeaderTop();
@@ -237,6 +239,35 @@ export default function SparePartsScreen() {
       setMachineDetailVisible(true);
   };
 
+  // Laptop: each list as a table (tap a row → same details popup as the card).
+  const isDesktop = useIsDesktop();
+  const stockColumns: TableColumn<any>[] = [
+      { key: 'part', label: 'Part', flex: 2, render: (p) => <TwoLine main={p.partName} sub={p.partNo ? `PN: ${p.partNo}` : undefined} /> },
+      { key: 'models', label: 'Compatible Models', flex: 2, render: (p) => p.compatibleModels || '-' },
+      { key: 'emp', label: 'Employee', flex: 1, render: (p) => <Pill text={p.empName} color="#1b5e20" bg="#e8f5e9" /> },
+      { key: 'qty', label: 'Qty', width: 70, align: 'right', render: (p) => String(p.empQty ?? 0) },
+  ];
+  const machineColumns: TableColumn<any>[] = [
+      { key: 'name', label: 'Machine', flex: 3, render: (m) => <TwoLine main={m.name} /> },
+      { key: 'qty', label: 'Qty', width: 80, align: 'right', render: (m) => String(m.quantity ?? 0) },
+      ...(isAdmin ? [{ key: 'act', label: '', width: 44, align: 'center' as const, render: (m: any) => (
+          <TouchableOpacity onPress={() => handleDeleteMachine(m.id)}><Ionicons name="trash-outline" size={18} color="#d32f2f" /></TouchableOpacity>
+      ) }] : []),
+  ];
+  const catalogColumns: TableColumn<any>[] = [
+      { key: 'part', label: 'Part', flex: 2, render: (p) => <TwoLine main={p.partName} sub={p.partNo ? `PN: ${p.partNo}` : undefined} /> },
+      { key: 'models', label: 'Compatible Models', flex: 2, render: (p) => p.compatibleModels || '-' },
+      { key: 'price', label: 'Price', width: 100, align: 'right', render: (p) => inr(p.price) },
+      { key: 'office', label: 'Office Stock', width: 100, align: 'right', render: (p) => String(p.officeStock || 0) },
+      { key: 'total', label: 'Total', width: 80, align: 'right', render: (p) => String(p.totalStock ?? p.officeStock ?? 0) },
+      { key: 'min', label: 'Min', width: 60, align: 'right', render: (p) => (p.minStock ? String(p.minStock) : '-') },
+      { key: 'flag', label: 'Status', width: 100, render: (p) => p.minStock > 0 && (p.totalStock ?? 0) <= p.minStock
+          ? <Pill text="LOW STOCK" color="#c62828" bg="#ffebee" />
+          : null },
+  ];
+  const isMachineList = activeTab === 'StockList' && stockSubTab === 'OfficeStock';
+  const tableColumns = activeTab === 'Parts' ? stockColumns : (isMachineList ? machineColumns : catalogColumns);
+
   const renderStockItem = ({item}: any) => (
       <TouchableOpacity style={styles.stockCard} onPress={() => openPartDetails(item)}>
           <View style={{flex:1}}>
@@ -364,10 +395,13 @@ export default function SparePartsScreen() {
                     {sparePartsLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={styles.emptyText}>No Items Found.</Text>}
                 </View>
             }
-            renderItem={
-                activeTab === 'Parts' ? renderStockItem : 
-                (stockSubTab === 'OfficeStock' ? renderMachineItem : renderCatalogItem)
+            renderItem={isDesktop
+                ? ({ item, index }) => <TableRow columns={tableColumns} item={item} index={index} onPress={() => isMachineList ? openMachineDetails(item) : openPartDetails(item)} />
+                : (activeTab === 'Parts' ? renderStockItem : 
+                (stockSubTab === 'OfficeStock' ? renderMachineItem : renderCatalogItem))
             }
+            ListHeaderComponent={isDesktop && renderedList.length > 0 ? <TableHeader columns={tableColumns} /> : null}
+            stickyHeaderIndices={isDesktop && renderedList.length > 0 ? [0] : undefined}
             ListFooterComponent={
                 <View style={{ paddingBottom: 80 }}>
                     {visibleCount < currentList.length ? (

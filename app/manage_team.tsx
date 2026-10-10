@@ -43,6 +43,8 @@ import { useCachedObject } from '../hooks/useCachedObject';
 import { buildCacheKey } from '../utils/listCache';
 import AlertSettingsTab from '../components/AlertSettingsTab';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function ManageTeamScreen() {
     const headerTop = useHeaderTop();
@@ -339,6 +341,36 @@ const handleBulkDeactivate = () => {
         setModalVisible(true);
     };
 
+    // Laptop: the same employee list as a table (tap a row → same as the card).
+    const isDesktop = useIsDesktop();
+    const userColumns: TableColumn<any>[] = [
+        ...(bulkMode ? [{ key: 'sel', label: '', width: 36, align: 'center' as const, render: (u: any) => (
+            <Ionicons name={selectedForBulk.has(u.id) ? 'checkbox' : 'square-outline'} size={20} color="#3b5998" />
+        ) }] : []),
+        { key: 'name', label: 'Employee', flex: 2, render: (u) => <TwoLine main={u.name + (u.status === 'Disabled' ? ' (Disabled)' : '')} sub={u.empId} /> },
+        { key: 'role', label: 'Role / Title', width: 150, render: (u) => <Pill text={u.role === 'FIELD_USER' ? (u.jobTitle || 'Sales Executive') : u.role} color="#3b5998" bg="#e8eef9" /> },
+        { key: 'contact', label: 'Mobile / Email', flex: 2, render: (u) => <TwoLine main={u.mobile || '-'} sub={u.email} /> },
+        { key: 'city', label: 'City', width: 120, render: (u) => u.city || '-' },
+        { key: 'join', label: 'Joining', width: 100, render: (u) => u.joiningDate || '-' },
+        { key: 'status', label: 'Status', width: 90, render: (u) => u.status === 'Disabled'
+            ? <Pill text="Disabled" color="#c62828" bg="#ffebee" />
+            : <Pill text="Active" color="#2e7d32" bg="#e8f5e9" /> },
+        ...(!bulkMode ? [{ key: 'act', label: '', width: 110, align: 'center' as const, render: (u: any) => (
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <TouchableOpacity
+                    onPress={() => router.push({ pathname: '/employee_360', params: { id: u.id } } as any)}
+                    style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#ede7f6', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, marginRight: 10 }}
+                >
+                    <Ionicons name="analytics" size={14} color="#6a1b9a" />
+                    <Text style={{ color: '#6a1b9a', fontWeight: 'bold', fontSize: 11, marginLeft: 3 }}>360</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => handleDisable(u)}>
+                    <Ionicons name={u.status === 'Disabled' ? 'refresh-circle' : 'ban'} size={20} color={u.status === 'Disabled' ? 'green' : '#e74c3c'} />
+                </TouchableOpacity>
+            </View>
+        ) }] : []),
+    ];
+
     if(loading) return <ActivityIndicator size="large" color="#2c3e50" style={{marginTop: 50}} />;
 
     return (
@@ -361,7 +393,11 @@ const handleBulkDeactivate = () => {
                 refreshControl={
                     <RefreshControl refreshing={usersRefreshing} onRefresh={refreshUsers} colors={['#2c3e50']} tintColor="#2c3e50" />
                 }
-                renderItem={({item}) => {
+                ListHeaderComponent={isDesktop && renderedUsers.length > 0 ? <TableHeader columns={userColumns} /> : null}
+                stickyHeaderIndices={isDesktop && renderedUsers.length > 0 ? [0] : undefined}
+                renderItem={isDesktop
+                    ? ({ item, index }) => <TableRow columns={userColumns} item={item} index={index} onPress={() => bulkMode ? toggleBulkSelect(item.id) : openEdit(item)} />
+                    : ({item}) => {
                     const isDisabled = item.status === 'Disabled';
                     return (
                         <TouchableOpacity 

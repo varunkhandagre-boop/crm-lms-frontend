@@ -25,6 +25,8 @@ import { fetchOrganizations, deleteOrganization } from '../services/api/organiza
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function OrganizationScreen() {
   const headerTop = useHeaderTop();
@@ -142,6 +144,21 @@ export default function OrganizationScreen() {
       );
   };
 
+  // Laptop: the same list as a table (tap a row → same details popup).
+  const isDesktop = useIsDesktop();
+  const orgColumns: TableColumn<any>[] = [
+      { key: 'name', label: 'Organization', flex: 2, render: (o) => <TwoLine main={o.name || o.orgName} sub={o.gstNumber ? `GST ${o.gstNumber}` : undefined} /> },
+      { key: 'type', label: 'Type', width: 110, render: (o) => <Pill text={o.type || 'Clinic'} color="#1565c0" bg="#e3f2fd" /> },
+      { key: 'loc', label: 'City / State', flex: 1.5, render: (o) => <TwoLine main={o.city || '-'} sub={o.state} /> },
+      { key: 'territory', label: 'Territory', width: 120, render: (o) => o.territory || '-' },
+      { key: 'contact', label: 'Contact Person', flex: 1.5, render: (o) => <TwoLine main={o.contactPerson || 'No Contact Person'} sub={o.designation} /> },
+      { key: 'mobile', label: 'Mobile', width: 120, render: (o) => o.mobile ? String(o.mobile) : '-' },
+      { key: 'email', label: 'Email', flex: 1.5, render: (o) => o.email || '-' },
+      { key: 'act', label: '', width: 44, align: 'center', render: (o) => o.mobile
+          ? <TouchableOpacity onPress={() => handleCall(o.mobile)}><Ionicons name="call" size={16} color="#2e7d32" /></TouchableOpacity>
+          : null },
+  ];
+
   const renderItem = ({ item }: any) => (
     <TouchableOpacity style={styles.card} onPress={() => openDetails(item)}>
         <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'flex-start'}}>
@@ -236,7 +253,11 @@ export default function OrganizationScreen() {
       <FlatList 
         data={renderedList}
         keyExtractor={item => item.id}
-        renderItem={renderItem}
+        renderItem={isDesktop
+            ? ({ item, index }) => <TableRow columns={orgColumns} item={item} index={index} onPress={() => openDetails(item)} />
+            : renderItem}
+        ListHeaderComponent={isDesktop && renderedList.length > 0 ? <TableHeader columns={orgColumns} /> : null}
+        stickyHeaderIndices={isDesktop && renderedList.length > 0 ? [0] : undefined}
         contentContainerStyle={styles.contentContainer}
         refreshControl={
             <RefreshControl refreshing={orgsRefreshing} onRefresh={refreshOrgs} colors={['#3b5998']} tintColor="#3b5998" />

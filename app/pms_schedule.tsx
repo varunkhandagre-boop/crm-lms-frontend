@@ -34,6 +34,8 @@ import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTeamMembers } from '../services/api/users';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function PMSScheduleScreen() {
   const headerTop = useHeaderTop();
@@ -398,6 +400,39 @@ export default function PMSScheduleScreen() {
     setModalVisible(true);
   };
 
+  // Laptop: the same list as a table (tap a row → same details popup).
+  const isDesktop = useIsDesktop();
+  const pmsDateInfo = (item: any) => {
+    const isDone = isTaskCompleted(item.status);
+    const isOverdue = parseDate(item.computedDueDate) < new Date().setHours(0, 0, 0, 0);
+    const showDone = filter === 'Completed' || (filter === 'All' && isDone);
+    return { isDone, isOverdue, showDone, displayDate: showDone ? (item.lastDoneDate || item.date) : item.computedDueDate, dateLabel: filter === 'Completed' ? 'Completed' : (showDone ? 'Done' : 'Next Due') };
+  };
+  const pmsColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Due / Done', width: 110, render: (i) => { const d = pmsDateInfo(i); return <TwoLine main={d.displayDate || '-'} sub={d.dateLabel} />; } },
+      { key: 'party', label: 'Hospital / Client', flex: 2, render: (i) => <TwoLine main={i.hospital || i.hospitalName || 'Unknown'} sub={i.city} /> },
+      { key: 'machine', label: 'Machine / Model', flex: 2, render: (i) => <TwoLine main={i.machine || i.machineName || 'Machine'} sub={i.model} /> },
+      { key: 'serial', label: 'Serial No', width: 130, render: (i) => i.serialNo || '-' },
+      { key: 'last', label: 'Last Done', width: 100, render: (i) => i.lastDoneDate || '-' },
+      { key: 'contract', label: 'Contract', width: 100, render: (i) => <Pill text={i.contractType || i.type || 'Warranty'} color="#616161" bg="#eeeeee" /> },
+      { key: 'status', label: 'Status', width: 100, render: (i) => {
+          const d = pmsDateInfo(i);
+          if (d.isDone) return <Pill text="Done" color="#2e7d32" bg="#e8f5e9" />;
+          return d.isOverdue ? <Pill text="Overdue" color="#c62828" bg="#ffebee" /> : <Pill text="Upcoming" color="#1565c0" bg="#e3f2fd" />;
+      } },
+      { key: 'staff', label: 'Staff', width: 130, render: (i) => i.senderName || '-' },
+      { key: 'act', label: '', width: 80, align: 'center', render: (i) => (filter === 'Upcoming' || filter === 'Overdue' || !isTaskCompleted(i.status))
+          ? (
+            <TouchableOpacity
+                style={styles.actionBtn}
+                onPress={() => router.push({ pathname: '/add_pms', params: { id: i.id, hospital: i.hospitalName, orgId: i.orgId || '', serial: i.serialNo } } as any)}
+            >
+              <Text style={styles.btnText}>Perform</Text>
+            </TouchableOpacity>
+          )
+          : null },
+  ];
+
   const renderItem = ({ item }: { item: any }) => {
     const isDone = isTaskCompleted(item.status);
     const dueTs = parseDate(item.computedDueDate);
@@ -540,7 +575,11 @@ export default function PMSScheduleScreen() {
         data={fullList}
         keyExtractor={(item, index) => item.id || index.toString()}
         contentContainerStyle={{ padding: 5, paddingBottom: 100 }}
-        renderItem={renderItem}
+        renderItem={isDesktop
+            ? ({ item, index }) => <TableRow columns={pmsColumns} item={item} index={index} onPress={() => openDetails(item)} />
+            : renderItem}
+        ListHeaderComponent={isDesktop && fullList.length > 0 ? <TableHeader columns={pmsColumns} /> : null}
+        stickyHeaderIndices={isDesktop && fullList.length > 0 ? [0] : undefined}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshPms} />}
         ListEmptyComponent={
             <View style={{ alignItems: 'center', marginTop: 50 }}>

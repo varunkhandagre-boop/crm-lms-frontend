@@ -28,6 +28,8 @@ import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function TravelNoteScreen() {
   const headerTop = useHeaderTop();
@@ -200,6 +202,29 @@ export default function TravelNoteScreen() {
       return 'walk';
   };
 
+  // Laptop: the same list as a table (tap a row → same details popup).
+  const isDesktop = useIsDesktop();
+  const travelColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Date', width: 100, render: (i) => i.date || '-' },
+      { key: 'staff', label: 'Staff', width: 160, render: (i) => i.senderName || i.userName || 'Unknown' },
+      { key: 'from', label: 'From', flex: 2, render: (i) => i.from || '-' },
+      { key: 'to', label: 'To', flex: 2, render: (i) => i.to || '-' },
+      { key: 'purpose', label: 'Purpose', flex: 2, render: (i) => <TwoLine main={i.purpose || '-'} sub={i.note} /> },
+      { key: 'mode', label: 'Mode', width: 100, render: (i) => (
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Ionicons name={getModeIcon(i.mode) as any} size={14} color="#3b5998" style={{ marginRight: 4 }} />
+              <Text style={{ fontSize: 13, color: '#2d3748' }} numberOfLines={1}>{i.mode || '-'}</Text>
+          </View>
+      ) },
+      { key: 'km', label: 'Km', width: 70, align: 'right', render: (i) => i.distance ?? '-' },
+      { key: 'amount', label: 'Amount', width: 110, align: 'right', render: (i) => inr(i.amount || 0) },
+      { key: 'status', label: 'Status', width: 100, render: (i) => {
+          if (i.status === 'Settled' || i.status === 'Paid') return <Pill text="PAID" color="#1565c0" bg="#e3f2fd" />;
+          if (i.status === 'Pending') return <Pill text="PENDING" color="#ef6c00" bg="#fff3e0" />;
+          return i.status || '-';
+      } },
+  ];
+
   const renderItem = ({ item }: any) => {
     const isSettled = item.status === 'Settled' || item.status === 'Paid';
     const isPending = item.status === 'Pending';
@@ -335,7 +360,11 @@ export default function TravelNoteScreen() {
       <FlatList 
           data={travelList}
           keyExtractor={(item: any) => item.id}
-          renderItem={renderItem}
+          renderItem={isDesktop
+              ? ({ item, index }) => <TableRow columns={travelColumns} item={item} index={index} onPress={() => openDetails(item)} />
+              : renderItem}
+          ListHeaderComponent={isDesktop && travelList.length > 0 ? <TableHeader columns={travelColumns} /> : null}
+          stickyHeaderIndices={isDesktop && travelList.length > 0 ? [0] : undefined}
           contentContainerStyle={{padding: 12}}
           refreshControl={<RefreshControl refreshing={travelRefreshing} onRefresh={refreshTravel} colors={['#3b5998']} tintColor="#3b5998" />}
           ListEmptyComponent={

@@ -35,6 +35,8 @@ import { sharePdfFromHtml } from '../utils/sharePdf';
 import { fetchOrganizations } from '../services/api/organizations';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function CourierScreen() {
   const headerTop = useHeaderTop();
@@ -482,6 +484,28 @@ export default function CourierScreen() {
       }
   };
 
+  // Laptop: the same list as a table (tap a row → same details popup).
+  const isDesktop = useIsDesktop();
+  const courierColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Date', width: 96, render: (c) => c.date || '-' },
+      { key: 'type', label: 'Type', width: 90, render: (c) => c.type === 'Inward'
+          ? <Pill text="INWARD" color="#2e7d32" bg="#e8f5e9" />
+          : <Pill text={(c.type || '-').toUpperCase()} color="#c62828" bg="#ffebee" /> },
+      { key: 'courier', label: 'Courier / Docket', width: 170, render: (c) => (
+          <TouchableOpacity onPress={() => copyDocket(c.docketNo)} hitSlop={8}>
+              <TwoLine main={c.courierName || '-'} sub={c.docketNo ? `#${c.docketNo}` : undefined} />
+          </TouchableOpacity>
+      ) },
+      { key: 'from', label: 'From', flex: 2, render: (c) => c.sender || '-' },
+      { key: 'to', label: 'To', flex: 2, render: (c) => <TwoLine main={c.receiver || '-'} sub={c.toCity || c.orgCity || undefined} /> },
+      { key: 'material', label: 'Material', flex: 2, render: (c) => <TwoLine main={c.material || c.materialSummary || 'No Details'} sub={c.dcNo ? `DC ${c.dcNo}` : undefined} /> },
+      { key: 'status', label: 'Status', width: 100, render: (c) => { const st = getStatusColor(c.status); return <Pill text={c.status || '-'} color={st.text} bg={st.bg} />; } },
+      ...(canManage ? [{ key: 'by', label: 'By', width: 120, render: (c: any) => c.senderName || 'Unknown' }] : []),
+      ...(isStrictAdmin ? [{ key: 'act', label: '', width: 44, align: 'center' as const, render: (c: any) => (
+          <TouchableOpacity onPress={() => openEditModal(c)}><Ionicons name="create" size={18} color="#d32f2f" /></TouchableOpacity>
+      ) }] : []),
+  ];
+
   const renderItem = ({item}: any) => {
     const statusStyle = getStatusColor(item.status);
     const isInward = item.type === 'Inward';
@@ -615,7 +639,11 @@ export default function CourierScreen() {
             <RefreshControl refreshing={courierRefreshing} onRefresh={refreshCouriers} colors={['#3b5998']} tintColor="#3b5998" />
         }
         ListEmptyComponent={<Text style={{textAlign:'center', marginTop:50, color:'gray'}}>{courierLoading ? 'Loading data...' : courierError ? 'Could not load couriers — pull down to retry.' : 'No Couriers Found'}</Text>} 
-        renderItem={renderItem} 
+        renderItem={isDesktop
+            ? ({ item, index }) => <TableRow columns={courierColumns} item={item} index={index} onPress={() => openDetails(item)} />
+            : renderItem}
+        ListHeaderComponent={isDesktop && courierList.length > 0 ? <TableHeader columns={courierColumns} /> : null}
+        stickyHeaderIndices={isDesktop && courierList.length > 0 ? [0] : undefined}
         ListFooterComponent={
             <View style={{ paddingBottom: 100 }}>
                 {courierHasMore ? (
