@@ -38,6 +38,8 @@ import { sharePdfFromHtml } from '../utils/sharePdf';
 import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTeamMembers } from '../services/api/users';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
 
 export default function PaymentCollection() {
@@ -489,6 +491,23 @@ export default function PaymentCollection() {
         } catch (error: any) { alert(error.message); }
     };
 
+    // Laptop: the same list as a table (tap a row → same details popup).
+    const isDesktop = useIsDesktop();
+    const paymentColumns: TableColumn<any>[] = [
+        { key: 'date', label: 'Date', width: 96, render: (p) => p.date || '-' },
+        { key: 'receipt', label: 'Receipt', width: 150, render: (p) => p.receiptNo || '-' },
+        { key: 'party', label: 'Party', flex: 2, render: (p) => <TwoLine main={p.orgName} sub={p.address} /> },
+        { key: 'bill', label: 'Bill / Order', width: 140, render: (p) => p.billRef || '-' },
+        { key: 'mode', label: 'Mode', width: 110, render: (p) => {
+            const m = getModeStyles(p.mode);
+            return <Pill text={p.mode || '-'} color={m.text} bg={m.bg} />;
+        } },
+        { key: 'ref', label: 'Ref / Bank', width: 150, render: (p) => <TwoLine main={p.refNumber || '-'} sub={p.bankName || (p.chequeStatus ? `Cheque: ${p.chequeStatus}` : undefined)} /> },
+        { key: 'amount', label: 'Amount', width: 110, align: 'right', render: (p) => <Text style={{ fontWeight: 'bold', color: '#27ae60', fontSize: 13 }}>{inr(p.amount)}</Text> },
+        { key: 'balance', label: 'Balance after', width: 110, align: 'right', render: (p) => p.balance !== undefined && p.balance !== null ? inr(p.balance) : '-' },
+        { key: 'staff', label: 'Staff', width: 130, render: (p) => p.senderName || p.userName || '-' },
+    ];
+
     const renderItem = ({item}: {item: any}) => {
         const modeStyle = getModeStyles(item.mode);
         const city = item.address || '';
@@ -559,7 +578,11 @@ export default function PaymentCollection() {
                 data={paymentList} 
                 keyExtractor={item => item.id} 
                 contentContainerStyle={{padding: 5, paddingBottom: 100}} 
-                renderItem={renderItem} 
+                renderItem={isDesktop
+                    ? ({ item, index }) => <TableRow columns={paymentColumns} item={item} index={index} onPress={() => setSelectedHistoryItem(item)} />
+                    : renderItem}
+                ListHeaderComponent={isDesktop && paymentList.length > 0 ? <TableHeader columns={paymentColumns} /> : null}
+                stickyHeaderIndices={isDesktop && paymentList.length > 0 ? [0] : undefined}
                 refreshControl={
                     <RefreshControl refreshing={paymentsRefreshing} onRefresh={refreshPayments} colors={['#3b5998']} tintColor="#3b5998" />
                 }

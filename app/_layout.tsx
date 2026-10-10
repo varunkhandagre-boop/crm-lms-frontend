@@ -6,7 +6,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DataProvider, useData } from './context/DataContext';
-import { DEFAULT_ON_TABS, MENU_TAG_BUCKET } from '../constants/modules';
+import { canSeeTab as canSeeTabFor } from '../utils/menuAccess';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import DesktopSidebar from '../components/DesktopSidebar';
 
 import { Notifications, notificationsAvailable } from '../utils/notificationsModule';
 import { manageAttendanceReminders, setupNotificationPermissions } from '../utils/notificationHelper';
@@ -38,13 +40,16 @@ Notifications.setNotificationHandler({
 });
 
 export default function Layout() {
+  const isDesktop = useIsDesktop();
   const app = (
     <DataProvider>
       <NavigationLayout />
     </DataProvider>
   );
   if (Platform.OS !== 'web') return app;
-  // Web: the screens are built for phones, so on a wide monitor they sit in a centred column.
+  // Laptop / desktop: full width (left menu + wide page, see NavigationLayout).
+  if (isDesktop) return app;
+  // Narrow browser window: the phone screens sit in a centred column.
   return (
     <View style={{ flex: 1, backgroundColor: '#dfe3ea', alignItems: 'center' }}>
       <View style={{ flex: 1, width: '100%', maxWidth: 1100, backgroundColor: '#f5f5f5' }}>{app}</View>
@@ -150,7 +155,9 @@ function NavigationLayout() {
       loading,
       isSubscriptionExpired, 
       companyProfile,
+      logout,
   } = useData();
+  const isDesktop = useIsDesktop();
 
   // 🔥 These 5 were previously read from DataContext (a big Firestore-backed
   // "God Context" that's since been cleaned up — see DataContext.tsx's own
@@ -342,24 +349,34 @@ if (currentUser && isSubscriptionExpired) {
     return <SubscriptionExpiredScreen />;
 }
 
-  const canSeeTab = (moduleKey: string) => {
-      const userRole = currentUser?.role || 'Service Engineer';
-      const myRole = userRole.toLowerCase().trim();
-      // Same company-level gate as index.tsx's canSee() — checked before
-      // role, applies even to Admin, skipped for SuperAdmin.
-      const bucket = MENU_TAG_BUCKET[moduleKey];
-      if (bucket && myRole !== 'superadmin' && !(companyProfile?.enabledModules || []).includes(bucket)) return false;
+  const menuCtx = { currentUser, companyProfile, appPermissions };
+  const canSeeTab = (moduleKey: string) => canSeeTabFor(moduleKey, menuCtx);
 
-      if (userRole === 'Admin' || userRole === 'SuperAdmin') return true;
-      // A per-user switch in Manage Team → Permissions wins over the role switch.
-      const userPerms = appPermissions?.[currentUser?.id || ''] || appPermissions?.[currentUser?.email || ''];
-      if (userPerms?.[moduleKey] !== undefined) return userPerms[moduleKey] === true;
-      const myPerms = appPermissions?.[userRole];
-      if (!myPerms) return true;
-      // Activity Plan and Tasks are on for everyone unless an admin switched them off.
-      if (DEFAULT_ON_TABS.includes(moduleKey)) return myPerms[moduleKey] !== false;
-      return myPerms[moduleKey] === true;
-  };
+  // Laptop / desktop web: the full menu stays on the left instead of the bottom bar.
+  const NO_SHELL = ['/login', '/register_company', '/onboarding'];
+  const desktopShell = isDesktop && !!currentUser && !NO_SHELL.includes(pathname);
+  if (desktopShell) {
+    return (
+      <View style={styles.desktopRoot}>
+        <NetworkIndicator />
+        <DesktopSidebar
+          ctx={menuCtx}
+          companyName={companyProfile?.shortName || companyProfile?.companyName || 'LMS'}
+          logoUrl={companyProfile?.logoUrl}
+          userName={currentUser?.name || ''}
+          userRole={currentUser?.role || ''}
+          badges={{ '/tasks': taskCount, '/leads': leadCount, '/service_call': serviceCount, '/organization': orgCount }}
+          onLogout={async () => { await logout(); router.replace('/login' as any); }}
+        />
+        <View style={styles.desktopMain}>
+          <PlanExpiryIndicator />
+          <View style={styles.desktopPage}>
+            <Slot />
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   const showNavBar = ['/', '/activity_plan', '/tasks', '/leads', '/service_call', '/organization'].includes(pathname);
 
@@ -488,7 +505,10 @@ const NavButton = ({ title, iconName, active, onPress, badgeCount }: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  content: { flex: 1 }, 
+  content: { flex: 1 },
+  desktopRoot: { flex: 1, flexDirection: 'row', backgroundColor: '#eef1f6' },
+  desktopMain: { flex: 1 },
+  desktopPage: { flex: 1, width: '100%', maxWidth: 1240, alignSelf: 'center', backgroundColor: '#f5f5f5', borderLeftWidth: 1, borderRightWidth: 1, borderColor: '#e4e7ee' }, 
   
   // 🔥 NETWORK INDICATOR STYLES
   networkPill: {

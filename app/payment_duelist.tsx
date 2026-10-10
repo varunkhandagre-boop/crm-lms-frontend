@@ -24,6 +24,8 @@ import { useServerPagedList } from '../hooks/useServerPagedList';
 import { buildCacheKey } from '../utils/listCache';
 import { periodRange, useDebounced } from '../utils/periodRange';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
 
 export default function PaymentDueList() {
@@ -199,12 +201,42 @@ export default function PaymentDueList() {
         });
     };
 
+    // Laptop: the same list as a table (tap a row → same details popup).
+    const isDesktop = useIsDesktop();
+    const dueColumns: TableColumn<any>[] = [
+        { key: 'date', label: 'Date', width: 96, render: (d) => d.date || d.createdAt || '-' },
+        { key: 'days', label: 'Days due', width: 80, align: 'right', render: (d) => {
+            const n = getOverdueDays(d.date || d.createdAt);
+            return n > 0 ? <Text style={{ color: '#d32f2f', fontWeight: 'bold', fontSize: 13 }}>{n}</Text> : '-';
+        } },
+        { key: 'party', label: 'Party', flex: 2, render: (d) => d.orgName || d.hospitalName || '-' },
+        { key: 'ref', label: 'Order / Bill', width: 150, render: (d) => {
+            const isOrder = d.collectionName === 'orders';
+            return <Pill text={isOrder ? `Order ${d.orderId}` : `Bill ${d.billNo || 'Manual'}`} color={isOrder ? '#1565c0' : '#6d4c41'} bg={isOrder ? '#e3f2fd' : '#efebe9'} />;
+        } },
+        { key: 'total', label: 'Bill amount', width: 110, align: 'right', render: (d) => inr(d.amount) },
+        { key: 'balance', label: 'Balance', width: 110, align: 'right', render: (d) => <Text style={{ fontWeight: 'bold', color: '#c0392b', fontSize: 13 }}>{inr(d.balance !== undefined ? d.balance : d.amount)}</Text> },
+        { key: 'reminder', label: 'Last reminder', width: 120, render: (d) => <TwoLine main={d.lastReminderDate || 'Never'} /> },
+        { key: 'act', label: '', width: 170, align: 'right', render: (d) => (
+            <View style={{ flexDirection: 'row', gap: 6 }}>
+                <TouchableOpacity style={[styles.collectBtn, { backgroundColor: '#25D366' }]} onPress={() => handleSendReminder(d)}>
+                    <Ionicons name="logo-whatsapp" size={12} color="white" />
+                    <Text style={[styles.collectBtnText, { marginLeft: 3 }]}>Remind</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.collectBtn} onPress={() => handleCollect(d)}>
+                    <Text style={styles.collectBtnText}>Collect</Text>
+                </TouchableOpacity>
+            </View>
+        ) },
+    ];
+
     const renderItem = ({ item }: any) => {
         const dateToShow = item.date || item.createdAt;
         const daysOutstanding = getOverdueDays(dateToShow);
         const displayAmount = item.balance !== undefined ? item.balance : item.amount;
         
-        const isOrder = item.orderId && typeof item.orderId === 'string' && item.orderId.startsWith('ORD');
+        // Order IDs look like LIF-26-27-019 now, so check where the row came from.
+        const isOrder = item.collectionName === 'orders';
 
         return (
             <TouchableOpacity 
@@ -296,7 +328,11 @@ export default function PaymentDueList() {
             <FlatList 
                 data={dueItems}
                 keyExtractor={item => item.id}
-                renderItem={renderItem}
+                renderItem={isDesktop
+                    ? ({ item, index }) => <TableRow columns={dueColumns} item={item} index={index} onPress={() => setSelectedItem(item)} tint={getOverdueDays(item.date || item.createdAt) > 0 ? '#e57373' : undefined} />
+                    : renderItem}
+                ListHeaderComponent={isDesktop && dueItems.length > 0 ? <TableHeader columns={dueColumns} /> : null}
+                stickyHeaderIndices={isDesktop && dueItems.length > 0 ? [0] : undefined}
                 contentContainerStyle={{padding: 15, paddingBottom: 100}}
                 refreshControl={
                     <RefreshControl

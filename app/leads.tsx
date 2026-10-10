@@ -31,6 +31,8 @@ import WebsiteLeadSettingsModal from '../components/WebsiteLeadSettingsModal';
 import { isWebsiteLead } from '../services/api/websiteLeads';
 import { formatInr } from '../constants/leadStatus';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 import { PeriodTabs } from '../components/compact';
 
 export default function LeadsScreen() {
@@ -250,6 +252,33 @@ export default function LeadsScreen() {
         Linking.openURL(`whatsapp://send?phone=91${mobile}&text=${encodeURIComponent(msg)}`).catch(() => Alert.alert("Error", "WhatsApp not installed"));
     };
 
+    // Laptop: the same list as a table (tap a row → lead details).
+    const isDesktop = useIsDesktop();
+    const openLead = (item: any) => router.push({ pathname: '/lead_details', params: { id: item.id } } as any);
+    const leadColumns: TableColumn<any>[] = [
+        { key: 'org', label: 'Hospital / Client', flex: 2, render: (l) => <TwoLine main={l.org || l.orgName} sub={[l.contactPerson, l.city].filter(Boolean).join(' • ')} /> },
+        { key: 'mobile', label: 'Mobile', width: 120, render: (l) => l.mobile || '-' },
+        { key: 'req', label: 'Requirement', flex: 1.4, render: (l) => { const r = l.requirements || l.product; return Array.isArray(r) ? (r.join(', ') || '-') : (r || '-'); } },
+        { key: 'type', label: 'Type', width: 80, render: (l) => {
+            const t = l.type || (l.isHot ? 'Hot' : 'Warm');
+            const c = t === 'Hot' ? '#d32f2f' : t === 'Warm' ? '#f57c00' : '#1976d2';
+            return <Pill text={t} color={c} bg={c + '18'} />;
+        } },
+        { key: 'stage', label: 'Stage', width: 130, render: (l) => <Pill text={l.stage || 'New'} color={getStageColor(l.stage)} bg={getStageColor(l.stage) + '20'} /> },
+        { key: 'value', label: 'Deal value', width: 100, align: 'right', render: (l) => (l.dealValue ? formatInr(l.dealValue) : '-') },
+        { key: 'next', label: 'Next follow-up', width: 140, render: (l) => {
+            const d = getFollowUpStatus(l.nextDate);
+            return <Pill text={`${d.label}${l.nextDate ? ' ' + new Date(l.nextDate).toLocaleDateString('en-GB').slice(0, 5) : ''}`} color={d.color} bg={d.bg} />;
+        } },
+        { key: 'owner', label: 'Added by', width: 120, render: (l) => <TwoLine main={nameById.get(l.senderId) || '-'} sub={isWebsiteLead(l.source) ? '🌐 Website' : undefined} /> },
+        { key: 'act', label: '', width: 70, align: 'right', render: (l) => l.mobile ? (
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+                <TouchableOpacity onPress={() => Linking.openURL(`tel:${l.mobile}`)}><Ionicons name="call" size={18} color="#3b5998" /></TouchableOpacity>
+                <TouchableOpacity onPress={() => openWhatsApp(l)}><Ionicons name="logo-whatsapp" size={19} color="#25D366" /></TouchableOpacity>
+            </View>
+        ) : null },
+    ];
+
     return (
         <View style={styles.container}>
             <View style={[styles.header, { paddingTop: headerTop }]}>
@@ -367,6 +396,8 @@ export default function LeadsScreen() {
             <FlatList
                 data={leadItems}
                 keyExtractor={item => item.id}
+                ListHeaderComponent={isDesktop && leadItems.length > 0 ? <TableHeader columns={leadColumns} /> : null}
+                stickyHeaderIndices={isDesktop && leadItems.length > 0 ? [0] : undefined}
                 contentContainerStyle={styles.contentContainer}
                 refreshControl={
                     <RefreshControl refreshing={leadsRefreshing} onRefresh={refreshLeads} colors={['#3b5998']} tintColor="#3b5998" />
@@ -378,7 +409,8 @@ export default function LeadsScreen() {
                         )}
                     </View>
                 }
-                renderItem={({ item }) => {
+                renderItem={({ item, index }) => {
+                    if (isDesktop) return <TableRow columns={leadColumns} item={item} index={index} onPress={() => openLead(item)} tint={getStageColor(item.stage)} />;
                     const dateStatus = getFollowUpStatus(item.nextDate);
                     const productInfo = item.requirements || item.product || null;
                     const leadType = item.type || (item.isHot ? 'Hot' : 'Warm');

@@ -46,6 +46,8 @@ import {
     deleteOrderPoFile,
 } from '../services/api/orders';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 import { useServerPagedList } from '../hooks/useServerPagedList';
 import { PeriodTabs, StaffPeriodRow, StatusChip, TotalBar } from '../components/compact';
 import { formatInr } from '../constants/leadStatus';
@@ -616,6 +618,33 @@ export default function OrderListScreen() {
       setModalVisible(true);
   };
 
+  // Laptop: the same list as a table (tap a row → same details popup).
+  const isDesktop = useIsDesktop();
+  const statusPill = (s: string) => {
+      const st = (s || '').trim();
+      if (st === 'Billed' || st === 'Completed') return <Pill text={st} color="#1976d2" bg="#e3f2fd" />;
+      if (st === 'Approved' || st === 'Dispatched') return <Pill text={st} color="#2e7d32" bg="#e8f5e9" />;
+      if (st === 'Rejected') return <Pill text={st} color="#c62828" bg="#ffebee" />;
+      return <Pill text={st || 'Pending'} color="#e65100" bg="#fff3e0" />;
+  };
+  const orderColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Date', width: 96, render: (o) => o.date || '-' },
+      { key: 'id', label: 'Order / PO', width: 150, render: (o) => <TwoLine main={o.orderId || '-'} sub={o.poNumber ? `PO ${o.poNumber}` : undefined} /> },
+      { key: 'party', label: 'Hospital / Client', flex: 2, render: (o) => <TwoLine main={o.hospitalName} sub={o.city} /> },
+      { key: 'product', label: 'Products', flex: 2, render: (o) => o.productDetails || '-' },
+      { key: 'amount', label: 'Amount', width: 110, align: 'right', render: (o) => <TwoLine main={inr(o.amount)} sub={Number(o.advanceAmount) > 0 ? `Adv ${inr(o.advanceAmount)}` : undefined} /> },
+      { key: 'balance', label: 'Balance', width: 100, align: 'right', render: (o) => o.balance !== undefined && o.balance !== null ? inr(o.balance) : '-' },
+      { key: 'type', label: 'Type', width: 70, render: (o) => (o.saleType || 'Credit') },
+      { key: 'status', label: 'Status', width: 100, render: (o) => statusPill(o.status) },
+      { key: 'staff', label: 'Staff', width: 130, render: (o) => <TwoLine main={o.senderName || o.userName || '-'} sub={o.bookedBy && o.bookedBy !== o.senderName ? `by ${o.bookedBy}` : undefined} /> },
+      { key: 'act', label: '', width: 44, align: 'center', render: (o) => {
+          const st = (o.status || '').trim().toLowerCase();
+          return isStrictAdmin && (st === 'pending' || st === 'approved')
+              ? <TouchableOpacity onPress={() => openEditModal(o)}><Ionicons name="create" size={18} color="#d32f2f" /></TouchableOpacity>
+              : (o.poFileUri ? <Ionicons name="attach" size={16} color="gray" /> : null);
+      } },
+  ];
+
   const renderItem = ({ item }: any) => {
       const currentStatus = (item.status || '').trim(); 
       const lowerStatus = currentStatus.toLowerCase();
@@ -761,7 +790,11 @@ export default function OrderListScreen() {
       <FlatList 
           data={orderList}
           keyExtractor={item => item.id}
-          renderItem={renderItem}
+          renderItem={isDesktop
+              ? ({ item, index }) => <TableRow columns={orderColumns} item={item} index={index} onPress={() => openDetails(item)} />
+              : renderItem}
+          ListHeaderComponent={isDesktop && orderList.length > 0 ? <TableHeader columns={orderColumns} /> : null}
+          stickyHeaderIndices={isDesktop && orderList.length > 0 ? [0] : undefined}
           contentContainerStyle={{padding: 5, paddingBottom: 100}} 
           refreshControl={
               <RefreshControl refreshing={ordersRefreshing} onRefresh={refreshOrders} colors={['#3b5998']} tintColor="#3b5998" />

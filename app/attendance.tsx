@@ -21,6 +21,8 @@ import { fetchHolidays } from '../services/api/holidays';
 import { fetchLeaves } from '../services/api/leaves';
 import { fetchTeamMembers } from '../services/api/users';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';
 
 export default function AttendanceScreen() {
@@ -489,6 +491,35 @@ export default function AttendanceScreen() {
 
   const handleItemClick = (item: any) => { setSelectedItem(item); setDetailModalVisible(true); };
 
+  // Laptop: the same rows as a table (tap a row → same details as on the phone).
+  const isDesktop = useIsDesktop();
+  const STATUS_PILL: Record<string, { text: string; color: string; bg: string }> = {
+      PRESENT: { text: 'Present', color: '#2e7d32', bg: '#e8f5e9' },
+      SHORT: { text: 'Short', color: '#ef6c00', bg: '#fff3e0' },
+      LEAVE: { text: 'Leave', color: '#e65100', bg: '#fff3e0' },
+      HOLIDAY: { text: 'Holiday', color: '#c2185b', bg: '#fce4ec' },
+      ABSENT: { text: 'Absent', color: '#d32f2f', bg: '#ffebee' },
+  };
+  const attendanceColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Date', width: 110, render: (a) => <TwoLine main={formatDateDisplay(a.date)} sub={getDayName(a.date)} /> },
+      { key: 'emp', label: 'Employee', flex: 1.4, render: (a) => (a.senderName === 'Summary' ? `👥 ${a.inTime}` : a.senderName || '-') },
+      { key: 'status', label: 'Status', width: 100, render: (a) => {
+          const p = STATUS_PILL[getStatus(a)] || STATUS_PILL.PRESENT;
+          return a.senderName === 'Summary' ? '-' : <Pill text={p.text} color={p.color} bg={p.bg} />;
+      } },
+      { key: 'in', label: 'In', width: 90, render: (a) => (['LEAVE', 'HOLIDAY', 'ABSENT'].includes(getStatus(a)) || a.senderName === 'Summary' ? '-' : a.inTime || '-') },
+      { key: 'out', label: 'Out', width: 110, render: (a) => {
+          const st = getStatus(a);
+          if (st === 'LEAVE' || st === 'HOLIDAY') return a.outTime || '-';
+          if (st === 'ABSENT' || a.senderName === 'Summary') return '-';
+          return st === 'SHORT' && (!a.outTime || a.outTime === '--') ? <Text style={{ color: '#ef6c00', fontWeight: 'bold', fontSize: 13 }}>Forgot?</Text> : a.outTime || '-';
+      } },
+      { key: 'hrs', label: 'Hours', width: 80, align: 'right', render: (a) => a.workHrs || '-' },
+      { key: 'where', label: 'Office / Field', width: 110, render: (a) => a.workLocationType
+          ? <Pill text={a.workLocationType} color="white" bg={a.workLocationType === 'Office' ? '#2e7d32' : '#e65100'} /> : '-' },
+      { key: 'exp', label: 'Day Out expense', width: 120, align: 'right', render: (a) => (Number(a.expenses?.totalAmount) > 0 ? inr(a.expenses.totalAmount) : '-') },
+  ];
+
   const renderItem = ({ item }: any) => {
     const status = getStatus(item);
     const isLeave = status === 'LEAVE';
@@ -690,7 +721,10 @@ export default function AttendanceScreen() {
                     <FlatList 
                         data={displayData} 
                         keyExtractor={(item, index) => item.id || `key-${index}`} 
-                        renderItem={renderItem} 
+                        renderItem={isDesktop
+                            ? ({ item, index }) => <TableRow columns={attendanceColumns} item={item} index={index} onPress={() => handleItemClick(item)} />
+                            : renderItem}
+                        ListHeaderComponent={isDesktop && displayData.length > 0 ? <TableHeader columns={attendanceColumns} /> : null} 
                         scrollEnabled={false} 
                         contentContainerStyle={{paddingHorizontal: 15}} 
                         ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>{statusFilter ? 'Nothing in this group' : `No data for ${getHeaderDateText()}`}</Text>} 
