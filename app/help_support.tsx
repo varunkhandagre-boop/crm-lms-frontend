@@ -35,7 +35,7 @@ type HelpModule = 'common' | 'hr' | 'sales' | 'service';
 type CatKey = 'start' | 'attendance' | 'leaves' | 'payroll' | 'expenses' | 'office' | 'sales' | 'orders' | 'service' | 'reports' | 'admin';
 
 const CATEGORIES: { key: CatKey; label: string; icon: any; module: HelpModule; keywords: string }[] = [
-    { key: 'start', label: 'Getting Started', icon: 'rocket', module: 'common', keywords: 'login password app web laptop computer notification profile slow photo shuru' },
+    { key: 'start', label: 'Getting Started', icon: 'rocket', module: 'common', keywords: 'login password app web laptop computer notification profile slow photo shuru start setup first kaise excel upload template sample' },
     { key: 'attendance', label: 'Attendance & Tracking', icon: 'finger-print', module: 'hr', keywords: 'day in day out hajri haziri gps location map km shift weekly off' },
     { key: 'leaves', label: 'Leaves', icon: 'calendar', module: 'hr', keywords: 'chutti leave cl sl el half day holiday balance' },
     { key: 'payroll', label: 'Payroll & Salary', icon: 'cash', module: 'hr', keywords: 'salary tankhwah payslip overtime late deduction bank full final' },
@@ -56,6 +56,33 @@ type FaqItem = { cat: CatKey; module?: HelpModule; q: string; a: string };
 // 📋 USER GUIDE SECTIONS
 // =========================================================
 const GUIDE_SECTIONS: GuideSection[] = [
+    {
+        icon: 'flag',
+        color: '#0d47a1',
+        cat: 'start',
+        title: 'Start Here — First Setup, Step by Step',
+        steps: [
+            'Step 1 — Company Profile: Sidebar → Company Profile. Fill company name, address, phone, email, GST and bank details, and upload your logo and signature. These appear on every PDF.',
+            'Step 2 — Add users: Sidebar → Admin Control → Users tab → "+". Enter name, email, password, mobile and role. The email and password are that employee\'s login.',
+            'Step 3 — Add organizations (your customers): Sidebar → Org → "Add New". Type the details, or tap "Scan Visiting Card (Auto-Fill)" to fill them from a photo.',
+            'Step 4 — Your team installs the app from Google Play (or opens app.lifelinem.com on a laptop) and logs in with the email and password you gave them.',
+            'Have many employees, products or holidays? Use "Set Up Everything at Once with Excel" below instead of adding them one by one.',
+        ],
+    },
+    {
+        icon: 'cloud-upload',
+        color: '#2e7d32',
+        cat: 'start',
+        title: 'Set Up Everything at Once with Excel',
+        steps: [
+            'Go to Sidebar → Admin Control → Setup tab. You will see Company Profile, Employees, Products / Price List and Holidays.',
+            'Company Profile: tap "Download Company Sheet", fill the "Value" column in Excel and upload it.',
+            'Employees, Products and Holidays: open each one, tap "Download Template" (Step 1) and fill the sample sheet in Excel.',
+            'Upload each filled sheet (Step 2). Check the preview and confirm — your company profile, users, products and holidays are added in one go.',
+            'New employees added from Excel get a starting password, shown on screen after the upload. Share it with them.',
+            'Logo, signature, UPI QR code and office location are added in Company Profile itself, not in Excel.',
+        ],
+    },
     {
         icon: 'laptop',
         color: '#37474f',
@@ -789,6 +816,11 @@ const GUIDE_SECTIONS: GuideSection[] = [
 // 📋 FAQ DATA
 // =========================================================
 const FAQS: FaqItem[] = [
+    {
+        cat: 'start',
+        q: 'I am new. How do I start?',
+        a: `1. Fill Company Profile (Sidebar → Company Profile). 2. Add users (Admin Control → Users → "+"). 3. Add your customers (Sidebar → Org → "Add New", or scan their visiting card). To add many employees, products and holidays at once, use Admin Control → Setup: download each sample Excel, fill it and upload it.`,
+    },
     {
         cat: 'start',
         q: 'Can I use the app on a laptop or computer?',
