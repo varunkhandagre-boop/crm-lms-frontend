@@ -40,6 +40,8 @@ import { fetchTeamMembers } from '../services/api/users';
 import { listSpareParts } from '../services/api/spareParts';
 import { sortAndFilterParts } from '../utils/sparePartSearch';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
 
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -635,6 +637,25 @@ export default function ServiceCallScreen() {
     );
   };
 
+  // Laptop: the same list as a table (tap a row → same details popup).
+  const isDesktop = useIsDesktop();
+  const callColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Date', width: 100, render: (c) => c.dateIso || c.date || '-' },
+      { key: 'ticket', label: 'Ticket', width: 140, render: (c) => <TwoLine main={c.scrId || '-'} sub={c.serviceType || c.type} /> },
+      { key: 'party', label: 'Hospital', flex: 1.6, render: (c) => <TwoLine main={c.hospitalName} sub={c.city} /> },
+      { key: 'machine', label: 'Machine', flex: 1.4, render: (c) => <TwoLine main={c.machine || '-'} sub={[c.model, c.serialNo && `SN ${c.serialNo}`].filter(Boolean).join(' • ')} /> },
+      { key: 'problem', label: 'Problem', flex: 1.6, render: (c) => c.remark || '-' },
+      { key: 'eng', label: 'Engineer', width: 130, render: (c) => c.assignedToId
+          ? (engineerNameById.get(c.assignedToId) || '—')
+          : <Text style={{ color: '#c62828', fontSize: 13 }}>Not assigned</Text> },
+      { key: 'age', label: 'Time', width: 140, render: (c) => renderAge(c) || '-' },
+      { key: 'status', label: 'Status', width: 100, render: (c) => {
+          const s = getStatusColor(c.status);
+          return <Pill text={c.status || '-'} color={s.text} bg={s.bg} />;
+      } },
+      { key: 'by', label: 'Logged by', width: 110, render: (c) => (c.senderName || '-') },
+  ];
+
   const renderCard = ({ item }: any) => {
     const statusStyle = getStatusColor(item.status);
     return (
@@ -749,7 +770,11 @@ export default function ServiceCallScreen() {
       <FlatList
         data={serviceCallList}
         keyExtractor={item => item.id}
-        renderItem={renderCard}
+        renderItem={isDesktop
+            ? ({ item, index }) => <TableRow columns={callColumns} item={item} index={index} onPress={() => openDetails(item)} />
+            : renderCard}
+        ListHeaderComponent={isDesktop && serviceCallList.length > 0 ? <TableHeader columns={callColumns} /> : null}
+        stickyHeaderIndices={isDesktop && serviceCallList.length > 0 ? [0] : undefined}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         contentContainerStyle={styles.contentContainer}
         ListEmptyComponent={

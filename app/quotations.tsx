@@ -18,6 +18,8 @@ import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import { sharePdfFromHtml } from '../utils/sharePdf';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 
 export default function QuotationsListScreen() {
@@ -329,6 +331,18 @@ export default function QuotationsListScreen() {
         }
     };
 
+    // Laptop: the same list as a table (tap a row → same details popup).
+    const isDesktop = useIsDesktop();
+    const quoteColumns: TableColumn<any>[] = [
+        { key: 'date', label: 'Date', width: 100, render: (q) => q.date || '-' },
+        { key: 'est', label: 'Estimate No.', width: 170, render: (q) => <TwoLine main={q.estimateNo || '-'} sub={q.docTitle} /> },
+        { key: 'org', label: 'Client', flex: 2, render: (q) => <TwoLine main={q.orgName} sub={q.orgAddress} /> },
+        { key: 'items', label: 'Items', flex: 2, render: (q) => (q.items || []).map((i: any) => i.name).filter(Boolean).slice(0, 3).join(', ') + ((q.items?.length || 0) > 3 ? ` +${q.items.length - 3}` : '') || '-' },
+        { key: 'total', label: 'Grand total', width: 120, align: 'right', render: (q) => <Text style={{ fontWeight: 'bold', fontSize: 13, color: '#1565c0' }}>{inr(q.grandTotal)}</Text> },
+        { key: 'status', label: 'Status', width: 90, render: (q) => <Pill text={q.status || 'Saved'} color="#1565c0" bg="#e3f2fd" /> },
+        ...(canManage ? [{ key: 'by', label: 'Made by', width: 120, render: (q: any) => q.senderName || 'Admin' }] : []),
+    ];
+
     const renderItem = ({ item }: any) => {
         return (
             <TouchableOpacity style={styles.card} activeOpacity={0.8} onPress={() => setSelectedQuote(item)}>
@@ -404,7 +418,11 @@ export default function QuotationsListScreen() {
                 <FlatList 
                     data={renderedList}
                     keyExtractor={item => item.id}
-                    renderItem={renderItem}
+                    renderItem={isDesktop
+                        ? ({ item, index }) => <TableRow columns={quoteColumns} item={item} index={index} onPress={() => setSelectedQuote(item)} />
+                        : renderItem}
+                    ListHeaderComponent={isDesktop && renderedList.length > 0 ? <TableHeader columns={quoteColumns} /> : null}
+                    stickyHeaderIndices={isDesktop && renderedList.length > 0 ? [0] : undefined}
                     contentContainerStyle={{padding: 15, paddingBottom: 50}}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                     ListEmptyComponent={

@@ -25,6 +25,8 @@ import RecordPhotoSection from '../components/RecordPhotoSection';
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 import { useServerPagedList } from '../hooks/useServerPagedList';
 import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';
@@ -244,6 +246,32 @@ export default function ExpenseScreen() {
       }
   };
 
+  // Laptop: the same list as a table (tap a row → same details popup).
+  const isDesktop = useIsDesktop();
+  const expenseStatusPill = (e: any) => {
+      const label = e.rowKind === 'request' && e.status === 'Used' ? 'Bill Added' : e.status;
+      if (e.status === 'Approved') return <Pill text={label} color="#2e7d32" bg="#e8f5e9" />;
+      if (e.status === 'Rejected') return <Pill text={label} color="#c62828" bg="#ffebee" />;
+      if (e.status === 'Settled' || e.status === 'Used') return <Pill text={label} color="#1565c0" bg="#e3f2fd" />;
+      if (e.rowKind === 'daily') return <Pill text={label || 'Day Out'} color="#6a1b9a" bg="#f3e5f5" />;
+      return <Pill text={label || 'Pending'} color="#ef6c00" bg="#fff3e0" />;
+  };
+  const expenseColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Date', width: 100, render: (e) => e.date || '-' },
+      { key: 'kind', label: 'Kind', width: 120, render: (e) => e.rowKind === 'daily'
+          ? <Pill text="Day Out" color="white" bg="#6a1b9a" />
+          : e.rowKind === 'request' ? <Pill text="Approval request" color="white" bg="#e65100" />
+          : e.requestId ? <Pill text="Pre-approved" color="white" bg="#2e7d32" /> : <Pill text="Claim" color="#455a64" bg="#eceff1" /> },
+      ...(canManage ? [{ key: 'emp', label: 'Employee', width: 140, render: (e: any) => e.senderName || '-' }] : []),
+      { key: 'type', label: 'Type', width: 130, render: (e) => e.type || '-' },
+      { key: 'remark', label: 'Details', flex: 2, render: (e) => e.rowKind === 'daily'
+          ? [e.da && `DA ₹${e.da}`, e.hotel && `Hotel ₹${e.hotel}`, e.misc && `Misc ₹${e.misc}`].filter(Boolean).join(' · ') + (e.remark ? ` — ${e.remark}` : '')
+          : (e.remark || '-') },
+      { key: 'bill', label: 'Bill', width: 50, align: 'center', render: (e) => (e.imageUri ? <Ionicons name="attach" size={16} color="#3b5998" /> : '-') },
+      { key: 'amount', label: 'Amount', width: 110, align: 'right', render: (e) => <Text style={{ fontWeight: 'bold', fontSize: 13, color: '#2d3748' }}>{inr(e.amount)}</Text> },
+      { key: 'status', label: 'Status', width: 110, render: (e) => expenseStatusPill(e) },
+  ];
+
   const renderItem = ({ item }: any) => {
     let statusColor = '#fff3e0'; 
     let statusTextCol = '#ef6c00';
@@ -403,8 +431,12 @@ export default function ExpenseScreen() {
 
       <FlatList 
         data={fullFilteredList}
+        ListHeaderComponent={isDesktop && fullFilteredList.length > 0 ? <TableHeader columns={expenseColumns} /> : null}
+        stickyHeaderIndices={isDesktop && fullFilteredList.length > 0 ? [0] : undefined}
         keyExtractor={item => item.id}
-        renderItem={renderItem}
+        renderItem={isDesktop
+            ? ({ item, index }) => <TableRow columns={expenseColumns} item={item} index={index} onPress={() => openDetails(item)} />
+            : renderItem}
         contentContainerStyle={{padding: 12}}
         refreshControl={
             <RefreshControl refreshing={expensesRefreshing} onRefresh={refreshExpenses} colors={['#3b5998']} tintColor="#3b5998" />

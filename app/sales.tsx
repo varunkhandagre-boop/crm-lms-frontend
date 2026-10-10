@@ -28,6 +28,8 @@ import { isCurrentFy, localYmd, periodRange, useDebounced } from '../utils/perio
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
 
 export default function SalesReportScreen() {
@@ -260,6 +262,21 @@ export default function SalesReportScreen() {
       );
   };
 
+    // Laptop: the same list as a table (tap a row → same details / lead).
+    const isDesktop = useIsDesktop();
+    const visitColumns: TableColumn<any>[] = [
+        { key: 'date', label: 'Date', width: 100, render: (v) => formatDateDisplay(v.dateIso || v.date) },
+        { key: 'type', label: 'Type', width: 100, render: (v) => v.visitType === 'Cold Call'
+            ? <Pill text="Cold Call" color="#1565c0" bg="#e3f2fd" />
+            : <Pill text={v.visitType || 'Visit'} color="#f57f17" bg="#fff3e0" /> },
+        { key: 'org', label: 'Hospital', flex: 1.6, render: (v) => <TwoLine main={v.hospital || v.hospitalName} sub={[getCity(v), v.person].filter(Boolean).join(' • ')} /> },
+        { key: 'product', label: 'Product', flex: 1.2, render: (v) => (Array.isArray(v.product) ? v.product.join(', ') : v.product) || '-' },
+        { key: 'outcome', label: 'Outcome', width: 140, render: (v) => v.outcome || '-' },
+        { key: 'notes', label: 'Discussion', flex: 1.8, render: (v) => (v.discussion ? String(v.discussion).split('\n')[0] : '-') },
+        { key: 'next', label: 'Next follow-up', width: 120, render: (v) => v.nextFollowUp ? <Text style={{ color: '#d32f2f', fontWeight: 'bold', fontSize: 13 }}>{v.nextFollowUp}</Text> : '-' },
+        { key: 'by', label: 'Staff', width: 120, render: (v) => v.senderName || v.userName || (userList || []).find((u: any) => u.id === v.senderId)?.name || '-' },
+    ];
+
     const renderItem = ({ item }: any) => {
       const isColdCall = item.visitType === 'Cold Call';
       const city = getCity(item); 
@@ -376,7 +393,11 @@ export default function SalesReportScreen() {
           data={salesVisitList}
           keyExtractor={item => item.id}
           contentContainerStyle={styles.listContent}
-          renderItem={renderItem}
+          renderItem={isDesktop
+              ? ({ item, index }) => <TableRow columns={visitColumns} item={item} index={index} onPress={() => openDetails(item)} tint={item.visitType === 'Cold Call' ? '#1976d2' : '#f57f17'} />
+              : renderItem}
+          ListHeaderComponent={isDesktop && salesVisitList.length > 0 ? <TableHeader columns={visitColumns} /> : null}
+          stickyHeaderIndices={isDesktop && salesVisitList.length > 0 ? [0] : undefined}
           refreshControl={
               <RefreshControl refreshing={refreshing} onRefresh={refreshSalesVisits} colors={['#1565c0']} tintColor="#1565c0" />
           }
