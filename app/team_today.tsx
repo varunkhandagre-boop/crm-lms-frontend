@@ -7,7 +7,7 @@ import { formatInr } from '../constants/leadStatus';
 import { getTeamDay, TeamDay } from '../services/api/teamDay';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 
-// Opened from the 8 PM "Team today" notification (or Sales Calculation).
+// Opened from the 8 PM "Team today" notification (or Team Performance).
 // Shows the same numbers as the notification, per salesperson, for any day.
 
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

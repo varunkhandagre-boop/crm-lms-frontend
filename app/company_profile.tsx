@@ -49,13 +49,7 @@ export default function CompanyProfileScreen() {
     const [stateSearchQuery, setStateSearchQuery] = useState('');
     const [citySearchQuery, setCitySearchQuery] = useState('');
 
-    const [subscriptionInfo, setSubscriptionInfo] = useState({
-        planName: 'Loading...',
-        expiryDate: 'Loading...',
-        maxEmployees: 10,
-        currentEmployees: 0,
-        isActive: false
-    });
+
 
     const [profile, setProfile] = useState({
         companyName: '', shortName: '', tagline: '',
@@ -83,17 +77,7 @@ export default function CompanyProfileScreen() {
                     officeLatitude: cp.officeLatitude ?? null, officeLongitude: cp.officeLongitude ?? null,
                 }));
 
-                let formattedExpiry = 'Unknown';
-                if (cp.expiryDate) {
-                    formattedExpiry = new Date(cp.expiryDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-                }
-                setSubscriptionInfo({
-                    planName: cp.plan || 'Free Trial',
-                    expiryDate: formattedExpiry,
-                    maxEmployees: cp.maxEmployees || 10,
-                    currentEmployees: cp.currentEmployees || 0,
-                    isActive: cp.isActive
-                });
+
             } finally {
                 setLoading(false);
             }
@@ -227,9 +211,7 @@ export default function CompanyProfileScreen() {
 
     if (loading) return <View style={styles.center}><ActivityIndicator size="large" color="#3b5998" /></View>;
 
-    const usagePercent = subscriptionInfo.maxEmployees > 0 
-        ? (subscriptionInfo.currentEmployees / subscriptionInfo.maxEmployees) * 100 
-        : 0;
+
 
     // ✅ MODALS + MAIN UI sab return() ke ANDAR hain
     return (
@@ -254,43 +236,6 @@ export default function CompanyProfileScreen() {
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled" 
                 >
-                    {/* 0. SUBSCRIPTION INFO CARD */}
-                    <View style={[styles.section, { backgroundColor: '#f0f4ff', borderColor: '#d0d9ff', borderWidth: 1 }]}>
-                        <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10}}>
-                            <View>
-                                <Text style={{fontSize: 12, color: '#555', fontWeight: 'bold'}}>CURRENT PLAN</Text>
-                                <Text style={{fontSize: 18, color: '#3b5998', fontWeight: 'bold'}}>{subscriptionInfo.planName}</Text>
-                            </View>
-                            <View style={{alignItems: 'flex-end'}}>
-                                <Text style={{fontSize: 12, color: '#555', fontWeight: 'bold'}}>VALID TILL</Text>
-                                <Text style={{fontSize: 16, color: subscriptionInfo.isActive ? '#2e7d32' : '#d32f2f', fontWeight: 'bold'}}>
-                                    {subscriptionInfo.expiryDate}
-                                </Text>
-                            </View>
-                        </View>
-                        <View style={{marginTop: 10}}>
-                            <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5}}>
-                                <Text style={{fontSize: 12, color: '#555', fontWeight: 'bold'}}>EMPLOYEES USED</Text>
-                                <Text style={{fontSize: 12, color: '#333', fontWeight: 'bold'}}>{subscriptionInfo.currentEmployees} / {subscriptionInfo.maxEmployees}</Text>
-                            </View>
-                            <View style={{height: 8, backgroundColor: '#ddd', borderRadius: 4, overflow: 'hidden'}}>
-                                <View style={{height: '100%', width: `${Math.min(usagePercent, 100)}%`, backgroundColor: usagePercent >= 100 ? '#d32f2f' : '#4caf50'}} />
-                            </View>
-                            {usagePercent >= 100 && (
-                                <Text style={{fontSize: 10, color: '#d32f2f', marginTop: 5, textAlign: 'right'}}>Limit reached. Contact Admin to upgrade.</Text>
-                            )}
-                        </View>
-                        {currentUser?.role?.toLowerCase() === 'admin' && (
-                            <TouchableOpacity 
-                                style={{ backgroundColor: '#2e7d32', padding: 12, borderRadius: 8, marginTop: 15, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', elevation: 2 }}
-                                onPress={() => router.push({ pathname: '/SubscriptionScreen' as any, params: { companyId: currentUser?.companyId } })}
-                            >
-                                <Ionicons name="rocket-outline" size={18} color="white" style={{ marginRight: 8 }} />
-                                <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 14 }}>Upgrade / Renew Plan</Text>
-                            </TouchableOpacity>
-                        )}
-                    </View>
-
                     {/* 1. BRANDING */}
                     <View style={styles.section}>
                         <Text style={styles.sectionHeader}>🏢 Branding & Identity</Text>

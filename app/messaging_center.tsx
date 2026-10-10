@@ -60,8 +60,11 @@ export default function MessagingCenterScreen() {
                     <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} style={{ padding: 5 }}>
                         <Ionicons name="arrow-back" size={24} color="white" />
                     </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Messaging Center</Text>
-                    <View style={{ width: 30 }} />
+                    <Text style={styles.headerTitle}>WhatsApp & Email</Text>
+                    {/* Automation (API keys, on/off) used to be its own sidebar item. */}
+                    <TouchableOpacity onPress={() => router.push('/automation_settings' as any)} style={{ padding: 5 }} accessibilityLabel="Automation settings">
+                        <Ionicons name="settings-outline" size={22} color="white" />
+                    </TouchableOpacity>
                 </View>
 
                 <View>

@@ -366,7 +366,7 @@ const saveTokenToDatabase = async (token: string) => {
                           <Ionicons name={activeSection === 'HR' ? "chevron-up" : "chevron-down"} size={20} color={activeSection === 'HR' ? "white" : "gray"} />
                       </TouchableOpacity>
                       {(isDesktop || activeSection === 'HR') && (
-                          <View style={styles.gridContainer}>
+                          <View style={[styles.gridContainer, isDesktop && styles.gridContainerDesktop]}>
                               {visibleHR.map((item, index) => <MenuItem key={index} {...item} desktop={isDesktop} onPress={() => router.push(item.route as any)} />)}
                           </View>
                       )}
@@ -383,7 +383,7 @@ const saveTokenToDatabase = async (token: string) => {
                           <Ionicons name={activeSection === 'Activity' ? "chevron-up" : "chevron-down"} size={20} color={activeSection === 'Activity' ? "white" : "gray"} />
                       </TouchableOpacity>
                       {(isDesktop || activeSection === 'Activity') && (
-                          <View style={styles.gridContainer}>
+                          <View style={[styles.gridContainer, isDesktop && styles.gridContainerDesktop]}>
                               {visibleActivity.map((item, index) => <MenuItem key={index} {...item} desktop={isDesktop} onPress={() => router.push(item.route as any)} />)}
                           </View>
                       )}
@@ -400,7 +400,7 @@ const saveTokenToDatabase = async (token: string) => {
                           <Ionicons name={activeSection === 'Sales' ? "chevron-up" : "chevron-down"} size={20} color={activeSection === 'Sales' ? "white" : "gray"} />
                       </TouchableOpacity>
                       {(isDesktop || activeSection === 'Sales') && (
-                          <View style={styles.gridContainer}>
+                          <View style={[styles.gridContainer, isDesktop && styles.gridContainerDesktop]}>
                               {visibleSales.map((item, index) => <MenuItem key={index} {...item} desktop={isDesktop} onPress={() => router.push(item.route as any)} />)}
                           </View>
                       )}
@@ -507,9 +507,11 @@ const styles = StyleSheet.create({
   accordionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'white', padding: 13, borderRadius: 10, marginTop: 8, elevation: 2 },
   activeHeader: { backgroundColor: '#3b5998' }, 
   sectionTitle: { fontSize: 16, fontWeight: 'bold', marginLeft: 10, color: '#333' },
-  gridContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-start', backgroundColor:'#f9f9f9', padding: 10, borderBottomLeftRadius:10, borderBottomRightRadius:10, marginBottom:0, paddingTop: 10, paddingBottom: 2 },
-  menuItem: { width: '31%', alignItems: 'center', marginBottom: 4, marginRight: '2%' },
-  menuItemDesktop: { width: 112, marginRight: 12, marginBottom: 10 },
+  // Phone: 3 tiles per row; a short last row is centred so 4, 7 or 8 tiles still look even.
+  gridContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', backgroundColor:'#f9f9f9', padding: 10, borderBottomLeftRadius:10, borderBottomRightRadius:10, marginBottom:0, paddingTop: 10, paddingBottom: 2 },
+  menuItem: { width: '31%', alignItems: 'center', marginBottom: 4, marginHorizontal: '1%' },
+  gridContainerDesktop: { justifyContent: 'flex-start' },
+  menuItemDesktop: { width: 112, marginHorizontal: 0, marginRight: 12, marginBottom: 10 },
   iconCircle: { width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center', marginBottom: 6, elevation: 2, position:'relative' },
   menuText: { fontSize: 11, color: '#333', textAlign: 'center', fontWeight:'600', height: 30 },
   menuBadge: { 

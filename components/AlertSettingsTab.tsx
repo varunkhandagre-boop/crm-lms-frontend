@@ -29,7 +29,7 @@ function toDate(hhmm: string): Date {
 
 const toHHMM = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 
-/** "Alerts" tab in Admin Control (manage_team.tsx): daily alert on/off + time. */
+/** "Alerts" tab in Team & Settings (manage_team.tsx): daily alert on/off + time. */
 export default function AlertSettingsTab() {
     const { currentUser } = useData();
     const isAllowed = ['Admin', 'SuperAdmin'].includes(currentUser?.role || '');

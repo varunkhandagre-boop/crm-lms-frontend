@@ -68,7 +68,7 @@ export default function ManageTeamScreen() {
                 >
                     <Ionicons name="arrow-back" size={24} color="white" />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Admin Control</Text>
+                <Text style={styles.headerTitle}>Team & Settings</Text>
                 <View style={{width:30}}/>
             </View>
 

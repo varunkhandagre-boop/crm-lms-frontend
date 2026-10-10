@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -13,9 +13,9 @@ import {
     View
 } from 'react-native';
 
-import { useHeaderTop } from '../hooks/useHeaderTop';
 import { AutomationSettings, fetchAutomationSettings, saveAutomationSettings } from '../services/api/automationSettings';
 import { useData } from './context/DataContext';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 const WHATSAPP_PROVIDERS = [
     { label: 'AiSensy', value: 'aisensy' },
@@ -128,7 +128,7 @@ export default function AutomationSettingsScreen() {
                     <TouchableOpacity onPress={() => router.back()}>
                         <Ionicons name="arrow-back" size={24} color="#333" />
                     </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Automation Settings</Text>
+                    <Text style={styles.headerTitle}>WhatsApp & Email Settings</Text>
                     <View style={{ width: 24 }} />
                 </View>
                 <View style={styles.centerBox}>
@@ -149,7 +149,7 @@ export default function AutomationSettingsScreen() {
                 <TouchableOpacity onPress={() => router.back()}>
                     <Ionicons name="arrow-back" size={24} color="#333" />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Automation Settings</Text>
+                <Text style={styles.headerTitle}>WhatsApp & Email Settings</Text>
                 <View style={{ width: 24 }} />
             </View>
 
@@ -182,7 +182,7 @@ export default function AutomationSettingsScreen() {
                     <Text style={styles.label}>API Key</Text>
                     <TextInput
                         style={styles.input}
-                        placeholder="Copy from the provider dashboard"
+                        placeholder="Provider dashboard se copy karein"
                         value={whatsappApiKey}
                         onChangeText={setWhatsappApiKey}
                         secureTextEntry
@@ -194,7 +194,7 @@ export default function AutomationSettingsScreen() {
                             <Text style={styles.label}>Phone Number ID (Meta Cloud only)</Text>
                             <TextInput
                                 style={styles.input}
-                                placeholder="Find it in Meta Business Manager"
+                                placeholder="Meta Business Manager se milega"
                                 value={whatsappSenderId}
                                 onChangeText={setWhatsappSenderId}
                                 autoCapitalize="none"
@@ -230,7 +230,7 @@ export default function AutomationSettingsScreen() {
                     <Text style={styles.label}>API Key</Text>
                     <TextInput
                         style={styles.input}
-                        placeholder="Copy from the SendGrid dashboard"
+                        placeholder="SendGrid dashboard se copy karein"
                         value={emailApiKey}
                         onChangeText={setEmailApiKey}
                         secureTextEntry

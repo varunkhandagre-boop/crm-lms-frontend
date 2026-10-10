@@ -63,7 +63,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         title: 'Start Here — First Setup, Step by Step',
         steps: [
             'Step 1 — Company Profile: Sidebar → Company Profile. Fill company name, address, phone, email, GST and bank details, and upload your logo and signature. These appear on every PDF.',
-            'Step 2 — Add users: Sidebar → Admin Control → Users tab → "+". Enter name, email, password, mobile and role. The email and password are that employee\'s login.',
+            'Step 2 — Add users: Sidebar → Team & Settings → Users tab → "+". Enter name, email, password, mobile and role. The email and password are that employee\'s login.',
             'Step 3 — Add organizations (your customers): Sidebar → Org → "Add New". Type the details, or tap "Scan Visiting Card (Auto-Fill)" to fill them from a photo.',
             'Step 4 — Your team installs the app from Google Play (or opens app.lifelinem.com on a laptop) and logs in with the email and password you gave them.',
             'Have many employees, products or holidays? Use "Set Up Everything at Once with Excel" below instead of adding them one by one.',
@@ -75,7 +75,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         cat: 'start',
         title: 'Set Up Everything at Once with Excel',
         steps: [
-            'Go to Sidebar → Admin Control → Setup tab. You will see Company Profile, Employees, Products / Price List and Holidays.',
+            'Go to Sidebar → Team & Settings → Setup tab. You will see Company Profile, Employees, Products / Price List and Holidays.',
             'Company Profile: tap "Download Company Sheet", fill the "Value" column in Excel and upload it.',
             'Employees, Products and Holidays: open each one, tap "Download Template" (Step 1) and fill the sample sheet in Excel.',
             'Upload each filled sheet (Step 2). Check the preview and confirm — your company profile, users, products and holidays are added in one go.',
@@ -178,7 +178,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         cat: 'attendance',
         title: 'Employee Day Map (Tracking)',
         steps: [
-            'Admin / Manager: Admin Control → Live Map tab → choose an employee and a date to see the route on the map with the total km.',
+            'Admin / Manager: Team & Settings → Live Map tab → choose an employee and a date to see the route on the map with the total km.',
             'Points come from Day In / Day Out, visits, orders, payments and the on-duty location every 30 minutes.',
             'Wrong GPS jumps (very far or too fast) are ignored, so the km may be less than the raw points suggest.',
         ],
@@ -231,7 +231,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         cat: 'admin',
         title: 'Adding New Users / Employees',
         steps: [
-            'Go to Sidebar → Admin Control → Users tab.',
+            'Go to Sidebar → Team & Settings → Users tab.',
             'Tap the "+" icon (top right) to add a new employee.',
             'Fill in the employee\'s Name, Email ID, Password, Mobile Number, and Role.',
             'The email and password you set here are the login credentials for that employee.',
@@ -246,7 +246,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         cat: 'admin',
         title: 'Edit Employee — Role, Target, Leave Balance',
         steps: [
-            'Go to Sidebar → Admin Control → Users tab.',
+            'Go to Sidebar → Team & Settings → Users tab.',
             'Tap on the employee whose details you want to change.',
             'From here you can change their Role, Monthly Sales Target, Leave Balance, Mobile Number, and other details.',
             'For a Field User choose the Designation — "Sales Executive" or "Service Engineer". It decides their screens and the title on their profile and visiting card. They should log out and log in once after it changes.',
@@ -261,7 +261,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         cat: 'admin',
         title: 'Permissions — Control What Each Employee Sees',
         steps: [
-            'Go to Sidebar → Admin Control → Permissions tab. Only available to Admins.',
+            'Go to Sidebar → Team & Settings → Permissions tab. Only available to Admins.',
             'Select any role (Sales Executive, Service Engineer, Accountant, Store Keeper, etc.) to control what screens and features that role can access.',
             'Toggle any module ON or OFF — for example, hide "Payment Dues" from Sales team, or show "Orders" to Accountants.',
             'You can also set permissions for individual employees — user-specific settings override role settings.',
@@ -278,7 +278,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
             'Admins and Managers can see data from all employees across all modules — Orders, Payments, Attendance, Leaves, Service Calls, etc.',
             'Accountants can also be given access to financial data (Orders, Payments, Dues) from the Permissions tab.',
             'Regular employees (Sales, Service) only see their own entries by default.',
-            'To give a specific employee access to all data, go to Admin Control → Permissions and enable the required modules for their role.',
+            'To give a specific employee access to all data, go to Team & Settings → Permissions and enable the required modules for their role.',
         ],
     },
     {
@@ -341,7 +341,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         cat: 'service',
         title: 'Service Call',
         steps: [
-            'Go to "Service Call" under Activity Report and tap "+ New".',
+            'Tap "Service" in the bottom bar (or Sidebar → Service on a laptop) and tap "+ New".',
             'Select the client and machine, describe the problem, and add any spare parts already used.',
             'Admin / Manager: open a call → "Assign" to give it to an engineer. The engineer gets a notification that opens the call directly. Use "Change" or "Remove engineer" if needed.',
             'Each card shows the engineer and how long the call has been open ("Open 2 days" turns red after 48 hours), or how long it took to close.',
@@ -411,9 +411,9 @@ const GUIDE_SECTIONS: GuideSection[] = [
         icon: 'calculator',
         color: '#1565c0',
         cat: 'sales',
-        title: 'Sales Calculation',
+        title: 'Team Performance',
         steps: [
-            'Go to Sidebar → "Sales Calculation".',
+            'Home → Sales → "Team Performance".',
             'Shows a summary for every employee — total Orders, Sales Target, Achievement %, Payment Collections, and Pending Dues.',
             'Admins use this to compare team performance at a glance.',
             'Tap on any employee to drill down into their individual sales data.',
@@ -532,9 +532,9 @@ const GUIDE_SECTIONS: GuideSection[] = [
         icon: 'chatbubbles',
         color: '#2e7d32',
         cat: 'admin',
-        title: 'Automation Settings (WhatsApp / Email)',
+        title: 'WhatsApp & Email — Automation Settings',
         steps: [
-            'Only visible to Admins with the Automation Add-on active.',
+            'Sidebar → "WhatsApp & Email" → tap the ⚙️ icon at the top right. Only works for Admins with the Automation Add-on active.',
             'Turn on WhatsApp and/or Email, choose your provider, and paste your API key.',
             'Once saved, customers automatically get updates for orders, payments, installations, services, and couriers.',
         ],
@@ -543,9 +543,9 @@ const GUIDE_SECTIONS: GuideSection[] = [
         icon: 'people-circle',
         color: '#3b5998',
         cat: 'admin',
-        title: 'Admin Control (Overview)',
+        title: 'Team & Settings (Overview)',
         steps: [
-            'Go to Sidebar → "Admin Control" — only visible to Admins / Managers.',
+            'Go to Sidebar → "Team & Settings" — only visible to Admins / Managers.',
             'Users Tab: Add, edit, or disable employee accounts. Tap "Select Multiple" to deactivate several employees at once.',
             'Permissions Tab: Control what each role or employee can see in the app.',
             'Holidays Tab: Manage the company holiday list (holidays are skipped by attendance alerts).',
@@ -583,7 +583,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
             '10:00 Service calls open more than 2 days → Admin / Manager, and each engineer for their own calls.',
             '11:00 Day In pending → HR / Admin (Sundays, holidays and approved leave are skipped).   11:30 Approvals pending more than 2 days → HR / Admin.',
             '20:00 Team\'s day report (visits, new leads, quotations, orders) → Admin / Manager.',
-            'Admin can switch any alert off or change its time in Admin Control → Alerts. Each alert is sent only once a day.',
+            'Admin can switch any alert off or change its time in Team & Settings → Alerts. Each alert is sent only once a day.',
         ],
     },
     {
@@ -602,9 +602,9 @@ const GUIDE_SECTIONS: GuideSection[] = [
         icon: 'card',
         color: '#1565c0',
         cat: 'admin',
-        title: 'Subscription & Renewal',
+        title: 'Plan & Renewal',
         steps: [
-            'Open Company Profile — the Current Plan card at the top shows your plan, valid-till date and employees used. Admin taps "Upgrade / Renew Plan".',
+            'Sidebar → "Plan & Renewal" (Admin). The card at the top shows your current plan, valid-till date, days left and employees used.',
             'Select a plan, enter number of employees, and optionally add the Automation add-on.',
             'Scan the UPI QR code to pay, then tap "I Have Paid".',
             'Your plan activates once the payment is verified (usually within 1 hour).',
@@ -648,7 +648,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         cat: 'admin',
         title: 'Excel Import — Company, Employees, Products, Holidays',
         steps: [
-            'Open Admin Control → Setup. All four Excel uploads are there (Products, Employees and Holidays also keep their own buttons in Product Master and Admin Control).',
+            'Open Team & Settings → Setup. All four Excel uploads are there (Products, Employees and Holidays also keep their own buttons in Product Master and Team & Settings).',
             'Company Profile: tap "Download Company Sheet" — it lists every detail (name, address, GST, contact, UPI, both bank accounts) with what is saved now. Fill the "Value" column and upload; you see each change before saving. Empty cells keep the old value. Logo, signature and QR code are added in Company Profile.',
             'Employees: the template has every HR column — role, joining date, targets, salary, yearly leaves, personal contact, blood group, address, bank, IFSC, Aadhaar, PAN. Only Name and Email are required. Role: Admin, Manager, Account, HR, Store, Sales or Service.',
             'To fill missing details for people already in the app: tap "Download Current Employees", fill the blanks, upload it, and turn on "Fill details for existing employees". Only filled cells are saved — name, role, email and password never change from Excel.',
@@ -672,9 +672,9 @@ const GUIDE_SECTIONS: GuideSection[] = [
         icon: 'chatbubbles',
         color: '#5e35b1',
         cat: 'admin',
-        title: 'Messaging Center (Templates & Broadcast)',
+        title: 'WhatsApp & Email (Templates & Broadcast)',
         steps: [
-            'Go to Sidebar → "Messaging Center".',
+            'Go to Sidebar → "WhatsApp & Email". The ⚙️ icon at the top opens the automation settings.',
             'Templates Tab: create and manage reusable WhatsApp/Email message templates.',
             'Pending Tab: see messages waiting to be approved or sent.',
             'History Tab: view previously sent messages and their delivery status.',
@@ -819,7 +819,7 @@ const FAQS: FaqItem[] = [
     {
         cat: 'start',
         q: 'I am new. How do I start?',
-        a: `1. Fill Company Profile (Sidebar → Company Profile). 2. Add users (Admin Control → Users → "+"). 3. Add your customers (Sidebar → Org → "Add New", or scan their visiting card). To add many employees, products and holidays at once, use Admin Control → Setup: download each sample Excel, fill it and upload it.`,
+        a: `1. Fill Company Profile (Sidebar → Company Profile). 2. Add users (Team & Settings → Users → "+"). 3. Add your customers (Sidebar → Org → "Add New", or scan their visiting card). To add many employees, products and holidays at once, use Team & Settings → Setup: download each sample Excel, fill it and upload it.`,
     },
     {
         cat: 'start',
@@ -864,7 +864,7 @@ const FAQS: FaqItem[] = [
     {
         cat: 'attendance',
         q: 'I forgot to mark Day In / Day Out — what should I do?',
-        a: `If you missed marking attendance:\n\n1. Contact your Admin or HR immediately and inform them.\n2. The Admin can manually update or note your attendance from the Admin Control panel.\n3. Do not try to mark it later on your own — the system records the actual time of marking.\n\nNote: Always mark Day In as soon as you start work to avoid discrepancies.`,
+        a: `If you missed marking attendance:\n\n1. Contact your Admin or HR immediately and inform them.\n2. The Admin can manually update or note your attendance from the Team & Settings panel.\n3. Do not try to mark it later on your own — the system records the actual time of marking.\n\nNote: Always mark Day In as soon as you start work to avoid discrepancies.`,
     },
     {
         cat: 'attendance',
@@ -959,7 +959,7 @@ const FAQS: FaqItem[] = [
     {
         cat: 'admin',
         q: 'WhatsApp / Email message was not sent to the customer',
-        a: `1. Go to Admin → Settings → Automation Settings and check that WhatsApp / Email is turned ON.\n2. Verify the API key is entered correctly and saved.\n3. Make sure the customer's mobile number is correct (10 digits).\n4. Check the "Outbound Messages" log for status.\n5. If still failing, contact support.`,
+        a: `1. Go to Sidebar → WhatsApp & Email → ⚙️ and check that WhatsApp / Email is turned ON.\n2. Verify the API key is entered correctly and saved.\n3. Make sure the customer's mobile number is correct (10 digits).\n4. Check the "Outbound Messages" log for status.\n5. If still failing, contact support.`,
     },
     {
         cat: 'admin',
@@ -969,12 +969,12 @@ const FAQS: FaqItem[] = [
     {
         cat: 'admin',
         q: 'I do not want to send WhatsApp messages for a specific entry',
-        a: `1. Make sure the client's mobile number field is left blank — messages are only sent if a number is present.\n2. Alternatively, ask your Admin to temporarily turn off automation from Automation Settings, add the entry, then turn it back on.`,
+        a: `1. Make sure the client's mobile number field is left blank — messages are only sent if a number is present.\n2. Alternatively, ask your Admin to temporarily turn off automation from WhatsApp & Email → ⚙️, add the entry, then turn it back on.`,
     },
     {
         cat: 'admin',
         q: 'My plan is expiring soon — how do I renew?',
-        a: `1. Admin: open Company Profile — the Current Plan card is at the top. Tap "Upgrade / Renew Plan" (or tap the "Plan: N days left" badge on Home).\n2. Choose the plan and number of employees, pay with the UPI QR code and tap "I Have Paid".\n3. Your plan is activated after the payment is verified (usually within 1 hour).\n\nDo not wait until the last day — renew at least 2–3 days before expiry.`,
+        a: `1. Admin: Sidebar → "Plan & Renewal" (or tap the "Plan: N days left" badge on Home).\n2. Choose the plan and number of employees, pay with the UPI QR code and tap "I Have Paid".\n3. Your plan is activated after the payment is verified (usually within 1 hour).\n\nDo not wait until the last day — renew at least 2–3 days before expiry.`,
     },
     {
         cat: 'admin',
@@ -994,27 +994,27 @@ const FAQS: FaqItem[] = [
     {
         cat: 'admin',
         q: 'How do I add a new employee to the app?',
-        a: `1. Go to Sidebar → Admin Control → Users tab.\n2. Tap the "+" icon at the top right.\n3. Fill in Name, Email ID, Password, Mobile Number, and Role.\n4. Tap Save — the account is created.\n5. The employee downloads the app from Google Play Store and logs in using the email and password you set.\n\nNote: Each employee must have a unique email ID.`,
+        a: `1. Go to Sidebar → Team & Settings → Users tab.\n2. Tap the "+" icon at the top right.\n3. Fill in Name, Email ID, Password, Mobile Number, and Role.\n4. Tap Save — the account is created.\n5. The employee downloads the app from Google Play Store and logs in using the email and password you set.\n\nNote: Each employee must have a unique email ID.`,
     },
     {
         cat: 'admin',
         q: 'How do I change an employee\'s role, target, or leave balance?',
-        a: `1. Go to Sidebar → Admin Control → Users tab.\n2. Tap on the employee you want to edit.\n3. Change their Role, Monthly Sales Target, Leave Balance, or any other detail.\n4. Tap Save — changes take effect immediately.\n5. The employee may need to close and reopen the app to see the updated role/permissions.`,
+        a: `1. Go to Sidebar → Team & Settings → Users tab.\n2. Tap on the employee you want to edit.\n3. Change their Role, Monthly Sales Target, Leave Balance, or any other detail.\n4. Tap Save — changes take effect immediately.\n5. The employee may need to close and reopen the app to see the updated role/permissions.`,
     },
     {
         cat: 'admin',
         q: 'I forgot my password — how do I reset it?',
-        a: `Ask your company Admin to reset it: Admin Control → Users → select your profile → change password. Then log in with the new password and change it from My Profile if you like.\n\nIf you are the Admin, contact support from the Contact tab.`,
+        a: `Ask your company Admin to reset it: Team & Settings → Users → select your profile → change password. Then log in with the new password and change it from My Profile if you like.\n\nIf you are the Admin, contact support from the Contact tab.`,
     },
     {
         cat: 'admin',
         q: 'An employee left the company — how do I disable their access?',
-        a: `1. Go to Sidebar → Admin Control → Users tab.\n2. Tap on the employee's profile.\n3. Toggle their status to "Inactive" or disable their account.\n4. Their login is blocked immediately.\n5. Their past records are retained for your reference — nothing is deleted.`,
+        a: `1. Go to Sidebar → Team & Settings → Users tab.\n2. Tap on the employee's profile.\n3. Toggle their status to "Inactive" or disable their account.\n4. Their login is blocked immediately.\n5. Their past records are retained for your reference — nothing is deleted.`,
     },
     {
         cat: 'admin',
         q: 'An employee cannot see a certain screen or feature',
-        a: `1. Go to Sidebar → Admin Control → Permissions tab.\n2. Select the employee's role.\n3. Enable the module/feature you want them to see.\n4. The employee needs to close and reopen the app for changes to take effect.\n\nIf the feature is still not visible, contact your Super Admin — some features are restricted at the plan level.`,
+        a: `1. Go to Sidebar → Team & Settings → Permissions tab.\n2. Select the employee's role.\n3. Enable the module/feature you want them to see.\n4. The employee needs to close and reopen the app for changes to take effect.\n\nIf the feature is still not visible, contact your Super Admin — some features are restricted at the plan level.`,
     },
     {
         cat: 'reports',
@@ -1030,12 +1030,12 @@ const FAQS: FaqItem[] = [
     {
         cat: 'sales',
         q: 'How do I see all employees\' sales performance in one place?',
-        a: `1. Go to Sidebar → "Sales Calculation".\n2. Shows every employee's Orders, Sales Target, Achievement %, Payment Collections, and Pending Dues.\n3. Tap on any employee to drill into their individual data.\n4. Filter by month to see monthly performance trends.\n\nYou can also go to Live Dashboard → Sales Analysis from the home screen for a quick visual overview.`,
+        a: `1. Home → Sales → "Team Performance".\n2. Shows every employee's Orders, Sales Target, Achievement %, Payment Collections, and Pending Dues.\n3. Tap on any employee to drill into their individual data.\n4. Filter by month to see monthly performance trends.\n\nYou can also go to Live Dashboard → Sales Analysis from the home screen for a quick visual overview.`,
     },
     {
         cat: 'admin',
         q: 'How do I control what each employee or team can see in the app?',
-        a: `1. Go to Sidebar → Admin Control → Permissions tab.\n2. Select a role (Sales Executive, Service Engineer, Accountant, Store Keeper, etc.).\n3. Toggle any module ON or OFF.\n4. You can also set permissions for individual employees — user-specific settings override role settings.\n5. Employees need to close and reopen the app for changes to take effect.`,
+        a: `1. Go to Sidebar → Team & Settings → Permissions tab.\n2. Select a role (Sales Executive, Service Engineer, Accountant, Store Keeper, etc.).\n3. Toggle any module ON or OFF.\n4. You can also set permissions for individual employees — user-specific settings override role settings.\n5. Employees need to close and reopen the app for changes to take effect.`,
     },
     {
         cat: 'service',
@@ -1055,7 +1055,7 @@ const FAQS: FaqItem[] = [
     {
         cat: 'start',
         q: 'I accidentally deleted a record — can it be recovered?',
-        a: `Records deleted from the app are permanently removed and cannot be recovered from the app itself.\n\nIf deleted recently:\n1. Contact support immediately with the details (client name, date, type of record).\n2. We may be able to recover it from database backups.\n\nTo avoid accidental deletions, only Admins should have delete permissions — set this in Admin Control → Permissions.`,
+        a: `Records deleted from the app are permanently removed and cannot be recovered from the app itself.\n\nIf deleted recently:\n1. Contact support immediately with the details (client name, date, type of record).\n2. We may be able to recover it from database backups.\n\nTo avoid accidental deletions, only Admins should have delete permissions — set this in Team & Settings → Permissions.`,
     },
     {
         cat: 'start',
@@ -1150,17 +1150,17 @@ const FAQS: FaqItem[] = [
     {
         cat: 'start',
         q: 'I am getting too many alerts, or at the wrong time',
-        a: `Admin: Sidebar → Admin Control → Alerts tab.\n\n1. Switch off any alert you don't need.\n2. Tap the time to change it, or "Reset" to go back to the default.\n\nEach alert is sent only once a day.`,
+        a: `Admin: Sidebar → Team & Settings → Alerts tab.\n\n1. Switch off any alert you don't need.\n2. Tap the time to change it, or "Reset" to go back to the default.\n\nEach alert is sent only once a day.`,
     },
     {
         cat: 'start',
         q: 'I am not receiving notifications or daily alerts',
-        a: `1. Phone Settings → Apps → [App Name] → Notifications → turn ON.\n2. Turn off battery optimisation for the app (Settings → Battery).\n3. Log out and log in once — this refreshes your notification registration.\n4. Check the bell icon in the app — all alerts are saved there too.\n5. Ask your Admin whether that alert is switched on in Admin Control → Alerts.`,
+        a: `1. Phone Settings → Apps → [App Name] → Notifications → turn ON.\n2. Turn off battery optimisation for the app (Settings → Battery).\n3. Log out and log in once — this refreshes your notification registration.\n4. Check the bell icon in the app — all alerts are saved there too.\n5. Ask your Admin whether that alert is switched on in Team & Settings → Alerts.`,
     },
     {
         cat: 'sales',
         q: 'Where can I see the evening team report?',
-        a: `Admin / Manager get it at 8 PM as a notification (also under the bell icon). Tap it to open Sales Calculation for details.`,
+        a: `Admin / Manager get it at 8 PM as a notification (also under the bell icon). Tap it to open Team Performance for details.`,
     },
     {
         cat: 'payroll',
@@ -1261,7 +1261,7 @@ const FAQS: FaqItem[] = [
     {
         cat: 'admin',
         q: 'How do I fill missing details for all employees at once?',
-        a: `Admin Control → Setup → Employees → "Download Current Employees". Fill the empty columns in Excel, upload the file and turn on "Fill details for existing employees". Only the cells you filled are saved.`,
+        a: `Team & Settings → Setup → Employees → "Download Current Employees". Fill the empty columns in Excel, upload the file and turn on "Fill details for existing employees". Only the cells you filled are saved.`,
     },
     {
         cat: 'admin',
@@ -1271,17 +1271,17 @@ const FAQS: FaqItem[] = [
     {
         cat: 'admin',
         q: 'Can I fill the Company Profile from Excel?',
-        a: `Yes. Admin Control → Setup → Company Profile → "Download Company Sheet", fill the Value column and upload it. You see every change before saving. Logo, signature, QR code and office location are set in Company Profile itself.`,
+        a: `Yes. Team & Settings → Setup → Company Profile → "Download Company Sheet", fill the Value column and upload it. You see every change before saving. Logo, signature, QR code and office location are set in Company Profile itself.`,
     },
     {
         cat: 'start',
         q: 'My visiting card / profile shows the wrong designation',
-        a: `Ask your Admin to open Admin Control → Users → your name and choose the right Designation (Sales Executive or Service Engineer), then log out and log in once.`,
+        a: `Ask your Admin to open Team & Settings → Users → your name and choose the right Designation (Sales Executive or Service Engineer), then log out and log in once.`,
     },
     {
         cat: 'start',
         q: 'Activity Plan or Tasks button is missing from the bottom bar',
-        a: `They are on for everyone unless an Admin switched them off. Ask your Admin to check Admin Control → Permissions for your role (or for you), then close and reopen the app.`,
+        a: `They are on for everyone unless an Admin switched them off. Ask your Admin to check Team & Settings → Permissions for your role (or for you), then close and reopen the app.`,
     },
     {
         cat: 'sales',

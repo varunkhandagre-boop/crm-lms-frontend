@@ -49,7 +49,7 @@ export function canSeeTab(moduleKey: string, ctx: MenuAccessCtx): boolean {
     const userRole = ctx.currentUser?.role || 'Service Engineer';
     if (!companyHas(moduleKey, { ...ctx, currentUser: { ...ctx.currentUser, role: userRole } })) return false;
     if (userRole === 'Admin' || userRole === 'SuperAdmin') return true;
-    // A per-user switch in Admin Control → Permissions wins over the role switch.
+    // A per-user switch in Team & Settings → Permissions wins over the role switch.
     const userPerms = ctx.appPermissions?.[ctx.currentUser?.id || ''] || ctx.appPermissions?.[ctx.currentUser?.email || ''];
     if (userPerms?.[moduleKey] !== undefined) return userPerms[moduleKey] === true;
     const myPerms = ctx.appPermissions?.[userRole];

@@ -18,18 +18,20 @@ export const ACTIVITY_ITEMS: MenuItemDef[] = [
     { title: 'Visits DSR', icon: 'briefcase', color: '#3b5998', route: '/sales', module: 'visits' },
     { title: 'Installation', icon: 'construct', color: '#795548', route: '/installation', module: 'installation' },
     { title: 'Demo Report', icon: 'play-circle', color: '#00bcd4', route: '/demo', module: 'demos' },
-    { title: 'Service Call', icon: 'settings', color: '#607d8b', route: '/service_call', module: 'tickets' },
     { title: 'PMS Report', icon: 'shield-checkmark', color: '#4caf50', route: '/pms_schedule', module: 'pms' },
     { title: 'Service Analysis', icon: 'pie-chart', color: '#673ab7', route: '/service_analysis', module: 'service_reports' },
-    { title: 'Quotations', icon: 'document-text', color: '#1565c0', route: '/quotations', module: 'quotations' },
     { title: 'Project Report', icon: 'business', color: '#607d8b', route: '/projects', module: 'organizations' },
 ];
 
+// Lead → quotation → order → payment → dues, then the two reports.
+// Leads (and Service Call / Task) live in the bottom bar, so not repeated here.
 export const SALES_ITEMS: MenuItemDef[] = [
+    { title: 'Quotations', icon: 'document-text', color: '#1565c0', route: '/quotations', module: 'quotations' },
     { title: 'Order Booking', icon: 'cart', color: '#ff9800', route: '/orders', module: 'orders' },
-    { title: 'Dashboard', icon: 'stats-chart', color: '#4caf50', route: '/sales_analysis', module: 'sales_analysis' },
     { title: 'Collect Payment', icon: 'cash', color: '#27ae60', route: '/payment_collection', module: 'payment_coll' },
     { title: 'Pending Dues', icon: 'time', color: '#c0392b', route: '/payment_duelist', module: 'payment_due' },
+    { title: 'Sales Trends', icon: 'stats-chart', color: '#4caf50', route: '/sales_analysis', module: 'sales_analysis' },
+    { title: 'Team Performance', icon: 'trophy', color: '#8e24aa', route: '/sales_team_report', module: 'sales_team_report' },
 ];
 
 export const SIDEBAR_ITEMS: MenuItemDef[] = [
@@ -39,13 +41,12 @@ export const SIDEBAR_ITEMS: MenuItemDef[] = [
     { id: '5', title: 'Spare Part Book', icon: 'book', route: '/spare_parts', module: 'spares' },
     { id: '100', title: 'Product Master', icon: 'cube', route: '/product_master', module: 'catalogs' },
     { id: '96', title: 'Personal Notes', icon: 'journal', route: '/personal_notes', module: 'personal_notes' },
-    { id: '99', title: 'Sales Calculation', icon: 'calculator', route: '/sales_team_report', module: 'sales_team_report' },
     { id: '93', title: 'Activity Timeline', icon: 'time', route: '/employee_timeline', module: 'users' },
-    { id: '103', title: 'Messaging Center', icon: 'chatbubbles', route: '/messaging_center', module: 'company_profile' },
+    { id: '103', title: 'WhatsApp & Email', icon: 'chatbubbles', route: '/messaging_center', module: 'company_profile' },
     { id: '91', title: 'Payroll', icon: 'cash', route: '/payroll', module: 'payroll' },
-    { id: '92', title: 'Admin Control', icon: 'settings', route: '/manage_team', module: 'users' },
-    { id: '101', title: 'Automation Settings', icon: 'chatbubbles', route: '/automation_settings', module: 'company_profile' },
+    { id: '92', title: 'Team & Settings', icon: 'settings', route: '/manage_team', module: 'users' },
     { id: '90', title: 'Company Profile', icon: 'business', route: '/company_profile', module: 'company_profile' },
+    { id: '104', title: 'Plan & Renewal', icon: 'rocket', route: '/SubscriptionScreen', module: 'company_profile' },
     { id: '102', title: 'Help & Support', icon: 'help-circle', route: '/help_support', module: 'common' },
 ];
 
@@ -60,7 +61,7 @@ export const NAV_TABS: MenuItemDef[] = [
 ];
 
 // Sensible starting permissions per role, used ONLY for a role Admin has
-// never touched in Admin Control → Permissions (no key for it exists yet in
+// never touched in Team & Settings → Permissions (no key for it exists yet in
 // the saved permissions blob). The moment Admin saves any change for a role,
 // that role's saved settings take over completely.
 const COMMON_DEFAULTS = ['dashboard', 'calendar', 'attendance', 'leave', 'travel', 'payroll', 'advance', 'expenses'];

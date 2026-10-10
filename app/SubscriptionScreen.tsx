@@ -19,6 +19,7 @@ import { openRazorpay } from '../utils/razorpay';
 import { ActivePlan, listActivePlans } from '../services/api/plans';
 import { fetchPublicBillingSettings, fetchPublicGatewayConfig, PublicGatewayConfig } from '../services/api/settings';
 import { submitSubscriptionRequest } from '../services/api/subscriptionRequests';
+import { fetchCompanyProfile } from '../services/api/companies';
 import { useData } from './context/DataContext';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 
@@ -55,6 +56,24 @@ export default function SubscriptionScreen() {
     const [fetchingRates, setFetchingRates] = useState(true);
 
     const [plans, setPlans] = useState<ActivePlan[]>([]);
+    // Current plan card (was at the top of Company Profile).
+    const [current, setCurrent] = useState<{ plan: string; expiry: string; daysLeft: number | null; used: number; max: number; active: boolean } | null>(null);
+    useEffect(() => {
+        if (!currentUser?.companyId) return;
+        fetchCompanyProfile()
+            .then((cp: any) => {
+                const exp = cp.expiryDate ? new Date(cp.expiryDate) : null;
+                setCurrent({
+                    plan: cp.plan || 'Free Trial',
+                    expiry: exp ? exp.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '-',
+                    daysLeft: exp ? Math.ceil((exp.getTime() - Date.now()) / 86400000) : null,
+                    used: cp.currentEmployees || 0,
+                    max: cp.maxEmployees || 0,
+                    active: !!cp.isActive,
+                });
+            })
+            .catch(() => { /* card just stays hidden */ });
+    }, [currentUser?.companyId]);
     const [upiId, setUpiId] = useState('');
     const [upiPayeeName, setUpiPayeeName] = useState('Company');
     const [gatewayConfig, setGatewayConfig] = useState<PublicGatewayConfig | null>(null);
@@ -258,11 +277,39 @@ export default function SubscriptionScreen() {
                 <TouchableOpacity onPress={() => router.replace('/' as any)} style={{ position: 'absolute', left: 20, bottom: 15 }}>
                     <Ionicons name="arrow-back" size={24} color="#3b5998" />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Subscription & Renewal</Text>
+                <Text style={styles.headerTitle}>Plan & Renewal</Text>
             </View>
 
             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
                 <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+
+                    {current && (
+                        <View style={styles.currentCard}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.currentLabel}>CURRENT PLAN</Text>
+                                    <Text style={styles.currentPlan}>{current.plan}</Text>
+                                </View>
+                                <View style={{ alignItems: 'flex-end' }}>
+                                    <Text style={styles.currentLabel}>VALID TILL</Text>
+                                    <Text style={[styles.currentPlan, { color: current.active && (current.daysLeft ?? 1) > 0 ? '#2e7d32' : '#d32f2f' }]}>{current.expiry}</Text>
+                                    {current.daysLeft !== null && (
+                                        <Text style={{ fontSize: 11, color: current.daysLeft <= 7 ? '#d32f2f' : '#666' }}>
+                                            {current.daysLeft > 0 ? `${current.daysLeft} days left` : 'Expired'}
+                                        </Text>
+                                    )}
+                                </View>
+                            </View>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, marginBottom: 5 }}>
+                                <Text style={styles.currentLabel}>EMPLOYEES USED</Text>
+                                <Text style={{ fontSize: 12, color: '#333', fontWeight: 'bold' }}>{current.used} / {current.max}</Text>
+                            </View>
+                            <View style={{ height: 8, backgroundColor: '#ddd', borderRadius: 4, overflow: 'hidden' }}>
+                                <View style={{ height: '100%', width: `${Math.min(current.max > 0 ? (current.used / current.max) * 100 : 0, 100)}%`, backgroundColor: current.max > 0 && current.used >= current.max ? '#d32f2f' : '#4caf50' }} />
+                            </View>
+                            <Text style={{ fontSize: 11, color: '#666', marginTop: 8 }}>Choose a plan below to renew, add employees or change modules.</Text>
+                        </View>
+                    )}
 
                     <Text style={styles.sectionTitle}>Select Plan</Text>
                     <View style={styles.planContainer}>
@@ -435,6 +482,9 @@ export default function SubscriptionScreen() {
 }
 
 const styles = StyleSheet.create({
+    currentCard: { backgroundColor: '#f0f4ff', borderColor: '#d0d9ff', borderWidth: 1, borderRadius: 12, padding: 15, marginBottom: 18 },
+    currentLabel: { fontSize: 12, color: '#555', fontWeight: 'bold' },
+    currentPlan: { fontSize: 17, color: '#3b5998', fontWeight: 'bold', marginTop: 2 },
     container: { flex: 1, backgroundColor: '#f9f9f9' },
     header: { padding: 20, backgroundColor: '#fff', elevation: 2, alignItems: 'center' },
     headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
