@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -14,7 +14,7 @@ import {
     View
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
-import RazorpayCheckout from 'react-native-razorpay';
+import { openRazorpay } from '../utils/razorpay';
 
 import { ActivePlan, listActivePlans } from '../services/api/plans';
 import { fetchPublicBillingSettings, fetchPublicGatewayConfig, PublicGatewayConfig } from '../services/api/settings';
@@ -60,7 +60,11 @@ export default function SubscriptionScreen() {
     const [gatewayConfig, setGatewayConfig] = useState<PublicGatewayConfig | null>(null);
 
     const [selectedPlanId, setSelectedPlanId] = useState<string>('');
-    const [employeeCount, setEmployeeCount] = useState('10');
+    // The landing page's "Buy now" passes ?plan=<id>&team=<n> through registration.
+    const params = useLocalSearchParams<{ planId?: string; team?: string }>();
+    const wantedPlanId = typeof params.planId === 'string' ? params.planId : '';
+    const wantedTeam = typeof params.team === 'string' && /^\d{1,4}$/.test(params.team) && Number(params.team) > 0 ? params.team : '';
+    const [employeeCount, setEmployeeCount] = useState(wantedTeam || '10');
     const [totalPrice, setTotalPrice] = useState(0);
     const [wantsAutomation, setWantsAutomation] = useState(false);
     const [automationAddonPrice, setAutomationAddonPrice] = useState(DEFAULT_AUTOMATION_ADDON_PRICE);
@@ -78,7 +82,7 @@ export default function SubscriptionScreen() {
                 ]);
 
                 setPlans(activePlans);
-                if (activePlans.length > 0) setSelectedPlanId(activePlans[0].id);
+                if (activePlans.length > 0) setSelectedPlanId(activePlans.some(p => p.id === wantedPlanId) ? wantedPlanId : activePlans[0].id);
 
                 if (billing) {
                     setUpiId(billing.upiId || '');
@@ -168,7 +172,7 @@ export default function SubscriptionScreen() {
                 },
             };
 
-            RazorpayCheckout.open(options)
+            openRazorpay(options)
                 .then(async (paymentData: any) => {
                     console.log('✅ Razorpay Payment:', paymentData.razorpay_payment_id);
                     try {

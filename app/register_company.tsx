@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
     ActivityIndicator,
@@ -26,6 +26,9 @@ import { registerCompanyOnBackend } from '../services/api/registration';
 
 export default function RegisterCompanyScreen() {
     const router = useRouter();
+    // "Buy now" on the landing page opens /register_company?plan=<id>&team=<n>;
+    // both are handed to the plan screen so that plan is already selected.
+    const { plan: wantedPlan, team: wantedTeam } = useLocalSearchParams<{ plan?: string; team?: string }>();
     const { login } = useData();
     const [loading, setLoading] = useState(false);
 
@@ -99,7 +102,11 @@ export default function RegisterCompanyScreen() {
                             // Isse companyId automatic naye screen par send ho jayegi
                             router.replace({
                                 pathname: '/SubscriptionScreen' as any,
-                                params: { companyId: companyId }
+                                params: {
+                                    companyId: companyId,
+                                    ...(typeof wantedPlan === 'string' && wantedPlan ? { planId: wantedPlan } : {}),
+                                    ...(typeof wantedTeam === 'string' && wantedTeam ? { team: wantedTeam } : {}),
+                                }
                             });
                         } 
                     }
