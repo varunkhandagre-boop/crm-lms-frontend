@@ -8,7 +8,7 @@ import { useData } from './context/DataContext';
 
 // Visit Targets: each salesperson's visits vs their daily / monthly target.
 // Field users see only themselves (the server scopes it). Targets are set in
-// Manage Team → user → "Visits / day" and "Visits / month".
+// Team & Settings → user → "Visits / day" and "Visits / month".
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -110,7 +110,7 @@ export default function VisitTargetsScreen() {
                     )}
                 </View>
 
-                {noTarget && <Text style={styles.noTarget}>No visit target set (Manage Team → edit user → Visits / day, Visits / month)</Text>}
+                {noTarget && <Text style={styles.noTarget}>No visit target set (Team & Settings → edit user → Visits / day, Visits / month)</Text>}
             </View>
         );
     };
@@ -146,7 +146,7 @@ export default function VisitTargetsScreen() {
                     ) : null}
                     ListEmptyComponent={
                         <Text style={styles.empty}>
-                            {error || 'No visit targets set and no visits logged this month. Set targets in Manage Team → edit user → "Visits / day" / "Visits / month".'}
+                            {error || 'No visit targets set and no visits logged this month. Set targets in Team & Settings → edit user → "Visits / day" / "Visits / month".'}
                         </Text>
                     }
                 />

@@ -699,7 +699,7 @@ const [selectedDate, setSelectedDate] = useState(new Date());
             <TouchableOpacity onPress={() => router.back()} style={{marginRight: 10}}>
                 <Ionicons name="arrow-back" size={24} color="#333" />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>Activity & Reports</Text>
+            <Text style={styles.headerTitle}>Activity Timeline</Text>
         </View>
       </View>
 

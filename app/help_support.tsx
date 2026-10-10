@@ -287,7 +287,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         cat: 'orders',
         title: 'Order Booking',
         steps: [
-            'Go to "Order Booking" from the Sales section.',
+            'Home → Sales → "Order Booking".',
             'Select the client/hospital from the list, or add a new one.',
             'Choose Cash or Credit sale, enter PO number, amount, and products.',
             'Tap Submit — the order is saved and the customer gets a WhatsApp/Email update automatically (if automation is enabled).',
@@ -302,7 +302,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         cat: 'orders',
         title: 'Collect Payment',
         steps: [
-            'Go to "Collect Payment" from the Sales section.',
+            'Home → Sales → "Collect Payment".',
             'Select the client and enter the amount received.',
             'Choose payment mode (Cash, UPI, NEFT, Cheque) and add reference details if needed.',
             'Submitting will automatically reduce the client\'s pending dues.',
@@ -315,7 +315,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         cat: 'orders',
         title: 'Pending Dues (Accountant)',
         steps: [
-            'Go to "Pending Dues" under Sales Analysis.',
+            'Home → Sales → "Pending Dues".',
             'Every approved order automatically creates a due entry — you do not need to add it manually.',
             'When a payment is collected, the due balance reduces automatically.',
             'Filter by client or status to see outstanding amounts at a glance.',
@@ -328,7 +328,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         cat: 'service',
         title: 'Installation Report',
         steps: [
-            'Go to "Installation" under Activity Report.',
+            'Home → Activity Report → "Installation".',
             'Select the client and product being installed.',
             'Add installation date, serial number, warranty expiry date and notes.',
             'Once saved, an Installation Report PDF can be generated with full company details from Company Profile.',
@@ -372,7 +372,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         cat: 'service',
         title: 'Service Analysis',
         steps: [
-            'Go to "Service Analysis" under Activity Report.',
+            'Home → Activity Report → "Service Analysis".',
             'See all service calls — open, closed, and pending — across machines and clients.',
             'Search by machine model, serial number, or client name to find service history of any specific machine.',
             'Admins and Service Managers can use this to track team performance and pending tickets.',
@@ -500,7 +500,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
             'Create a quotation from inside a lead (Generate Quotation) so it stays linked to that lead.',
             'A lead with a new quotation moves to the Quotation stage automatically and its deal value is filled if empty.',
             'If a quotation was sent about a week ago and the lead has not been updated since, the salesperson gets a follow-up reminder in the morning.',
-            'Open any quotation to share it as a PDF.',
+            'All quotations: Home → Sales → Quotations. Open any quotation to share it as a PDF.',
         ],
     },
     {
@@ -509,7 +509,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         cat: 'service',
         title: 'PMS Schedule (Preventive Maintenance)',
         steps: [
-            'Go to "PMS Report" under Activity Report.',
+            'Home → Activity Report → "PMS Report".',
             'Add a PMS entry with client, machine, last service date, and next service date.',
             'The home screen badge shows PMS entries due THIS MONTH that are not yet marked Done.',
             'Every morning the engineer who did the last PMS of a machine gets a reminder when it is due or overdue.',
@@ -595,7 +595,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
             'Tap your avatar/initials (top right of home screen) to open your profile.',
             'You can update your profile photo, name, and contact details here.',
             'Your Employee ID and role are shown in the sidebar.',
-            'To change your password, use "Forgot Password" on the login screen.',
+            'Forgot your password? Ask your Admin to set a new one from Team & Settings → Users.',
         ],
     },
     {
@@ -606,7 +606,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         steps: [
             'Sidebar → "Plan & Renewal" (Admin). The card at the top shows your current plan, valid-till date, days left and employees used.',
             'Select a plan, enter number of employees, and optionally add the Automation add-on.',
-            'Scan the UPI QR code to pay, then tap "I Have Paid".',
+            'Tap "Pay Online" (Card / UPI / Net Banking / Wallet), or scan the UPI QR code and tap "I Have Paid".',
             'Your plan activates once the payment is verified (usually within 1 hour).',
             'When 30 days or less are left, a "Plan: N days left" badge shows on the Home screen and under your name in the sidebar. Tap it to go straight to renewal.',
         ],
@@ -688,7 +688,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         title: 'Weekly Off & Shift',
         steps: [
             'Company default: Payroll → Salary Rules → "Weekly Off & Shift". Choose the weekly off days (e.g. Sun, or Sat + Sun), extra Saturdays off (e.g. 2nd & 4th), shift start / end (24-hour, e.g. 09:30 – 18:30) and "Late after (min)" grace.',
-            'For one employee: Manage Team → edit the employee → "Weekly off & shift" → "Own schedule". Choose "Company default" to go back.',
+            'For one employee: Team & Settings → edit the employee → "Weekly off & shift" → "Own schedule". Choose "Company default" to go back.',
             'This schedule is used everywhere: Day In list ("Monday Off", "2nd Saturday Off"), Attendance Report, leave balance, the 11 AM Day-In alert, phone reminders (they follow the shift time) and late marks in payroll.',
         ],
     },
@@ -725,7 +725,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         module: 'hr',
         title: 'Employee 360',
         steps: [
-            'Manage Team → Users → tap "📊 360" on an employee card (or Activity & Reports → choose an employee → "📊 360").',
+            'Team & Settings → Users → tap "📊 360" on an employee card (or Sidebar → Activity Timeline → choose an employee → "📊 360").',
             'One screen shows: profile and years of service, attendance, this month’s salary estimate (late, absent, overtime, advance), leave balances and recent leaves, advances and expenses, recent payslips, and work (sales, collection, visits, leads, service calls, tasks).',
             'Use the chips This month / This FY / Last FY / All time to change the period for attendance, work and expenses.',
         ],
@@ -740,7 +740,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
             'Choose the last working day; optionally the leave days to encash (blank = balance), notice-period shortfall, gratuity (on automatically after 5 years), and any other addition or deduction. Tap "Calculate".',
             'Check the lines: salary up to the last day, leave encashment, gratuity, additions, minus advance balance, notice shortfall and deductions → Net payable.',
             '"Save Full & Final" closes the employee’s advances. Then "📄 Share PDF" and, after paying, "💰 Mark as Paid". Until it is paid, "Delete settlement" undoes it and reopens the advances.',
-            'Disable the employee in Manage Team after they leave. The calculation follows your own rules — check it before paying.',
+            'Disable the employee in Team & Settings after they leave. The calculation follows your own rules — check it before paying.',
         ],
     },
     {
@@ -760,7 +760,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         cat: 'sales',
         title: 'Visit Targets',
         steps: [
-            'Set targets: Manage Team → edit the employee → "Visits / day" and "Visits / month" (blank = no target).',
+            'Set targets: Team & Settings → edit the employee → "Visits / day" and "Visits / month" (blank = no target).',
             'See progress: Visits DSR → orange 🏆 button, or Team Performance → "Visits". Today x / target, this month y / target with an "expected by today" mark, and "On track" / "Behind pace".',
             'Salespeople see only their own card.',
         ],
@@ -924,12 +924,12 @@ const FAQS: FaqItem[] = [
     {
         cat: 'orders',
         q: 'How do I generate a Payment Receipt for a client?',
-        a: `1. Go to "Collect Payment" under Sales Analysis.\n2. Find the payment entry for which you need the receipt.\n3. Tap on it to open the details.\n4. Tap the PDF/Share icon — a Payment Receipt is generated with your company header, client details, amount, payment mode, and bank details.\n5. Share it directly with the client via WhatsApp or Email.`,
+        a: `1. Home → Sales → "Collect Payment".\n2. Find the payment entry for which you need the receipt.\n3. Tap on it to open the details.\n4. Tap the PDF/Share icon — a Payment Receipt is generated with your company header, client details, amount, payment mode, and bank details.\n5. Share it directly with the client via WhatsApp or Email.`,
     },
     {
         cat: 'orders',
         q: 'How do I generate a Delivery Challan / Order PDF?',
-        a: `1. Go to "Order Booking" under Sales Analysis.\n2. Find the order entry.\n3. Tap on it to open the details.\n4. Tap the PDF/Share icon — a Delivery Challan is generated with your company logo, client details, products, and amounts.\n5. Share with the client or print it directly.`,
+        a: `1. Home → Sales → "Order Booking".\n2. Find the order entry.\n3. Tap on it to open the details.\n4. Tap the PDF/Share icon — a Delivery Challan is generated with your company logo, client details, products, and amounts.\n5. Share with the client or print it directly.`,
     },
     {
         cat: 'reports',
@@ -954,12 +954,12 @@ const FAQS: FaqItem[] = [
     {
         cat: 'orders',
         q: 'How do I check my payment collection history?',
-        a: `1. Go to "Collect Payment" under Sales Analysis.\n2. The list shows all payments recorded.\n3. Admins and Accountants can see all payments across the team.\n4. Filter by date or client name to find specific records.`,
+        a: `1. Home → Sales → "Collect Payment".\n2. The list shows all payments recorded.\n3. Admins and Accountants can see all payments across the team.\n4. Filter by date or client name to find specific records.`,
     },
     {
         cat: 'admin',
         q: 'WhatsApp / Email message was not sent to the customer',
-        a: `1. Go to Sidebar → WhatsApp & Email → ⚙️ and check that WhatsApp / Email is turned ON.\n2. Verify the API key is entered correctly and saved.\n3. Make sure the customer's mobile number is correct (10 digits).\n4. Check the "Outbound Messages" log for status.\n5. If still failing, contact support.`,
+        a: `1. Go to Sidebar → WhatsApp & Email → ⚙️ and check that WhatsApp / Email is turned ON.\n2. Verify the API key is entered correctly and saved.\n3. Make sure the customer's mobile number is correct (10 digits).\n4. Check the History tab in WhatsApp & Email for the delivery status.\n5. If still failing, contact support.`,
     },
     {
         cat: 'admin',
@@ -974,7 +974,7 @@ const FAQS: FaqItem[] = [
     {
         cat: 'admin',
         q: 'My plan is expiring soon — how do I renew?',
-        a: `1. Admin: Sidebar → "Plan & Renewal" (or tap the "Plan: N days left" badge on Home).\n2. Choose the plan and number of employees, pay with the UPI QR code and tap "I Have Paid".\n3. Your plan is activated after the payment is verified (usually within 1 hour).\n\nDo not wait until the last day — renew at least 2–3 days before expiry.`,
+        a: `1. Admin: Sidebar → "Plan & Renewal" (or tap the "Plan: N days left" badge on Home).\n2. Choose the plan and number of employees, then tap "Pay Online" — or scan the UPI QR code and tap "I Have Paid".\n3. Your plan is activated after the payment is verified (usually within 1 hour).\n\nDo not wait until the last day — renew at least 2–3 days before expiry.`,
     },
     {
         cat: 'admin',
@@ -984,7 +984,7 @@ const FAQS: FaqItem[] = [
     {
         cat: 'admin',
         q: 'I made a payment but the plan is still not activated',
-        a: `1. Make sure you tapped "I Have Paid" after scanning the QR code — this sends a notification to the admin.\n2. Share your payment screenshot on WhatsApp with the support team.\n3. Activation usually happens within 1 hour during business hours.\n4. If it has been more than 2 hours, contact support directly.`,
+        a: `1. Paid by UPI QR? Make sure you tapped "I Have Paid" — this sends the request for verification. Paid online? Keep the Razorpay payment ID from the SMS / email.\n2. Share your payment screenshot on WhatsApp with the support team.\n3. Activation usually happens within 1 hour during business hours.\n4. If it has been more than 2 hours, contact support directly.`,
     },
     {
         cat: 'admin',
@@ -1030,7 +1030,7 @@ const FAQS: FaqItem[] = [
     {
         cat: 'sales',
         q: 'How do I see all employees\' sales performance in one place?',
-        a: `1. Home → Sales → "Team Performance".\n2. Shows every employee's Orders, Sales Target, Achievement %, Payment Collections, and Pending Dues.\n3. Tap on any employee to drill into their individual data.\n4. Filter by month to see monthly performance trends.\n\nYou can also go to Live Dashboard → Sales Analysis from the home screen for a quick visual overview.`,
+        a: `1. Home → Sales → "Team Performance".\n2. Shows every employee's Orders, Sales Target, Achievement %, Payment Collections, and Pending Dues.\n3. Tap on any employee to drill into their individual data.\n4. Filter by month to see monthly performance trends.\n\nFor charts, open Home → Sales → "Sales Trends".`,
     },
     {
         cat: 'admin',
@@ -1040,7 +1040,7 @@ const FAQS: FaqItem[] = [
     {
         cat: 'service',
         q: 'How do I see all service history for a specific machine?',
-        a: `Two ways:\n\n1. Go to Sidebar → Serial Number → enter the machine's Serial Number — all service, installation, and PMS records appear.\n\n2. Go to Activity Report → Service Analysis → search by machine model or serial number to see all tickets, their status, and resolution details.`,
+        a: `Two ways:\n\n1. Go to Sidebar → Serial Number → enter the machine's Serial Number — all service, installation, and PMS records appear.\n\n2. Go to Home → Activity Report → Service Analysis → search by machine model or serial number to see all tickets, their status, and resolution details.`,
     },
     {
         cat: 'start',
@@ -1070,7 +1070,7 @@ const FAQS: FaqItem[] = [
     {
         cat: 'start',
         q: 'How do I search for a specific record quickly?',
-        a: `Every list screen has a Search Bar at the top.\n\n1. Type the client name, amount, date, or any keyword — results filter in real time.\n2. For a client's full history: Sidebar → Serial Number → Organization tab.\n3. For employee activity: Sidebar → Activity Timeline.\n4. For financial summary: Sidebar → Sales Calculation.`,
+        a: `Every list screen has a Search Bar at the top.\n\n1. Type the client name, amount, date, or any keyword — results filter in real time.\n2. For a client's full history: Sidebar → Serial Number → Organization tab.\n3. For employee activity: Sidebar → Activity Timeline.\n4. For sales and collection figures: Home → Sales → Sales Trends or Team Performance.`,
     },
     {
         cat: 'sales',
@@ -1210,18 +1210,18 @@ const FAQS: FaqItem[] = [
     {
         cat: 'attendance',
         q: 'Someone has a different weekly off (e.g. Monday)',
-        a: `Manage Team → edit the employee → "Weekly off & shift" → "Own schedule" → choose Mon. Their attendance, leave balance and Day-In alert then treat Monday as off.`,
+        a: `Team & Settings → edit the employee → "Weekly off & shift" → "Own schedule" → choose Mon. Their attendance, leave balance and Day-In alert then treat Monday as off.`,
     },
     {
         cat: 'attendance',
         q: 'Day In / Day Out reminders come at the wrong time',
-        a: `Reminders follow your shift time. Ask HR to set the shift in Salary Rules (company default) or on your profile in Manage Team. Reopen the app once after it changes.`,
+        a: `Reminders follow your shift time. Ask HR to set the shift in Salary Rules (company default) or on your profile in Team & Settings. Reopen the app once after it changes.`,
     },
     {
         cat: 'admin',
         module: 'hr',
         q: 'How do I see everything about one employee?',
-        a: `Manage Team → Users → "📊 360" on their card (or Activity & Reports → choose the employee → "📊 360"). Use the period chips for this month, this FY, last FY or all time.`,
+        a: `Team & Settings → Users → "📊 360" on their card (or Sidebar → Activity Timeline → choose the employee → "📊 360"). Use the period chips for this month, this FY, last FY or all time.`,
     },
     {
         cat: 'payroll',

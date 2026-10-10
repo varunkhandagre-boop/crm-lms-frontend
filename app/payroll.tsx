@@ -221,7 +221,7 @@ export default function PayrollScreen() {
             if (missing.length) {
                 Alert.alert(
                     'Bank details missing',
-                    `${missing.length} employee(s) have no account number / IFSC:\n\n${missing.join(', ')}\n\nAdd them in Manage Team, or export anyway and fill those rows by hand.`,
+                    `${missing.length} employee(s) have no account number / IFSC:\n\n${missing.join(', ')}\n\nAdd them in Team & Settings, or export anyway and fill those rows by hand.`,
                     [{ text: 'Cancel', style: 'cancel' }, { text: 'Export anyway', onPress: exportSheet }]
                 );
             } else {
@@ -715,7 +715,7 @@ const generatePayslipPDF = async (slip: Payslip) => {
                     <RuleHeader color="#00897b" icon="calendar" title="Weekly Off & Shift (company default)" />
                     <View style={[styles.card, styles.ruleCard, { borderLeftColor: '#00897b' }]}>
                         <Text style={{ fontSize: 12, color: 'gray' }}>
-                            Applies to everyone unless an employee has their own in Manage Team. Used for Day In reminders, attendance, leave balance and late marks.
+                            Applies to everyone unless an employee has their own in Team & Settings. Used for Day In reminders, attendance, leave balance and late marks.
                         </Text>
                         <WorkScheduleEditor
                             value={settings.workSchedule || DEFAULT_SCHEDULE}
@@ -832,7 +832,7 @@ const generatePayslipPDF = async (slip: Payslip) => {
                         <Text style={styles.hint}>
                             {lp.enabled
                                 ? 'Each employee gets these yearly quotas (Apr–Mar). Working on a weekly off / holiday adds Comp Off. Unplanned absence is NOT taken from leave — use “Absent” above to cut salary. The per-employee “Leaves” number and the ₹ leave penalty are not used.'
-                                : 'Off: one yearly leave pool per employee (Manage Team → Leaves), as before.'}
+                                : 'Off: one yearly leave pool per employee (Team & Settings → Leaves), as before.'}
                         </Text>
                         {lp.enabled && (
                             <>

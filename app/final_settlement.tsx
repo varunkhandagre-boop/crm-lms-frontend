@@ -95,7 +95,7 @@ export default function FinalSettlementScreen() {
         if (!preview) return;
         Alert.alert(
             'Save Full & Final?',
-            `Net ${rs(preview.net)} for ${preview.employee.name}.\n\nTheir advances will be marked settled. You can still delete it until it is marked paid. Disable the employee in Manage Team when they leave.`,
+            `Net ${rs(preview.net)} for ${preview.employee.name}.\n\nTheir advances will be marked settled. You can still delete it until it is marked paid. Disable the employee in Team & Settings when they leave.`,
             [
                 { text: 'Cancel', style: 'cancel' },
                 { text: 'Save', onPress: async () => {

@@ -1,6 +1,6 @@
 // Weekly off + shift — same rules as the backend (src/lib/workSchedule.ts).
 // The company default is set in Payroll → Salary Rules; an employee can have
-// their own in Manage Team. Screens get them from GET /attendance/schedules.
+// their own in Team & Settings. Screens get them from GET /attendance/schedules.
 
 export interface WorkSchedule {
     weeklyOffDays: number[];  // 0 = Sunday … 6 = Saturday

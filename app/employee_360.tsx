@@ -8,7 +8,7 @@ import { useData } from './context/DataContext';
 
 // Employee 360: one employee on one screen — profile, attendance, this
 // month's salary estimate, leave, advances, expenses, payslips and work.
-// Opened from Manage Team (office roles). All numbers come from the server,
+// Opened from Team & Settings (office roles). All numbers come from the server,
 // computed the same way as the Attendance, Leave and Payroll screens.
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

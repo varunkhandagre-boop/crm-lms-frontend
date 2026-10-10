@@ -395,7 +395,7 @@ const saveTokenToDatabase = async (token: string) => {
                       <TouchableOpacity style={[styles.accordionHeader, activeSection === 'Sales' && styles.activeHeader]} onPress={() => toggleSection('Sales')}>
                           <View style={{flexDirection:'row', alignItems:'center'}}>
                               <Ionicons name="bar-chart" size={24} color={activeSection === 'Sales' ? "white" : "#333"} />
-                              <Text style={[styles.sectionTitle, activeSection === 'Sales' && {color:'white'}]}> Sales Analysis</Text>
+                              <Text style={[styles.sectionTitle, activeSection === 'Sales' && {color:'white'}]}> Sales</Text>
                           </View>
                           <Ionicons name={activeSection === 'Sales' ? "chevron-up" : "chevron-down"} size={20} color={activeSection === 'Sales' ? "white" : "gray"} />
                       </TouchableOpacity>

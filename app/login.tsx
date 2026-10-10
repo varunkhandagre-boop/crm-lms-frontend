@@ -84,7 +84,7 @@ export default function LoginScreen() {
     const handleForgotPassword = () => {
       Alert.alert(
           "Reset Password",
-          "Please ask your company Admin to reset your password from Manage Team. If you are the Admin, contact support."
+          "Please ask your company Admin to reset your password from Team & Settings. If you are the Admin, contact support."
       );
   };
 
