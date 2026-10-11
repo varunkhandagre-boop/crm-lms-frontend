@@ -525,7 +525,8 @@ const GUIDE_SECTIONS: GuideSection[] = [
             'Go to "Courier" under HR & Operations.',
             'Add sender, receiver, and courier partner details.',
             'Track the status until it is marked delivered.',
-            'Tap the docket / tracking number to copy it, then paste it on the courier company\'s website to track the parcel.',
+            'Tap the orange "Track" button: the courier company\'s tracking page opens (Blue Dart, Delhivery, DHL, FedEx, Xpressbees, Ecom, Ekart open with the number filled in; for DTDC, India Post and others the number is copied — just paste it). Then mark the entry Received / Delivered.',
+            'Every morning Admin and Store get a summary of pending inward / outward couriers, and at 8 PM what was delivered and received today (Team & Settings → Alerts to change the time or switch off).',
         ],
     },
     {
@@ -1296,8 +1297,8 @@ const FAQS: FaqItem[] = [
     },
     {
         cat: 'office',
-        q: 'How do I copy a courier tracking number?',
-        a: `In Courier, tap the docket / tracking number — it is copied. Paste it on the courier company's website.`,
+        q: 'How do I track a courier?',
+        a: `In Courier, tap the orange "Track" button on the entry (or in its details). The courier company's tracking page opens — for Blue Dart, Delhivery, DHL, FedEx, Xpressbees, Ecom Express and Ekart the number is already filled in. For DTDC, India Post and other couriers the docket number is copied: paste it on their page. Tapping the docket number also copies it.`,
     },
     {
         cat: 'orders',

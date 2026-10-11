@@ -18,6 +18,7 @@ import {
     View
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
+import { trackCourier } from '../utils/courierTracking';
 
 // 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
 import { useData } from './context/DataContext';
@@ -496,6 +497,11 @@ export default function CourierScreen() {
               <TwoLine main={c.courierName || '-'} sub={c.docketNo ? `#${c.docketNo}` : undefined} />
           </TouchableOpacity>
       ) },
+      { key: 'track', label: '', width: 70, align: 'center' as const, render: (c) => c.docketNo ? (
+          <TouchableOpacity style={styles.trackBtn} onPress={() => trackCourier(c.courierName, c.docketNo)}>
+              <Ionicons name="locate" size={13} color="white" /><Text style={styles.trackBtnText}>Track</Text>
+          </TouchableOpacity>
+      ) : null },
       { key: 'from', label: 'From', flex: 2, render: (c) => c.sender || '-' },
       { key: 'to', label: 'To', flex: 2, render: (c) => <TwoLine main={c.receiver || '-'} sub={c.toCity || c.orgCity || undefined} /> },
       { key: 'material', label: 'Material', flex: 2, render: (c) => <TwoLine main={c.material || c.materialSummary || 'No Details'} sub={c.dcNo ? `DC ${c.dcNo}` : undefined} /> },
@@ -538,6 +544,12 @@ export default function CourierScreen() {
                         <Ionicons name="copy-outline" size={14} color="#3b5998" style={{marginLeft: 6}} />
                     </TouchableOpacity>
                 </View>
+                {!!item.docketNo && (
+                    <TouchableOpacity style={styles.trackBtn} onPress={() => trackCourier(item.courierName, item.docketNo)} hitSlop={6}>
+                        <Ionicons name="locate" size={14} color="white" />
+                        <Text style={styles.trackBtnText}>Track</Text>
+                    </TouchableOpacity>
+                )}
                 <View style={[styles.typeBadge, isInward ? styles.inBadge : styles.outBadge]}>
                     <Text style={[styles.typeText, isInward ? {color:'#2e7d32'} : {color:'#c62828'}]}>{item.type?.toUpperCase()}</Text>
                 </View>
@@ -760,6 +772,12 @@ export default function CourierScreen() {
                               <DetailRow label="Docket No (tap to copy)" value={selectedCourier.docketNo} icon="barcode" />
                           </TouchableOpacity>
                           <DetailRow label="Service" value={selectedCourier.courierName} icon="cube" />
+                          {!!selectedCourier.docketNo && (
+                              <TouchableOpacity style={[styles.trackBtn, styles.trackBtnWide]} onPress={() => trackCourier(selectedCourier.courierName, selectedCourier.docketNo)}>
+                                  <Ionicons name="locate" size={18} color="white" />
+                                  <Text style={[styles.trackBtnText, { fontSize: 15 }]}>Track on {selectedCourier.courierName || 'courier'} website</Text>
+                              </TouchableOpacity>
+                          )}
                           <DetailRow label="Type" value={selectedCourier.type} icon="swap-vertical" />
                           <DetailRow label="Date" value={selectedCourier.date} icon="calendar" />
                           
@@ -884,6 +902,9 @@ const styles = StyleSheet.create({
   dateText: { fontSize: 12, color: 'gray' },
   statusBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
   docketNo: { fontWeight: 'bold', fontSize: 14, color:'#3b5998' },
+  trackBtn: { flexDirection: 'row', alignItems: 'center', alignSelf: 'center', gap: 4, backgroundColor: '#e67e22', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14 },
+  trackBtnWide: { alignSelf: 'stretch', justifyContent: 'center', paddingVertical: 11, borderRadius: 10, marginVertical: 8 },
+  trackBtnText: { color: 'white', fontWeight: 'bold', fontSize: 12 },
   courierName: { fontSize: 16, fontWeight: 'bold', color: '#333' },
   typeBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
   inBadge: { backgroundColor: '#e8f5e9' },
