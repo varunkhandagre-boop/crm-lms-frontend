@@ -87,6 +87,8 @@ export default function SubscriptionScreen() {
     const [totalPrice, setTotalPrice] = useState(0);
     const [wantsAutomation, setWantsAutomation] = useState(false);
     const [automationAddonPrice, setAutomationAddonPrice] = useState(DEFAULT_AUTOMATION_ADDON_PRICE);
+    const [gstPercent, setGstPercent] = useState(0);
+    const [price, setPrice] = useState({ planAmount: 0, subtotal: 0, gstAmount: 0 });
 
     // =========================================================
     // 1. LOAD PLANS + BILLING + GATEWAY CONFIG
@@ -107,6 +109,7 @@ export default function SubscriptionScreen() {
                     setUpiId(billing.upiId || '');
                     setUpiPayeeName(billing.upiPayeeName || 'Company');
                     setAutomationAddonPrice(Number(billing.automationAddonPrice) || DEFAULT_AUTOMATION_ADDON_PRICE);
+                    setGstPercent(Number(billing.gstPercent) || 0);
                 }
                 if (gateway) setGatewayConfig(gateway);
             } catch (e: any) {
@@ -123,16 +126,18 @@ export default function SubscriptionScreen() {
     // =========================================================
     useEffect(() => {
         const plan = plans.find(p => p.id === selectedPlanId);
-        if (!plan) { setTotalPrice(0); return; }
+        if (!plan) { setTotalPrice(0); setPrice({ planAmount: 0, subtotal: 0, gstAmount: 0 }); return; }
 
+        // Same formula as the server checkout (checkoutAmount): plan after discount + add-on, then GST.
         const empCount = Number(employeeCount) || 0;
         const yearsInPlan = plan.durationMonths / 12;
-        let baseCost = empCount * plan.pricePerEmployee * yearsInPlan;
-        const discountAmount = (baseCost * (plan.discountPercent || 0)) / 100;
-        let finalPrice = Math.round(baseCost - discountAmount);
-        if (wantsAutomation) finalPrice += automationAddonPrice;
-        setTotalPrice(finalPrice);
-    }, [selectedPlanId, employeeCount, plans, wantsAutomation]);
+        const baseCost = empCount * Number(plan.pricePerEmployee) * yearsInPlan;
+        const planAmount = Math.round(baseCost - (baseCost * (Number(plan.discountPercent) || 0)) / 100);
+        const subtotal = planAmount + (wantsAutomation ? automationAddonPrice : 0);
+        const gstAmount = Math.round((subtotal * gstPercent) / 100);
+        setPrice({ planAmount, subtotal, gstAmount });
+        setTotalPrice(subtotal + gstAmount);
+    }, [selectedPlanId, employeeCount, plans, wantsAutomation, automationAddonPrice, gstPercent]);
 
     const selectedPlan = plans.find(p => p.id === selectedPlanId);
 
@@ -322,7 +327,7 @@ export default function SubscriptionScreen() {
                             return (
                             <TouchableOpacity
                                 key={plan.id}
-                                style={[styles.planCard, { borderColor: selected ? tone.color : tone.soft, backgroundColor: selected ? tone.bg : '#fff' }, selected && styles.selectedCard]}
+                                style={[styles.planCard, { borderColor: selected ? tone.color : tone.soft, backgroundColor: selected ? tone.bg : '#fff' }, selected && styles.selectedCard, !!selectedPlanId && !selected && styles.unselectedCard]}
                                 onPress={() => setSelectedPlanId(plan.id)}
                             >
                                 <View style={[styles.planBand, { backgroundColor: tone.color }]}>
@@ -334,10 +339,10 @@ export default function SubscriptionScreen() {
                                         </View>
                                     )}
                                 </View>
-                                <View style={{ padding: 12 }}>
+                                <View style={{ padding: 12, paddingBottom: 34 }}>
                                     <Text style={styles.planTitle}>{plan.label}</Text>
                                     <Text style={[styles.planPriceBig, { color: tone.color }]}>₹{yearly.toLocaleString('en-IN')}</Text>
-                                    <Text style={styles.planPrice}>per employee / year</Text>
+                                    <Text style={styles.planPrice}>per employee / year{gstPercent > 0 ? ' + GST' : ''}</Text>
                                     {plan.discountPercent > 0 && (
                                         <Text style={styles.planWas}>₹{Number(plan.pricePerEmployee).toLocaleString('en-IN')}</Text>
                                     )}
@@ -347,6 +352,12 @@ export default function SubscriptionScreen() {
                                         ))}
                                     </View>
                                 </View>
+                                {selected && (
+                                    <View style={[styles.selectedTag, { backgroundColor: tone.color }]}>
+                                        <Ionicons name="checkmark" size={12} color="white" />
+                                        <Text style={styles.selectedTagText}>SELECTED</Text>
+                                    </View>
+                                )}
                             </TouchableOpacity>
                             );
                         })}
@@ -370,11 +381,17 @@ export default function SubscriptionScreen() {
                         <View style={{ flex: 1, paddingRight: 10 }}>
                             <Text style={styles.addonTitle}>WhatsApp / Email Automation</Text>
                             <Text style={styles.addonSubtitle}>
-                                Order, payment, and service updates sent to customers automatically
+                                Order, payment and service updates sent to your customers automatically.
+                            </Text>
+                            <Text style={styles.addonNote}>
+                                • One price for the whole company — not per employee.{'\n'}
+                                • Covers setup and connection by our team.{'\n'}
+                                • You buy your own WhatsApp Business API (e.g. AiSensy, Wati) and email service; their message charges are paid by you.
                             </Text>
                         </View>
                         <View style={{ alignItems: 'flex-end' }}>
-                            <Text style={styles.addonPrice}>+₹{automationAddonPrice}</Text>
+                            <Text style={styles.addonPrice}>+₹{automationAddonPrice.toLocaleString('en-IN')}</Text>
+                            <Text style={styles.addonPer}>per company</Text>
                             <Ionicons
                                 name={wantsAutomation ? 'checkbox' : 'square-outline'}
                                 size={24}
@@ -385,32 +402,27 @@ export default function SubscriptionScreen() {
 
                     <View style={styles.summaryCard}>
                         <Text style={styles.summaryTitle}>Order Summary</Text>
-                        <View style={styles.summaryRow}>
-                            <Text style={styles.summaryLabel}>Plan:</Text>
-                            <Text style={styles.summaryValue}>{selectedPlan?.label}</Text>
-                        </View>
-                        <View style={styles.summaryRow}>
-                            <Text style={styles.summaryLabel}>Total Employees:</Text>
-                            <Text style={styles.summaryValue}>{employeeCount || 0} Users</Text>
-                        </View>
+                        <SummaryRow label="Plan" value={selectedPlan?.label || '—'} />
+                        <SummaryRow label="Price per employee / year" value={selectedPlan ? `₹${Number(selectedPlan.pricePerEmployee).toLocaleString('en-IN')}` : '—'} />
+                        <SummaryRow label="Employees" value={`${Number(employeeCount) || 0}`} />
+                        <SummaryRow label="Duration" value={selectedPlan ? (selectedPlan.durationMonths % 12 === 0 ? `${selectedPlan.durationMonths / 12} year${selectedPlan.durationMonths > 12 ? 's' : ''}` : `${selectedPlan.durationMonths} months`) : '—'} />
                         {selectedPlan && selectedPlan.discountPercent > 0 && (
-                            <View style={styles.summaryRow}>
-                                <Text style={styles.summaryLabel}>Discount:</Text>
-                                <Text style={[styles.summaryValue, { color: '#2e7d32' }]}>
-                                    -{selectedPlan.discountPercent}% applied
-                                </Text>
-                            </View>
+                            <SummaryRow label="Discount" value={`${selectedPlan.discountPercent}% off`} valueColor="#2e7d32" />
                         )}
+                        <SummaryRow label="Plan amount" value={`₹${price.planAmount.toLocaleString('en-IN')}`} />
                         {wantsAutomation && (
-                            <View style={styles.summaryRow}>
-                                <Text style={styles.summaryLabel}>Automation Add-on:</Text>
-                                <Text style={styles.summaryValue}>+₹{automationAddonPrice}</Text>
-                            </View>
+                            <SummaryRow label="Automation (per company)" value={`₹${automationAddonPrice.toLocaleString('en-IN')}`} />
+                        )}
+                        <View style={styles.summaryDivider} />
+                        <SummaryRow label="Subtotal" value={`₹${price.subtotal.toLocaleString('en-IN')}`} />
+                        {gstPercent > 0 && (
+                            <SummaryRow label={`GST (${gstPercent}%)`} value={`₹${price.gstAmount.toLocaleString('en-IN')}`} />
                         )}
                         <View style={[styles.summaryRow, styles.totalRow]}>
-                            <Text style={styles.totalLabel}>Total Amount:</Text>
+                            <Text style={styles.totalLabel}>Total payable</Text>
                             <Text style={styles.totalValue}>₹{totalPrice.toLocaleString('en-IN')}</Text>
                         </View>
+                        {gstPercent > 0 && <Text style={styles.gstNote}>Includes {gstPercent}% GST</Text>}
                     </View>
 
                     <Text style={styles.sectionTitle}>Payment Options</Text>
@@ -498,6 +510,15 @@ export default function SubscriptionScreen() {
     );
 }
 
+function SummaryRow({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
+    return (
+        <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>{label}</Text>
+            <Text style={[styles.summaryValue, valueColor ? { color: valueColor } : null]}>{value}</Text>
+        </View>
+    );
+}
+
 const MODULE_STYLE: Record<'hr' | 'sales' | 'service', { label: string; color: string; bg: string }> = {
     hr: { label: 'HR', color: '#2e7d32', bg: '#e8f5e9' },
     sales: { label: 'Sales', color: '#1565c0', bg: '#e3f2fd' },
@@ -522,7 +543,10 @@ const styles = StyleSheet.create({
     sectionTitle: { fontSize: 15, fontWeight: 'bold', color: '#333', marginTop: 18, marginBottom: 10 },
     planContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 10 },
     planCard: { flexBasis: '47%', flexGrow: 1, backgroundColor: '#fff', borderWidth: 1.5, borderRadius: 14, overflow: 'hidden' },
-    selectedCard: { borderWidth: 3, elevation: 4 },
+    selectedCard: { borderWidth: 3, elevation: 10, shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, transform: [{ scale: 1.03 }] },
+    unselectedCard: { opacity: 0.72 },
+    selectedTag: { position: 'absolute', bottom: 8, right: 8, flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
+    selectedTagText: { color: 'white', fontSize: 11, fontWeight: 'bold' },
     planBand: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 7 },
     planBandText: { color: 'white', fontWeight: 'bold', fontSize: 12, flex: 1 },
     planTitle: { fontSize: 14, fontWeight: 'bold', color: '#333' },
@@ -541,12 +565,16 @@ const styles = StyleSheet.create({
     addonPrice: { fontSize: 14, fontWeight: 'bold', color: '#2e7d32', marginBottom: 4 },
     summaryCard: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#eee', borderRadius: 12, padding: 18, marginBottom: 10 },
     summaryTitle: { fontSize: 15, fontWeight: 'bold', color: '#333', marginBottom: 14 },
-    summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-    totalRow: { borderTopWidth: 1, borderTopColor: '#ddd', paddingTop: 12, marginTop: 8 },
-    summaryLabel: { color: '#666', fontSize: 14 },
-    summaryValue: { fontWeight: 'bold', color: '#333', fontSize: 14 },
-    totalLabel: { fontSize: 16, fontWeight: 'bold', color: '#333' },
-    totalValue: { fontSize: 20, fontWeight: 'bold', color: '#d32f2f' },
+    summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, gap: 12 },
+    summaryDivider: { height: 1, backgroundColor: '#e5e7eb', marginVertical: 6 },
+    totalRow: { backgroundColor: '#eef3ff', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 12, marginTop: 8 },
+    summaryLabel: { color: '#444', fontSize: 14, fontWeight: '600', flexShrink: 1 },
+    summaryValue: { fontWeight: 'bold', color: '#111', fontSize: 15, textAlign: 'right', flexShrink: 1 },
+    totalLabel: { fontSize: 17, fontWeight: 'bold', color: '#1f3a8a' },
+    totalValue: { fontSize: 24, fontWeight: 'bold', color: '#1f3a8a' },
+    gstNote: { fontSize: 12, color: '#666', textAlign: 'right', marginTop: 4 },
+    addonNote: { fontSize: 12, color: '#7a4b00', backgroundColor: '#fff8e1', borderRadius: 8, padding: 8, marginTop: 8, lineHeight: 18 },
+    addonPer: { fontSize: 11, color: '#2e7d32', fontWeight: '600', marginBottom: 4 },
     razorpayBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#3b5998', padding: 18, borderRadius: 14, marginBottom: 10, elevation: 3 },
     razorpayBtnText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
     razorpayBtnSub: { color: 'rgba(255,255,255,0.75)', fontSize: 11, marginTop: 2 },

@@ -21,6 +21,7 @@ export interface BillingSettings {
   upiId: string;
   upiPayeeName?: string;
   automationAddonPrice: number;
+  gstPercent?: number;
 }
 
 interface OneResponse<T> { data: T }

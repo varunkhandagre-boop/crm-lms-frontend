@@ -59,6 +59,8 @@ export default function ManagePlansScreen() {
     const [upiPayeeName, setUpiPayeeName] = useState('');
     const [automationAddonPrice, setAutomationAddonPrice] = useState('3000');
     const [savingAutomationPrice, setSavingAutomationPrice] = useState(false);
+    const [gstPercent, setGstPercent] = useState('0');
+    const [savingGst, setSavingGst] = useState(false);
 
     // Modal / form state
     const [modalVisible, setModalVisible] = useState(false);
@@ -80,7 +82,8 @@ export default function ManagePlansScreen() {
             if (billingRes) {
                 setUpiId(billingRes.upiId || '');
                 setUpiPayeeName(billingRes.upiPayeeName || '');
-                setAutomationAddonPrice(String(billingRes.automationAddonPrice ?? '3000'));
+                setAutomationAddonPrice(String(Number(billingRes.automationAddonPrice ?? 3000)));
+                setGstPercent(String(Number(billingRes.gstPercent ?? 0)));
             }
         } catch (e: any) {
             Alert.alert('Error', e.message || 'Could not load plans. Check your connection.');
@@ -96,6 +99,7 @@ export default function ManagePlansScreen() {
             upiId,
             upiPayeeName,
             automationAddonPrice: Number(automationAddonPrice) || 0,
+            gstPercent: Number(gstPercent) || 0,
             ...overrides,
         };
         return saveBillingSettings(payload);
@@ -133,6 +137,26 @@ export default function ManagePlansScreen() {
             setSavingAutomationPrice(false);
         }
     };
+
+    const saveGst = async () => {
+        const g = Number(gstPercent);
+        if (gstPercent.trim() === '' || isNaN(g) || g < 0 || g > 28) {
+            Alert.alert('Invalid', 'GST must be between 0 and 28 (use 18 for software).');
+            return;
+        }
+        setSavingGst(true);
+        try {
+            await persistBilling({ gstPercent: g });
+            Alert.alert('Saved ✅', g > 0 ? `${g}% GST will be added on top of plan prices on the website and in Plan & Renewal.` : 'GST is now off.');
+        } catch (e: any) {
+            Alert.alert('Error', e.message || 'Could not save GST.');
+        } finally {
+            setSavingGst(false);
+        }
+    };
+
+    // Active plans first (in their sort order), deactivated ones at the bottom.
+    const sortedPlans = [...plans].sort((a, b) => Number(b.active) - Number(a.active));
 
     const openAddForm = () => {
         setForm(EMPTY_FORM);
@@ -267,7 +291,7 @@ export default function ManagePlansScreen() {
                     </Text>
                 )}
 
-                {plans.map((plan) => {
+                {sortedPlans.map((plan) => {
                     const mods = plan.modules || [];
                     const tone = planTone(mods);
                     const effective = Math.round(plan.pricePerEmployee * (1 - (plan.discountPercent || 0) / 100));
@@ -288,7 +312,7 @@ export default function ManagePlansScreen() {
                         <View style={[styles.priceBox, { backgroundColor: tone.bg }]}>
                             <View style={{ flex: 1 }}>
                                 <Text style={[styles.priceBig, { color: tone.color }]}>₹{effective.toLocaleString('en-IN')}</Text>
-                                <Text style={styles.priceUnit}>per employee / year</Text>
+                                <Text style={styles.priceUnit}>per employee / year{Number(gstPercent) > 0 ? ` + ${Number(gstPercent)}% GST` : ''}</Text>
                                 {plan.discountPercent > 0 && (
                                     <Text style={styles.priceWas}>₹{Number(plan.pricePerEmployee).toLocaleString('en-IN')} before discount</Text>
                                 )}
@@ -341,8 +365,9 @@ export default function ManagePlansScreen() {
                         </Text>
                     </View>
                     <Text style={styles.helperText}>
-                        This price is shown to every client on the Subscription screen
-                        when they select the "WhatsApp/Email Automation" add-on.
+                        One price for the whole company (not per employee), charged when the client
+                        ticks "WhatsApp / Email Automation" in Plan & Renewal or on the website. It covers
+                        our setup; the client buys their own WhatsApp / email API. GST is added on top.
                     </Text>
                     <Text style={styles.label}>Price (₹)</Text>
                     <TextInput
@@ -361,6 +386,29 @@ export default function ManagePlansScreen() {
                             ? <ActivityIndicator color="white" />
                             : <Text style={styles.btnText}>Save Automation Price</Text>
                         }
+                    </TouchableOpacity>
+                </View>
+
+                {/* GST SECTION */}
+                <View style={styles.gstCard}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                        <Ionicons name="receipt" size={18} color="#ef6c00" />
+                        <Text style={[styles.sectionHeader, { marginBottom: 0, marginLeft: 6 }]}>GST on Subscriptions</Text>
+                    </View>
+                    <Text style={styles.helperText}>
+                        Plan and add-on prices are before GST. This % is added on top at checkout
+                        (website and Plan & Renewal). Software (SaaS) in India: 18%. 0 = no GST.
+                    </Text>
+                    <Text style={styles.label}>GST (%)</Text>
+                    <TextInput
+                        style={styles.inputBox}
+                        value={gstPercent}
+                        onChangeText={setGstPercent}
+                        placeholder="18"
+                        keyboardType="numeric"
+                    />
+                    <TouchableOpacity style={[styles.saveUpiBtn, { backgroundColor: '#ef6c00' }]} onPress={saveGst} disabled={savingGst}>
+                        {savingGst ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Save GST</Text>}
                     </TouchableOpacity>
                 </View>
 
@@ -420,7 +468,7 @@ export default function ManagePlansScreen() {
                                 keyboardType="numeric"
                             />
 
-                            <Text style={styles.label}>Price per Employee / Year (₹)</Text>
+                            <Text style={styles.label}>Price per Employee / Year (₹, before GST)</Text>
                             <TextInput
                                 style={styles.inputBox}
                                 value={form.pricePerEmployee}
@@ -535,6 +583,7 @@ const styles = StyleSheet.create({
     deleteBtnText: { color: '#d32f2f', fontWeight: 'bold', fontSize: 13 },
 
     automationCard: { backgroundColor: '#fff', borderRadius: 10, padding: 15, marginTop: 10, marginBottom: 15, elevation: 2, borderWidth: 1, borderColor: '#c8e6c9' },
+    gstCard: { backgroundColor: '#fff', borderRadius: 10, padding: 15, marginTop: 10, marginBottom: 15, elevation: 2, borderWidth: 1, borderColor: '#ffe0b2' },
     helperText: { fontSize: 12, color: '#888', marginBottom: 5, lineHeight: 17 },
 
     upiCard: { backgroundColor: '#fff', borderRadius: 10, padding: 15, marginTop: 10, marginBottom: 30, elevation: 2 },

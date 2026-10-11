@@ -535,6 +535,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         title: 'WhatsApp & Email — Automation Settings',
         steps: [
             'Sidebar → "WhatsApp & Email" → tap the ⚙️ icon at the top right. Only works for Admins with the Automation Add-on active.',
+            'The Automation add-on is one price for the whole company (not per employee) and covers our setup. You buy your own WhatsApp Business API account (e.g. AiSensy, Wati) and email service; their message charges are paid to them by you.',
             'Turn on WhatsApp and/or Email, choose your provider, and paste your API key.',
             'Once saved, customers automatically get updates for orders, payments, installations, services, and couriers.',
         ],
@@ -605,7 +606,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         title: 'Plan & Renewal',
         steps: [
             'Sidebar → "Plan & Renewal" (Admin). The card at the top shows your current plan, valid-till date, days left and employees used.',
-            'Select a plan, enter number of employees, and optionally add the Automation add-on.',
+            'Select a plan (prices are per employee per year, + GST), enter the number of employees, and optionally add the Automation add-on (one price per company). The Order Summary shows the subtotal, GST and total payable.',
             'Tap "Pay Online" (Card / UPI / Net Banking / Wallet), or scan the UPI QR code and tap "I Have Paid".',
             'Your plan activates once the payment is verified (usually within 1 hour).',
             'When 30 days or less are left, a "Plan: N days left" badge shows on the Home screen and under your name in the sidebar. Tap it to go straight to renewal.',
