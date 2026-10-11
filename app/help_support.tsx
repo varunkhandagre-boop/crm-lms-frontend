@@ -517,6 +517,20 @@ const GUIDE_SECTIONS: GuideSection[] = [
         ],
     },
     {
+        icon: 'journal',
+        color: '#f9a825',
+        cat: 'office',
+        title: 'Personal Notes — Checklists & Reminders',
+        steps: [
+            'Sidebar → "Personal Notes". Only you can see your notes (bank details, points to remember, ideas).',
+            'Tap + for a text note, or the small ☑ button above it for a checklist. In a note, the ☑ / 📄 icon at the top switches between text and checklist — lines become items and back.',
+            'Tick items in the note or straight on its card; the card shows "2/5 done".',
+            'Reminder: choose "Today 6 pm", "Tomorrow 9 am" or "Pick date & time". At that time you get a notification; tapping it opens the note. Tap ✕ to remove a reminder.',
+            'To speak instead of typing, tap the mic on your phone keyboard (Hindi or English).',
+            'Pin important notes, change the colour, share a note on WhatsApp, or archive old ones.',
+        ],
+    },
+    {
         icon: 'cube',
         color: '#e67e22',
         cat: 'office',

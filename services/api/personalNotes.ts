@@ -12,9 +12,16 @@ export interface PersonalNote {
     color: string;
     isPinned: boolean;
     isArchived: boolean;
+    /** null / missing = ordinary text note */
+    checklist?: ChecklistItem[] | null;
+    /** ISO time of the reminder push; reminderSentAt is set once it went out */
+    reminderAt?: string | null;
+    reminderSentAt?: string | null;
     createdAt: string;
     updatedAt: string;
 }
+
+export interface ChecklistItem { text: string; done: boolean }
 
 interface OneResponse<T> { data: T }
 interface ListResponse<T> { data: T[] }
@@ -31,6 +38,8 @@ export interface SaveNotePayload {
     content: string;
     color: string;
     isPinned: boolean;
+    checklist?: ChecklistItem[] | null;
+    reminderAt?: string | null;
 }
 
 export async function createPersonalNote(payload: SaveNotePayload): Promise<PersonalNote> {
