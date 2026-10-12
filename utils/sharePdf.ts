@@ -14,9 +14,10 @@ export async function sharePdfFromHtml(
   dialogTitle?: string,
   pageSize?: { width?: number; height?: number },
 ): Promise<void> {
-  // Web: open the browser's print window — choose "Save as PDF" there.
+  // Web: expo-print ignores `html` on web and prints the current screen, so
+  // print the PDF's own HTML from a hidden frame instead ("Save as PDF" there).
   if (Platform.OS === 'web') {
-    await Print.printAsync({ html });
+    await printHtmlOnWeb(html, fileName);
     return;
   }
   const { uri, base64 } = await Print.printToFileAsync({ html, base64: true, ...pageSize });
@@ -30,4 +31,50 @@ export async function sharePdfFromHtml(
     console.log('PDF write failed, sharing original file:', writeError);
     await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle });
   }
+}
+
+// Prints the given HTML document (not the app screen) in the browser.
+function printHtmlOnWeb(html: string, fileName: string): Promise<void> {
+  return new Promise((resolve) => {
+    const frame = document.createElement('iframe');
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+    document.body.appendChild(frame);
+    const win = frame.contentWindow;
+    const doc = win?.document;
+    if (!win || !doc) { frame.remove(); resolve(); return; }
+    doc.open();
+    doc.write(html);
+    doc.close();
+
+    // Chrome's "Save as PDF" suggests the page title as the file name.
+    const oldTitle = document.title;
+    const title = fileName.replace(/\.pdf$/i, '');
+    document.title = title;
+    doc.title = title;
+
+    let done = false;
+    const cleanup = () => {
+      if (done) return;
+      done = true;
+      document.title = oldTitle;
+      setTimeout(() => frame.remove(), 500);
+      resolve();
+    };
+
+    // Wait for the logo / signature / QR images, at most 4 s.
+    const images = Array.from(doc.images || []);
+    const loaded = images.map((img) => (img.complete ? Promise.resolve() : new Promise<void>((r) => {
+      img.addEventListener('load', () => r(), { once: true });
+      img.addEventListener('error', () => r(), { once: true });
+    })));
+    const timeout = new Promise<void>((r) => setTimeout(r, 4000));
+    Promise.race([Promise.all(loaded), timeout]).then(() => {
+      win.addEventListener('afterprint', cleanup, { once: true });
+      win.focus();
+      win.print();
+      // Some browsers never fire afterprint for frames; print() blocks until the dialog closes anyway.
+      setTimeout(cleanup, 1000);
+    });
+  });
 }
