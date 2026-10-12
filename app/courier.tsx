@@ -386,6 +386,18 @@ export default function CourierScreen() {
     setEditModalVisible(true);
   };
 
+  // Inward ⇄ Outward is fixing a wrong entry: the parcel went the other way, so
+  // From and To swap too, and "Received" (inward) ⇄ "Delivered" (outward).
+  const changeEditType = (ty: string) => {
+      if (ty === editData.type) return;
+      const status = editData.status === 'Received' && ty === 'Outward' ? 'Delivered'
+          : editData.status === 'Delivered' && ty === 'Inward' ? 'Received'
+          : editData.status;
+      setEditData({ ...editData, type: ty, sender: editData.receiver, receiver: editData.sender, status });
+      if (Platform.OS === 'android') ToastAndroid.show('From and To swapped — please check them.', ToastAndroid.SHORT);
+  };
+  const swapEditParties = () => setEditData({ ...editData, sender: editData.receiver, receiver: editData.sender });
+
   // 🔥 5. SAAS UPDATE LOGIC (EDIT) — Phase 8: PATCHes Postgres via updateCourier()
   const handleSaveEdit = async () => {
     if (!editData.id) return;
@@ -714,7 +726,7 @@ export default function CourierScreen() {
                               <TouchableOpacity 
                                   key={ty} 
                                   style={[styles.statusChip, editData.type === ty && {backgroundColor: '#3b5998', borderColor: '#3b5998'}]}
-                                  onPress={() => setEditData({...editData, type: ty})}
+                                  onPress={() => changeEditType(ty)}
                               >
                                   <Text style={{color: editData.type === ty ? 'white' : '#555', fontSize: 12}}>{ty}</Text>
                               </TouchableOpacity>
@@ -723,6 +735,11 @@ export default function CourierScreen() {
 
                       <Text style={styles.inputLabel}>From (Sender)</Text>
                       <TextInput style={styles.editInput} value={editData.sender} onChangeText={t => setEditData({...editData, sender: t})} />
+
+                      <TouchableOpacity style={styles.swapBtn} onPress={swapEditParties}>
+                          <Ionicons name="swap-vertical" size={16} color="#3b5998" />
+                          <Text style={styles.swapBtnText}>Swap From / To</Text>
+                      </TouchableOpacity>
 
                       <Text style={styles.inputLabel}>To (Receiver)</Text>
                       <TextInput style={styles.editInput} value={editData.receiver} onChangeText={t => setEditData({...editData, receiver: t})} />
@@ -902,6 +919,8 @@ const styles = StyleSheet.create({
   dateText: { fontSize: 12, color: 'gray' },
   statusBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
   docketNo: { fontWeight: 'bold', fontSize: 14, color:'#3b5998' },
+  swapBtn: { flexDirection: 'row', alignItems: 'center', alignSelf: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14, backgroundColor: '#eef2ff', marginBottom: 8 },
+  swapBtnText: { color: '#3b5998', fontWeight: 'bold', fontSize: 12 },
   trackBtn: { flexDirection: 'row', alignItems: 'center', alignSelf: 'center', gap: 4, backgroundColor: '#e67e22', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14 },
   trackBtnWide: { alignSelf: 'stretch', justifyContent: 'center', paddingVertical: 11, borderRadius: 10, marginVertical: 8 },
   trackBtnText: { color: 'white', fontWeight: 'bold', fontSize: 12 },
