@@ -3,7 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
 import { Slot, usePathname, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Dimensions, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Dimensions, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DataProvider, useData } from './context/DataContext';
@@ -360,12 +360,13 @@ function NavigationLayout() {
    return <View style={{flex:1, justifyContent:'center', alignItems:'center'}}><ActivityIndicator size="large" color="#3b5998"/></View>;
 }
 
-// ✅ Subscription expired check (the server refuses this company's calls too).
-// An expired company's Admin may open Plan & Renewal to renew.
-const adminRenewing = currentUser?.role === 'Admin' && lockReason !== 'suspended' && pathname === '/SubscriptionScreen';
-if (currentUser && isSubscriptionExpired && !adminRenewing) {
+// ✅ Suspended company: nothing works (the server refuses every call).
+// Plan / trial over: view only — old data opens, saving is refused by the
+// server, and a red bar at the bottom says so (ReadOnlyBar).
+if (currentUser && isSubscriptionExpired && lockReason === 'suspended') {
     return <SubscriptionExpiredScreen />;
 }
+const readOnly = !!currentUser && isSubscriptionExpired && currentUser.role !== 'SuperAdmin';
 
   const menuCtx = { currentUser, companyProfile, appPermissions };
   const canSeeTab = (moduleKey: string) => canSeeTabFor(moduleKey, menuCtx);
@@ -387,6 +388,7 @@ if (currentUser && isSubscriptionExpired && !adminRenewing) {
           onLogout={async () => { await logout(); router.replace('/login' as any); }}
         />
         <View style={styles.desktopMain}>
+          {readOnly && <ReadOnlyBar isAdmin={currentUser?.role === 'Admin'} />}
           <PlanExpiryIndicator />
           <View style={styles.desktopPage}>
             <Slot />
@@ -412,11 +414,12 @@ if (currentUser && isSubscriptionExpired && !adminRenewing) {
       <View style={styles.content}>
         <Slot />
       </View>
+      {readOnly && <ReadOnlyBar isAdmin={currentUser?.role === 'Admin'} bottomInset={insets.bottom} />}
       
 
       {/* BOTTOM NAVIGATION */}
       {showNavBar && (
-        <View style={[styles.bottomNavContainer, { bottom: 20 + insets.bottom }]}>
+        <View style={[styles.bottomNavContainer, { bottom: 20 + (readOnly ? READ_ONLY_BAR_HEIGHT : insets.bottom) }]}>
             <View style={styles.bottomNav}>
             
             <NavButton title="Home" iconName="home" active={pathname === '/'} onPress={() => router.push('/')} />
@@ -473,11 +476,32 @@ if (currentUser && isSubscriptionExpired && !adminRenewing) {
 }
 
 // ✅ Subscription Expired Screen Component
+// Plan / trial over: old data can be viewed, nothing new can be saved.
+const READ_ONLY_BAR_HEIGHT = 34;
+function ReadOnlyBar({ isAdmin, bottomInset = 0 }: { isAdmin: boolean; bottomInset?: number }) {
+    const router = useRouter();
+    const onPress = () => {
+        if (isAdmin) router.push('/SubscriptionScreen' as any);
+        else Alert.alert('Plan expired', "You can still view old data. To add or change anything, ask your company admin to renew the plan.");
+    };
+    return (
+        <TouchableOpacity
+            onPress={onPress}
+            accessibilityLabel="Plan expired, view only"
+            style={{ backgroundColor: '#c62828', minHeight: READ_ONLY_BAR_HEIGHT, paddingBottom: bottomInset, justifyContent: 'center', alignItems: 'center', flexDirection: 'row' }}
+        >
+            <Ionicons name="lock-closed" size={14} color="white" />
+            <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 12, marginLeft: 6 }}>
+                Plan expired — view only.{isAdmin ? ' Tap to renew' : ''}
+            </Text>
+        </TouchableOpacity>
+    );
+}
+
+// Company suspended by us: nothing works until support re-activates it.
 function SubscriptionExpiredScreen() {
     const router = useRouter();
-    const { logout, currentUser, lockReason } = useData();
-    const suspended = lockReason === 'suspended';
-    const isAdmin = currentUser?.role === 'Admin';
+    const { logout } = useData();
     const handleLogout = async () => {
         await logout();
         router.replace('/login' as any);
@@ -486,23 +510,11 @@ function SubscriptionExpiredScreen() {
         <View style={{flex:1, justifyContent:'center', alignItems:'center', padding:20, backgroundColor:'#fff'}}>
             <Ionicons name="lock-closed" size={80} color="#d32f2f" />
             <Text style={{fontSize:24, fontWeight:'bold', color:'#d32f2f', marginTop:20}}>
-                {suspended ? 'Account Suspended' : 'Plan Expired'}
+                Account Suspended
             </Text>
             <Text style={{textAlign:'center', color:'#555', marginTop:10, fontSize:15, lineHeight:24}}>
-                {suspended
-                    ? "Your company's account is suspended.\nPlease contact support."
-                    : isAdmin
-                        ? "Your company's plan has expired.\nRenew the plan to continue."
-                        : "Your company's plan has expired.\nPlease ask your company admin to renew it."}
+                {"Your company's account is suspended.\nPlease contact support."}
             </Text>
-            {isAdmin && !suspended && (
-                <TouchableOpacity
-                    style={{marginTop:20, paddingHorizontal:30, paddingVertical:12, backgroundColor:'#2e7d32', borderRadius:25}}
-                    onPress={() => router.push('/SubscriptionScreen' as any)}
-                >
-                    <Text style={{color:'white', fontWeight:'bold', fontSize:16}}>Renew plan</Text>
-                </TouchableOpacity>
-            )}
             <View style={{backgroundColor:'#f5f5f5', padding:20, borderRadius:10, width:'100%', marginTop:30, alignItems:'center'}}>
                 <Text style={{fontWeight:'bold', fontSize:16, marginBottom:10, color:'#333'}}>Contact Support</Text>
                 <Text style={{fontSize:15, color:'#555', marginBottom:5}}>📞 +91 87705 30146</Text>
