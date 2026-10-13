@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -29,6 +29,7 @@ import { useData } from './context/DataContext';
 import WorkScheduleEditor, { scheduleHasErrors } from '../components/WorkScheduleEditor';
 import { useWorkSchedules } from '../hooks/useWorkSchedules';
 import { describeSchedule, WorkSchedule } from '../utils/workSchedule';
+import { fetchShifts, isOvernightShift, Shift } from '../services/api/shifts';
 
 // 🔥 Phase 10: team members now live in Postgres via these adapters
 import { createTeamMember, fetchTeamMembers, LegacyTeamMember, setTeamMemberStatus, updateTeamMember } from '../services/api/users';
@@ -122,6 +123,9 @@ const UsersTab = () => {
     const { currentUser } = useData();
     // Company weekly off / shift — shown when an employee uses the default
     const { company: companySchedule } = useWorkSchedules(currentUser?.companyId, currentUser?.id);
+    // Company shifts (Shift Roster → Shifts) for the default-shift choice.
+    const [shiftList, setShiftList] = useState<Shift[]>([]);
+    useEffect(() => { fetchShifts().then(setShiftList).catch(() => {}); }, []);
     const [selectedForBulk, setSelectedForBulk] = useState<Set<string>>(new Set());
     const [bulkMode, setBulkMode] = useState(false);
     
@@ -137,6 +141,7 @@ const UsersTab = () => {
         empId: "", joiningDate: "", monthlyTarget: "0", baseSalary: "0", yearlyLeaves: "18",
         dailyVisitTarget: "", monthlyVisitTarget: "",
         workSchedule: null as WorkSchedule | null,
+        defaultShiftId: null as string | null,
         password: "",
         personalEmail: "", personalMobile: "", bloodGroup: "",
         address: "", city: "", state: "", permanentAddress: "",
@@ -187,6 +192,7 @@ const UsersTab = () => {
                     // empty / 0 = no visit target (null clears it)
                     dailyVisitTarget: Number(formData.dailyVisitTarget) || null,
                     workSchedule: formData.workSchedule, // null = company default
+                    defaultShiftId: formData.defaultShiftId, // null = shift times from the schedule
                     monthlyVisitTarget: Number(formData.monthlyVisitTarget) || null,
                     baseSalary: Number(formData.baseSalary) || undefined,
                     yearlyLeaves: Number(formData.yearlyLeaves) || undefined,
@@ -229,6 +235,7 @@ const UsersTab = () => {
                     // empty / 0 = no visit target (null clears it)
                     dailyVisitTarget: Number(formData.dailyVisitTarget) || null,
                     workSchedule: formData.workSchedule, // null = company default
+                    defaultShiftId: formData.defaultShiftId, // null = shift times from the schedule
                     monthlyVisitTarget: Number(formData.monthlyVisitTarget) || null,
                     baseSalary: Number(formData.baseSalary) || undefined,
                     yearlyLeaves: Number(formData.yearlyLeaves) || undefined,
@@ -292,6 +299,7 @@ const UsersTab = () => {
             monthlyTarget: String(user.monthlyTarget || 0),
             dailyVisitTarget: user.dailyVisitTarget || "",
             workSchedule: user.workSchedule ?? null,
+            defaultShiftId: user.defaultShiftId ?? null,
             monthlyVisitTarget: user.monthlyVisitTarget || "",
             baseSalary: String(user.baseSalary || 0),
             yearlyLeaves: String(user.yearlyLeaves || 18)
@@ -337,6 +345,7 @@ const handleBulkDeactivate = () => {
             password: "", city: "", monthlyTarget: "0", baseSalary: "0", yearlyLeaves: "18",
             dailyVisitTarget: "", monthlyVisitTarget: "",
         workSchedule: null as WorkSchedule | null,
+        defaultShiftId: null as string | null,
             personalEmail: "", personalMobile: "", bloodGroup: "", address: "", state: "", permanentAddress: "",
             bankName: "", accountNo: "", ifscCode: "", aadhar: "", pan: "", assetNotes: ""
         });
@@ -554,6 +563,28 @@ const handleBulkDeactivate = () => {
                                 <View style={{flex:1}}><Text style={styles.label}>Visits / day</Text><TextInput style={styles.input} value={String(formData.dailyVisitTarget ?? '')} onChangeText={t=>setFormData({...formData, dailyVisitTarget:t.replace(/[^0-9]/g, '')})} keyboardType="numeric" placeholder="No target" /></View>
                                 <View style={{flex:1}}><Text style={styles.label}>Visits / month</Text><TextInput style={styles.input} value={String(formData.monthlyVisitTarget ?? '')} onChangeText={t=>setFormData({...formData, monthlyVisitTarget:t.replace(/[^0-9]/g, '')})} keyboardType="numeric" placeholder="No target" /></View>
                             </View>
+                            {shiftList.length > 0 && (
+                                <View style={{ marginTop: 6 }}>
+                                    <Text style={styles.label}>Default shift</Text>
+                                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                                        {[{ id: null as string | null, t: 'None' }, ...shiftList.map((s) => ({ id: s.id as string | null, t: `${isOvernightShift(s.startTime, s.endTime) ? '🌙 ' : ''}${s.name} ${s.startTime}–${s.endTime}` }))].map((o) => {
+                                            const on = (formData.defaultShiftId ?? null) === o.id;
+                                            return (
+                                                <TouchableOpacity
+                                                    key={o.id ?? 'none'}
+                                                    onPress={() => setFormData({ ...formData, defaultShiftId: o.id })}
+                                                    style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 14, borderWidth: 1, borderColor: on ? '#3b5998' : '#ccc', backgroundColor: on ? '#3b5998' : '#fff' }}
+                                                >
+                                                    <Text style={{ color: on ? '#fff' : '#3b5998', fontWeight: '600', fontSize: 12 }}>{o.t}</Text>
+                                                </TouchableOpacity>
+                                            );
+                                        })}
+                                    </View>
+                                    <Text style={{ fontSize: 11, color: 'gray', marginTop: 4 }}>
+                                        {formData.defaultShiftId ? 'Used on days with no Shift Roster entry (its times replace the shift times below).' : 'None = shift times from the schedule below.'}
+                                    </Text>
+                                </View>
+                            )}
                             <View style={{ marginTop: 6, marginBottom: 10 }}>
                                 <Text style={styles.label}>Weekly off & shift</Text>
                                 <View style={{ flexDirection: 'row', gap: 8 }}>

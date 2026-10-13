@@ -13,6 +13,7 @@ import DesktopSidebar from '../components/DesktopSidebar';
 
 import { Notifications, notificationsAvailable } from '../utils/notificationsModule';
 import { manageAttendanceReminders, setupNotificationPermissions } from '../utils/notificationHelper';
+import { cacheMyRoster } from '../services/api/shifts';
 
 import * as Location from 'expo-location';
 // 🔥 Firestore direct imports minimized
@@ -337,14 +338,17 @@ function NavigationLayout() {
         await setupNotificationPermissions();
 
         const myEntry = todayAttendance[0];
+        // Own Shift Roster days for the reminder times (offline: last cached copy).
+        await cacheMyRoster().catch(() => {});
 
         let status: any = 'LOGIN_PENDING';
 
         if (myEntry) {
-            status = myEntry.outTime ? 'COMPLETED' : 'LOGGED_IN';
+            // An open row has outTime "--" (services/api/attendance.ts).
+            status = myEntry.outTime && myEntry.outTime !== '--' ? 'COMPLETED' : 'LOGGED_IN';
         }
         
-        await manageAttendanceReminders(status);
+        await manageAttendanceReminders(status, [], myEntry?.date);
     };
 
     initReminders();
