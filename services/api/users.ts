@@ -25,6 +25,7 @@ export interface LegacyTeamMember {
   monthlyTarget: string;
   dailyVisitTarget: string;   // '' = no target
   workSchedule: WorkSchedule | null; // null = company default
+  defaultShiftId: string | null; // Shifts list (Shift Roster); null = shift times from workSchedule
   monthlyVisitTarget: string;
   baseSalary: string;
   yearlyLeaves: string;
@@ -62,6 +63,7 @@ function toLegacyTeamMember(u: any): LegacyTeamMember {
     monthlyTarget: u.monthlyTarget != null ? String(u.monthlyTarget) : '0',
     dailyVisitTarget: u.dailyVisitTarget != null ? String(u.dailyVisitTarget) : '',
     workSchedule: u.workSchedule ?? null,
+    defaultShiftId: u.defaultShiftId ?? null,
     monthlyVisitTarget: u.monthlyVisitTarget != null ? String(u.monthlyVisitTarget) : '',
     baseSalary: u.baseSalary != null ? String(u.baseSalary) : '0',
     yearlyLeaves: u.yearlyLeaves != null ? String(u.yearlyLeaves) : '18',
@@ -123,6 +125,7 @@ export async function createTeamMember(payload: {
   empId?: string; joiningDate?: string; monthlyTarget?: number; baseSalary?: number; yearlyLeaves?: number;
   dailyVisitTarget?: number | null; monthlyVisitTarget?: number | null;
   workSchedule?: WorkSchedule | null;
+  defaultShiftId?: string | null;
   personalEmail?: string; personalMobile?: string; bloodGroup?: string;
   address?: string; city?: string; state?: string; permanentAddress?: string;
   bankName?: string; bankAccountNo?: string; bankIfsc?: string;
@@ -136,6 +139,7 @@ export async function updateTeamMember(id: string, payload: Partial<{
   name: string; mobile: string; jobTitle: string | null; empId: string; joiningDate: string; monthlyTarget: number; baseSalary: number; yearlyLeaves: number;
   dailyVisitTarget: number | null; monthlyVisitTarget: number | null;
   workSchedule: WorkSchedule | null;
+  defaultShiftId: string | null;
   personalEmail: string; personalMobile: string; bloodGroup: string;
   address: string; city: string; state: string; permanentAddress: string;
   bankName: string; bankAccountNo: string; bankIfsc: string;

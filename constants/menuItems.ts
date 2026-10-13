@@ -41,6 +41,8 @@ export const SIDEBAR_ITEMS: MenuItemDef[] = [
     { id: '999', title: 'Super Admin Panel', icon: 'globe', route: '/superadmin/super_admin', module: 'superadmin_only' },
     { id: '1', title: 'Serial Number', icon: 'pricetag', route: '/serial_number', module: 'asset_history' },
     { id: '7', title: 'Attendance Report', icon: 'person', route: '/attendance', module: 'attendance' },
+    // Office roles: week grid + Shifts list; everyone else: My Shifts (same screen).
+    { id: '8', title: 'Shift Roster', icon: 'calendar-number', route: '/roster', module: 'attendance' },
     { id: '5', title: 'Spare Part Book', icon: 'book', route: '/spare_parts', module: 'spares' },
     { id: '100', title: 'Product Master', icon: 'cube', route: '/product_master', module: 'catalogs' },
     { id: '96', title: 'Personal Notes', icon: 'journal', route: '/personal_notes', module: 'personal_notes' },

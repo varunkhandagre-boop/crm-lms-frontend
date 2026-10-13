@@ -24,9 +24,10 @@ import {
 // 🔥 SAAS IMPORTS ("users" stays on Firestore until Phase 10)
 import { useData } from './context/DataContext';
 import { useWorkSchedules } from '../hooks/useWorkSchedules';
-import { isOffDay, offDayLabel } from '../utils/workSchedule';
+import { isOffDay, MyRosterDay, offDayLabel } from '../utils/workSchedule';
 
 import { manageAttendanceReminders } from '../utils/notificationHelper';
+import { cacheMyRoster, shiftTimeLabel } from '../services/api/shifts';
 
 // 🔥 Phase 7: attendance/leaves/holidays now come from Postgres via these adapters
 import { dayIn as dayInApi, dayOut as dayOutApi, fetchAttendance, fetchTodayAttendance } from '../services/api/attendance';
@@ -74,6 +75,17 @@ export default function DayInScreen() {
     const [workLocationType, setWorkLocationType] = useState<string | null>(null);
     const [timer, setTimer] = useState(0); 
     const [todayDocId, setTodayDocId] = useState<string | null>(null);
+    // Date of the open / done row — yesterday's while a night shift runs past midnight.
+    const [entryDate, setEntryDate] = useState<string | null>(null);
+    // Own Shift Roster days around today (shift or Off per date).
+    const [myRoster, setMyRoster] = useState<Record<string, MyRosterDay> | null>(null);
+    useFocusEffect(
+        useCallback(() => {
+            let cancelled = false;
+            cacheMyRoster().then((d) => { if (!cancelled) setMyRoster(d); }).catch(() => {});
+            return () => { cancelled = true; };
+        }, [])
+    );
     const [startTime, setStartTime] = useState<number | null>(null);
     
     // Expenses State
@@ -232,6 +244,7 @@ export default function DayInScreen() {
 
                     if (myEntry) {
                         setTodayDocId(myEntry.id);
+                        setEntryDate(myEntry.date || null);
 
                         if (myEntry.outTime && myEntry.outTime !== '--') {
                             setStatus('Completed');
@@ -252,6 +265,7 @@ export default function DayInScreen() {
                         setStatus('Out');
                         setTimer(0);
                         setTodayDocId(null);
+                        setEntryDate(null);
                     }
                 } catch (e) {
                     console.log('Today attendance check failed', e);
@@ -442,8 +456,17 @@ export default function DayInScreen() {
     const tomorrowStrFull = getStandardDateForHoliday(tomorrowObj);
 
     const mySchedule = scheduleFor(currentUser?.id);
-    const todayIsOff = isOffDay(todayStrFull, mySchedule); // own weekly off
-    const tomorrowIsOff = isOffDay(tomorrowStrFull, mySchedule);
+    // Shift Roster Off / working day wins over the weekly off.
+    const rosterToday = myRoster?.[todayStrFull];
+    const todayIsOff = rosterToday ? rosterToday.off : isOffDay(todayStrFull, mySchedule);
+    const tomorrowIsOff = myRoster?.[tomorrowStrFull] ? myRoster[tomorrowStrFull].off : isOffDay(tomorrowStrFull, mySchedule);
+    // Last night's shift still running (row dated yesterday).
+    const onYesterdaysShift = !!entryDate && entryDate < todayStrFull;
+    const shiftLine = onYesterdaysShift
+        ? `🌙 Night shift from yesterday${myRoster?.[entryDate!]?.end ? ` — ends ${myRoster[entryDate!].end}` : ''}`
+        : rosterToday && !rosterToday.off && rosterToday.start
+            ? `Today's shift: ${shiftTimeLabel(rosterToday.start, rosterToday.end)}`
+            : null;
 
     const todayHoliday = holidayList?.find((h:any) => normalizeDate(h.date, h.dateIso) === todayStrFull);
     const tomorrowHoliday = holidayList?.find((h:any) => normalizeDate(h.date, h.dateIso) === tomorrowStrFull);
@@ -451,7 +474,9 @@ export default function DayInScreen() {
     let holidayMessage = null;
     let isTodayHoliday = false;
 
-    if (todayHoliday || todayIsOff) {
+    if (onYesterdaysShift) {
+        // working last night's shift — no "day off" message
+    } else if (todayHoliday || todayIsOff) {
         isTodayHoliday = true;
         holidayMessage = `🎉 Today is ${todayHoliday ? todayHoliday.name : 'your weekly off'}. Enjoy your day off!`;
     } else if (tomorrowHoliday || tomorrowIsOff) {
@@ -500,10 +525,11 @@ export default function DayInScreen() {
 
             if (res.success) {
                 setTodayDocId(res.id);
+                setEntryDate(res.record?.date || null); // server may file a post-midnight Day In under last night's date
                 setStatus('In');
                 setStartTime(now.getTime());
                 setWorkLocationType(res.record?.workLocationType ?? null);
-                await manageAttendanceReminders('LOGGED_IN', holidayList);
+                await manageAttendanceReminders('LOGGED_IN', holidayList, res.record?.date);
                 
                 // Silent refresh
                 await loadAllData();
@@ -581,7 +607,7 @@ export default function DayInScreen() {
                 await stopBackgroundTracking();
                 await Notifications.dismissAllNotificationsAsync();
                 await Notifications.cancelAllScheduledNotificationsAsync();
-                await manageAttendanceReminders('COMPLETED', holidayList);
+                await manageAttendanceReminders('COMPLETED', holidayList, res.record?.date);
 
                 setStatus('Completed');
                 setExpenseModalVisible(false);
@@ -645,13 +671,16 @@ export default function DayInScreen() {
             <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="white" /></TouchableOpacity>
                 <Text style={styles.headerTitle}>Attendance</Text>
-                <View style={{width:24}} />
+                <TouchableOpacity onPress={() => router.push('/roster' as any)} accessibilityLabel="Shift roster">
+                    <Ionicons name="calendar-outline" size={24} color="white" />
+                </TouchableOpacity>
             </View>
 
             <ScrollView contentContainerStyle={{paddingBottom: 20}}>
                 
                 <View style={styles.card}>
                     <Text style={styles.dateText}>{new Date().toDateString()}</Text>
+                    {shiftLine && <Text style={styles.shiftLine}>{shiftLine}</Text>}
                     {status === 'In' ? (
                         <Text style={styles.timerText}>{formatTime(timer)}</Text>
                     ) : status === 'Completed' ? (
@@ -890,6 +919,7 @@ const styles = StyleSheet.create({
     
     card: { backgroundColor: 'white', margin: 15, padding: 20, borderRadius: 15, alignItems: 'center', elevation: 3 },
     dateText: { fontSize: 16, color: 'gray' },
+    shiftLine: { fontSize: 13, color: '#3b5998', fontWeight: '600', marginTop: 4 },
     timerText: { fontSize: 36, fontWeight: 'bold', color: '#2e7d32', marginVertical: 10 },
     timeText: { fontSize: 24, fontWeight: 'bold', color: '#333', marginVertical: 10 },
     locationBox: { flexDirection: 'row', backgroundColor: '#e3f2fd', padding: 10, borderRadius: 8, width: '100%', marginBottom: 20, justifyContent:'center' },

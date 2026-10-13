@@ -14,6 +14,9 @@ export const DEFAULT_SCHEDULE: WorkSchedule = { weeklyOffDays: [0], offSaturdays
 
 // Own schedule cache (written by hooks/useWorkSchedules, read by the local reminders).
 export const MY_SCHEDULE_KEY = 'my_work_schedule';
+// Own Shift Roster days around today (services/api/shifts.ts cacheMyRoster), for the reminders.
+export const MY_ROSTER_KEY = 'my_roster_days';
+export interface MyRosterDay { start: string | null; end: string | null; off: boolean }
 
 export const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const NTH = ['1st', '2nd', '3rd', '4th', '5th'];
@@ -48,7 +51,10 @@ export function describeSchedule(s: WorkSchedule | null | undefined): string {
         days.push(`${sch.offSaturdays.slice().sort().map((n) => NTH[n - 1]).join(' & ')} Sat`);
     }
     parts.push(days.length ? `Off: ${days.join(', ')}` : 'No weekly off');
-    if (sch.shiftStart || sch.shiftEnd) parts.push(`Shift ${sch.shiftStart || '?'}–${sch.shiftEnd || '?'}`);
+    if (sch.shiftStart || sch.shiftEnd) {
+        const night = !!sch.shiftStart && !!sch.shiftEnd && isValidHhmm(sch.shiftStart) && isValidHhmm(sch.shiftEnd) && sch.shiftEnd <= sch.shiftStart;
+        parts.push(`Shift ${sch.shiftStart || '?'}–${sch.shiftEnd || '?'}${night ? ' 🌙 (ends next day)' : ''}`);
+    }
     return parts.join(' • ');
 }
 
