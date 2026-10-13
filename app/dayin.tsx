@@ -75,6 +75,8 @@ export default function DayInScreen() {
     const [workLocationType, setWorkLocationType] = useState<string | null>(null);
     const [timer, setTimer] = useState(0); 
     const [todayDocId, setTodayDocId] = useState<string | null>(null);
+    // Step shown while Day In / Day Out runs ("Getting your location…").
+    const [busyText, setBusyText] = useState<string | null>(null);
     // Date of the open / done row — yesterday's while a night shift runs past midnight.
     const [entryDate, setEntryDate] = useState<string | null>(null);
     // Own Shift Roster days around today (shift or Off per date).
@@ -488,10 +490,30 @@ export default function DayInScreen() {
     const leavesOrAbsent = finalData.filter(i => getStatus(i) === 'LEAVE' || getStatus(i) === 'ABSENT').length;
     const midLabel = "Leaves/Abs";
 
+    // What failed, in words staff can act on (it used to be "check internet" for everything).
+    const attendanceError = (e: any, action: string): string => {
+        if (e?.status === 0) return e.message; // no internet / server too slow
+        if (e?.status === 401) return 'Your login has expired. Please log in again.';
+        if (e?.status === 403) return e.message; // e.g. plan expired — the server says why
+        if (e?.status >= 500) return `Server problem while saving ${action}. Please try again in a minute.`;
+        return e?.message || `Could not save ${action}. Please try again.`;
+    };
+    // Saving Day In / Day Out is safe to repeat (the server keeps one row per day),
+    // so a dropped connection is retried once before showing an error.
+    const retryOnce = async <T,>(save: () => Promise<T>): Promise<T> => {
+        try {
+            return await save();
+        } catch (e: any) {
+            if (e?.status !== 0) throw e;
+            setBusyText('Network slow, trying again…');
+            return save();
+        }
+    };
+
     // 🔥 5. Day-In — Phase 7: posts to /api/v1/attendance via dayInApi()
     const handleDayIn = async () => {
         setLoading(true);
-        setAddress("Fetching GPS...");
+        setBusyText("Checking today's entry…");
         try {
             const now = new Date();
             const todayStr = getStandardDateForHoliday(now);
@@ -501,27 +523,33 @@ export default function DayInScreen() {
             const existing = await fetchTodayAttendance();
             if (existing) {
                 Alert.alert("Already Punched In", "You have already marked your attendance for today.");
+                // Keep the row so Day Out works right away (it used to do nothing here).
+                setTodayDocId(existing.id);
+                setEntryDate(existing.date || null);
+                setStartTime(new Date(existing.createdAt).getTime());
                 setStatus(existing.outTime && existing.outTime !== '--' ? 'Completed' : 'In');
-                setLoading(false);
                 return;
             }
 
             // Permission, GPS on, precise → normal → last known fix (see utils/getLocation.ts).
+            setBusyText('Getting your location…');
             const loc = await getGpsFix();
             setLocation(loc);
 
             // The address is a nice-to-have: some phones' geocoder fails or is slow,
             // and that used to fail the whole Day In.
+            setBusyText('Finding address…');
             const currentAddr = (await getAddressFromCoords(loc.coords)) || coordsText(loc.coords);
             setAddress(currentAddr);
 
-            const res = await dayInApi({
+            setBusyText('Saving Day In…');
+            const res = await retryOnce(() => dayInApi({
                 date: todayStr,
                 checkInAt: now.toISOString(),
                 checkInLocation: { latitude: loc.coords.latitude, longitude: loc.coords.longitude },
                 checkInAddress: currentAddr,
                 note: 'Marked via GPS',
-            });
+            }));
 
             if (res.success) {
                 setTodayDocId(res.id);
@@ -547,11 +575,12 @@ export default function DayInScreen() {
                 Alert.alert("Location needed", error.message);
                 setAddress("Location not available");
             } else {
-                Alert.alert("Error", "Could not save Day In. Check internet and try again.");
-                setAddress("Error saving Day In");
+                Alert.alert("Day In not saved", attendanceError(error, 'Day In'));
+                setAddress("Day In not saved — try again");
             }
         } finally { 
             setLoading(false); 
+            setBusyText(null);
         }
     };
 
@@ -568,15 +597,27 @@ export default function DayInScreen() {
 
     // 🔥 6. Day-Out — Phase 7: PATCHes /api/v1/attendance/:id via dayOutApi()
     const handleFinalizeDayOut = async () => {
-        if (!todayDocId) return;
-        if (!startTime) {
-            Alert.alert("Please Wait", "Syncing attendance data... try again in 5 seconds.");
-            return;
-        }
         if (loading) return;
         setLoading(true);
 
         try {
+            // The open row's id — fetched again if the screen never got it (slow
+            // network on open); before, Day Out silently did nothing then.
+            let docId = todayDocId;
+            if (!docId) {
+                setBusyText("Checking today's entry…");
+                const entry = await fetchTodayAttendance();
+                if (entry && (!entry.outTime || entry.outTime === '--')) {
+                    docId = entry.id;
+                    setTodayDocId(entry.id);
+                    setEntryDate(entry.date || null);
+                }
+            }
+            if (!docId) {
+                Alert.alert("No Day In found", "There's no open Day In for today. Close and reopen this screen, then try again.");
+                return;
+            }
+
             const finalExpenses = {
                 da: parseFloat(expenses.da) || 0,
                 hotel: parseFloat(expenses.hotel) || 0,
@@ -587,13 +628,15 @@ export default function DayInScreen() {
             let outLocData: { latitude: number; longitude: number } | undefined;
             let outAddr = "Unknown";
             // Day Out never fails because of GPS: location is saved when we can get it.
+            setBusyText('Getting your location…');
             const loc = await tryGetCurrentLocation();
             if (loc) {
                 outLocData = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
                 outAddr = (await getAddressFromCoords(outLocData)) || coordsText(outLocData);
             }
 
-            const res = await dayOutApi(todayDocId, {
+            setBusyText('Saving Day Out…');
+            const res = await retryOnce(() => dayOutApi(docId!, {
                 checkOutAt: new Date().toISOString(),
                 checkOutLocation: outLocData,
                 checkOutAddress: outAddr,
@@ -601,7 +644,7 @@ export default function DayInScreen() {
                 expenseHotel: finalExpenses.hotel,
                 expenseMisc: finalExpenses.misc,
                 expenseNote: finalExpenses.note,
-            });
+            }));
 
             if (res.success) {
                 await stopBackgroundTracking();
@@ -620,9 +663,10 @@ export default function DayInScreen() {
                 throw new Error("Failed to update in Postgres");
             }
         } catch (error) {
-            Alert.alert("Error", "Day Out Update Failed.");
+            Alert.alert("Day Out not saved", attendanceError(error, 'Day Out'));
         } finally {
             setLoading(false);
+            setBusyText(null);
         }
     };
 
@@ -703,7 +747,12 @@ export default function DayInScreen() {
                     
                     <View style={styles.locationBox}>
                         <Ionicons name="location" size={20} color="#3b5998" />
-                        {loading ? <ActivityIndicator size="small" color="#3b5998" style={{marginLeft:10}} /> : 
+                        {loading ? (
+                            <>
+                                <ActivityIndicator size="small" color="#3b5998" style={{marginLeft:10}} />
+                                {busyText && <Text style={styles.locText} numberOfLines={1}>{busyText}</Text>}
+                            </>
+                        ) : 
                             <Text style={styles.locText} numberOfLines={1}>{address}</Text>
                         }
                         {workLocationType && (

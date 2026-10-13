@@ -5,7 +5,8 @@ import { stopBackgroundTracking } from '../../utils/backgroundLocation';
 import { fetchPermissions } from '../../services/api/permissions';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { BridgeUser, bridgeLogin, bridgeLogout, getStoredPostgresUser } from '../../services/api/authBridge';
+import { BridgeUser, bridgeLogin, bridgeLogout, bridgeRefresh, getStoredPostgresUser } from '../../services/api/authBridge';
+import { onAuthProblem } from '../../services/api/client';
 import { trackAppOpen } from '../../services/api/usage';
 import { clearAllListCaches } from '../../utils/listCache';
 
@@ -50,6 +51,8 @@ export const DataProvider = ({ children }: any) => {
   const [shouldOpenSidebar, setShouldOpenSidebar] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isSubscriptionExpired, setIsSubscriptionExpired] = useState(false);
+  // Why the company is locked: plan / trial over (Admin can renew) or suspended by us.
+  const [lockReason, setLockReason] = useState<'expired' | 'suspended' | null>(null);
   // True once the stored session has been checked (drives _layout's "Syncing..." pill).
   const [isSessionReady, setIsSessionReady] = useState(false);
 
@@ -109,11 +112,14 @@ export const DataProvider = ({ children }: any) => {
         setCompanyProfile(profileData as any);
         await AsyncStorage.setItem('companyProfileLocal', JSON.stringify(profileData));
 
-        // Expiry check
+        // Expiry check (the server enforces it too). A renewed plan unlocks
+        // without a restart — this runs every hour.
         if (data.expiryDate) {
             const today = new Date();
             const expiry = new Date(data.expiryDate);
-            if (today > expiry) setIsSubscriptionExpired(true);
+            const expired = today > expiry;
+            setIsSubscriptionExpired(expired);
+            setLockReason(expired ? 'expired' : null);
         }
     } catch (error) {
         if (gen !== sessionGen.current) return; // logged out — don't retry
@@ -158,7 +164,20 @@ export const DataProvider = ({ children }: any) => {
       const gen = sessionGen.current;
       getStoredPostgresUser().then((stored) => {
           if (gen !== sessionGen.current) return; // logged in / out meanwhile
-          if (stored) startSession(stored);
+          if (!stored) return;
+          startSession(stored);
+          // Fresh token for this session; failures are handled by onAuthProblem
+          // (expired session / locked plan) or simply retried on the next start.
+          bridgeRefresh()
+              .then((u) => {
+                  if (gen !== sessionGen.current) return;
+                  // Role / name may have changed since login; same user = no re-render.
+                  const appUser = toAppUser(u);
+                  if (JSON.stringify(appUser) === JSON.stringify(currentUserRef.current)) return;
+                  currentUserRef.current = appUser;
+                  setCurrentUser(appUser);
+              })
+              .catch(() => {});
       }).finally(() => {
           setIsSessionReady(true);
           setLoading(false);
@@ -206,6 +225,8 @@ export const DataProvider = ({ children }: any) => {
           const user = await bridgeLogin(email.trim().toLowerCase(), pass);
           sessionGen.current += 1;
           await AsyncStorage.removeItem('companyProfileLocal');
+          setIsSubscriptionExpired(false);
+          setLockReason(null);
           startSession(user);
           return true;
       } catch (error: any) {
@@ -233,13 +254,34 @@ export const DataProvider = ({ children }: any) => {
       await clearAllListCaches();
   };
 
+  // Any API call can report an expired session (401) or a locked company
+  // (403 from the server — plan / trial over, or suspended).
+  const logoutRef = useRef(logout);
+  useEffect(() => { logoutRef.current = logout; });
+  useEffect(() => {
+      let sessionExpiredShown = false;
+      return onAuthProblem((problem, message) => {
+          if (!currentUserRef.current) return;
+          if (problem === 'SESSION_EXPIRED') {
+              if (sessionExpiredShown) return;
+              sessionExpiredShown = true;
+              Alert.alert('Session expired', 'Please log in again.');
+              logoutRef.current().finally(() => { sessionExpiredShown = false; });
+              return;
+          }
+          setLockReason(problem === 'COMPANY_SUSPENDED' ? 'suspended' : 'expired');
+          setIsSubscriptionExpired(true);
+          console.log('[plan lock]', message);
+      });
+  }, []);
+
   const contextValue = useMemo(() => ({
       currentUser, loading, login, logout, activeSection, setActiveSection, shouldOpenSidebar, setShouldOpenSidebar, user: currentUser,
-      isSessionReady, isSubscriptionExpired,
+      isSessionReady, isSubscriptionExpired, lockReason,
       companyProfile,
       appPermissions,
   }), [
-      currentUser, loading, activeSection, shouldOpenSidebar, isSessionReady, isSubscriptionExpired,
+      currentUser, loading, activeSection, shouldOpenSidebar, isSessionReady, isSubscriptionExpired, lockReason,
       companyProfile, appPermissions
   ]);
 

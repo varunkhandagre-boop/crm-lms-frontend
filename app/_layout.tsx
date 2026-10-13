@@ -166,6 +166,7 @@ function NavigationLayout() {
       appPermissions, 
       loading,
       isSubscriptionExpired, 
+      lockReason,
       companyProfile,
       logout,
   } = useData();
@@ -359,8 +360,10 @@ function NavigationLayout() {
    return <View style={{flex:1, justifyContent:'center', alignItems:'center'}}><ActivityIndicator size="large" color="#3b5998"/></View>;
 }
 
-// ✅ Subscription expired check
-if (currentUser && isSubscriptionExpired) {
+// ✅ Subscription expired check (the server refuses this company's calls too).
+// An expired company's Admin may open Plan & Renewal to renew.
+const adminRenewing = currentUser?.role === 'Admin' && lockReason !== 'suspended' && pathname === '/SubscriptionScreen';
+if (currentUser && isSubscriptionExpired && !adminRenewing) {
     return <SubscriptionExpiredScreen />;
 }
 
@@ -472,7 +475,9 @@ if (currentUser && isSubscriptionExpired) {
 // ✅ Subscription Expired Screen Component
 function SubscriptionExpiredScreen() {
     const router = useRouter();
-    const { logout } = useData();
+    const { logout, currentUser, lockReason } = useData();
+    const suspended = lockReason === 'suspended';
+    const isAdmin = currentUser?.role === 'Admin';
     const handleLogout = async () => {
         await logout();
         router.replace('/login' as any);
@@ -481,11 +486,23 @@ function SubscriptionExpiredScreen() {
         <View style={{flex:1, justifyContent:'center', alignItems:'center', padding:20, backgroundColor:'#fff'}}>
             <Ionicons name="lock-closed" size={80} color="#d32f2f" />
             <Text style={{fontSize:24, fontWeight:'bold', color:'#d32f2f', marginTop:20}}>
-                Plan Expired
+                {suspended ? 'Account Suspended' : 'Plan Expired'}
             </Text>
             <Text style={{textAlign:'center', color:'#555', marginTop:10, fontSize:15, lineHeight:24}}>
-                Your subscription has expired.{"\n"}Please contact support to renew.
+                {suspended
+                    ? "Your company's account is suspended.\nPlease contact support."
+                    : isAdmin
+                        ? "Your company's plan has expired.\nRenew the plan to continue."
+                        : "Your company's plan has expired.\nPlease ask your company admin to renew it."}
             </Text>
+            {isAdmin && !suspended && (
+                <TouchableOpacity
+                    style={{marginTop:20, paddingHorizontal:30, paddingVertical:12, backgroundColor:'#2e7d32', borderRadius:25}}
+                    onPress={() => router.push('/SubscriptionScreen' as any)}
+                >
+                    <Text style={{color:'white', fontWeight:'bold', fontSize:16}}>Renew plan</Text>
+                </TouchableOpacity>
+            )}
             <View style={{backgroundColor:'#f5f5f5', padding:20, borderRadius:10, width:'100%', marginTop:30, alignItems:'center'}}>
                 <Text style={{fontWeight:'bold', fontSize:16, marginBottom:10, color:'#333'}}>Contact Support</Text>
                 <Text style={{fontSize:15, color:'#555', marginBottom:5}}>📞 +91 87705 30146</Text>

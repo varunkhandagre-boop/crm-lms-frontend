@@ -142,7 +142,8 @@ export async function dayIn(payload: {
   checkInAddress?: string;
   note?: string;
 }) {
-  const res = await apiClient.post<OneResponse<any>>(`/attendance`, payload);
+  // Short timeout: Day In shows a clear error (and retries once) instead of spinning.
+  const res = await apiClient.post<OneResponse<any>>(`/attendance`, payload, { timeoutMs: 20_000 });
   return { success: true, id: res.data?.id, record: toLegacyAttendance(res.data), alreadyExists: !!res.meta?.alreadyExists };
 }
 
@@ -158,7 +159,7 @@ export async function dayOut(
     expenseNote?: string;
   }
 ) {
-  const res = await apiClient.patch<OneResponse<any>>(`/attendance/${attendanceId}`, payload);
+  const res = await apiClient.patch<OneResponse<any>>(`/attendance/${attendanceId}`, payload, { timeoutMs: 20_000 });
   return { success: true, record: toLegacyAttendance(res.data) };
 }
 
