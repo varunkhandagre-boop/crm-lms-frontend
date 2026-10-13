@@ -58,6 +58,9 @@ export default function LeaveApplicationScreen() {
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
+  // Balance of the employee whose leave is open in the details modal (managers only)
+  const [modalBalance, setModalBalance] = useState<{ balance: number; total: number; used: number } | null>(null);
+  const [modalBalanceLoading, setModalBalanceLoading] = useState(false);
 
   const [employees, setEmployees] = useState<{name: string, id?: string, yearlyLeaves?: number, joiningDate?: any, createdAt?: any}[]>([]);
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All'); 
@@ -241,7 +244,23 @@ export default function LeaveApplicationScreen() {
       }
   };
 
-  const openDetails = (item: any) => { setSelectedItem(item); setModalVisible(true); };
+  const openDetails = async (item: any) => {
+      setSelectedItem(item);
+      setModalVisible(true);
+      setModalBalance(null);
+      if (!canManage) return;
+      const userId = item.senderId || item.userId || employees.find(e => e.name === item.senderName)?.id;
+      if (!userId) return;
+      setModalBalanceLoading(true);
+      try {
+          const summary = await fetchLeaveSummary({ userId, fyStartYear: currentFyStartYear() });
+          setModalBalance({ balance: summary.balance, total: summary.totalQuota, used: summary.used });
+      } catch (e) {
+          console.log('Modal leave summary fetch failed', e);
+      } finally {
+          setModalBalanceLoading(false);
+      }
+  };
 
   // Opened from a notification: /leave?id=<request id> → show that request.
   const linkParams = useLocalSearchParams<{ id?: string }>();
@@ -504,6 +523,16 @@ export default function LeaveApplicationScreen() {
                   {selectedItem && (
                       <ScrollView>
                           {canManage && <View style={{backgroundColor:'#e3f2fd', padding:10, borderRadius:8, marginBottom:10}}><Text style={{color:'#1565c0', fontWeight:'bold', textAlign:'center'}}>👤 {selectedItem.senderName}</Text></View>}
+                          {canManage && (modalBalanceLoading || modalBalance) && (
+                              <View style={{backgroundColor:'#e8f5e9', padding:10, borderRadius:8, marginBottom:10, alignItems:'center'}}>
+                                  {modalBalanceLoading ? <ActivityIndicator color="#27ae60" size="small" /> : (
+                                      <>
+                                          <Text style={{color:'#2e7d32', fontWeight:'bold', fontSize:16}}>Balance Leaves: {modalBalance?.balance}</Text>
+                                          <Text style={{color:'#555', fontSize:12, marginTop:2}}>Total: {modalBalance?.total}  •  Used: {modalBalance?.used}</Text>
+                                      </>
+                                  )}
+                              </View>
+                          )}
                           
                           <DetailRow label="Date" value={selectedItem.fromDate} />
                           {!selectedItem.isAutoRecord && <DetailRow label="To" value={selectedItem.toDate} />}
