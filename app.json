@@ -8,8 +8,12 @@
     "scheme": "mycrm",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.crm.lms"
+      "supportsTablet": false,
+      "bundleIdentifier": "com.crm.lms",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
