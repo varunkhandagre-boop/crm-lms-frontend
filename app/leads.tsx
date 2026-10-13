@@ -17,20 +17,26 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (users still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // Leads are filtered + paginated on the server (hooks/useServerLeads.ts)
 import { getLeadCounts, LeadCounts } from '../services/api/leads';
-import { buildLeadFilters, useServerLeads } from '../hooks/useServerLeads';
+import { buildLeadFilters, LeadSortMode, useServerLeads } from '../hooks/useServerLeads';
 import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading pilot (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import ReassignLeadsModal from '../components/ReassignLeadsModal';
 import CloseStaleLeadsModal from '../components/CloseStaleLeadsModal';
+import WebsiteLeadSettingsModal from '../components/WebsiteLeadSettingsModal';
+import { isWebsiteLead } from '../services/api/websiteLeads';
 import { formatInr } from '../constants/leadStatus';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
+import { PeriodTabs } from '../components/compact';
 
 export default function LeadsScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     
     // 🔥 1. Context se sirf user
@@ -38,7 +44,6 @@ export default function LeadsScreen() {
 
     // 🔥 2. SaaS Engine — only isDbLoading (search-icon spinner) still used here;
     // leads no longer go through this (see useCachedList below)
-    const { isDbLoading } = useSaaSDB();
 
     // 🔥 3. Lazy Loaded States
     // Leads come from useServerLeads below (server-side filtered pages)
@@ -48,6 +53,9 @@ export default function LeadsScreen() {
     const [activeFilter, setActiveFilter] = useState('All');
     const [activeStageFilter, setActiveStageFilter] = useState('All'); 
     const [quickFilter, setQuickFilter] = useState<'' | 'overdue' | 'today' | 'hot'>('');
+    const [websiteOnly, setWebsiteOnly] = useState(false);
+    const [sortMode, setSortMode] = useState<LeadSortMode>('newest');
+    const [showWebsiteSettings, setShowWebsiteSettings] = useState(false);
 
     // Opened from the morning follow-up reminder push (/leads?quick=today)
     const { quick } = useLocalSearchParams<{ quick?: string }>();
@@ -101,12 +109,14 @@ export default function LeadsScreen() {
         viewMode,
         currentDate,
         employeeId: employeeFilterId,
-    }), [quickFilter, activeFilter, activeStageFilter, debouncedSearch, viewMode, currentDate, employeeFilterId]);
+        websiteOnly,
+        sortMode,
+    }), [quickFilter, activeFilter, activeStageFilter, debouncedSearch, viewMode, currentDate, employeeFilterId, websiteOnly, sortMode]);
 
     // Only the screen's default view (this FY, open leads, no filters) is
     // cached, so the screen still opens instantly without storing every
     // filter combination on the device.
-    const isDefaultView = !quickFilter && activeFilter === 'All' && activeStageFilter === 'All' && !debouncedSearch
+    const isDefaultView = !quickFilter && !websiteOnly && sortMode === 'newest' && activeFilter === 'All' && activeStageFilter === 'All' && !debouncedSearch
         && viewMode === 'FY' && !employeeFilterId && buildLeadFilters({ quickFilter: '', status: 'All', stage: 'All', search: '', viewMode: 'FY', currentDate: new Date() }).from === leadFilters.from;
     const {
         items: leadItems,
@@ -121,7 +131,7 @@ export default function LeadsScreen() {
     } = useServerLeads({
         filters: leadFilters,
         enabled: !!currentUser?.companyId,
-        cacheKey: isDefaultView ? buildCacheKey('leads_first_page', currentUser?.companyId) : null,
+        cacheKey: isDefaultView ? buildCacheKey('leads_first_page_v2', currentUser?.companyId) : null,
     });
 
     // Overdue / Due Today / Hot cards — server-side counts.
@@ -242,9 +252,36 @@ export default function LeadsScreen() {
         Linking.openURL(`whatsapp://send?phone=91${mobile}&text=${encodeURIComponent(msg)}`).catch(() => Alert.alert("Error", "WhatsApp not installed"));
     };
 
+    // Laptop: the same list as a table (tap a row → lead details).
+    const isDesktop = useIsDesktop();
+    const openLead = (item: any) => router.push({ pathname: '/lead_details', params: { id: item.id } } as any);
+    const leadColumns: TableColumn<any>[] = [
+        { key: 'org', label: 'Hospital / Client', flex: 2, render: (l) => <TwoLine main={l.org || l.orgName} sub={[l.contactPerson, l.city].filter(Boolean).join(' • ')} /> },
+        { key: 'mobile', label: 'Mobile', width: 120, render: (l) => l.mobile || '-' },
+        { key: 'req', label: 'Requirement', flex: 1.4, render: (l) => { const r = l.requirements || l.product; return Array.isArray(r) ? (r.join(', ') || '-') : (r || '-'); } },
+        { key: 'type', label: 'Type', width: 80, render: (l) => {
+            const t = l.type || (l.isHot ? 'Hot' : 'Warm');
+            const c = t === 'Hot' ? '#d32f2f' : t === 'Warm' ? '#f57c00' : '#1976d2';
+            return <Pill text={t} color={c} bg={c + '18'} />;
+        } },
+        { key: 'stage', label: 'Stage', width: 130, render: (l) => <Pill text={l.stage || 'New'} color={getStageColor(l.stage)} bg={getStageColor(l.stage) + '20'} /> },
+        { key: 'value', label: 'Deal value', width: 100, align: 'right', render: (l) => (l.dealValue ? formatInr(l.dealValue) : '-') },
+        { key: 'next', label: 'Next follow-up', width: 140, render: (l) => {
+            const d = getFollowUpStatus(l.nextDate);
+            return <Pill text={`${d.label}${l.nextDate ? ' ' + new Date(l.nextDate).toLocaleDateString('en-GB').slice(0, 5) : ''}`} color={d.color} bg={d.bg} />;
+        } },
+        { key: 'owner', label: 'Added by', width: 120, render: (l) => <TwoLine main={nameById.get(l.senderId) || '-'} sub={isWebsiteLead(l.source) ? '🌐 Website' : undefined} /> },
+        { key: 'act', label: '', width: 70, align: 'right', render: (l) => l.mobile ? (
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+                <TouchableOpacity onPress={() => Linking.openURL(`tel:${l.mobile}`)}><Ionicons name="call" size={18} color="#3b5998" /></TouchableOpacity>
+                <TouchableOpacity onPress={() => openWhatsApp(l)}><Ionicons name="logo-whatsapp" size={19} color="#25D366" /></TouchableOpacity>
+            </View>
+        ) : null },
+    ];
+
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <View style={styles.headerTop}>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
@@ -254,6 +291,9 @@ export default function LeadsScreen() {
                         <TouchableOpacity style={styles.reassignBtn} onPress={() => router.push('/leads_board' as any)}>
                             <Ionicons name="grid-outline" size={16} color="#3b5998" />
                             <Text style={{ color: '#3b5998', fontWeight: 'bold', marginLeft: 3, fontSize: 12 }}>Board</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.reassignBtn} onPress={() => router.push('/nearby_leads' as any)} accessibilityLabel="Nearby leads">
+                            <Ionicons name="navigate-outline" size={16} color="#3b5998" />
                         </TouchableOpacity>
                         <TouchableOpacity style={styles.reassignBtn} onPress={() => router.push('/lead_insights' as any)} accessibilityLabel="Lead insights">
                             <Ionicons name="stats-chart" size={16} color="#3b5998" />
@@ -274,27 +314,28 @@ export default function LeadsScreen() {
             <View style={{ backgroundColor: 'white', paddingBottom: 5 }}>
                 <View style={styles.actionCardsRow}>
                     <TouchableOpacity style={[styles.actionCard, { backgroundColor: '#ffebee', borderColor: quickFilter === 'overdue' ? '#d32f2f' : 'transparent', borderWidth: 1 }]} onPress={() => setQuickFilter(quickFilter === 'overdue' ? '' : 'overdue')}>
-                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#d32f2f' }}>{counts.overdue}</Text>
-                        <Text style={{ fontSize: 10, color: '#d32f2f', fontWeight: '600' }}>OVERDUE</Text>
+                        <Text style={[styles.actionNum, { color: '#d32f2f' }]}>{counts.overdue}</Text>
+                        <Text style={[styles.actionLabel, { color: '#d32f2f' }]}>OVERDUE</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={[styles.actionCard, { backgroundColor: '#fff3e0', borderColor: quickFilter === 'today' ? '#f57c00' : 'transparent', borderWidth: 1 }]} onPress={() => setQuickFilter(quickFilter === 'today' ? '' : 'today')}>
-                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#f57c00' }}>{counts.today}</Text>
-                        <Text style={{ fontSize: 10, color: '#f57c00', fontWeight: '600' }}>DUE TODAY</Text>
+                        <Text style={[styles.actionNum, { color: '#f57c00' }]}>{counts.today}</Text>
+                        <Text style={[styles.actionLabel, { color: '#f57c00' }]}>DUE TODAY</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={[styles.actionCard, { backgroundColor: '#e8f5e9', borderColor: quickFilter === 'hot' ? '#2e7d32' : 'transparent', borderWidth: 1 }]} onPress={() => setQuickFilter(quickFilter === 'hot' ? '' : 'hot')}>
-                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#2e7d32' }}>{counts.hot}</Text>
-                        <Text style={{ fontSize: 10, color: '#2e7d32', fontWeight: '600' }}>HOT LEADS</Text>
+                        <Text style={[styles.actionNum, { color: '#2e7d32' }]}>{counts.hot}</Text>
+                        <Text style={[styles.actionLabel, { color: '#2e7d32' }]}>HOT LEADS</Text>
                     </TouchableOpacity>
                 </View>
 
                 <View style={styles.searchBar}>
-                    {isDbLoading ? <ActivityIndicator size="small" color="#1565c0" /> : <Ionicons name="search" size={20} color="#1565c0" />}
+                    {<Ionicons name="search" size={20} color="#1565c0" />}
                     <TextInput style={styles.input} placeholder="Search Leads..." value={searchText} onChangeText={setSearchText} />
-                    {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={20} color="#d32f2f" /></TouchableOpacity>}
+                    <Text style={styles.totalInline}>{leadsTotal}{leadsLoading && leadItems.length > 0 ? ' ⏳' : ''}</Text>
+                    {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText('')} style={{ marginLeft: 6 }}><Ionicons name="close-circle" size={20} color="#d32f2f" /></TouchableOpacity>}
                 </View>
 
                 {!searchText && !quickFilter && (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: 15, marginBottom: 10 }}>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: 12, marginBottom: 2 }}>
                         <TouchableOpacity style={styles.smartFilterChip} onPress={() => setFilterModalVisible(true)}>
                             <Text style={styles.smartFilterText}>Status: {activeFilter}</Text>
                             <Ionicons name="caret-down" size={14} color="#3b5998" />
@@ -302,6 +343,20 @@ export default function LeadsScreen() {
                         <TouchableOpacity style={styles.smartFilterChip} onPress={() => setStageFilterModalVisible(true)}>
                             <Text style={styles.smartFilterText}>Stage: {activeStageFilter}</Text>
                             <Ionicons name="caret-down" size={14} color="#3b5998" />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.smartFilterChip, websiteOnly && { backgroundColor: '#e0f7fa', borderColor: '#00838f' }]}
+                            onPress={() => setWebsiteOnly(!websiteOnly)}
+                        >
+                            <Text style={[styles.smartFilterText, websiteOnly && { color: '#00838f' }]}>🌐 Website</Text>
+                            {websiteOnly && <Ionicons name="close" size={14} color="#00838f" />}
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.smartFilterChip}
+                            onPress={() => setSortMode(sortMode === 'newest' ? 'followup' : 'newest')}
+                        >
+                            <Ionicons name="swap-vertical" size={12} color="#3b5998" style={{ marginRight: 4 }} />
+                            <Text style={styles.smartFilterText}>{sortMode === 'newest' ? 'Newest first' : 'Follow-up date'}</Text>
                         </TouchableOpacity>
                         {canViewEmployeeFilter && (
                             <TouchableOpacity style={[styles.smartFilterChip, {backgroundColor: '#e8f5e9', borderColor: '#a5d6a7'}]} onPress={() => setShowEmployeePicker(true)}>
@@ -314,29 +369,35 @@ export default function LeadsScreen() {
                 )}
 
                 {!searchText && !quickFilter && (
-                    <>
-                        <View style={styles.tabContainer}>
-                            {['Day', 'Month', 'FY', 'All'].map((m) => (
-                                <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
-                                    <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
+                    // Period tabs and ◀ period ▶ share one line to keep the list higher.
+                    <View style={styles.periodLine}>
+                        <PeriodTabs value={viewMode} onChange={setViewMode} style={{ flex: 1, marginHorizontal: 0, marginTop: 0 }} />
                         {viewMode !== 'All' && (
-                            <View style={styles.dateNav}>
-                                <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-                                <Text style={styles.monthText}>{getHeaderDate()}</Text>
-                                <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
+                            <View style={styles.periodNav}>
+                                <TouchableOpacity onPress={() => changeDate(-1)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                                    <Ionicons name="chevron-back" size={18} color="#555" />
+                                </TouchableOpacity>
+                                <Text style={styles.periodNavText} numberOfLines={1}>{getHeaderDate()}</Text>
+                                <TouchableOpacity onPress={() => changeDate(1)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                                    <Ionicons name="chevron-forward" size={18} color="#555" />
+                                </TouchableOpacity>
                             </View>
                         )}
-                    </>
+                    </View>
                 )}
-                <Text style={{ textAlign:'right', fontSize: 12, color: 'gray', paddingHorizontal:15, paddingBottom:5 }}>Total Leads: <Text style={{ fontWeight: 'bold', color: '#3b5998' }}>{leadsTotal}</Text>{leadsLoading && leadItems.length > 0 ? '  ⏳' : ''}</Text>
+                {websiteOnly && (searchText || quickFilter) ? (
+                    <TouchableOpacity onPress={() => setWebsiteOnly(false)} style={{ alignSelf: 'flex-start', marginLeft: 15, marginBottom: 4, flexDirection: 'row', alignItems: 'center' }}>
+                        <Text style={{ fontSize: 12, color: '#00838f', fontWeight: 'bold' }}>🌐 Website leads only </Text>
+                        <Ionicons name="close-circle" size={14} color="#00838f" />
+                    </TouchableOpacity>
+                ) : null}
             </View>
 
             <FlatList
                 data={leadItems}
                 keyExtractor={item => item.id}
+                ListHeaderComponent={isDesktop && leadItems.length > 0 ? <TableHeader columns={leadColumns} /> : null}
+                stickyHeaderIndices={isDesktop && leadItems.length > 0 ? [0] : undefined}
                 contentContainerStyle={styles.contentContainer}
                 refreshControl={
                     <RefreshControl refreshing={leadsRefreshing} onRefresh={refreshLeads} colors={['#3b5998']} tintColor="#3b5998" />
@@ -348,7 +409,8 @@ export default function LeadsScreen() {
                         )}
                     </View>
                 }
-                renderItem={({ item }) => {
+                renderItem={({ item, index }) => {
+                    if (isDesktop) return <TableRow columns={leadColumns} item={item} index={index} onPress={() => openLead(item)} tint={getStageColor(item.stage)} />;
                     const dateStatus = getFollowUpStatus(item.nextDate);
                     const productInfo = item.requirements || item.product || null;
                     const leadType = item.type || (item.isHot ? 'Hot' : 'Warm');
@@ -383,6 +445,7 @@ export default function LeadsScreen() {
                                             {leadType === 'Hot' ? '🔥' : leadType === 'Warm' ? '🌤️' : '❄️'} {leadType.toUpperCase()}
                                         </Text>
                                         {item.dealValue ? <Text style={[styles.hotBadge, { color: '#2e7d32' }]}>💰 {formatInr(item.dealValue)}</Text> : null}
+                                        {isWebsiteLead(item.source) ? <Text style={[styles.hotBadge, { color: '#00838f' }]}>🌐 WEBSITE</Text> : null}
                                     </View>
                                     
                                     <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 5 }}>
@@ -481,7 +544,7 @@ export default function LeadsScreen() {
 
             {/* "+ Lead" — both ways a lead gets created */}
             <Modal visible={showAddMenu} transparent animationType="fade" onRequestClose={() => setShowAddMenu(false)}>
-                <TouchableOpacity style={styles.menuOverlay} activeOpacity={1} onPress={() => setShowAddMenu(false)}>
+                <TouchableOpacity style={[styles.menuOverlay, { paddingTop: headerTop + 35 }]} activeOpacity={1} onPress={() => setShowAddMenu(false)}>
                     <View style={styles.menuBox}>
                         <TouchableOpacity style={styles.menuItem} onPress={() => { setShowAddMenu(false); router.push('/add_sales' as any); }}>
                             <Ionicons name="location-outline" size={20} color="#3b5998" />
@@ -503,7 +566,7 @@ export default function LeadsScreen() {
 
             {canBulkReassign && (
                 <Modal visible={showAdminMenu} transparent animationType="fade" onRequestClose={() => setShowAdminMenu(false)}>
-                    <TouchableOpacity style={styles.menuOverlay} activeOpacity={1} onPress={() => setShowAdminMenu(false)}>
+                    <TouchableOpacity style={[styles.menuOverlay, { paddingTop: headerTop + 35 }]} activeOpacity={1} onPress={() => setShowAdminMenu(false)}>
                         <View style={styles.menuBox}>
                             <TouchableOpacity style={styles.menuItem} onPress={() => { setShowAdminMenu(false); setShowReassign(true); }}>
                                 <Ionicons name="swap-horizontal" size={20} color="#3b5998" />
@@ -512,11 +575,18 @@ export default function LeadsScreen() {
                                     <Text style={styles.menuSub}>Move an employee's leads to someone else</Text>
                                 </View>
                             </TouchableOpacity>
-                            <TouchableOpacity style={[styles.menuItem, { borderBottomWidth: 0 }]} onPress={() => { setShowAdminMenu(false); setShowCloseStale(true); }}>
+                            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowAdminMenu(false); setShowCloseStale(true); }}>
                                 <Ionicons name="archive-outline" size={20} color="#c62828" />
                                 <View style={{ marginLeft: 12, flex: 1 }}>
                                     <Text style={styles.menuTitle}>Close Stale Leads</Text>
                                     <Text style={styles.menuSub}>Mark old, untouched leads as Lost</Text>
+                                </View>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.menuItem, { borderBottomWidth: 0 }]} onPress={() => { setShowAdminMenu(false); setShowWebsiteSettings(true); }}>
+                                <Ionicons name="globe-outline" size={20} color="#00838f" />
+                                <View style={{ marginLeft: 12, flex: 1 }}>
+                                    <Text style={styles.menuTitle}>Website Leads</Text>
+                                    <Text style={styles.menuSub}>Choose who gets leads from the website</Text>
                                 </View>
                             </TouchableOpacity>
                         </View>
@@ -530,6 +600,15 @@ export default function LeadsScreen() {
                     onClose={() => setShowCloseStale(false)}
                     onDone={() => { refreshLeads(); }}
                     teamMembers={teamMembersForLeads}
+                />
+            )}
+
+            {canBulkReassign && (
+                <WebsiteLeadSettingsModal
+                    visible={showWebsiteSettings}
+                    onClose={() => setShowWebsiteSettings(false)}
+                    teamMembers={teamMembersForLeads}
+                    canEdit={['admin', 'superadmin'].includes(userRole)}
                 />
             )}
 
@@ -548,28 +627,34 @@ export default function LeadsScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { backgroundColor: 'white', paddingTop: 55, paddingBottom: 2, elevation: 2 },
-    headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 15, marginBottom: 5 },
+    header: { backgroundColor: 'white', paddingBottom: 0 },
+    headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 12, marginBottom: 4 },
     headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
     addBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#3b5998', borderRadius: 5, paddingHorizontal: 8, paddingVertical: 6 },
-    menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.25)', justifyContent: 'flex-start', alignItems: 'flex-end', paddingTop: 90, paddingRight: 12 },
+    menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.25)', justifyContent: 'flex-start', alignItems: 'flex-end', paddingRight: 12 },
     menuBox: { width: 270, backgroundColor: 'white', borderRadius: 10, elevation: 8, paddingVertical: 4 },
     menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
     menuTitle: { fontSize: 14, fontWeight: 'bold', color: '#333' },
     menuSub: { fontSize: 11, color: 'gray', marginTop: 1 },
     reassignBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e8eaf6', borderRadius: 5, paddingHorizontal: 8, paddingVertical: 6 },
 
-    actionCardsRow: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 15, marginBottom: 10, marginTop: 10 },
-    actionCard: { flex: 1, alignItems: 'center', paddingVertical: 5, borderRadius: 8, marginHorizontal: 3, elevation: 1 },
+    actionCardsRow: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 12, marginBottom: 6, marginTop: 4 },
+    actionCard: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 5, borderRadius: 8, marginHorizontal: 3 },
+    actionNum: { fontSize: 15, fontWeight: 'bold' },
+    actionLabel: { fontSize: 10, fontWeight: '600' },
 
-    searchBar: { backgroundColor: '#e3f2fd', borderRadius: 10, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, height: 45, marginHorizontal: 15, marginBottom: 10, borderWidth: 1, borderColor: '#90caf9', elevation: 1 },
-    input: { flex: 1, marginLeft: 10, fontSize: 15, color: '#1565c0', fontWeight: '500' },
-    
-    smartFilterChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e3f2fd', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, marginRight: 8, borderWidth: 1, borderColor: '#bbdefb' },
+    searchBar: { backgroundColor: '#e3f2fd', borderRadius: 10, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, height: 38, marginHorizontal: 12, marginBottom: 6, borderWidth: 1, borderColor: '#90caf9' },
+    input: { flex: 1, marginLeft: 8, fontSize: 14, color: '#1565c0', fontWeight: '500' },
+    totalInline: { fontSize: 12, fontWeight: 'bold', color: '#3b5998', backgroundColor: 'white', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, overflow: 'hidden' },
+    periodLine: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 12, marginTop: 6, marginBottom: 2 },
+    periodNav: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f2f4f7', borderRadius: 16, paddingHorizontal: 6, minHeight: 30, maxWidth: 150 },
+    periodNavText: { fontSize: 12, fontWeight: 'bold', color: '#3b5998', marginHorizontal: 4, flexShrink: 1 },
+
+    smartFilterChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e3f2fd', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, marginRight: 6, borderWidth: 1, borderColor: '#bbdefb' },
     smartFilterText: { fontSize: 12, color: '#1565c0', fontWeight: 'bold', marginRight: 4 },
 
-    contentContainer: { padding: 15, paddingBottom: 100 },
-    card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 15, elevation: 2 },
+    contentContainer: { padding: 12, paddingBottom: 100 },
+    card: { backgroundColor: 'white', borderRadius: 10, padding: 12, marginBottom: 10, elevation: 2 },
     cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 5 },
     hospitalName: { fontWeight: 'bold', fontSize: 16, color: '#333', maxWidth: '70%' },
     hotBadge: { fontSize: 11, marginLeft: 8, fontWeight: 'bold' },
@@ -579,13 +664,6 @@ const styles = StyleSheet.create({
     tagText: { fontSize: 10, color: '#006064', fontWeight: 'bold' },
     divider: { height: 1, backgroundColor: '#eee', marginVertical: 10 },
 
-    tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', marginHorizontal: 15, borderRadius: 8, padding: 2, marginBottom: 5 },
-    tab: { flex: 1, paddingVertical: 5, alignItems: 'center', borderRadius: 6 },
-    activeTab: { backgroundColor: 'white', elevation: 2 },
-    tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-    activeTabText: { color: '#3b5998', fontWeight: 'bold' },
-    dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 5, marginHorizontal: 15, borderRadius: 8, marginBottom: 5, borderWidth: 1, borderColor: '#eee' },
-    monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
 
     loadMoreBtn: { padding: 12, backgroundColor: '#fff', alignItems: 'center', marginVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ddd' },
 

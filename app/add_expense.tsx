@@ -1,13 +1,13 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import { pickerHandlers } from '../utils/datePickerHandlers';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
     FlatList,
-    Image,
     KeyboardAvoidingView,
     Modal,
     Platform,
@@ -19,15 +19,25 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (kept for parity, not used for writes anymore)
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: expenses now via new backend API
-import { createExpense } from '../services/api/expenses';
+import { createExpense, getExpenseSettings, listOpenRequests, uploadExpenseBillPhoto } from '../services/api/expenses';
+import PhotoPickerField, { PendingPhoto } from '../components/PhotoPickerField';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddExpenseScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
-  const { currentUser, addNotification } = useData();
+  const { currentUser } = useData();
+  // mode=request → ask approval before buying; requestId → bill for an approved request.
+  const params = useLocalSearchParams<{ mode?: string; requestId?: string }>();
+  const [isRequest, setIsRequest] = useState(params.mode === 'request');
+
+  const [approvalLimit, setApprovalLimit] = useState<number | null>(null);
+  const [openRequests, setOpenRequests] = useState<any[]>([]);
+  const [linkedRequest, setLinkedRequest] = useState<any>(null);
+  const [showRequestPicker, setShowRequestPicker] = useState(false);
 
   const [date, setDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -35,11 +45,34 @@ export default function AddExpenseScreen() {
   const [type, setType] = useState('Select Type');
   const [amount, setAmount] = useState('');
   const [remark, setRemark] = useState('');
-  const [image, setImage] = useState<string | null>(null);
+  const [image, setImage] = useState<PendingPhoto | null>(null);
+  const [preparingImage, setPreparingImage] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const [modalVisible, setModalVisible] = useState(false);
-  const expenseTypes = ["Travel", "Food", "Lodging/Hotel", "Fuel", "Mobile/Internet", "Office Stationary", "Misc"];
+  const expenseTypes = ["Travel", "Food", "Lodging/Hotel", "Fuel", "Mobile/Internet", "Office Stationary", "Equipment / Tools", "Misc"];
+
+  const pickRequest = (r: any | null) => {
+      setLinkedRequest(r);
+      setShowRequestPicker(false);
+      if (r) {
+          setType(expenseTypes.includes(r.type) ? r.type : r.type || 'Misc');
+          setAmount(String(r.amount));
+      }
+  };
+
+  useEffect(() => {
+      getExpenseSettings().then((s) => setApprovalLimit(s.approvalLimit)).catch(() => {});
+      if (params.mode === 'request') return;
+      listOpenRequests()
+          .then((list) => {
+              setOpenRequests(list);
+              const pre = params.requestId ? list.find((r: any) => r.id === params.requestId) : null;
+              if (pre) pickRequest(pre);
+          })
+          .catch(() => {});
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const formatDate = (rawDate: Date) => {
     let day = rawDate.getDate().toString().padStart(2, '0');
@@ -48,54 +81,75 @@ export default function AddExpenseScreen() {
     return `${day}/${month}/${year}`;
   };
 
-  const pickImage = async () => {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-          Alert.alert("Permission Denied", "Camera access is needed to upload bills.");
-          return;
-      }
-
-      let result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: false, 
-          quality: 0.5,
-      });
-
-      if (!result.canceled) {
-          setImage(result.assets[0].uri);
-      }
-  };
-
-  // 🔥 SAVE LOGIC — via new backend API. Note: imageUri is passed through as
-  // a local file URI only — it isn't uploaded to Supabase Storage yet, same
-  // known gap as Order PO files and Service Call photos.
+  // 🔥 SAVE LOGIC — claim via the backend API, then the bill photo is
+  // uploaded to it (the claim stays saved even if the photo upload fails).
   const handleSave = async () => {
+      if (preparingImage) return Alert.alert("Please wait", "The bill photo is still being prepared.");
       if (type === 'Select Type' || !amount) {
           Alert.alert("Missing Fields", "Please select Type and enter Amount.");
           return;
       }
+      if (isRequest && !remark.trim()) {
+          Alert.alert("Missing Reason", "Please write why this purchase is needed.");
+          return;
+      }
+      const value = parseFloat(amount) || 0;
+      // Above the company limit without an approved request → suggest asking first.
+      if (!isRequest && !linkedRequest && approvalLimit && value > approvalLimit) {
+          Alert.alert(
+              "Approval needed",
+              `Purchases above ₹${approvalLimit.toLocaleString()} should be approved before buying.`,
+              [
+                  { text: "Cancel", style: "cancel" },
+                  { text: "Submit Claim Anyway", onPress: () => submit('CLAIM') },
+                  { text: "Ask Approval", onPress: () => submit('REQUEST') },
+              ],
+          );
+          return;
+      }
+      submit(isRequest ? 'REQUEST' : 'CLAIM');
+  };
 
+  const submit = async (kind: 'CLAIM' | 'REQUEST') => {
+      const asRequest = kind === 'REQUEST';
       setLoading(true);
       try {
-          await createExpense({
+          const saved = await createExpense({
               date: date.toISOString(),
               type,
               amount: parseFloat(amount) || 0,
               remark,
-              imageUri: image || undefined,
+              kind,
+              requestId: !asRequest && linkedRequest ? linkedRequest.id : undefined,
           });
 
-          if (addNotification) {
-              await addNotification({
-                  title: "New Expense Claim 💸",
-                  message: `${currentUser?.name} claimed ₹${amount} for ${type}.`,
-                  to: "Accountant",
-                  route: "/expense",
-                  type: "warning"
-              });
+          let photoFailed = false;
+          if (image) {
+              try {
+                  await uploadExpenseBillPhoto(saved.id, image.dataUri);
+              } catch (e) {
+                  console.log("Bill photo upload failed:", e);
+                  photoFailed = true;
+              }
           }
 
-          Alert.alert("Success", "Expense Claim Submitted & Admin Notified!");
+          if (asRequest) {
+              // The server notifies Admin / Manager / Account.
+              Alert.alert(
+                  "Request Sent",
+                  "Your purchase request was sent for approval. After it is approved and you buy, open it in Expenses and tap \"Add Bill\"." +
+                      (photoFailed ? `\n\n⚠️ The photo could not be uploaded.` : ''),
+              );
+              router.back();
+              return;
+          }
+
+
+          Alert.alert(
+              "Success",
+              (saved.status === 'Approved' ? "Claim saved and approved (within the approved amount)." : "Expense Claim Submitted & Admin Notified!") +
+                  (photoFailed ? `\n\n⚠️ The bill photo could not be uploaded. Open the claim in Expenses and tap "Add Bill Photo".` : '')
+          );
           router.back();
       } catch (e: any) {
           Alert.alert("Error", e?.message || "Could not submit claim.");
@@ -106,11 +160,11 @@ export default function AddExpenseScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#333" />
+            <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>New Expense Claim</Text>
+        <Text style={styles.headerTitle}>{isRequest ? 'Ask Purchase Approval' : 'New Expense Claim'}</Text>
         <View style={{width:24}} /> 
       </View>
 
@@ -124,7 +178,24 @@ export default function AddExpenseScreen() {
             keyboardShouldPersistTaps="handled"
         >
             
-            <Text style={styles.label}>Date</Text>
+            {isRequest ? (
+                <View style={styles.infoBox}>
+                    <Ionicons name="information-circle" size={18} color="#1565c0" />
+                    <Text style={styles.infoText}>Ask before an important purchase. After approval, buy it and add the bill from Expenses.</Text>
+                </View>
+            ) : openRequests.length > 0 && (
+                <>
+                    <Text style={styles.label}>Against Approved Request</Text>
+                    <TouchableOpacity style={styles.inputBox} onPress={() => setShowRequestPicker(true)}>
+                        <Text style={{ flex: 1, color: linkedRequest ? '#333' : 'gray' }}>
+                            {linkedRequest ? `${linkedRequest.type} — ₹${linkedRequest.amount} (approved)` : 'None (normal claim)'}
+                        </Text>
+                        <Ionicons name="caret-down" size={14} color="gray" />
+                    </TouchableOpacity>
+                </>
+            )}
+
+            <Text style={styles.label}>{isRequest ? 'Needed On' : 'Date'}</Text>
             <TouchableOpacity style={styles.inputBox} onPress={() => setShowDatePicker(true)}>
                 <Text style={{flex:1, color:'#333'}}>{formatDate(date)}</Text>
                 <Ionicons name="calendar-outline" size={20} color="gray" />
@@ -133,7 +204,7 @@ export default function AddExpenseScreen() {
                 <DateTimePicker 
                     value={date} 
                     mode="date" 
-                    onChange={(e, d) => { setShowDatePicker(false); if(d) setDate(d); }} 
+                    {...pickerHandlers((e, d) => { setShowDatePicker(false); if(d) setDate(d); })} 
                 />
             )}
 
@@ -143,7 +214,7 @@ export default function AddExpenseScreen() {
                 <Ionicons name="caret-down" size={14} color="gray" />
             </TouchableOpacity>
 
-            <Text style={styles.label}>Amount (₹) *</Text>
+            <Text style={styles.label}>{isRequest ? 'Estimated Amount (₹) *' : 'Amount (₹) *'}</Text>
             <TextInput 
                 style={styles.inputBox} 
                 value={amount} 
@@ -151,8 +222,14 @@ export default function AddExpenseScreen() {
                 keyboardType="numeric"
                 placeholder="0.00"
             />
+            {!isRequest && !linkedRequest && !!approvalLimit && (parseFloat(amount) || 0) > approvalLimit && (
+                <Text style={styles.limitHint}>Above ₹{approvalLimit.toLocaleString()} — needs approval before buying.</Text>
+            )}
+            {!!linkedRequest && (parseFloat(amount) || 0) > Number(linkedRequest.amount) && (
+                <Text style={styles.limitHint}>More than the approved ₹{linkedRequest.amount} — this claim will need approval again.</Text>
+            )}
 
-            <Text style={styles.label}>Description / Remark</Text>
+            <Text style={styles.label}>{isRequest ? 'Why is it needed? *' : 'Description / Remark'}</Text>
             <TextInput 
                 style={[styles.inputBox, {height: 80, textAlignVertical:'top'}]} 
                 value={remark} 
@@ -161,22 +238,9 @@ export default function AddExpenseScreen() {
                 placeholder="Details..."
             />
 
-            <Text style={styles.label}>Upload Bill / Ticket</Text>
+            <Text style={styles.label}>{isRequest ? 'Quotation / Photo (optional)' : 'Upload Bill / Ticket'}</Text>
             <View style={styles.uploadContainer}>
-                {image ? (
-                    <View>
-                        <Image source={{ uri: image }} style={styles.previewImage} />
-                        <TouchableOpacity style={styles.removeBtn} onPress={() => setImage(null)}>
-                            <Ionicons name="trash" size={18} color="white" />
-                            <Text style={{color:'white', fontSize:12, marginLeft:5}}>Remove</Text>
-                        </TouchableOpacity>
-                    </View>
-                ) : (
-                    <TouchableOpacity style={styles.cameraBtn} onPress={pickImage}>
-                        <Ionicons name="camera" size={30} color="#3b5998" />
-                        <Text style={{color:'#3b5998', fontWeight:'bold', marginTop:5}}>Take Photo</Text>
-                    </TouchableOpacity>
-                )}
+                <PhotoPickerField value={image} onChange={setImage} onBusyChange={setPreparingImage} buttonLabel={isRequest ? 'Take Photo' : 'Take Bill Photo'} />
             </View>
 
             <TouchableOpacity 
@@ -184,8 +248,15 @@ export default function AddExpenseScreen() {
                 onPress={handleSave} 
                 disabled={loading}
             >
-                {loading ? <ActivityIndicator color="white"/> : <Text style={styles.saveBtnText}>Submit Claim</Text>}
+                {loading ? <ActivityIndicator color="white"/> : <Text style={styles.saveBtnText}>{isRequest ? 'Send for Approval' : 'Submit Claim'}</Text>}
             </TouchableOpacity>
+            {params.mode !== 'request' && params.requestId === undefined && (
+                <TouchableOpacity onPress={() => { setIsRequest(!isRequest); setLinkedRequest(null); }} style={{ alignItems: 'center', marginTop: 14 }}>
+                    <Text style={{ color: '#3b5998', fontWeight: '600' }}>
+                        {isRequest ? 'Already bought? Submit a claim instead' : 'Big purchase? Ask approval first'}
+                    </Text>
+                </TouchableOpacity>
+            )}
             
         </ScrollView>
       </KeyboardAvoidingView>
@@ -211,13 +282,34 @@ export default function AddExpenseScreen() {
         </View>
       </Modal>
 
+      <Modal visible={showRequestPicker} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>Approved Requests</Text>
+                <FlatList
+                    data={[null, ...openRequests]}
+                    keyExtractor={(item) => item?.id ?? 'none'}
+                    renderItem={({ item }) => (
+                        <TouchableOpacity style={styles.modalItem} onPress={() => pickRequest(item)}>
+                            <Text style={styles.modalItemText}>{item ? `${item.type} — ₹${item.amount} (${item.date})` : 'None (normal claim)'}</Text>
+                            {(linkedRequest?.id ?? null) === (item?.id ?? null) && <Ionicons name="checkmark" size={20} color="#3b5998" />}
+                        </TouchableOpacity>
+                    )}
+                />
+                <TouchableOpacity style={styles.closeBtn} onPress={() => setShowRequestPicker(false)}>
+                    <Text style={{color:'red'}}>Close</Text>
+                </TouchableOpacity>
+            </View>
+        </View>
+      </Modal>
+
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   contentContainer: { padding: 20 },
   label: { marginBottom: 5, color:'#555', fontWeight:'600', fontSize:13, marginTop:15 },
@@ -236,5 +328,8 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, color: '#3b5998', textAlign:'center' },
   modalItem: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#eee', flexDirection:'row', justifyContent:'space-between' },
   modalItemText: { fontSize: 16, color: '#333' },
-  closeBtn: { marginTop:15, alignItems:'center', padding:10 }
-});
+  closeBtn: { marginTop:15, alignItems:'center', padding:10 },
+  infoBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e3f2fd', padding: 10, borderRadius: 8, gap: 8 },
+  infoText: { flex: 1, color: '#1565c0', fontSize: 12 },
+  limitHint: { color: '#e65100', fontSize: 12, marginTop: 4 },
+}), FORM_ACCENT.expense);

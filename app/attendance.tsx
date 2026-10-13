@@ -1,11 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
+import { saveAndShareFile } from '../utils/saveFile';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Modal, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 // 🔥 SAAS IMPORTS ("users" stays on Firestore until Phase 10)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+import { useWorkSchedules } from '../hooks/useWorkSchedules';
+import { isOffDay, offDayLabel } from '../utils/workSchedule';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
@@ -18,21 +20,26 @@ import { fetchAttendance } from '../services/api/attendance';
 import { fetchHolidays } from '../services/api/holidays';
 import { fetchLeaves } from '../services/api/leaves';
 import { fetchTeamMembers } from '../services/api/users';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
+import { PeriodTabs, StaffPeriodRow } from '../components/compact';
 
 export default function AttendanceScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   // 🔥 1. Context se sirf logged in User
   const { currentUser } = useData();
+  // Weekly off per employee (was: Sunday for everyone)
+  const { forUser: scheduleFor } = useWorkSchedules(currentUser?.companyId, currentUser?.id);
   
   // 🔥 2. "users" still Firestore. isDbLoading previously gated ALL content here
   // (attendance + leave-quota + summary), which meant this screen looked slow
   // every time regardless of the attendance cache, since it was also waiting
   // on the (uncached) Firestore team-members fetch below. The visible
   // content only actually depends on attendance data, so the loading gate
-  // now uses attendanceLoading alone (see below) — useSaaSDB() is kept only
-  // in case other code in this file relies on it being called.
-  useSaaSDB();
+  // now uses attendanceLoading alone (see below).
 
   // 🔥 3. Lazy Loaded Lists
   // attendanceList now comes from useCachedList below (cache-first)
@@ -67,10 +74,13 @@ export default function AttendanceScreen() {
 
   // PAGINATION STATE
   const [visibleCount, setVisibleCount] = useState(50); 
+  // Tapping a summary box (Present / Absent / …) shows only those rows; tap again for all.
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
   useEffect(() => {
       if (viewMode === 'Day') setVisibleCount(500); 
       else setVisibleCount(20);  
+      setStatusFilter(null);
   }, [viewMode, currentDate, filterUser]);
 
   const DEFAULT_QUOTA = 18;
@@ -126,9 +136,11 @@ export default function AttendanceScreen() {
 
   // 🔥 Resolved target-user-id — shared by the cache key below and the
   // fetch itself, so the cache key always matches what's actually fetched.
+  // Day view with "All" = every employee; Month / FY always show ONE person
+  // (the chosen one, else yourself), so only that person's rows are fetched.
   const resolveTargetUserId = (): string | undefined => {
       if (!canManage) return undefined; // self, enforced server-side
-      if (filterUser === 'All') return 'all';
+      if (filterUser === 'All') return viewMode === 'Day' ? 'all' : undefined;
       const match = userList.find((u: any) => u.name === filterUser);
       return match?.id; // if not found, adapter/route falls back to self — acceptable edge case
   };
@@ -154,7 +166,7 @@ export default function AttendanceScreen() {
   } = useCachedList({
       cacheKey: attendanceCacheKey,
       enabled: !!currentUser?.companyId && usersReady,
-      fetcher: () => fetchAttendance({ userId: targetUserId, fromDate, toDate, limit: 500 }),
+      fetcher: () => fetchAttendance({ userId: targetUserId, fromDate, toDate, limit: 2000 }),
   });
 
   // 🔥 Leaves/holidays — same date-range dependency as attendance above, but
@@ -163,9 +175,11 @@ export default function AttendanceScreen() {
   useEffect(() => {
       const loadLeavesAndHolidays = async () => {
           if (!currentUser?.companyId || !usersReady) return;
+          const leaveFy = currentDate.getMonth() >= 3 ? currentDate.getFullYear() : currentDate.getFullYear() - 1;
           try {
               const [leaves, holidays] = await Promise.all([
-                  fetchLeaves({ userId: targetUserId, limit: 200 }),
+                  // Whole FY: the list needs the range, the leave-quota card needs the year.
+                  fetchLeaves({ userId: targetUserId, fromDate: `${leaveFy}-04-01`, toDate: `${leaveFy + 1}-03-31`, limit: 2000 }),
                   fetchHolidays(fromDate, toDate),
               ]);
               setLeaveList(leaves);
@@ -316,8 +330,6 @@ export default function AttendanceScreen() {
     // CASE A: DAY VIEW
     if (viewMode === 'Day') {
         const targetDateStr = getStandardDate(currentDate);
-        const targetDayObj = new Date(targetDateStr);
-        const isSunday = targetDayObj.getDay() === 0;
         const holidayObj = findHoliday(targetDateStr);
 
         let targetUsers: any[] = [];
@@ -346,8 +358,8 @@ export default function AttendanceScreen() {
                 else if (holidayObj) {
                     finalOutput.push({ id: `hol-${u.id}`, date: targetDateStr, type: 'HOLIDAY', senderName: u.name, outTime: holidayObj.name });
                 } 
-                else if (isSunday) {
-                    finalOutput.push({ id: `sun-${u.id}`, date: targetDateStr, type: 'HOLIDAY', senderName: u.name, outTime: 'Sunday Off' });
+                else if (isOffDay(targetDateStr, scheduleFor(u.id))) {
+                    finalOutput.push({ id: `off-${u.id}`, date: targetDateStr, type: 'HOLIDAY', senderName: u.name, outTime: offDayLabel(targetDateStr) });
                 } 
                 else if (targetDateStr <= todayStr) {
                     if (targetDateStr >= "2026-01-01") {
@@ -360,6 +372,10 @@ export default function AttendanceScreen() {
     // CASE B: MONTH/FY VIEW
     else {
         const targetUserName = (filterUser === 'All' || !canManage) ? currentUser?.name : filterUser;
+        const targetUserId = (filterUser === 'All' || !canManage)
+            ? currentUser?.id
+            : safeUsers.find((u: any) => u.name === filterUser)?.id;
+        const targetSchedule = scheduleFor(targetUserId);
         let loop = new Date(startDate);
 
         while (loop <= endDate) {
@@ -367,7 +383,7 @@ export default function AttendanceScreen() {
             
             if (dStr > todayStr && viewMode !== 'Month') break; 
 
-            const isSunday = loop.getDay() === 0;
+            const isWeeklyOff = isOffDay(dStr, targetSchedule);
             const att = findAttendance(targetUserName, dStr);
             const lv = findLeave(targetUserName, dStr);
             const hol = findHoliday(dStr);
@@ -381,8 +397,8 @@ export default function AttendanceScreen() {
             else if (hol) {
                 finalOutput.push({ id: `hol-${dStr}`, date: dStr, type: 'HOLIDAY', senderName: targetUserName, outTime: hol.name });
             } 
-            else if (isSunday) {
-                finalOutput.push({ id: `sun-${dStr}`, date: dStr, type: 'HOLIDAY', senderName: targetUserName, outTime: 'Sunday Off' });
+            else if (isWeeklyOff) {
+                finalOutput.push({ id: `off-${dStr}`, date: dStr, type: 'HOLIDAY', senderName: targetUserName, outTime: offDayLabel(dStr) });
             } 
             else if (dStr <= todayStr) {
                 if (dStr >= "2026-01-01") {
@@ -398,7 +414,13 @@ export default function AttendanceScreen() {
   };
 
   const finalData = getDisplayData();
-  const displayData = finalData.slice(0, visibleCount);
+  const filteredData = statusFilter
+      ? finalData.filter((i: any) => statusFilter === 'EXPENSE'
+          ? i.type === 'ATTENDANCE' && parseFloat(i.expenses?.totalAmount) > 0
+          : getStatus(i) === statusFilter)
+      : finalData;
+  const displayData = filteredData.slice(0, visibleCount);
+  const toggleStatus = (s: string) => setStatusFilter((prev) => (prev === s ? null : s));
 
   // --- STATS CALCULATION ---
   const todayStr = getStandardDate(new Date());
@@ -459,17 +481,44 @@ export default function AttendanceScreen() {
                 const outTime = item.outTime || '-';
                 const hrs = item.workHrs || '-';
                 const expense = item.expenses?.totalAmount || '0';
-              const note = item.location === 'On Leave' ? 'Leave' : (item.outTime === 'Sunday Off' ? 'Sunday' : '-');
+              const note = item.location === 'On Leave' ? 'Leave' : (/ Off$/.test(item.outTime || '') ? 'Weekly Off' : '-');
               csvRows += `${date},${name},${status},${location},${inTime},${outTime},${hrs},${expense},${note}\n`;
           });
 
-          const fileUri = (FileSystem as any).cacheDirectory + `Attendance_${targetName || 'Report'}.csv`;
-          await FileSystem.writeAsStringAsync(fileUri, csvHeader + csvRows, { encoding: 'utf8' });
-          if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(fileUri);
+          await saveAndShareFile({ content: csvHeader + csvRows, fileName: `Attendance_${targetName || 'Report'}.csv`, mimeType: 'text/csv' });
       } catch (error: any) { Alert.alert("Error", error.message); }
   };
 
   const handleItemClick = (item: any) => { setSelectedItem(item); setDetailModalVisible(true); };
+
+  // Laptop: the same rows as a table (tap a row → same details as on the phone).
+  const isDesktop = useIsDesktop();
+  const STATUS_PILL: Record<string, { text: string; color: string; bg: string }> = {
+      PRESENT: { text: 'Present', color: '#2e7d32', bg: '#e8f5e9' },
+      SHORT: { text: 'Short', color: '#ef6c00', bg: '#fff3e0' },
+      LEAVE: { text: 'Leave', color: '#e65100', bg: '#fff3e0' },
+      HOLIDAY: { text: 'Holiday', color: '#c2185b', bg: '#fce4ec' },
+      ABSENT: { text: 'Absent', color: '#d32f2f', bg: '#ffebee' },
+  };
+  const attendanceColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Date', width: 110, render: (a) => <TwoLine main={formatDateDisplay(a.date)} sub={getDayName(a.date)} /> },
+      { key: 'emp', label: 'Employee', flex: 1.4, render: (a) => (a.senderName === 'Summary' ? `👥 ${a.inTime}` : a.senderName || '-') },
+      { key: 'status', label: 'Status', width: 100, render: (a) => {
+          const p = STATUS_PILL[getStatus(a)] || STATUS_PILL.PRESENT;
+          return a.senderName === 'Summary' ? '-' : <Pill text={p.text} color={p.color} bg={p.bg} />;
+      } },
+      { key: 'in', label: 'In', width: 90, render: (a) => (['LEAVE', 'HOLIDAY', 'ABSENT'].includes(getStatus(a)) || a.senderName === 'Summary' ? '-' : a.inTime || '-') },
+      { key: 'out', label: 'Out', width: 110, render: (a) => {
+          const st = getStatus(a);
+          if (st === 'LEAVE' || st === 'HOLIDAY') return a.outTime || '-';
+          if (st === 'ABSENT' || a.senderName === 'Summary') return '-';
+          return st === 'SHORT' && (!a.outTime || a.outTime === '--') ? <Text style={{ color: '#ef6c00', fontWeight: 'bold', fontSize: 13 }}>Forgot?</Text> : a.outTime || '-';
+      } },
+      { key: 'hrs', label: 'Hours', width: 80, align: 'right', render: (a) => a.workHrs || '-' },
+      { key: 'where', label: 'Office / Field', width: 110, render: (a) => a.workLocationType
+          ? <Pill text={a.workLocationType} color="white" bg={a.workLocationType === 'Office' ? '#2e7d32' : '#e65100'} /> : '-' },
+      { key: 'exp', label: 'Day Out expense', width: 120, align: 'right', render: (a) => (Number(a.expenses?.totalAmount) > 0 ? inr(a.expenses.totalAmount) : '-') },
+  ];
 
   const renderItem = ({ item }: any) => {
     const status = getStatus(item);
@@ -580,7 +629,7 @@ export default function AttendanceScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={{flexDirection:'row', alignItems:'center'}}>
             <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
             <Text style={styles.headerTitle}>Attendance Log</Text>
@@ -595,17 +644,29 @@ export default function AttendanceScreen() {
         </View>
       </View>
 
-      {canManage && (
-          <TouchableOpacity style={styles.filterBtn} onPress={() => setShowUserModal(true)}>
-              <Ionicons name="person" size={16} color="white" /><Text style={styles.filterBtnText}>{filterUser === 'All' ? 'Filter: All Employees' : `User: ${filterUser}`}</Text><Ionicons name="chevron-down" size={16} color="white" />
-          </TouchableOpacity>
-      )}
-
-      <View style={styles.monthSelector}>
-          <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-          <View style={{flexDirection:'row', alignItems:'center'}}><Ionicons name="calendar" size={18} color="#3b5998" style={{marginRight:8}} /><Text style={styles.monthText}>{getHeaderDateText()}</Text></View>
-          <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-          {viewMode === 'Month' && filterUser !== 'All' && <TouchableOpacity onPress={() => setIsCalendarView(!isCalendarView)} style={{marginLeft:15}}><Ionicons name={isCalendarView ? "list" : "grid"} size={22} color="#3b5998" /></TouchableOpacity>}
+      <View style={{ backgroundColor: 'white', paddingBottom: 6 }}>
+          <PeriodTabs
+              value={viewMode}
+              options={['Day', 'Month', 'FY'] as const}
+              onChange={(m) => { setViewMode(m); if (m === 'Day') setIsCalendarView(false); setCurrentDate(new Date()); }}
+          />
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <View style={{ flex: 1 }}>
+                  <StaffPeriodRow
+                      showStaff={canManage}
+                      staffLabel={filterUser === 'All' ? 'All Employees' : filterUser}
+                      onStaffPress={() => setShowUserModal(true)}
+                      periodLabel={getHeaderDateText()}
+                      onPrev={() => changeDate(-1)}
+                      onNext={() => changeDate(1)}
+                  />
+              </View>
+              {viewMode === 'Month' && filterUser !== 'All' && (
+                  <TouchableOpacity onPress={() => setIsCalendarView(!isCalendarView)} style={{ paddingRight: 12, paddingTop: 6 }} accessibilityLabel="Calendar view">
+                      <Ionicons name={isCalendarView ? "list" : "grid"} size={22} color="#3b5998" />
+                  </TouchableOpacity>
+              )}
+          </View>
       </View>
 
       <ScrollView
@@ -638,40 +699,38 @@ export default function AttendanceScreen() {
                     </View>
                 )}
 
-                <View style={styles.tabContainer}>
-                    {['Day', 'Month', 'FY'].map(m => (
-                        <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => { setViewMode(m as any); if(m==='Day') setIsCalendarView(false); setCurrentDate(new Date()); }}>
-                            <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m === 'Day' ? 'Daily' : m === 'Month' ? 'Monthly' : 'FY (Yearly)'}</Text>
-                        </TouchableOpacity>
-                    ))}
-                </View>
 
-                <View style={{height: 70, marginBottom: 10}}>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingHorizontal: 15, alignItems: 'center'}}>
-                        <SummaryItem label="Present" value={daysPresent} color="#e8f5e9" textColor="green" />
-                        <SummaryItem label="Absent" value={daysAbsent} color="#ffebee" textColor="#d32f2f" />
-                        <SummaryItem label="Leave" value={daysLeave} color="#fff3e0" textColor="#e65100" />
-                        <SummaryItem label="Short" value={daysShort} color="#fff8e1" textColor="#ff9800" />
-                        <View style={[styles.summaryBox, { backgroundColor: '#fff8e1', borderColor: '#ffb300', borderWidth: 1 }]}>
-                            <Text style={[styles.summaryBoxValue, { color: '#ff6f00', fontSize: 13 }]}>₹{totalExpense}</Text>
-                            <Text style={[styles.summaryBoxLabel, { color: '#ff6f00' }]}>Expense</Text>
-                        </View>
-                        <SummaryItem label="Holiday" value={daysHoliday} color="#fce4ec" textColor="#c2185b" />
+                <View style={{marginVertical: 8}}>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingHorizontal: 12, alignItems: 'center'}}>
+                        <SummaryItem label="Present" value={daysPresent} color="#e8f5e9" textColor="green" active={statusFilter === 'PRESENT'} onPress={() => toggleStatus('PRESENT')} />
+                        <SummaryItem label="Absent" value={daysAbsent} color="#ffebee" textColor="#d32f2f" active={statusFilter === 'ABSENT'} onPress={() => toggleStatus('ABSENT')} />
+                        <SummaryItem label="Leave" value={daysLeave} color="#fff3e0" textColor="#e65100" active={statusFilter === 'LEAVE'} onPress={() => toggleStatus('LEAVE')} />
+                        <SummaryItem label="Short" value={daysShort} color="#fff8e1" textColor="#ff9800" active={statusFilter === 'SHORT'} onPress={() => toggleStatus('SHORT')} />
+                        <SummaryItem label="Expense" value={`₹${totalExpense}`} color="#fff8e1" textColor="#ff6f00" active={statusFilter === 'EXPENSE'} onPress={() => toggleStatus('EXPENSE')} />
+                        <SummaryItem label="Holiday" value={daysHoliday} color="#fce4ec" textColor="#c2185b" active={statusFilter === 'HOLIDAY'} onPress={() => toggleStatus('HOLIDAY')} />
                         <View style={{width: 10}} />
                     </ScrollView>
+                    {statusFilter && (
+                        <TouchableOpacity onPress={() => setStatusFilter(null)} style={{alignSelf: 'flex-start', marginLeft: 14, marginTop: 4}}>
+                            <Text style={{fontSize: 11, color: '#3b5998'}}>Showing only {statusFilter === 'EXPENSE' ? 'days with expense' : statusFilter.toLowerCase()} — tap to show all ✕</Text>
+                        </TouchableOpacity>
+                    )}
                 </View>
 
                 {viewMode === 'Month' && isCalendarView ? renderCalendar() : (
                     <FlatList 
                         data={displayData} 
                         keyExtractor={(item, index) => item.id || `key-${index}`} 
-                        renderItem={renderItem} 
+                        renderItem={isDesktop
+                            ? ({ item, index }) => <TableRow columns={attendanceColumns} item={item} index={index} onPress={() => handleItemClick(item)} />
+                            : renderItem}
+                        ListHeaderComponent={isDesktop && displayData.length > 0 ? <TableHeader columns={attendanceColumns} /> : null} 
                         scrollEnabled={false} 
                         contentContainerStyle={{paddingHorizontal: 15}} 
-                        ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>No data for {getHeaderDateText()}</Text>} 
+                        ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>{statusFilter ? 'Nothing in this group' : `No data for ${getHeaderDateText()}`}</Text>} 
                         
                         ListFooterComponent={
-                            visibleCount < finalData.length ? (
+                            visibleCount < filteredData.length ? (
                                 <TouchableOpacity 
                                     onPress={() => setVisibleCount(prev => prev + 20)} 
                                     style={{
@@ -686,11 +745,11 @@ export default function AttendanceScreen() {
                                     }}
                                 >
                                     <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                                        👇 Load More Records ({finalData.length - visibleCount} remaining)
+                                        👇 Load More Records ({filteredData.length - visibleCount} remaining)
                                     </Text>
                                 </TouchableOpacity>
                             ) : (
-                                finalData.length > 0 ? (
+                                filteredData.length > 0 ? (
                                     <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
                                         --- End of List ---
                                     </Text>
@@ -852,11 +911,12 @@ export default function AttendanceScreen() {
   );
 }
 
-const SummaryItem = ({ label, value, color, textColor }: any) => (
-    <View style={[styles.summaryBox, { backgroundColor: color }]}>
+const SummaryItem = ({ label, value, color, textColor, active, onPress }: any) => (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.7}
+        style={[styles.summaryBox, { backgroundColor: color }, active && { borderWidth: 2, borderColor: textColor }]}>
         <Text style={[styles.summaryBoxValue, { color: textColor }]}>{value}</Text>
         <Text style={[styles.summaryBoxLabel, { color: textColor }]}>{label}</Text>
-    </View>
+    </TouchableOpacity>
 );
 
 const DetailRow = ({label, value, highlight, color, icon}: any) => (
@@ -871,7 +931,7 @@ const DetailRow = ({label, value, highlight, color, icon}: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8f9fa' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 4 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, backgroundColor: 'white', elevation: 4 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 10 },
   backBtn: { padding: 5 }, 
   holidayBtn: { padding: 8, backgroundColor:'#fff3e0', borderRadius:20 },
@@ -882,9 +942,9 @@ const styles = StyleSheet.create({
   compactCard: { backgroundColor: 'white', marginHorizontal: 15, marginTop: 10, padding: 10, borderRadius: 8, elevation: 1, borderLeftWidth:4, borderLeftColor:'#3b5998' },
   progressBarBackground: { height: 6, backgroundColor: '#f0f0f0', borderRadius: 3, marginVertical: 5, overflow:'hidden' },
   progressBarFill: { height: '100%', borderRadius: 3 },
-  tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', marginHorizontal: 15, borderRadius: 8, padding: 3, marginVertical: 15 },
-  tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-  activeTab: { backgroundColor: 'white', elevation: 2 },
+  tabContainer: { flexDirection: 'row', backgroundColor: '#eceff1', marginHorizontal: 12, borderRadius: 8, padding: 2, marginVertical: 8},
+  tab: { flex: 1, paddingVertical: 5, alignItems: 'center', borderRadius: 6 },
+  activeTab: { backgroundColor: 'white', elevation: 1},
   tabText: { color: 'gray', fontWeight: '600', fontSize:12 },
   activeTabText: { color: '#3b5998', fontWeight: 'bold' },
   summaryBox: { 

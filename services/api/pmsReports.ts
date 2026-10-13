@@ -20,6 +20,9 @@ export interface ApiPmsReport {
   location: { latitude: number; longitude: number } | null;
   createdById: string;
   createdAt: string;
+  /** List endpoint only. */
+  createdBy?: { name: string } | null;
+  organization?: { address1: string | null; address2: string | null; city: string | null } | null;
   updatedAt: string;
 }
 
@@ -59,7 +62,10 @@ export function toLegacyPmsReport(p: ApiPmsReport): any {
     nextServiceDate: dueOnly,
     location: p.location,
     senderId: p.createdById,
-    senderName: undefined,
+    ...(p.createdBy ? { senderName: p.createdBy.name } : {}),
+    ...(p.organization
+      ? { orgAddress: [p.organization.address1, p.organization.address2].filter(Boolean).join(', '), orgCity: p.organization.city || '' }
+      : {}),
     userName: undefined,
     createdAt: p.createdAt,
   };
@@ -72,6 +78,23 @@ function toQueryString(params: Record<string, any>) {
   });
   const s = q.toString();
   return s ? `?${s}` : '';
+}
+
+export interface PmsPageFilters {
+  view?: 'All' | 'Upcoming' | 'Completed' | 'Overdue';
+  fromDate?: string;
+  toDate?: string;
+  createdById?: string;
+  search?: string;
+  today?: string; // phone's date, for Upcoming / Overdue
+}
+
+/** One page for the PMS screen; tab, dates, employee and search run on the server. */
+export async function listPmsReportsPage(
+  params: PmsPageFilters & { page: number; limit: number },
+): Promise<{ items: any[]; total: number; totalPages: number }> {
+  const res = await apiClient.get<ListResponse>(`/pms-reports${toQueryString(params)}`);
+  return { items: res.data.map(toLegacyPmsReport), total: res.meta.total, totalPages: res.meta.totalPages };
 }
 
 export async function listPmsReports(params: { search?: string } = {}): Promise<any[]> {

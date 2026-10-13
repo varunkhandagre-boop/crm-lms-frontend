@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -13,39 +13,43 @@ import {
     StyleSheet,
     Text,
     TextInput,
+    ToastAndroid,
     TouchableOpacity,
     View
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import { trackCourier } from '../utils/courierTracking';
 
 // 🔥 SAAS IMPORTS (Direct Firebase DB imports removed)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 // 🔥 Phase 8: couriers now come from Postgres via these adapters
-import { deleteCourier, fetchCouriers, updateCourier, updateCourierStatus } from '../services/api/couriers';
-import { fetchTeamMembers } from '../services/api/users';
-// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
-import { useCachedList } from '../hooks/useCachedList';
+import { CourierPageFilters, deleteCourier, listCouriersPage, updateCourier, updateCourierStatus } from '../services/api/couriers';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
 import { buildCacheKey } from '../utils/listCache';
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 import { fetchOrganizations } from '../services/api/organizations';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function CourierScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   // 🔥 1. Context se sirf Profile, User & Notifications Nikala
-  const { currentUser, addNotification, companyProfile } = useData(); 
+  const { currentUser, companyProfile } = useData(); 
 
   // 🔥 2. "organizations" still Firestore; couriers are Postgres now
-  const { isDbLoading: isOrgsLoading } = useSaaSDB();
   // isDbLoading (courier-specific) is computed below, once courierLoading is available
 
   // 🔥 3. Lazy Loaded Lists
-  // courierList now comes from useCachedList below (cache-first)
-  // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
 
   // --- STATES ---
   const [activeTab, setActiveTab] = useState<'All' | 'Inward' | 'Outward'>('All'); 
@@ -66,78 +70,45 @@ export default function CourierScreen() {
   const [editData, setEditData] = useState<any>({});
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
-  const [visibleCount, setVisibleCount] = useState(20);
 
-  useEffect(() => {
-      if (viewMode === 'Day') setVisibleCount(500); 
-      else setVisibleCount(20); 
-  }, [viewMode, currentDate, activeTab, activeStatus, searchText]);
-
-  // 🔥 4. LOAD DATA — couriers bounded by the current view window + type/status filter
-  // (server-enforced visibility: non-office roles automatically only see their own).
-  function getFetchRange(): { fromDate?: string; toDate?: string } {
-      const toIso = (d: Date) => d.toISOString().split('T')[0];
-      if (viewMode === 'All') return {};
-      if (viewMode === 'Day') return { fromDate: toIso(currentDate), toDate: toIso(currentDate) };
-      if (viewMode === 'Month') {
-          const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-          const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-          return { fromDate: toIso(start), toDate: toIso(end) };
-      }
-      // FY
-      const m = currentDate.getMonth();
-      const y = currentDate.getFullYear();
-      const fyStartYear = m >= 3 ? y : y - 1;
-      return { fromDate: toIso(new Date(fyStartYear, 3, 1)), toDate: toIso(new Date(fyStartYear + 1, 2, 31)) };
-  }
-
-    // Organizations — cache-first, shares the SAME 'organizations' cache key
-  // as organization.tsx/messaging_center.tsx.
-  const { data: orgList } = useCachedList({
-      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 500 }),
-  });
-
-  // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
-  // as manage_team.tsx/employee_timeline.tsx.
-  const { data: teamMembersForCourier } = useCachedList({
-      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: fetchTeamMembers,
-  });
-
-  // 🔥 COURIERS — cache-first, parameterized by date-range (server
-  // auto-scopes by role, no employee filter param exists for this list).
-  // See hooks/useCachedList.ts.
-  const { fromDate, toDate } = getFetchRange();
-  const courierCacheKey = buildCacheKey(`couriers:${viewMode}:${fromDate || 'none'}:${toDate || 'none'}`, currentUser?.companyId);
+  // 🔥 4. COURIERS — 20 per page from the server: type tab, status chip, date range
+  // and search all run there (non-office roles only get their own — server-enforced).
+  // Page 1 also brings the Pending badges for the date range.
+  const debouncedSearch = useDebounced(searchText.trim());
+  const courierFilters = useMemo<CourierPageFilters>(() => ({
+      ...periodRange(viewMode, currentDate),
+      type: activeTab === 'All' ? undefined : activeTab,
+      status: activeStatus === 'All' ? undefined : (activeStatus as CourierPageFilters['status']),
+      search: debouncedSearch || undefined,
+  }), [viewMode, currentDate, activeTab, activeStatus, debouncedSearch]);
+  const [pendingCounts, setPendingCounts] = useState({ inwardPending: 0, outwardPending: 0 });
+  const fetchCourierPage = useCallback(async (p: CourierPageFilters & { page: number; limit: number }) => {
+      const r = await listCouriersPage(p);
+      if (r.counts) setPendingCounts(r.counts);
+      return r;
+  }, []);
+  const isDefaultView = isCurrentFy(viewMode, currentDate) && activeTab === 'All' && activeStatus === 'Pending' && !debouncedSearch;
   const {
-      data: courierList,
-      setData: setCourierList,
+      items: courierList,
+      setItems: setCourierList,
+      total: courierTotal,
       loading: courierLoading,
+      loadingMore: courierLoadingMore,
+      hasMore: courierHasMore,
+      loadMore: loadMoreCouriers,
       refreshing: courierRefreshing,
       refresh: refreshCouriers,
-  } = useCachedList({
-      cacheKey: courierCacheKey,
+      error: courierError,
+  } = useServerPagedList<CourierPageFilters, any>({
+      fetchPage: fetchCourierPage,
+      filters: courierFilters,
       enabled: !!currentUser?.companyId,
-      fetcher: () => fetchCouriers({ fromDate, toDate, limit: 500 }),
+      cacheKey: isDefaultView ? buildCacheKey('couriers_page1_v1', currentUser?.companyId) : null,
   });
+  // Update / status responses don't carry the creator's name or org address — keep them from the list row.
+  const mergeRecord = (item: any, rec: any) => ({ ...item, ...rec, senderName: rec.senderName || item.senderName, orgAddress: item.orgAddress, orgCity: item.orgCity });
 
-  // 🔥 senderName was never populated by the API (only senderId), so every
-  // courier entry showed "Unknown" — same fix pattern as orders.tsx.
-  useEffect(() => {
-      if (teamMembersForCourier.length === 0 || courierList.length === 0) return;
-      const nameById = new Map(teamMembersForCourier.map((u: any) => [u.id, u.name || 'Unknown']));
-      const needsEnrichment = courierList.some((c: any) => c.senderName === undefined);
-      if (!needsEnrichment) return;
-      setCourierList(courierList.map((c: any) => ({
-          ...c,
-          senderName: nameById.get(c.senderId) || 'Unknown',
-      })));
-  }, [courierList, teamMembersForCourier]);
-
-  const isDbLoading = isOrgsLoading || courierLoading;
+  const isDbLoading = courierLoading;
 
   // POWER USER CHECK
   const role = currentUser?.role || ''; 
@@ -150,20 +121,15 @@ export default function CourierScreen() {
 
   const isStrictAdmin = role === 'Admin' || role === 'Manager' || role === 'SuperAdmin';
 
-  // --- BADGE COUNTS ---
-  const inwardPending = courierList.filter((c: any) => c.type === 'Inward' && c.status === 'Pending').length;
-  const outwardPending = courierList.filter((c: any) => c.type === 'Outward' && c.status === 'Pending').length;
-
-  const parseDate = (dateStr: string) => {
-      if (!dateStr) return new Date(0);
-      if (dateStr.includes('T')) return new Date(dateStr);
-      if (dateStr.includes('-')) return new Date(dateStr);
-      const parts = dateStr.split('/');
-      if (parts.length === 3) {
-          return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-      }
-      return new Date(0);
+  const copyDocket = async (docketNo?: string) => {
+      if (!docketNo) return;
+      await Clipboard.setStringAsync(docketNo);
+      if (Platform.OS === 'android') ToastAndroid.show(`Copied ${docketNo}`, ToastAndroid.SHORT);
+      else Alert.alert('Copied', docketNo);
   };
+
+  // --- BADGE COUNTS ---
+  const { inwardPending, outwardPending } = pendingCounts;
 
     const generateChallan = async (data: any) => {
       try {
@@ -210,12 +176,12 @@ export default function CourierScreen() {
           let receiverName = data.receiver ? data.receiver.split(',')[0] : '-';
           let receiverAddr = data.toCity || '';
           
-          const org = orgList.find((o: any) => 
-              (data.orgId && o.id === data.orgId) || 
-              o.orgName === receiverName || 
-              o.name === receiverName
-          );
-          
+          // Address of the linked organization (sent with the list), else look it up by name.
+          let org: any = data.orgAddress || data.orgCity ? { address: data.orgAddress, city: data.orgCity } : null;
+          if (!org && receiverName && receiverName !== '-') {
+              const found = await fetchOrganizations({ search: receiverName, limit: 5 }).catch(() => []);
+              org = found.find((o: any) => o.orgName === receiverName || o.name === receiverName) || null;
+          }
           if (org) {
               receiverAddr = org.address ? `${org.address}, ${org.city || ''}` : (org.city || receiverAddr);
           }
@@ -362,18 +328,9 @@ export default function CourierScreen() {
             </body>
           </html>`;
 
-          const { uri } = await Print.printToFileAsync({ html: htmlContent });
           const newFileName = `${data.dcNo || 'Challan'}.pdf`;
           
-          const fs = FileSystem as any;
-          const newPath = `${fs.cacheDirectory}${newFileName}`;
-
-          try {
-              await FileSystem.copyAsync({ from: uri, to: newPath });
-              await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf' });
-          } catch (renameError) {
-              await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-          }
+          await sharePdfFromHtml(htmlContent, newFileName);
       } catch (error) { Alert.alert("Error", "Could not generate PDF."); }
   };
 
@@ -398,56 +355,6 @@ export default function CourierScreen() {
       return "All Time";
   };
 
-  const getFilteredData = () => {
-      let data = Array.isArray(courierList) ? [...courierList] : [];
-
-      // Date range already applied server-side (see getFetchRange() above);
-      // visibility (self vs all) is also server-enforced now — no client-side self-filter needed.
-      // type/status stay client-side so the tab badges above can see across all of them.
-
-      if (activeTab !== 'All') {
-          data = data.filter((item: any) => item.type === activeTab);
-      }
-
-      if (activeStatus !== 'All') {
-          data = data.filter((item: any) => item.status === activeStatus);
-      }
-
-      if (searchText) {
-          const lowerText = searchText.toLowerCase();
-          data = data.filter((item: any) => {
-              const fullString = `${item.docketNo} ${item.courierName} ${item.receiver} ${item.sender} ${item.materialSummary || item.material || ''} ${item.type}`.toLowerCase();
-              return fullString.includes(lowerText);
-          });
-      }
-
-      if (viewMode !== 'All') {
-          const targetYear = currentDate.getFullYear();
-          const targetMonth = currentDate.getMonth();
-          const targetDay = currentDate.getDate();
-
-          const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
-
-          data = data.filter((item: any) => {
-              if(!item.date) return false;
-              const itemDate = parseDate(item.date);
-              const itemTime = itemDate.getTime();
-
-              if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-              if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-              if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-              return true;
-          });
-      }
-
-      data.sort((a: any, b: any) => new Date(b.createdAt || b.dateIso || b.date).getTime() - new Date(a.createdAt || a.dateIso || a.date).getTime());
-      return data;
-  };
-
-  const fullList = getFilteredData(); 
-  const renderedList = fullList.slice(0, visibleCount);
 
   const openDetails = (item: any) => {
       setSelectedCourier(item);
@@ -479,6 +386,18 @@ export default function CourierScreen() {
     setEditModalVisible(true);
   };
 
+  // Inward ⇄ Outward is fixing a wrong entry: the parcel went the other way, so
+  // From and To swap too, and "Received" (inward) ⇄ "Delivered" (outward).
+  const changeEditType = (ty: string) => {
+      if (ty === editData.type) return;
+      const status = editData.status === 'Received' && ty === 'Outward' ? 'Delivered'
+          : editData.status === 'Delivered' && ty === 'Inward' ? 'Received'
+          : editData.status;
+      setEditData({ ...editData, type: ty, sender: editData.receiver, receiver: editData.sender, status });
+      if (Platform.OS === 'android') ToastAndroid.show('From and To swapped — please check them.', ToastAndroid.SHORT);
+  };
+  const swapEditParties = () => setEditData({ ...editData, sender: editData.receiver, receiver: editData.sender });
+
   // 🔥 5. SAAS UPDATE LOGIC (EDIT) — Phase 8: PATCHes Postgres via updateCourier()
   const handleSaveEdit = async () => {
     if (!editData.id) return;
@@ -507,7 +426,8 @@ export default function CourierScreen() {
         });
 
         if (res.success) {
-            setCourierList(prev => prev.map(item => item.id === editData.id ? res.record : item));
+            setCourierList(prev => prev.map(item => item.id === editData.id ? mergeRecord(item, res.record) : item));
+            refreshCouriers(); // badges / tabs may change
             Alert.alert("Success", "Courier details updated successfully!");
             setEditModalVisible(false);
         } else {
@@ -531,6 +451,7 @@ export default function CourierScreen() {
             const res = await deleteCourier(selectedCourier.id);
             if (res.success) {
                 setCourierList(prev => prev.filter(item => item.id !== selectedCourier.id));
+                refreshCouriers();
                 setModalVisible(false);
                 Alert.alert("Deleted", "Success.");
             } else {
@@ -554,17 +475,8 @@ export default function CourierScreen() {
                   const res = await updateCourierStatus(selectedCourier.id, newStatus as any, note);
                   
                   if (res.success) {
-                      if (addNotification) {
-                          const targetUser = selectedCourier.type === 'Inward' ? selectedCourier.receiver : selectedCourier.sender;
-                          await addNotification({
-                              title: `Courier ${newStatus}`, 
-                              message: `Docket: ${selectedCourier.docketNo} marked as ${newStatus}.`, 
-                              type: 'info', 
-                              to: targetUser, 
-                              route: '/courier'
-                          });
-                      }
-                      setCourierList(prev => prev.map(item => item.id === selectedCourier.id ? res.record : item));
+                      setCourierList(prev => prev.map(item => item.id === selectedCourier.id ? mergeRecord(item, res.record) : item));
+                      refreshCouriers(); // Pending badge + status chip
                       setModalVisible(false);
                       Alert.alert("Success", "Status Updated!");
                   } else {
@@ -584,6 +496,33 @@ export default function CourierScreen() {
           default: return { bg: '#f5f5f5', text: 'gray' };
       }
   };
+
+  // Laptop: the same list as a table (tap a row → same details popup).
+  const isDesktop = useIsDesktop();
+  const courierColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Date', width: 96, render: (c) => c.date || '-' },
+      { key: 'type', label: 'Type', width: 90, render: (c) => c.type === 'Inward'
+          ? <Pill text="INWARD" color="#2e7d32" bg="#e8f5e9" />
+          : <Pill text={(c.type || '-').toUpperCase()} color="#c62828" bg="#ffebee" /> },
+      { key: 'courier', label: 'Courier / Docket', width: 170, render: (c) => (
+          <TouchableOpacity onPress={() => copyDocket(c.docketNo)} hitSlop={8}>
+              <TwoLine main={c.courierName || '-'} sub={c.docketNo ? `#${c.docketNo}` : undefined} />
+          </TouchableOpacity>
+      ) },
+      { key: 'track', label: '', width: 70, align: 'center' as const, render: (c) => c.docketNo ? (
+          <TouchableOpacity style={styles.trackBtn} onPress={() => trackCourier(c.courierName, c.docketNo)}>
+              <Ionicons name="locate" size={13} color="white" /><Text style={styles.trackBtnText}>Track</Text>
+          </TouchableOpacity>
+      ) : null },
+      { key: 'from', label: 'From', flex: 2, render: (c) => c.sender || '-' },
+      { key: 'to', label: 'To', flex: 2, render: (c) => <TwoLine main={c.receiver || '-'} sub={c.toCity || c.orgCity || undefined} /> },
+      { key: 'material', label: 'Material', flex: 2, render: (c) => <TwoLine main={c.material || c.materialSummary || 'No Details'} sub={c.dcNo ? `DC ${c.dcNo}` : undefined} /> },
+      { key: 'status', label: 'Status', width: 100, render: (c) => { const st = getStatusColor(c.status); return <Pill text={c.status || '-'} color={st.text} bg={st.bg} />; } },
+      ...(canManage ? [{ key: 'by', label: 'By', width: 120, render: (c: any) => c.senderName || 'Unknown' }] : []),
+      ...(isStrictAdmin ? [{ key: 'act', label: '', width: 44, align: 'center' as const, render: (c: any) => (
+          <TouchableOpacity onPress={() => openEditModal(c)}><Ionicons name="create" size={18} color="#d32f2f" /></TouchableOpacity>
+      ) }] : []),
+  ];
 
   const renderItem = ({item}: any) => {
     const statusStyle = getStatusColor(item.status);
@@ -611,8 +550,18 @@ export default function CourierScreen() {
             <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:12}}>
                 <View>
                     <Text style={styles.courierName}>{item.courierName}</Text>
-                    <Text style={styles.docketNo}>#{item.docketNo}</Text>
+                    {/* Tap the tracking number to copy it (paste it on the courier's website). */}
+                    <TouchableOpacity onPress={() => copyDocket(item.docketNo)} hitSlop={8} style={{flexDirection:'row', alignItems:'center'}}>
+                        <Text style={styles.docketNo}>#{item.docketNo}</Text>
+                        <Ionicons name="copy-outline" size={14} color="#3b5998" style={{marginLeft: 6}} />
+                    </TouchableOpacity>
                 </View>
+                {!!item.docketNo && (
+                    <TouchableOpacity style={styles.trackBtn} onPress={() => trackCourier(item.courierName, item.docketNo)} hitSlop={6}>
+                        <Ionicons name="locate" size={14} color="white" />
+                        <Text style={styles.trackBtnText}>Track</Text>
+                    </TouchableOpacity>
+                )}
                 <View style={[styles.typeBadge, isInward ? styles.inBadge : styles.outBadge]}>
                     <Text style={[styles.typeText, isInward ? {color:'#2e7d32'} : {color:'#c62828'}]}>{item.type?.toUpperCase()}</Text>
                 </View>
@@ -661,7 +610,7 @@ export default function CourierScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={styles.headerTop}>
              <View style={{flexDirection:'row', alignItems:'center'}}>
                  <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
@@ -685,20 +634,12 @@ export default function CourierScreen() {
       </View>
 
       <View style={{backgroundColor:'white', paddingBottom:5, marginBottom:0}}>
-          <View style={styles.tabContainer}>
-              {['Day', 'Month', 'FY', 'All'].map((m) => (
-                  <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
-                      <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
-                  </TouchableOpacity>
-              ))}
-          </View>
-          {viewMode !== 'All' && (
-              <View style={styles.dateNav}>
-                  <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-                  <Text style={styles.monthText}>{getHeaderDate()}</Text>
-                  <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-              </View>
-          )}
+          <PeriodTabs value={viewMode} onChange={setViewMode} />
+          <StaffPeriodRow
+              periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+              onPrev={() => changeDate(-1)}
+              onNext={() => changeDate(1)}
+          />
           <View style={styles.searchBar}>
               {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
               <TextInput style={styles.input} placeholder="Search Docket, Name..." value={searchText} onChangeText={setSearchText} />
@@ -711,23 +652,28 @@ export default function CourierScreen() {
                   </TouchableOpacity>
               ))}
           </ScrollView>
-          <Text style={{textAlign:'right', fontSize:11, color:'gray', paddingRight:15, marginTop:2}}>Total: {fullList.length}</Text>
+          <TotalBar label="Total" count={courierTotal} />
       </View>
 
       <FlatList 
-        data={renderedList} 
+        data={courierList} 
         keyExtractor={item => item.id} 
         contentContainerStyle={styles.contentContainer} 
         refreshControl={
             <RefreshControl refreshing={courierRefreshing} onRefresh={refreshCouriers} colors={['#3b5998']} tintColor="#3b5998" />
         }
-        ListEmptyComponent={<Text style={{textAlign:'center', marginTop:50, color:'gray'}}>{courierLoading ? 'Loading data...' : 'No Couriers Found'}</Text>} 
-        renderItem={renderItem} 
+        ListEmptyComponent={<Text style={{textAlign:'center', marginTop:50, color:'gray'}}>{courierLoading ? 'Loading data...' : courierError ? 'Could not load couriers — pull down to retry.' : 'No Couriers Found'}</Text>} 
+        renderItem={isDesktop
+            ? ({ item, index }) => <TableRow columns={courierColumns} item={item} index={index} onPress={() => openDetails(item)} />
+            : renderItem}
+        ListHeaderComponent={isDesktop && courierList.length > 0 ? <TableHeader columns={courierColumns} /> : null}
+        stickyHeaderIndices={isDesktop && courierList.length > 0 ? [0] : undefined}
         ListFooterComponent={
             <View style={{ paddingBottom: 100 }}>
-                {visibleCount < fullList.length ? (
+                {courierHasMore ? (
                     <TouchableOpacity 
-                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                        onPress={loadMoreCouriers}
+                        disabled={courierLoadingMore}
                         style={{
                             padding: 12, 
                             backgroundColor: '#fff', 
@@ -738,12 +684,12 @@ export default function CourierScreen() {
                             borderColor: '#ddd'
                         }}
                     >
-                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                            👇 Load More Records ({fullList.length - visibleCount} remaining)
-                        </Text>
+                        {courierLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({courierTotal - courierList.length} remaining)</Text>
+                        )}
                     </TouchableOpacity>
                 ) : (
-                    fullList.length > 0 ? (
+                    courierList.length > 0 ? (
                         <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
                             --- End of List ---
                         </Text>
@@ -780,7 +726,7 @@ export default function CourierScreen() {
                               <TouchableOpacity 
                                   key={ty} 
                                   style={[styles.statusChip, editData.type === ty && {backgroundColor: '#3b5998', borderColor: '#3b5998'}]}
-                                  onPress={() => setEditData({...editData, type: ty})}
+                                  onPress={() => changeEditType(ty)}
                               >
                                   <Text style={{color: editData.type === ty ? 'white' : '#555', fontSize: 12}}>{ty}</Text>
                               </TouchableOpacity>
@@ -789,6 +735,11 @@ export default function CourierScreen() {
 
                       <Text style={styles.inputLabel}>From (Sender)</Text>
                       <TextInput style={styles.editInput} value={editData.sender} onChangeText={t => setEditData({...editData, sender: t})} />
+
+                      <TouchableOpacity style={styles.swapBtn} onPress={swapEditParties}>
+                          <Ionicons name="swap-vertical" size={16} color="#3b5998" />
+                          <Text style={styles.swapBtnText}>Swap From / To</Text>
+                      </TouchableOpacity>
 
                       <Text style={styles.inputLabel}>To (Receiver)</Text>
                       <TextInput style={styles.editInput} value={editData.receiver} onChangeText={t => setEditData({...editData, receiver: t})} />
@@ -834,8 +785,16 @@ export default function CourierScreen() {
                               <Text style={styles.modalTitle}>Courier Details</Text>
                               <TouchableOpacity onPress={() => setModalVisible(false)}><Ionicons name="close-circle" size={28} color="#d32f2f" /></TouchableOpacity>
                           </View>
-                          <DetailRow label="Docket No" value={selectedCourier.docketNo} icon="barcode" />
+                          <TouchableOpacity onPress={() => copyDocket(selectedCourier.docketNo)}>
+                              <DetailRow label="Docket No (tap to copy)" value={selectedCourier.docketNo} icon="barcode" />
+                          </TouchableOpacity>
                           <DetailRow label="Service" value={selectedCourier.courierName} icon="cube" />
+                          {!!selectedCourier.docketNo && (
+                              <TouchableOpacity style={[styles.trackBtn, styles.trackBtnWide]} onPress={() => trackCourier(selectedCourier.courierName, selectedCourier.docketNo)}>
+                                  <Ionicons name="locate" size={18} color="white" />
+                                  <Text style={[styles.trackBtnText, { fontSize: 15 }]}>Track on {selectedCourier.courierName || 'courier'} website</Text>
+                              </TouchableOpacity>
+                          )}
                           <DetailRow label="Type" value={selectedCourier.type} icon="swap-vertical" />
                           <DetailRow label="Date" value={selectedCourier.date} icon="calendar" />
                           
@@ -937,7 +896,7 @@ const DetailRow = ({label, value, icon}: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { backgroundColor: 'white',paddingHorizontal: 15, paddingTop: 50,paddingBottom: 0, elevation: 2 },
+  header: { backgroundColor: 'white',paddingHorizontal: 15,paddingBottom: 0, elevation: 2 },
   headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom:10 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
   addBtn: { flexDirection:'row', alignItems:'center', borderWidth:1, borderColor:'#3b5998', borderRadius:5, paddingHorizontal:10, paddingVertical:5 },
@@ -948,22 +907,7 @@ const styles = StyleSheet.create({
   activeMainTabText: { color: '#3b5998', fontWeight: 'bold' },
   badge: { backgroundColor: '#d32f2f', borderRadius: 10, paddingHorizontal: 6, marginLeft: 5, paddingVertical:1 },
   badgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
-  tabContainer: { 
-      flexDirection: 'row', 
-      backgroundColor: '#e0e0e0', 
-      marginHorizontal: 15, 
-      marginTop: 10,      
-      marginBottom: 5,      
-      borderRadius: 8, 
-      padding: 2            
-  },
-  tab: { flex: 1, paddingVertical: 4, alignItems: 'center', borderRadius: 6 },
-  activeTab: { backgroundColor: 'white', elevation: 2 },
-  tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-  activeTabText: { color: '#3b5998', fontWeight: 'bold' },
-  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 6, marginHorizontal: 15, borderRadius: 8, marginBottom: 5, borderWidth:1, borderColor:'#eee' },
-  monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
-  searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', paddingHorizontal: 10, borderRadius: 8, alignItems: 'center', height: 36, marginHorizontal: 15, marginBottom: 5 },
+  searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', paddingHorizontal: 10, borderRadius: 8, alignItems: 'center', height: 36, marginHorizontal: 12, marginTop: 6 },
   input: { flex:1, marginLeft:5, fontSize:15, color:'black' },
   filterChip: { paddingHorizontal:15, paddingVertical:6, backgroundColor:'#eee', borderRadius:20, marginRight:10 },
   activeChip: { backgroundColor:'#3b5998' },
@@ -975,6 +919,11 @@ const styles = StyleSheet.create({
   dateText: { fontSize: 12, color: 'gray' },
   statusBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
   docketNo: { fontWeight: 'bold', fontSize: 14, color:'#3b5998' },
+  swapBtn: { flexDirection: 'row', alignItems: 'center', alignSelf: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14, backgroundColor: '#eef2ff', marginBottom: 8 },
+  swapBtnText: { color: '#3b5998', fontWeight: 'bold', fontSize: 12 },
+  trackBtn: { flexDirection: 'row', alignItems: 'center', alignSelf: 'center', gap: 4, backgroundColor: '#e67e22', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14 },
+  trackBtnWide: { alignSelf: 'stretch', justifyContent: 'center', paddingVertical: 11, borderRadius: 10, marginVertical: 8 },
+  trackBtnText: { color: 'white', fontWeight: 'bold', fontSize: 12 },
   courierName: { fontSize: 16, fontWeight: 'bold', color: '#333' },
   typeBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
   inBadge: { backgroundColor: '#e8f5e9' },

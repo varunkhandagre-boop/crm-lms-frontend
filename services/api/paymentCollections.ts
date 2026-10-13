@@ -21,13 +21,14 @@ export interface ApiPaymentCollection {
   notes: string | null;
   status: string;
   chequeStatus: string | null;
+  chequeImageUrl?: string | null;
   clearedDate: string | null;
   bouncedDate: string | null;
   createdById: string;
   createdAt: string;
 }
 
-function toLegacyPayment(p: ApiPaymentCollection): any {
+export function toLegacyPayment(p: ApiPaymentCollection): any {
   const dateOnly = p.date ? p.date.split('T')[0] : undefined;
   return {
     id: p.id,
@@ -51,6 +52,7 @@ function toLegacyPayment(p: ApiPaymentCollection): any {
     note: p.notes || '',
     status: p.status,
     chequeStatus: p.chequeStatus || 'Pending',
+    chequeImageUrl: p.chequeImageUrl || null,
     clearedDate: p.clearedDate,
     bouncedDate: p.bouncedDate,
     addedBy: undefined,
@@ -125,4 +127,44 @@ export async function markChequeBounced(id: string): Promise<any> {
 
 export async function deletePaymentCollection(id: string): Promise<void> {
   await apiClient.delete(`/payment-collections/${id}`);
+}
+
+// Cheque photo as a base64 data URI; replaces any earlier one.
+export async function uploadChequePhoto(id: string, dataUri: string): Promise<any> {
+  const res = await apiClient.put<{ data: ApiPaymentCollection }>(`/payment-collections/${id}/cheque-photo`, { dataUri });
+  return toLegacyPayment(res.data);
+}
+
+// Also deletes the file from storage.
+export async function deleteChequePhoto(id: string): Promise<any> {
+  const res = await apiClient.delete<{ data: ApiPaymentCollection }>(`/payment-collections/${id}/cheque-photo`);
+  return toLegacyPayment(res.data);
+}
+
+export interface PaymentPageFilters {
+  createdById?: string;
+  linkedOrderId?: string; // receipts against one order
+  search?: string;
+  fromDate?: string; // YYYY-MM-DD
+  toDate?: string;
+}
+
+/**
+ * One server page for the Collections screen — newest receipt first, field users
+ * limited to their own receipts by the server, plus the total amount for the filter.
+ */
+export async function listPaymentCollectionsPage(
+  params: PaymentPageFilters & { page: number; limit: number },
+): Promise<{ items: any[]; total: number; totalPages: number; totalAmount: number }> {
+  const res = await apiClient.get<{
+    data: ApiPaymentCollection[];
+    meta: { total: number; totalPages: number };
+    totals?: { count: number; amount: number };
+  }>(`/payment-collections${toQueryString({ ...params, roleScope: 'true', withTotals: params.page === 1 ? 'true' : undefined })}`);
+  return {
+    items: res.data.map(toLegacyPayment),
+    total: res.meta.total,
+    totalPages: res.meta.totalPages,
+    totalAmount: res.totals?.amount ?? 0,
+  };
 }

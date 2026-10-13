@@ -1,5 +1,7 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -27,11 +29,13 @@ import { fetchTeamMembers, LegacyTeamMember } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddTaskScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
-  const { currentUser, addNotification } = useData(); 
+  const { currentUser } = useData(); 
 
   // userList/loadingUsers now come from useCachedList below (cache-first, shared 'team_members' key)
 
@@ -134,15 +138,6 @@ export default function AddTaskScreen() {
           });
 
           if (res.success) {
-              if (addNotification) {
-                  await addNotification({
-                      title: "New Task Assigned 📋",
-                      message: `${currentUser?.name} assigned you a task: ${taskTitle}.`,
-                      to: assignedToId,
-                      route: "/tasks",
-                      type: "warning"
-                  });
-              }
 
               Alert.alert("Success", "Task Assigned & User Notified! 🚀");
               router.back();
@@ -159,9 +154,9 @@ export default function AddTaskScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#333" />
+            <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>New Task</Text>
         <View style={{width:24}} /> 
@@ -211,7 +206,7 @@ export default function AddTaskScreen() {
                             value={dueDate} 
                             mode="date" 
                             minimumDate={new Date()}
-                            onChange={(e, d) => { setShowDatePicker(false); if(d) setDueDate(d); }} 
+                            {...pickerHandlers((e, d) => { setShowDatePicker(false); if(d) setDueDate(d); })} 
                         />
                     )}
                 </View>
@@ -296,9 +291,9 @@ export default function AddTaskScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 4 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 4 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   contentContainer: { padding: 20 },
   
@@ -318,4 +313,4 @@ const styles = StyleSheet.create({
   modalItem: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#eee' },
   modalText: { fontSize: 16, color: '#333' },
   closeBtn: { marginTop: 15, alignItems:'center', padding: 10 }
-});
+}), FORM_ACCENT.task);

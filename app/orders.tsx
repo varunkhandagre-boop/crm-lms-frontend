@@ -3,11 +3,13 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import React, { useEffect, useState } from 'react';
+import { sharePdfFromHtml } from '../utils/sharePdf';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
     FlatList,
+    Image,
     KeyboardAvoidingView,
     Linking,
     Modal,
@@ -21,10 +23,11 @@ import {
     View
 } from 'react-native';
 import { urlToBase64Image } from '../utils/pdfImageHelper';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
+import { compressPhoto, isPdfUrl, isUploadedFile, pdfToDataUri } from '../utils/attachments';
 
 // 🔥 SAAS IMPORTS (payments/users still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
-import { listPaymentCollections } from '../services/api/paymentCollections';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
@@ -36,19 +39,41 @@ import {
     deleteOrder as apiDeleteOrder,
     updateOrder as apiUpdateOrder,
     updateOrderStatus as apiUpdateOrderStatus,
-    listOrders,
+    getOrderCounts,
+    listOrdersPage,
+    OrderCounts,
+    uploadOrderPoFile,
+    deleteOrderPoFile,
 } from '../services/api/orders';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { PeriodTabs, StaffPeriodRow, StatusChip, TotalBar } from '../components/compact';
+import { formatInr } from '../constants/leadStatus';
+
+const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/** PO-date range (local calendar days) for the Day / Month / FY tabs; "All" = no range. */
+function periodRange(mode: 'Day' | 'Month' | 'FY' | 'All', d: Date): { fromDate?: string; toDate?: string } {
+    if (mode === 'Day') return { fromDate: ymd(d), toDate: ymd(d) };
+    if (mode === 'Month') {
+        return { fromDate: ymd(new Date(d.getFullYear(), d.getMonth(), 1)), toDate: ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0)) };
+    }
+    if (mode === 'FY') {
+        const start = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+        return { fromDate: `${start}-04-01`, toDate: `${start + 1}-03-31` };
+    }
+    return {};
+}
 
 export default function OrderListScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
 
-  const { currentUser, addNotification, companyProfile } = useData();
+  const { currentUser, companyProfile } = useData();
 
-  // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); orders/payments/users no longer go through this
-  const { isDbLoading } = useSaaSDB();
 
-  // orderList now comes from useCachedList below (cache-first)
-  const [paymentList, setPaymentList] = useState<any[]>([]);
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
 
   const [searchText, setSearchText] = useState('');
@@ -60,7 +85,6 @@ export default function OrderListScreen() {
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  const [visibleCount, setVisibleCount] = useState(20);
 
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
@@ -80,25 +104,63 @@ export default function OrderListScreen() {
   const isAdmin = ['admin', 'manager', 'account', 'accountant', 'hr', 'superadmin'].includes(userRole);
   const isStrictAdmin = ['admin', 'manager', 'accountant', 'account', 'superadmin'].includes(userRole); 
 
-  useEffect(() => {
-      if (viewMode === 'Day') setVisibleCount(500); 
-      else setVisibleCount(20); 
-  }, [viewMode, currentDate, searchText, statusFilter, selectedEmployee]);
 
-  // 🔥 ORDERS — cache-first (instant from AsyncStorage, then background
-  // refresh from the API). See hooks/useCachedList.ts.
-  const ordersCacheKey = buildCacheKey('orders', currentUser?.companyId);
+  // 🔥 ORDERS — 20 per page from the server; status, staff, search and the
+  // Day / Month / FY range are all filtered there (was: every order downloaded).
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+      const t = setTimeout(() => setDebouncedSearch(searchText.trim()), 400);
+      return () => clearTimeout(t);
+  }, [searchText]);
+
+  const orderFilters = useMemo(() => {
+      const { fromDate, toDate } = periodRange(viewMode, currentDate);
+      return {
+          status: statusFilter === 'All' ? undefined : statusFilter,
+          assignedToId: isStrictAdmin && selectedEmployee !== 'All' ? selectedEmployee : undefined,
+          search: debouncedSearch || undefined,
+          fromDate,
+          toDate,
+      };
+  }, [viewMode, currentDate, statusFilter, isStrictAdmin, selectedEmployee, debouncedSearch]);
+
+  // Page 1 of the default view (this FY, all staff / statuses) opens instantly from cache.
+  const isDefaultView = viewMode === 'FY' && statusFilter === 'All' && selectedEmployee === 'All' && !debouncedSearch
+      && periodRange('FY', currentDate).fromDate === periodRange('FY', new Date()).fromDate;
   const {
-      data: orderList,
-      setData: setOrderList,
+      items: orderList,
+      setItems: setOrderList,
+      total: orderTotal,
       loading: ordersLoading,
+      loadingMore: ordersLoadingMore,
+      hasMore: ordersHasMore,
+      loadMore: loadMoreOrders,
       refreshing: ordersRefreshing,
-      refresh: refreshOrders,
-  } = useCachedList({
-      cacheKey: ordersCacheKey,
+      refresh: refreshOrderList,
+      error: ordersError,
+  } = useServerPagedList<typeof orderFilters, any>({
+      fetchPage: listOrdersPage,
+      filters: orderFilters,
       enabled: !!currentUser?.companyId,
-      fetcher: listOrders, // was: fetchSaaSData("orders")
+      cacheKey: isDefaultView ? buildCacheKey('orders_page1_v2', currentUser?.companyId) : null,
   });
+
+  // Status chips: count + ₹ per status for the same filters (server side).
+  const [orderCounts, setOrderCounts] = useState<OrderCounts | null>(null);
+  const countFilters = useMemo(() => {
+      const { status, ...rest } = orderFilters;
+      return rest;
+  }, [orderFilters]);
+  const reloadCounts = useCallback(() => {
+      if (!currentUser?.companyId) return;
+      getOrderCounts(countFilters).then(setOrderCounts).catch(() => {});
+  }, [countFilters, currentUser?.companyId]);
+  useEffect(() => { reloadCounts(); }, [reloadCounts]);
+
+  const refreshOrders = useCallback(async () => {
+      reloadCounts();
+      await refreshOrderList();
+  }, [reloadCounts, refreshOrderList]);
 
   // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
   // as manage_team.tsx/employee_timeline.tsx.
@@ -137,43 +199,6 @@ export default function OrderListScreen() {
       })));
   }, [orderList, teamMembersForOrders]);
 
-  // Payments — unchanged plain fetch-on-mount (payments list is currently
-  // unused downstream; left as-is, out of scope for this pass).
-  useEffect(() => {
-      const loadRest = async () => {
-          if (currentUser?.companyId) {
-              const payments = await listPaymentCollections(); // was: fetchSaaSData("payments")
-              setPaymentList(payments);
-          }
-      };
-      loadRest();
-  }, [currentUser]);
-
-  const parseDate = (dateStr: any) => {
-      if (!dateStr) return 0;
-      if (typeof dateStr === 'number') return dateStr; 
-      if (dateStr instanceof Date) return dateStr.getTime(); 
-
-      if (typeof dateStr === 'string') {
-          let cleanStr = dateStr.replace(/\./g, '/').replace(/-/g, '/');
-          const parts = cleanStr.split('/');
-          
-          if (parts.length === 3 && parts[0].length === 4) {
-              const year = parseInt(parts[0]);
-              const month = parseInt(parts[1]) - 1; 
-              const day = parseInt(parts[2]);
-              return new Date(year, month, day).getTime();
-          }
-          if (parts.length === 3 && parts[2].length === 4) {
-              const day = parseInt(parts[0]);
-              const month = parseInt(parts[1]) - 1;
-              const year = parseInt(parts[2]);
-              return new Date(year, month, day).getTime();
-          }
-      }
-      const d = new Date(dateStr);
-      return isNaN(d.getTime()) ? 0 : d.getTime();
-  };
 
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
@@ -323,16 +348,8 @@ export default function OrderListScreen() {
         </body>
         </html>`;
 
-        const { uri } = await Print.printToFileAsync({ html: htmlContent });
         const cleanName = `Order_${orderData.orderId}.pdf`;
-        const newPath = `${FileSystem.cacheDirectory}${cleanName}`;
-
-        try {
-            await FileSystem.copyAsync({ from: uri, to: newPath });
-            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Order PDF` });
-        } catch (error) {
-            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-        }
+        await sharePdfFromHtml(htmlContent, cleanName, `Share Order PDF`);
     } catch (error) {
         Alert.alert("Error", "Could not generate PDF");
     } finally {
@@ -365,72 +382,16 @@ export default function OrderListScreen() {
       } catch (e: any) { Alert.alert("Error", "Could not open file."); }
   };
 
-  const getFilteredData = () => {
-      let data = orderList ? [...orderList] : [];
-
-      if (isAdmin && selectedEmployee !== 'All') {
-          const targetName = selectedEmployeeName.toLowerCase().trim();
-          data = data.filter((item: any) => 
-              (item.senderId === selectedEmployee) || 
-              (item.userId === selectedEmployee) ||
-              (item.senderName && item.senderName.toLowerCase().trim().includes(targetName)) ||
-              (item.userName && item.userName.toLowerCase().trim().includes(targetName)) ||
-              (item.bookedBy && item.bookedBy.toLowerCase().trim().includes(targetName))
-          );
-      } 
-      else if (!isAdmin) {
-          const myId = currentUser?.id || currentUser?.uid;
-          data = data.filter((item: any) => item.senderId === myId || item.bookedBy === currentUser?.name);
-      }
-
-      if (statusFilter !== 'All') data = data.filter((item: any) => item.status === statusFilter);
-
-      if (searchText) {
-          const term = searchText.toLowerCase();
-          data = data.filter((item: any) => {
-              const fullString = `${item.hospitalName || ''} ${item.poNumber || ''} ${item.orderId || ''} ${item.productDetails || ''} ${item.amount || ''} ${item.status || ''} ${item.senderName || item.userName || ''} ${item.bookedBy || ''}`.toLowerCase();
-              return fullString.includes(term);
-          });
-      }
-
-      if (viewMode !== 'All') {
-          const targetYear = currentDate.getFullYear();
-          const targetMonth = currentDate.getMonth();
-          const targetDay = currentDate.getDate();
-
-          const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime();
-
-          data = data.filter((item: any) => {
-              const ts = parseDate(item.dateIso || item.date || item.createdAt);
-              if (ts === 0) return false;
-              const itemDate = new Date(ts);
-              
-              if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-              if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-              if (viewMode === 'FY') return ts >= fyStartDate && ts <= fyEndDate;
-              return true;
-          });
-      }
-
-      data.sort((a: any, b: any) => {
-          const aStatus = (a.status || '').toLowerCase().trim();
-          const bStatus = (b.status || '').toLowerCase().trim();
-          
-          const aIsPriority = (aStatus === 'pending' || aStatus === 'approved') ? 1 : 0;
-          const bIsPriority = (bStatus === 'pending' || bStatus === 'approved') ? 1 : 0;
-
-          if (aIsPriority !== bIsPriority) {
-              return bIsPriority - aIsPriority; 
-          }
-          return parseDate(b.dateIso || b.date) - parseDate(a.dateIso || a.date);
-      });
-      return data;
+  const chipNumbers = (s: string) => {
+      if (!orderCounts) return { count: 0, amount: 0 };
+      return s === 'All' ? orderCounts.all : (orderCounts.byStatus[s] || { count: 0, amount: 0 });
   };
-
-  const fullList = getFilteredData(); 
-  const renderedList = fullList.slice(0, visibleCount);
+  // Total line: everything the list shows (in "All" that includes Rejected, like before).
+  const totalAmount = orderCounts
+      ? (statusFilter === 'All'
+          ? Object.values(orderCounts.byStatus).reduce((sum, v) => sum + v.amount, 0)
+          : chipNumbers(statusFilter).amount)
+      : 0;
 
   // 🔥 STATUS UPDATE — via new backend API
   const handleUpdateStatus = async (newStatus: string) => {
@@ -444,17 +405,8 @@ export default function OrderListScreen() {
                   try {
                       await apiUpdateOrderStatus(selectedOrder.id, newStatus as any);
 
-                      if (addNotification && selectedOrder.senderId) {
-                          await addNotification({
-                              title: `Order ${newStatus}`, 
-                              message: `Order for ${selectedOrder.hospitalName} (PO: ${selectedOrder.poNumber}) has been ${newStatus}.`,
-                              type: newStatus === 'Approved' ? 'success' : newStatus === 'Rejected' ? 'alert' : 'info',
-                              userId: selectedOrder.senderId,
-                              to: selectedOrder.senderName, 
-                              route: '/orders'
-                          });
-                      }
                       setOrderList(prev => prev.map(item => item.id === selectedOrder.id ? { ...item, status: newStatus } : item));
+                      reloadCounts();
                       setModalVisible(false);
                   } catch (error: any) { Alert.alert("Error", error?.message || "Failed to update status."); } 
                   finally { setIsUpdating(false); }
@@ -502,6 +454,7 @@ export default function OrderListScreen() {
           if (editData.status) await apiUpdateOrderStatus(editData.id, editData.status);
 
           setOrderList(prev => prev.map(item => item.id === editData.id ? { ...item, hospitalName: editData.hospitalName, ...updates, status: editData.status } : item));
+          reloadCounts();
           Alert.alert("Success", "Order details updated successfully!");
           setEditModalVisible(false);
       } catch (error: any) {
@@ -526,6 +479,7 @@ export default function OrderListScreen() {
           const updated = await apiBillOrder(selectedOrder.id, finalAmountNum);
 
           setOrderList(prev => prev.map(item => item.id === selectedOrder.id ? { ...item, ...updated } : item));
+          reloadCounts();
           Alert.alert("Success", `Billing Done! Auto-calculated balance: ₹${updated.balance}.`);
           setBilledModalVisible(false);
           setModalVisible(false); 
@@ -552,6 +506,7 @@ export default function OrderListScreen() {
                       try {
                           await apiDeleteOrder(selectedOrder.id);
                           setOrderList(prev => prev.filter(item => item.id !== selectedOrder.id));
+                          reloadCounts();
                           setModalVisible(false);
                           Alert.alert("Deleted", "Order has been deleted successfully.");
                       } catch (error: any) {
@@ -576,10 +531,119 @@ export default function OrderListScreen() {
       ));
   };
 
+  // ── PO attachment (Order Details) — saved to the server immediately ──
+  const [poBusy, setPoBusy] = useState(false);
+
+  const applyOrderUpdate = (updated: any) => {
+      // keep fields the server doesn't send back (names filled in on the list)
+      setSelectedOrder((prev: any) => (prev ? { ...prev, ...pickPoFields(updated) } : prev));
+      setOrderList(prev => prev.map(item => item.id === updated.id ? { ...item, ...pickPoFields(updated) } : item));
+  };
+  const pickPoFields = (o: any) => ({ poFileUri: o.poFileUri, poFileName: o.poFileName, poFileType: o.poFileType });
+
+  const uploadPo = async (dataUri: string, name: string) => {
+      if (!selectedOrder) return;
+      setPoBusy(true);
+      try {
+          applyOrderUpdate(await uploadOrderPoFile(selectedOrder.id, dataUri, name));
+      } catch (e: any) {
+          Alert.alert("Upload failed", e?.message || "Could not upload the PO. Please try again.");
+      } finally {
+          setPoBusy(false);
+      }
+  };
+
+  const attachPoPhoto = async (fromCamera: boolean) => {
+      const perm = fromCamera
+          ? await ImagePicker.requestCameraPermissionsAsync()
+          : Platform.OS === 'ios' ? await ImagePicker.requestMediaLibraryPermissionsAsync() : { status: 'granted' };
+      if (perm.status !== 'granted') return Alert.alert("Permission Denied");
+      const result = fromCamera
+          ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.8 })
+          : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+      if (result.canceled) return;
+      setPoBusy(true);
+      try {
+          const photo = await compressPhoto(result.assets[0]);
+          await uploadPo(photo.dataUri, "PO photo.jpg");
+      } catch {
+          setPoBusy(false);
+          Alert.alert("Photo", "Could not prepare this photo. Please try again.");
+      }
+  };
+
+  const attachPoPdf = async () => {
+      const result = await DocumentPicker.getDocumentAsync({ type: 'application/pdf', copyToCacheDirectory: true });
+      if (result.canceled || !result.assets?.length) return;
+      setPoBusy(true);
+      try {
+          const dataUri = await pdfToDataUri(result.assets[0].uri);
+          await uploadPo(dataUri, result.assets[0].name);
+      } catch (e: any) {
+          setPoBusy(false);
+          Alert.alert("PDF", e?.message || "Could not read this PDF.");
+      }
+  };
+
+  const choosePoSource = () => {
+      Alert.alert("Purchase Order", "Choose source", [
+          { text: "Camera", onPress: () => attachPoPhoto(true) },
+          { text: "Gallery", onPress: () => attachPoPhoto(false) },
+          { text: "PDF", onPress: attachPoPdf },
+          { text: "Cancel", style: "cancel" },
+      ]);
+  };
+
+  const removePo = () => {
+      if (!selectedOrder) return;
+      Alert.alert("Delete PO file?", "The file will be removed from the order and from storage.", [
+          { text: "Cancel", style: "cancel" },
+          {
+              text: "Delete", style: "destructive", onPress: async () => {
+                  setPoBusy(true);
+                  try {
+                      applyOrderUpdate(await deleteOrderPoFile(selectedOrder.id));
+                  } catch (e: any) {
+                      Alert.alert("Error", e?.message || "Could not delete the PO file.");
+                  } finally {
+                      setPoBusy(false);
+                  }
+              }
+          },
+      ]);
+  };
+
   const openDetails = (item: any) => {
       setSelectedOrder(item);
       setModalVisible(true);
   };
+
+  // Laptop: the same list as a table (tap a row → same details popup).
+  const isDesktop = useIsDesktop();
+  const statusPill = (s: string) => {
+      const st = (s || '').trim();
+      if (st === 'Billed' || st === 'Completed') return <Pill text={st} color="#1976d2" bg="#e3f2fd" />;
+      if (st === 'Approved' || st === 'Dispatched') return <Pill text={st} color="#2e7d32" bg="#e8f5e9" />;
+      if (st === 'Rejected') return <Pill text={st} color="#c62828" bg="#ffebee" />;
+      return <Pill text={st || 'Pending'} color="#e65100" bg="#fff3e0" />;
+  };
+  const orderColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Date', width: 96, render: (o) => o.date || '-' },
+      { key: 'id', label: 'Order / PO', width: 150, render: (o) => <TwoLine main={o.orderId || '-'} sub={o.poNumber ? `PO ${o.poNumber}` : undefined} /> },
+      { key: 'party', label: 'Hospital / Client', flex: 2, render: (o) => <TwoLine main={o.hospitalName} sub={o.city} /> },
+      { key: 'product', label: 'Products', flex: 2, render: (o) => o.productDetails || '-' },
+      { key: 'amount', label: 'Amount', width: 110, align: 'right', render: (o) => <TwoLine main={inr(o.amount)} sub={Number(o.advanceAmount) > 0 ? `Adv ${inr(o.advanceAmount)}` : undefined} /> },
+      { key: 'balance', label: 'Balance', width: 100, align: 'right', render: (o) => o.balance !== undefined && o.balance !== null ? inr(o.balance) : '-' },
+      { key: 'type', label: 'Type', width: 70, render: (o) => (o.saleType || 'Credit') },
+      { key: 'status', label: 'Status', width: 100, render: (o) => statusPill(o.status) },
+      { key: 'staff', label: 'Staff', width: 130, render: (o) => <TwoLine main={o.senderName || o.userName || '-'} sub={o.bookedBy && o.bookedBy !== o.senderName ? `by ${o.bookedBy}` : undefined} /> },
+      { key: 'act', label: '', width: 44, align: 'center', render: (o) => {
+          const st = (o.status || '').trim().toLowerCase();
+          return isStrictAdmin && (st === 'pending' || st === 'approved')
+              ? <TouchableOpacity onPress={() => openEditModal(o)}><Ionicons name="create" size={18} color="#d32f2f" /></TouchableOpacity>
+              : (o.poFileUri ? <Ionicons name="attach" size={16} color="gray" /> : null);
+      } },
+  ];
 
   const renderItem = ({ item }: any) => {
       const currentStatus = (item.status || '').trim(); 
@@ -670,7 +734,7 @@ export default function OrderListScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
         <Text style={styles.headerTitle}>Order Bookings</Text>
         <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_order' as any)}>
@@ -678,165 +742,77 @@ export default function OrderListScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={{backgroundColor:'white', paddingBottom:10, marginBottom:5}}>
-          <View style={styles.tabContainer}>
-              {['Day', 'Month', 'FY', 'All'].map((m) => (
-                  <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
-                      <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
-                  </TouchableOpacity>
-              ))}
-          </View>
+      <View style={{backgroundColor:'white', paddingBottom:4, marginBottom:4}}>
+          <PeriodTabs value={viewMode} onChange={setViewMode} />
 
-          {isStrictAdmin && (
-            <View style={{paddingHorizontal: 15, marginBottom: 10}}>
-               <TouchableOpacity style={styles.employeeFilterBtn} onPress={() => setShowEmployeePicker(true)}>
-                   <Ionicons name="people" size={18} color="#2e7d32" />
-                   <Text style={{fontSize:13, marginLeft:8, color:'#2e7d32', fontWeight:'600'}}>
-                       {selectedEmployee === 'All' ? 'View All Staff' : selectedEmployeeName}
-                   </Text>
-                   <Ionicons name="chevron-down" size={16} color="#2e7d32" style={{marginLeft:'auto'}}/>
-               </TouchableOpacity>
-            </View>
-          )}
-
-          {viewMode !== 'All' && (
-              <View style={styles.dateNav}>
-                  <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-                  <Text style={styles.monthText}>{getHeaderDate()}</Text>
-                  <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-              </View>
-          )}
+          <StaffPeriodRow
+              showStaff={isStrictAdmin}
+              staffLabel={selectedEmployee === 'All' ? 'All Staff' : selectedEmployeeName}
+              onStaffPress={() => setShowEmployeePicker(true)}
+              periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+              onPrev={() => changeDate(-1)}
+              onNext={() => changeDate(1)}
+          />
 
           <View style={styles.searchBar}>
-              {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+              {<Ionicons name="search" size={20} color="gray" />}
               <TextInput style={styles.searchInput} placeholder="Search Hospital, PO, ID..." value={searchText} onChangeText={setSearchText} />
               {searchText.length > 0 && (
                   <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={18} color="gray" /></TouchableOpacity>
               )}
           </View>
 
-                    {/* Total for whatever is currently filtered — same idea as "Total Pending" /
-              "Total Collected" on the Dues/Payments screens, but respects the
-              selected status chip (All/Pending/Approved/Billed/...) and employee. */}
-          <View style={{ flexDirection:'row', justifyContent:'space-between', alignItems:'center', paddingHorizontal:15, paddingVertical:10, backgroundColor:'#f8f9fa', marginHorizontal:15, borderRadius:8, marginBottom:8, borderWidth:1, borderColor:'#e0e0e0' }}>
-              <Text style={{ fontWeight:'bold', color:'#555', fontSize:13 }}>
-                  {statusFilter === 'All' ? 'Total' : `Total (${statusFilter})`}
-                  {selectedEmployee !== 'All' ? ` — ${selectedEmployeeName}` : ''}:
-              </Text>
-              <Text style={{ fontWeight:'bold', fontSize:16, color:'#3b5998' }}>
-                  {fullList.length} • ₹{fullList.reduce((sum: number, o: any) => sum + (parseFloat(o.amount) || 0), 0).toLocaleString('en-IN')}
-              </Text>
-          </View>
+          {/* Respects the selected status chip and employee, like "Total Pending" on Dues/Payments. */}
+          <TotalBar
+              label={`${statusFilter === 'All' ? 'Total' : `Total (${statusFilter})`}${selectedEmployee !== 'All' ? ` — ${selectedEmployeeName}` : ''}`}
+              count={orderTotal}
+              amount={totalAmount}
+          />
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingLeft:15, paddingVertical:10}}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingLeft:12, paddingRight:4, paddingTop:6, paddingBottom:2}}>
     {['All', 'Pending', 'Approved', 'Dispatched', 'Billed', 'Rejected'].map(s => {
         
-        const chipData = (() => {
-            let base = orderList ? [...orderList] : [];
-
-            if (isAdmin && selectedEmployee !== 'All') {
-                const targetName = selectedEmployeeName.toLowerCase().trim();
-                base = base.filter((item: any) =>
-                    item.senderId === selectedEmployee ||
-                    item.userId === selectedEmployee ||
-                    (item.senderName && item.senderName.toLowerCase().includes(targetName)) ||
-                    (item.userName && item.userName.toLowerCase().includes(targetName))
-                );
-            } else if (!isAdmin) {
-                const myId = currentUser?.id || currentUser?.uid;
-                base = base.filter((item: any) =>
-                    item.senderId === myId || item.bookedBy === currentUser?.name
-                );
-            }
-
-            if (searchText) {
-                const term = searchText.toLowerCase();
-                base = base.filter((item: any) => {
-                    const fullString = `${item.hospitalName || ''} ${item.poNumber || ''} ${item.orderId || ''} ${item.productDetails || ''} ${item.amount || ''}`.toLowerCase();
-                    return fullString.includes(term);
-                });
-            }
-
-            if (viewMode !== 'All') {
-                const targetYear = currentDate.getFullYear();
-                const targetMonth = currentDate.getMonth();
-                const targetDay = currentDate.getDate();
-                const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-                const fyStartDate = new Date(fyStartYear, 3, 1).getTime();
-                const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime();
-
-                base = base.filter((item: any) => {
-                    const ts = parseDate(item.dateIso || item.date || item.createdAt);
-                    if (ts === 0) return false;
-                    const itemDate = new Date(ts);
-                    if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-                    if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-                    if (viewMode === 'FY') return ts >= fyStartDate && ts <= fyEndDate;
-                    return true;
-                });
-            }
-
-            const filtered = s === 'All'
-                ? base.filter((item: any) => {
-                    const status = (item.status || '').toLowerCase();
-                    return !status.includes('reject') && !status.includes('cancel');
-                })
-                : base.filter((item: any) => item.status === s);
-
-            const count = filtered.length;
-            const amount = filtered.reduce((sum: number, o: any) => sum + (parseFloat(o.amount) || 0), 0);
-            return { count, amount };
-        })();
-
-        const isActive = statusFilter === s;
+        const chipData = chipNumbers(s);
 
         return (
-            <TouchableOpacity
+            <StatusChip
                 key={s}
-                style={[
-                    styles.filterChip,
-                    isActive && styles.activeChip,
-                    { minWidth: 90, paddingVertical: 8, alignItems: 'center' }
-                ]}
+                label={s}
+                active={statusFilter === s}
                 onPress={() => setStatusFilter(s)}
-            >
-                <Text style={[styles.chipText, isActive && { color: 'white' }, { fontWeight: 'bold' }]}>
-                    {s}
-                </Text>
-                <Text style={[
-                    { fontSize: 11, marginTop: 2 },
-                    isActive ? { color: 'white' } : { color: '#3b5998' }
-                ]}>
-                    {chipData.count} • ₹{chipData.amount >= 100000
-                        ? (chipData.amount / 100000).toFixed(1) + 'L'
-                        : chipData.amount.toLocaleString('en-IN')}
-                </Text>
-            </TouchableOpacity>
+                detail={`${chipData.count} • ${formatInr(chipData.amount)}`}
+            />
         );
     })}
 </ScrollView>
       </View>
 
       <FlatList 
-          data={renderedList}
+          data={orderList}
           keyExtractor={item => item.id}
-          renderItem={renderItem}
+          renderItem={isDesktop
+              ? ({ item, index }) => <TableRow columns={orderColumns} item={item} index={index} onPress={() => openDetails(item)} />
+              : renderItem}
+          ListHeaderComponent={isDesktop && orderList.length > 0 ? <TableHeader columns={orderColumns} /> : null}
+          stickyHeaderIndices={isDesktop && orderList.length > 0 ? [0] : undefined}
           contentContainerStyle={{padding: 5, paddingBottom: 100}} 
           refreshControl={
               <RefreshControl refreshing={ordersRefreshing} onRefresh={refreshOrders} colors={['#3b5998']} tintColor="#3b5998" />
           }
           ListEmptyComponent={
               <View style={{alignItems:'center', marginTop:50}}>
-                  {ordersLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{color:'gray'}}>No Orders Found</Text>}
+                  {ordersLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{color:'gray'}}>{ordersError ? 'Could not load orders — pull down to retry.' : 'No Orders Found'}</Text>}
               </View>
           }
           ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
-                {visibleCount < fullList.length ? (
-                    <TouchableOpacity onPress={() => setVisibleCount(prev => prev + 20)} style={styles.loadMoreBtn}>
-                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({fullList.length - visibleCount} remaining)</Text>
+                {ordersHasMore ? (
+                    <TouchableOpacity onPress={loadMoreOrders} style={styles.loadMoreBtn} disabled={ordersLoadingMore}>
+                        {ordersLoadingMore
+                            ? <ActivityIndicator color="#3b5998" />
+                            : <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({orderTotal - orderList.length} remaining)</Text>}
                     </TouchableOpacity>
-                ) : (fullList.length > 0 ? <Text style={styles.endListText}>--- End of List ---</Text> : null)}
+                ) : (orderList.length > 0 ? <Text style={styles.endListText}>--- End of List ---</Text> : null)}
             </View>
         }
       />
@@ -999,13 +975,43 @@ export default function OrderListScreen() {
                               </View>
                           ) : null}
 
-                          {selectedOrder.poFileUri && (
-                              <TouchableOpacity style={styles.fileBox} onPress={() => handleOpenFile(selectedOrder.poFileUri)}>
-                                  <Ionicons name="document-attach" size={20} color="#3b5998" />
-                                  <Text style={{marginLeft:10, flex:1, color:'#3b5998', textDecorationLine:'underline'}}>
-                                      {selectedOrder.poFileName || 'Download Attachment'}
-                                  </Text>
-                                  <Ionicons name="open-outline" size={16} color="green" />
+                          <Text style={styles.sectionHeader}>📎 Purchase Order File</Text>
+                          {poBusy ? (
+                              <View style={[styles.fileBox, {justifyContent:'center'}]}>
+                                  <ActivityIndicator color="#3b5998" />
+                                  <Text style={{marginLeft:10, color:'#3b5998'}}>Please wait...</Text>
+                              </View>
+                          ) : isUploadedFile(selectedOrder.poFileUri) ? (
+                              <View>
+                                  {isPdfUrl(selectedOrder.poFileUri) ? (
+                                      <TouchableOpacity style={styles.fileBox} onPress={() => handleOpenFile(selectedOrder.poFileUri)}>
+                                          <Ionicons name="document-text" size={20} color="#e53935" />
+                                          <Text style={{marginLeft:10, flex:1, color:'#3b5998', textDecorationLine:'underline'}} numberOfLines={1}>
+                                              {selectedOrder.poFileName || 'Purchase Order.pdf'}
+                                          </Text>
+                                          <Ionicons name="open-outline" size={16} color="green" />
+                                      </TouchableOpacity>
+                                  ) : (
+                                      <TouchableOpacity onPress={() => handleOpenFile(selectedOrder.poFileUri)}>
+                                          <Image source={{ uri: selectedOrder.poFileUri }} style={{ width: '100%', height: 200, borderRadius: 8, marginTop: 5, backgroundColor: '#eee' }} resizeMode="cover" />
+                                          <Text style={{fontSize: 11, color: 'gray', marginTop: 4}}>Tap the photo to open it full size</Text>
+                                      </TouchableOpacity>
+                                  )}
+                                  <View style={{flexDirection:'row', marginTop: 8}}>
+                                      <TouchableOpacity style={[styles.fileBox, {flex:1, marginRight:5, justifyContent:'center'}]} onPress={choosePoSource}>
+                                          <Ionicons name="swap-horizontal" size={18} color="#3b5998" />
+                                          <Text style={{marginLeft:6, color:'#3b5998', fontWeight:'bold'}}>Replace</Text>
+                                      </TouchableOpacity>
+                                      <TouchableOpacity style={[styles.fileBox, {flex:1, marginLeft:5, justifyContent:'center', backgroundColor:'#ffebee', borderColor:'#ef9a9a'}]} onPress={removePo}>
+                                          <Ionicons name="trash-outline" size={18} color="#d32f2f" />
+                                          <Text style={{marginLeft:6, color:'#d32f2f', fontWeight:'bold'}}>Delete</Text>
+                                      </TouchableOpacity>
+                                  </View>
+                              </View>
+                          ) : (
+                              <TouchableOpacity style={[styles.fileBox, {justifyContent:'center'}]} onPress={choosePoSource}>
+                                  <Ionicons name="cloud-upload-outline" size={20} color="#3b5998" />
+                                  <Text style={{marginLeft:8, color:'#3b5998', fontWeight:'bold'}}>Attach PO (photo or PDF)</Text>
                               </TouchableOpacity>
                           )}
 
@@ -1104,41 +1110,26 @@ const DetailRow = ({label, value, icon, highlight}: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 10, paddingTop: 50, backgroundColor: 'white', elevation: 4, alignItems:'center' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 10, backgroundColor: 'white', elevation: 4, alignItems:'center' },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   addBtn: { backgroundColor:'#3b5998', padding:8, borderRadius:20 },
-  
-  tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', margin: 10, borderRadius: 8, padding: 2, marginBottom: 5 },
-  tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-  activeTab: { backgroundColor: 'white', elevation: 2 },
-  tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-  activeTabText: { color: '#3b5998', fontWeight: 'bold' },
 
-  employeeFilterBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#e8f5e9', paddingHorizontal:12, paddingVertical:10, borderRadius:8, borderWidth:1, borderColor:'#2e7d32', marginBottom:10 },
-
-  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 6, marginHorizontal: 15, borderRadius: 8, marginBottom: 5, borderWidth:1, borderColor:'#eee' },
-  monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
-
-  searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', marginHorizontal: 15, paddingHorizontal: 10, borderRadius: 8, height:36, alignItems:'center', marginBottom:10 },
+  searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', marginHorizontal: 12, marginTop: 6, paddingHorizontal: 10, borderRadius: 8, height:36, alignItems:'center' },
   searchInput: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
 
-  filterChip: { paddingHorizontal:15, paddingVertical:6, backgroundColor:'#eee', borderRadius:20, marginRight:10, minWidth: 90, alignItems: 'center' },
-  activeChip: { backgroundColor:'#3b5998' },
-  chipText: { fontSize:12, color:'#555' },
-  
-  card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 10, elevation: 2, borderLeftWidth:4, borderLeftColor:'#ff9800' },
+  card: { backgroundColor: 'white', borderRadius: 10, padding: 11, marginBottom: 8, elevation: 2, borderLeftWidth:4, borderLeftColor:'#ff9800' },
   cardApproved: { borderLeftColor: '#4caf50' },
   cardBilled: { borderLeftColor: '#1976d2' },
   cardRejected: { borderLeftColor: '#f44336' },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  hospitalName: { fontWeight: 'bold', fontSize: 16, color: '#333', flex:1 },
+  hospitalName: { fontWeight: 'bold', fontSize: 15, color: '#333', flex:1 },
   poNumber: { fontSize: 12, color: 'gray' },
   statusBadge: { paddingHorizontal:8, paddingVertical:3, borderRadius:4, marginLeft: 10 },
-  productText: { fontSize: 13, color: '#555', marginTop: 8, fontStyle: 'italic' },
-  row: { flexDirection:'row', justifyContent:'space-between', marginTop:10 },
-  amount: { fontWeight:'bold', fontSize:16, color:'#333' },
+  productText: { fontSize: 13, color: '#555', marginTop: 4, fontStyle: 'italic' },
+  row: { flexDirection:'row', justifyContent:'space-between', marginTop:6 },
+  amount: { fontWeight:'bold', fontSize:15, color:'#333' },
   date: { color:'gray', fontSize:12 },
-  divider: { height:1, backgroundColor:'#eee', marginVertical:10 },
+  divider: { height:1, backgroundColor:'#eee', marginVertical:7 },
   footer: { flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
   
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end', padding: 10 },

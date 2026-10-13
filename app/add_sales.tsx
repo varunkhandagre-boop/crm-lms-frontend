@@ -1,6 +1,9 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as Location from 'expo-location';
+import { getCurrentLocation as getGpsFix } from '../utils/getLocation';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -19,27 +22,28 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (organizations/products still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: sales visits now go through the new backend API, which
 // auto-creates/links a lead server-side for positive outcomes — no more
 // separate addSaaSData("leads", ...) call needed here.
 import { recordLocationLog } from '../services/api/locationLogs';
+import { useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { listProducts } from '../services/api/products';
 import { createSalesVisit } from '../services/api/salesVisits';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddSalesScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     
     // 🔥 Context se current user aur global Notification engine
-    const { currentUser, addNotification } = useData(); 
+    const { currentUser } = useData(); 
 
     // 🔥 SaaS Engine for organizations/products (still Firestore)
-    const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
     // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
     const [productList, setProductList] = useState<any[]>([]);
@@ -87,6 +91,8 @@ export default function AddSalesScreen() {
         enabled: !!currentUser?.companyId,
         fetcher: () => fetchOrganizations({ limit: 500 }),
     });
+    // Beyond the first 500: search the server while the organization picker is open.
+    useOrgServerSearch(modalVisible && currentModalType === 'Hospital', searchText, setFilteredData);
 
     // 🔥 Products — unchanged plain fetch-on-mount (out of scope for this pass).
     useEffect(() => {
@@ -119,7 +125,7 @@ export default function AddSalesScreen() {
         try {
             let { status } = await Location.requestForegroundPermissionsAsync();
             if (status !== 'granted') return null;
-            let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+            let location = await getGpsFix();
             return { lat: location.coords.latitude, lng: location.coords.longitude, timestamp: new Date().toISOString() };
         } catch (error) { return null; }
     };
@@ -246,15 +252,6 @@ if (locationData) {
             // An existing lead already got its welcome message when it was created.
             if (visit.leadId && mobile && !visit.attachedToExistingLead) triggerAutomatedMessages({ hospital, person, mobile, email });
 
-            if (addNotification) {
-                await addNotification({
-                    title: "New Cold Call 📍",
-                    message: `${currentUser?.name} visited ${hospital} (${outcome}).`,
-                    to: "Admin", 
-                    route: "/sales", 
-                    type: "info"
-                });
-            }
 
             Alert.alert(
                 "Success",
@@ -272,8 +269,8 @@ if (locationData) {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
+                <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="white" /></TouchableOpacity>
                 <Text style={styles.headerTitle}>New Cold Call</Text>
                 <View style={{width:24}} /> 
             </View>
@@ -286,7 +283,7 @@ if (locationData) {
                     <Text style={styles.label}>Hospital / Clinic *</Text>
                     <TouchableOpacity style={styles.dropdown} onPress={() => openModal('Hospital', orgList)}>
                         <Text style={{color: hospital ? '#333' : 'gray', flex:1}}>{hospital || "Search..."}</Text>
-                        {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+                        {<Ionicons name="search" size={20} color="gray" />}
                     </TouchableOpacity>
 
                     {hospital ? (
@@ -338,7 +335,7 @@ if (locationData) {
                                 <Text style={{color:'#333', fontWeight:'bold'}}>{formatDate(nextDate)}</Text>
                                 <Ionicons name="calendar" size={16} color="#3b5998" />
                             </TouchableOpacity>
-                            {showDatePicker && <DateTimePicker value={nextDate} mode="date" onChange={(e, d) => { setShowDatePicker(false); if(d) setNextDate(d); }} />}
+                            {showDatePicker && <DateTimePicker value={nextDate} mode="date" {...pickerHandlers((e, d) => { setShowDatePicker(false); if(d) setNextDate(d); })} />}
                         </View>
                     </View>
 
@@ -419,7 +416,7 @@ if (locationData) {
                                         </View>
                                     ) : (
                                         <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%'}}>
-                                            <Text style={[styles.modalText, isSelected && {color: '#1976d2', fontWeight: 'bold'}]}>
+                                            <Text style={[styles.modalText, { flex: 1, marginRight: 12 }, isSelected && {color: '#1976d2', fontWeight: 'bold'}]}>
                                                 {typeof item === 'string' ? item : (item.name)}
                                             </Text>
                                             {currentModalType === 'Product' && (
@@ -457,9 +454,9 @@ if (locationData) {
     );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
     contentContainer: { padding: 20 },
     
@@ -492,4 +489,4 @@ const styles = StyleSheet.create({
     iconBox: { width: 35, height: 35, borderRadius: 8, justifyContent:'center', alignItems:'center', backgroundColor:'#e3f2fd' },
     modalMainText: { fontWeight: 'bold', fontSize: 15, color: '#333' },
     modalSubText: { fontSize: 12, color: 'gray' }
-});
+}), FORM_ACCENT.sales);

@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { saveAndShareFile } from '../utils/saveFile';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
@@ -18,28 +19,21 @@ import * as XLSX from 'xlsx';
 
 import { useData } from './context/DataContext';
 import { fetchTeamMembers } from '../services/api/users';
+import { ActivityModule, fetchActivity } from '../services/api/activity';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 
 // 🔥 New Postgres backend adapters replacing fetchSaaSData() per module
-import { listAdvances } from '../services/api/advances';
 import { fetchAttendance } from '../services/api/attendance';
-import { fetchCouriers } from '../services/api/couriers';
-import { listDemos } from '../services/api/demos';
-import { listExpenses } from '../services/api/expenses';
-import { listInstallations } from '../services/api/installations';
-import { listLeads } from '../services/api/leads';
 import { fetchLeaves } from '../services/api/leaves';
-import { listOrders } from '../services/api/orders';
-import { listPaymentCollections } from '../services/api/paymentCollections';
-import { listPmsReports } from '../services/api/pmsReports';
 import { listProjects } from '../services/api/projects';
-import { listServiceCalls } from '../services/api/serviceCalls';
 import { fetchTasks } from '../services/api/tasks';
 import { fetchTravelNotes } from '../services/api/travelNotes';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function DownloadDetailsScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
 
     const { currentUser } = useData();
@@ -71,7 +65,10 @@ export default function DownloadDetailsScreen() {
         advances: false,
         travel: false,
         leaves: false,
-        projects: false
+        projects: false,
+        visits: false,
+        activity: false,
+        dues: false,
     });
 
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -146,11 +143,14 @@ export default function DownloadDetailsScreen() {
             let hasData = false;
             const { fromDate, toDate } = getDateRangeParams();
             const scopeUserId = selectedUser !== 'All' ? selectedUser : (isAdmin ? 'all' : undefined);
+            // Dated modules: only this range (and person) comes from the server, one module per call.
+            const act = async (m: ActivityModule) =>
+                (await fetchActivity({ fromDate, toDate, userId: selectedUser !== 'All' ? selectedUser : undefined, modules: [m] }))[m];
 
             if (modules.orders) {
                 setProgress("Fetching Orders...");
                 try {
-                    const data = filterData(await listOrders());
+                    const data = await act('orders');
                     if (addSheetIfData(wb, data, "Orders")) hasData = true;
                 } catch (e) { console.log("Orders fetch error:", e); }
             }
@@ -158,7 +158,7 @@ export default function DownloadDetailsScreen() {
             if (modules.collections) {
                 setProgress("Fetching Collections...");
                 try {
-                    const data = filterData(await listPaymentCollections());
+                    const data = await act('payments');
                     if (addSheetIfData(wb, data, "Collections")) hasData = true;
                 } catch (e) { console.log("Collections fetch error:", e); }
             }
@@ -166,7 +166,7 @@ export default function DownloadDetailsScreen() {
             if (modules.expenses) {
                 setProgress("Fetching Expenses...");
                 try {
-                    const data = filterData(await listExpenses());
+                    const data = await act('expenses');
                     if (addSheetIfData(wb, data, "Expenses")) hasData = true;
                 } catch (e) { console.log("Expenses fetch error:", e); }
             }
@@ -174,7 +174,7 @@ export default function DownloadDetailsScreen() {
             if (modules.leads) {
                 setProgress("Fetching Leads...");
                 try {
-                    const data = filterData(await listLeads());
+                    const data = await act('leads');
                     if (addSheetIfData(wb, data, "Leads")) hasData = true;
                 } catch (e) { console.log("Leads fetch error:", e); }
             }
@@ -190,7 +190,7 @@ export default function DownloadDetailsScreen() {
             if (modules.installations) {
                 setProgress("Fetching Installations...");
                 try {
-                    const data = filterData(await listInstallations());
+                    const data = await act('installations');
                     if (addSheetIfData(wb, data, "Installations")) hasData = true;
                 } catch (e) { console.log("Installations fetch error:", e); }
             }
@@ -198,7 +198,7 @@ export default function DownloadDetailsScreen() {
             if (modules.pms) {
                 setProgress("Fetching PMS...");
                 try {
-                    const data = filterData(await listPmsReports());
+                    const data = await act('pms');
                     if (addSheetIfData(wb, data, "PMS")) hasData = true;
                 } catch (e) { console.log("PMS fetch error:", e); }
             }
@@ -206,7 +206,7 @@ export default function DownloadDetailsScreen() {
             if (modules.service) {
                 setProgress("Fetching Service Calls...");
                 try {
-                    const data = filterData(await listServiceCalls());
+                    const data = await act('serviceCalls');
                     if (addSheetIfData(wb, data, "ServiceCalls")) hasData = true;
                 } catch (e) { console.log("Service fetch error:", e); }
             }
@@ -214,7 +214,7 @@ export default function DownloadDetailsScreen() {
             if (modules.demos) {
                 setProgress("Fetching Demos...");
                 try {
-                    const data = filterData(await listDemos());
+                    const data = await act('demos');
                     if (addSheetIfData(wb, data, "Demos")) hasData = true;
                 } catch (e) { console.log("Demos fetch error:", e); }
             }
@@ -222,7 +222,7 @@ export default function DownloadDetailsScreen() {
             if (modules.couriers) {
                 setProgress("Fetching Couriers...");
                 try {
-                    const data = filterData(await fetchCouriers({ fromDate, toDate, limit: 2000 }));
+                    const data = await act('couriers');
                     if (addSheetIfData(wb, data, "Couriers")) hasData = true;
                 } catch (e) { console.log("Couriers fetch error:", e); }
             }
@@ -242,7 +242,7 @@ export default function DownloadDetailsScreen() {
             if (modules.advances) {
                 setProgress("Fetching Advances...");
                 try {
-                    const data = filterData(await listAdvances());
+                    const data = await act('advances');
                     if (addSheetIfData(wb, data, "Advances")) hasData = true;
                 } catch (e) { console.log("Advances fetch error:", e); }
             }
@@ -261,6 +261,30 @@ export default function DownloadDetailsScreen() {
                     const data = await fetchLeaves({ userId: scopeUserId, fromDate, toDate, limit: 2000 });
                     if (addSheetIfData(wb, data, "Leaves")) hasData = true;
                 } catch (e) { console.log("Leaves fetch error:", e); }
+            }
+
+            if (modules.visits) {
+                setProgress("Fetching Visits...");
+                try {
+                    const data = await act('salesVisits');
+                    if (addSheetIfData(wb, data, "Visits")) hasData = true;
+                } catch (e) { console.log("Visits fetch error:", e); }
+            }
+
+            if (modules.activity) {
+                setProgress("Fetching Activity Plans...");
+                try {
+                    const data = await act('activityPlans');
+                    if (addSheetIfData(wb, data, "Activity Plans")) hasData = true;
+                } catch (e) { console.log("Activity plans fetch error:", e); }
+            }
+
+            if (modules.dues) {
+                setProgress("Fetching Pending Dues...");
+                try {
+                    const data = await act('dues');
+                    if (addSheetIfData(wb, data, "Dues")) hasData = true;
+                } catch (e) { console.log("Dues fetch error:", e); }
             }
 
             if (modules.projects) {
@@ -284,14 +308,7 @@ export default function DownloadDetailsScreen() {
             const fileName = `Report_${timeLabel}_${selectedYear}.xlsx`;
 
             const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-            const uri = FileSystem.cacheDirectory + fileName;
-
-            await FileSystem.writeAsStringAsync(uri, wbout, { encoding: FileSystem.EncodingType.Base64 });
-
-            await Sharing.shareAsync(uri, {
-                mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                dialogTitle: `Download Report: ${fileName}`
-            });
+            await saveAndShareFile({ content: wbout, base64: true, fileName, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle: `Download Report: ${fileName}` });
 
         } catch (error: any) {
             Alert.alert("Error", error.message);
@@ -318,7 +335,7 @@ export default function DownloadDetailsScreen() {
 
     return (
         <View style={{ flex: 1, backgroundColor: '#f4f6f8' }}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
                 <Text style={styles.headerTitle}>Download Reports 📊</Text>
                 <View style={{ width: 24 }} />
@@ -389,7 +406,14 @@ export default function DownloadDetailsScreen() {
                         <View style={styles.col}><ToggleRow label="Tasks" field="tasks" /></View>
                         <View style={styles.col}><ToggleRow label="Advances" field="advances" /></View>
                     </View>
-                    <View style={styles.grid}><View style={styles.col}><ToggleRow label="Projects" field="projects" /></View></View>
+                    <View style={styles.grid}>
+                        <View style={styles.col}><ToggleRow label="Projects" field="projects" /></View>
+                        <View style={styles.col}><ToggleRow label="Visits (DSR)" field="visits" /></View>
+                    </View>
+                    <View style={styles.grid}>
+                        <View style={styles.col}><ToggleRow label="Activity Plans" field="activity" /></View>
+                        <View style={styles.col}><ToggleRow label="Pending Dues" field="dues" /></View>
+                    </View>
                 </View>
 
                 <TouchableOpacity style={styles.downloadBtn} onPress={generateExcel} disabled={loading}>
@@ -455,7 +479,7 @@ export default function DownloadDetailsScreen() {
 
 const styles = StyleSheet.create({
     container: { padding: 15 },
-    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, paddingTop: 50, backgroundColor: 'white', alignItems: 'center', elevation: 2 },
+    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, backgroundColor: 'white', alignItems: 'center', elevation: 2 },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
     card: { backgroundColor: 'white', padding: 15, borderRadius: 12, marginBottom: 15, elevation: 1 },
     cardHeader: { fontSize: 14, fontWeight: 'bold', color: '#555', borderBottomWidth: 1, borderBottomColor: '#eee', paddingBottom: 5 },

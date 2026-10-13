@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -16,29 +16,33 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (organizations/users still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: PMS reports now via new backend API
-import { listPmsReports } from '../services/api/pmsReports';
+import { listPmsReportsPage, PmsPageFilters } from '../services/api/pmsReports';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { isCurrentFy, localYmd, periodRange, useDebounced } from '../utils/periodRange';
 import { buildCacheKey } from '../utils/listCache';
 
 // 🔥 PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTeamMembers } from '../services/api/users';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { PeriodTabs, StaffPeriodRow } from '../components/compact';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function PMSScheduleScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   const { currentUser, companyProfile } = useData(); 
-  const { isDbLoading } = useSaaSDB();
 
-  // pmsList now comes from useCachedList below (cache-first)
-  // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
   const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
 
   const [filter, setFilter] = useState<'All' | 'Upcoming' | 'Completed' | 'Overdue'>('All');
@@ -47,7 +51,6 @@ export default function PMSScheduleScreen() {
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
 
-  const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [generatingPdf, setGeneratingPdf] = useState(false); 
@@ -56,31 +59,37 @@ export default function PMSScheduleScreen() {
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  const [visibleCount, setVisibleCount] = useState(20);
 
   const isAdmin = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
 
-  useEffect(() => {
-      if (viewMode === 'Day') {
-          setVisibleCount(500); 
-      } else {
-          setVisibleCount(20); 
-      }
-  }, [viewMode, currentDate, searchText, filter, selectedEmployee]);
 
-  // 🔥 PMS REPORTS — cache-first (instant from AsyncStorage, then
-  // background refresh). See hooks/useCachedList.ts.
-  const pmsCacheKey = buildCacheKey('pms_reports', currentUser?.companyId);
-    const {
-      data: pmsList,
-      setData: setPmsList,
+  // 🔥 PMS REPORTS — 20 per page from the server: tab (All / Upcoming / Overdue /
+  // Completed), date range, employee and search all run there, with names.
+  // Upcoming / Overdue ignore the date tabs, as before.
+  const debouncedSearch = useDebounced(searchText.trim());
+  const pmsFilters = useMemo<PmsPageFilters>(() => ({
+      view: filter,
+      ...(filter === 'All' || filter === 'Completed' ? periodRange(viewMode, currentDate) : {}),
+      today: localYmd(new Date()),
+      createdById: isAdmin && selectedEmployee !== 'All' ? selectedEmployee : undefined,
+      search: debouncedSearch || undefined,
+  }), [filter, viewMode, currentDate, isAdmin, selectedEmployee, debouncedSearch]);
+  const isDefaultView = filter === 'All' && isCurrentFy(viewMode, currentDate) && selectedEmployee === 'All' && !debouncedSearch;
+  const {
+      items: pmsList,
+      total: pmsTotal,
       loading: pmsLoading,
-      refreshing: pmsRefreshing,
+      loadingMore: pmsLoadingMore,
+      hasMore: pmsHasMore,
+      loadMore: loadMorePms,
+      refreshing,
       refresh: refreshPms,
-  } = useCachedList({
-      cacheKey: pmsCacheKey,
+      error: pmsError,
+  } = useServerPagedList<PmsPageFilters, any>({
+      fetchPage: listPmsReportsPage,
+      filters: pmsFilters,
       enabled: !!currentUser?.companyId,
-      fetcher: listPmsReports, // was: fetchSaaSData("pms_reports")
+      cacheKey: isDefaultView ? buildCacheKey('pms_page1_v1', currentUser?.companyId) : null,
   });
 
   // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
@@ -91,19 +100,6 @@ export default function PMSScheduleScreen() {
       fetcher: fetchTeamMembers,
   });
 
-  // 🔥 senderName was never populated by the API (only senderId), so every
-  // PMS report showed a blank/undefined engineer name — same fix pattern
-  // as orders.tsx/installation.tsx.
-  useEffect(() => {
-      if (teamMembersForPms.length === 0 || pmsList.length === 0) return;
-      const nameById = new Map(teamMembersForPms.map((u: any) => [u.id, u.name || 'Unknown']));
-      const needsEnrichment = pmsList.some((p: any) => p.senderName === undefined);
-      if (!needsEnrichment) return;
-      setPmsList(pmsList.map((p: any) => ({
-          ...p,
-          senderName: nameById.get(p.senderId) || 'Unknown',
-      })));
-  }, [pmsList, teamMembersForPms]);
 
   useEffect(() => {
       if (isAdmin) {
@@ -115,40 +111,20 @@ export default function PMSScheduleScreen() {
       }
   }, [teamMembersForPms, isAdmin]);
 
-  // 🔥 senderName was never populated — the API only returns senderId (see
-  // services/api/pmsReports.ts's comment), so every PMS report showed no
-  // name. Fill it in once team members are available.
-  useEffect(() => {
-      if (teamMembersForPms.length === 0 || pmsList.length === 0) return;
-      const nameById = new Map(teamMembersForPms.map((u: any) => [u.id, u.name || 'Unknown']));
-      const needsEnrichment = pmsList.some((p: any) => p.senderName === undefined);
-      if (!needsEnrichment) return;
-      setPmsList(pmsList.map((p: any) => ({ ...p, senderName: nameById.get(p.senderId) || 'Unknown' })));
-  }, [pmsList, teamMembersForPms]);
 
-  // Organizations — cache-first, shares the SAME 'organizations' cache key
-  // as organization.tsx/messaging_center.tsx.
-  const { data: orgList, refresh: refreshOrgsForPms } = useCachedList({
-      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 500 }),
-  });
 
-  // Refresh PMS reports (background, cache already shows something instant)
-  // whenever the screen regains focus — same intent as the original
-  // useFocusEffect + loadData(), now routed through the hook's refresh().
+  // Coming back to this screen (e.g. after adding a PMS) reloads page 1.
+  // The first focus is skipped — the list hook already loads on open.
+  const refreshPmsRef = useRef(refreshPms);
+  useEffect(() => { refreshPmsRef.current = refreshPms; }, [refreshPms]);
+  const focusedOnce = useRef(false);
   useFocusEffect(
       useCallback(() => {
-          refreshPms();
-          // eslint-disable-next-line react-hooks/exhaustive-deps
-      }, [pmsCacheKey])
+          if (focusedOnce.current) refreshPmsRef.current();
+          focusedOnce.current = true;
+      }, [])
   );
 
-  const onRefresh = async () => {
-      setRefreshing(true);
-      await Promise.all([refreshPms(), refreshOrgsForPms()]);
-      setRefreshing(false);
-  };
 
   const isTaskCompleted = (status: string) => {
     const s = (status || '').toLowerCase();
@@ -220,11 +196,12 @@ export default function PMSScheduleScreen() {
         let orgCity = pmsData.city || '';
         
         if (!orgAddr || !orgCity) {
-            const org = orgList.find((o: any) => 
-                (pmsData.orgId && o.id === pmsData.orgId) || 
-                o.orgName === pmsData.hospitalName || 
-                o.name === pmsData.hospitalName
-            );
+            // Linked organization (sent with the list), else look it up by name.
+            let org: any = pmsData.orgAddress || pmsData.orgCity ? { address: pmsData.orgAddress, city: pmsData.orgCity } : null;
+            if (!org && pmsData.hospitalName) {
+                const found = await fetchOrganizations({ search: pmsData.hospitalName, limit: 5 }).catch(() => []);
+                org = found.find((o: any) => o.orgName === pmsData.hospitalName || o.name === pmsData.hospitalName) || null;
+            }
             if (org) {
                 orgAddr = orgAddr || org.address || '';
                 orgCity = orgCity || org.city || '';
@@ -393,17 +370,8 @@ export default function PMSScheduleScreen() {
           </body>
         </html>`;
 
-        const { uri } = await Print.printToFileAsync({ html: htmlContent });
         const cleanName = `PMS_${(pmsData.hospitalName || 'Client').replace(/ /g, '_')}_${Date.now()}.pdf`;
-        // @ts-ignore
-        const newPath = `${FileSystem.cacheDirectory}${cleanName}`;
-
-        try {
-            await FileSystem.copyAsync({ from: uri, to: newPath });
-            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share PMS Report` });
-        } catch (error) {
-            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-        }
+        await sharePdfFromHtml(htmlContent, cleanName, `Share PMS Report`);
     } catch (error) {
         Alert.alert("Error", "Could not generate PDF");
     } finally {
@@ -425,98 +393,45 @@ export default function PMSScheduleScreen() {
 
   const processedList = getProcessedList();
 
-  const getFilteredData = () => {
-    let data = [...processedList];
-
-        if (isAdmin && selectedEmployee !== 'All') {
-      data = data.filter((item: any) =>
-        (item.senderId === selectedEmployee) ||
-        (item.userId === selectedEmployee) ||
-        (item.engineerId === selectedEmployee) ||
-        (item.userName === selectedEmployeeName) ||
-        (item.senderName === selectedEmployeeName)
-      );
-    } else if (!isAdmin) {
-      const myId = currentUser?.uid || currentUser?.id;
-      data = data.filter((item: any) => item.userId === myId || item.engineerId === myId || item.senderId === myId);
-    }
-
-    if (searchText) {
-      const term = searchText.toLowerCase().trim();
-      data = data.filter((item: any) =>
-        `${item.hospital || ''} ${item.hospitalName || ''} ${item.city || ''} ${item.serialNo || ''} ${item.machine || ''}`.toLowerCase().includes(term)
-      );
-    }
-
-    const nowTs = new Date().setHours(0, 0, 0, 0);
-
-    if (filter === 'Completed') {
-      data = data.filter((i: any) => isTaskCompleted(i.status));
-    }
-    else if (filter === 'Overdue') {
-      data = data.filter((i: any) => {
-        const dueTs = parseDate(i.computedDueDate);
-        return dueTs < nowTs;
-      });
-    }
-    else if (filter === 'Upcoming') {
-      data = data.filter((i: any) => {
-        const dueTs = parseDate(i.computedDueDate);
-        return dueTs >= nowTs;
-      });
-    }
-
-    const shouldApplyDateFilter = viewMode !== 'All' && (filter === 'All' || filter === 'Completed');
-
-    if (shouldApplyDateFilter) {
-      const tYear = currentDate.getFullYear();
-      const tMonth = currentDate.getMonth();
-      const tDay = currentDate.getDate();
-
-      const fyStartYear = tMonth >= 3 ? tYear : tYear - 1;
-      const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-      const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
-
-      data = data.filter((item: any) => {
-        let dateField;
-        if (isTaskCompleted(item.status)) {
-          dateField = item.lastDoneDate || item.dateIso || item.date;
-        } else {
-          dateField = item.computedDueDate;
-        }
-
-        const ts = parseDate(dateField);
-        if (!ts) return false;
-
-        const d = new Date(ts);
-        const itemTime = d.getTime();
-
-        if (viewMode === 'Month') return d.getFullYear() === tYear && d.getMonth() === tMonth;
-        if (viewMode === 'Day') return d.getFullYear() === tYear && d.getMonth() === tMonth && d.getDate() === tDay;
-        if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-        return true;
-      });
-    }
-
-    data.sort((a: any, b: any) => {
-      if (filter === 'Upcoming' || filter === 'Overdue') {
-        return parseDate(a.computedDueDate) - parseDate(b.computedDueDate);
-      }
-      const dateA = isTaskCompleted(a.status) ? parseDate(a.lastDoneDate || a.dateIso || a.date) : parseDate(a.computedDueDate);
-      const dateB = isTaskCompleted(b.status) ? parseDate(b.lastDoneDate || b.dateIso || b.date) : parseDate(b.computedDueDate);
-      return dateA - dateB;
-    });
-
-    return data;
-  };
-
-  const fullList = getFilteredData(); 
-  const renderedList = fullList.slice(0, visibleCount);
+  const fullList = processedList; // already filtered and sorted by the server
 
   const openDetails = (item: any) => {
     setSelectedItem(item);
     setModalVisible(true);
   };
+
+  // Laptop: the same list as a table (tap a row → same details popup).
+  const isDesktop = useIsDesktop();
+  const pmsDateInfo = (item: any) => {
+    const isDone = isTaskCompleted(item.status);
+    const isOverdue = parseDate(item.computedDueDate) < new Date().setHours(0, 0, 0, 0);
+    const showDone = filter === 'Completed' || (filter === 'All' && isDone);
+    return { isDone, isOverdue, showDone, displayDate: showDone ? (item.lastDoneDate || item.date) : item.computedDueDate, dateLabel: filter === 'Completed' ? 'Completed' : (showDone ? 'Done' : 'Next Due') };
+  };
+  const pmsColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Due / Done', width: 110, render: (i) => { const d = pmsDateInfo(i); return <TwoLine main={d.displayDate || '-'} sub={d.dateLabel} />; } },
+      { key: 'party', label: 'Hospital / Client', flex: 2, render: (i) => <TwoLine main={i.hospital || i.hospitalName || 'Unknown'} sub={i.city} /> },
+      { key: 'machine', label: 'Machine / Model', flex: 2, render: (i) => <TwoLine main={i.machine || i.machineName || 'Machine'} sub={i.model} /> },
+      { key: 'serial', label: 'Serial No', width: 130, render: (i) => i.serialNo || '-' },
+      { key: 'last', label: 'Last Done', width: 100, render: (i) => i.lastDoneDate || '-' },
+      { key: 'contract', label: 'Contract', width: 100, render: (i) => <Pill text={i.contractType || i.type || 'Warranty'} color="#616161" bg="#eeeeee" /> },
+      { key: 'status', label: 'Status', width: 100, render: (i) => {
+          const d = pmsDateInfo(i);
+          if (d.isDone) return <Pill text="Done" color="#2e7d32" bg="#e8f5e9" />;
+          return d.isOverdue ? <Pill text="Overdue" color="#c62828" bg="#ffebee" /> : <Pill text="Upcoming" color="#1565c0" bg="#e3f2fd" />;
+      } },
+      { key: 'staff', label: 'Staff', width: 130, render: (i) => i.senderName || '-' },
+      { key: 'act', label: '', width: 80, align: 'center', render: (i) => (filter === 'Upcoming' || filter === 'Overdue' || !isTaskCompleted(i.status))
+          ? (
+            <TouchableOpacity
+                style={styles.actionBtn}
+                onPress={() => router.push({ pathname: '/add_pms', params: { id: i.id, hospital: i.hospitalName, orgId: i.orgId || '', serial: i.serialNo } } as any)}
+            >
+              <Text style={styles.btnText}>Perform</Text>
+            </TouchableOpacity>
+          )
+          : null },
+  ];
 
   const renderItem = ({ item }: { item: any }) => {
     const isDone = isTaskCompleted(item.status);
@@ -607,7 +522,7 @@ export default function PMSScheduleScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#333" />
@@ -621,39 +536,18 @@ export default function PMSScheduleScreen() {
       </View>
 
       <View style={{ backgroundColor: 'white', paddingBottom: 10, marginBottom: 5 }}>
-        <View style={styles.tabContainer}>
-          {['Day', 'Month', 'FY', 'All'].map((m) => (
-            <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
-              <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {isAdmin && (
-          <View style={{ paddingHorizontal: 15, marginBottom: 10 }}>
-            <TouchableOpacity
-              style={styles.employeeFilterBtn}
-              onPress={() => setShowEmployeePicker(true)}
-            >
-              <Ionicons name="people" size={18} color="#2e7d32" />
-              <Text style={{ fontSize: 13, marginLeft: 8, color: '#2e7d32', fontWeight: '600' }}>
-                {selectedEmployee === 'All' ? 'View All Staff' : selectedEmployeeName}
-              </Text>
-              <Ionicons name="chevron-down" size={16} color="#2e7d32" style={{ marginLeft: 'auto' }} />
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {viewMode !== 'All' && (
-          <View style={styles.dateNav}>
-            <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-            <Text style={styles.monthText}>{getHeaderDate()}</Text>
-            <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-          </View>
-        )}
+        <PeriodTabs value={viewMode} onChange={setViewMode} />
+        <StaffPeriodRow
+            showStaff={isAdmin}
+            staffLabel={selectedEmployee === 'All' ? 'All Staff' : selectedEmployeeName}
+            onStaffPress={() => setShowEmployeePicker(true)}
+            periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+            onPrev={() => changeDate(-1)}
+            onNext={() => changeDate(1)}
+        />
 
         <View style={styles.searchBar}>
-          {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+          {<Ionicons name="search" size={20} color="gray" />}
           <TextInput
             style={styles.input}
             placeholder="Search Hospital, Machine, Serial..."
@@ -674,25 +568,30 @@ export default function PMSScheduleScreen() {
             </TouchableOpacity>
           ))}
         </ScrollView>
-        <Text style={{ textAlign: 'right', fontSize: 12, color: 'gray', paddingRight: 15 }}>Total: {fullList.length}</Text>
+        <Text style={{ textAlign: 'right', fontSize: 12, color: 'gray', paddingRight: 15 }}>Total: {pmsTotal}</Text>
       </View>
 
       <FlatList
-        data={renderedList}
+        data={fullList}
         keyExtractor={(item, index) => item.id || index.toString()}
         contentContainerStyle={{ padding: 5, paddingBottom: 100 }}
-        renderItem={renderItem}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        renderItem={isDesktop
+            ? ({ item, index }) => <TableRow columns={pmsColumns} item={item} index={index} onPress={() => openDetails(item)} />
+            : renderItem}
+        ListHeaderComponent={isDesktop && fullList.length > 0 ? <TableHeader columns={pmsColumns} /> : null}
+        stickyHeaderIndices={isDesktop && fullList.length > 0 ? [0] : undefined}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshPms} />}
         ListEmptyComponent={
             <View style={{ alignItems: 'center', marginTop: 50 }}>
-                {pmsLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{ color: 'gray' }}>No Data Found</Text>}
+                {pmsLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{ color: 'gray' }}>{pmsError ? 'Could not load PMS — pull down to retry.' : 'No Data Found'}</Text>}
             </View>
         }
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
-                {visibleCount < fullList.length ? (
-                    <TouchableOpacity 
-                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                {pmsHasMore ? (
+                    <TouchableOpacity
+                        onPress={loadMorePms}
+                        disabled={pmsLoadingMore}
                         style={{
                             padding: 12, 
                             backgroundColor: '#fff', 
@@ -704,9 +603,9 @@ export default function PMSScheduleScreen() {
                             marginHorizontal: 15
                         }}
                     >
-                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                            👇 Load More Records ({fullList.length - visibleCount} remaining)
-                        </Text>
+                        {pmsLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({pmsTotal - fullList.length} remaining)</Text>
+                        )}
                     </TouchableOpacity>
                 ) : (
                     fullList.length > 0 ? (
@@ -829,26 +728,18 @@ const DetailRow = ({ label, value, highlight, color }: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 10, paddingTop: 50, backgroundColor: 'white', elevation: 4, alignItems:'center' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 10, backgroundColor: 'white', elevation: 4, alignItems:'center' },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
   addBtn: { flexDirection:'row', backgroundColor:'#3b5998', paddingVertical:6, paddingHorizontal:12, borderRadius:20, alignItems:'center' },
   filterBox: { backgroundColor:'white', padding:15, paddingBottom:10, marginBottom:5 },
-  tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', margin: 10, borderRadius: 8, padding: 2, marginBottom: 5 },
-  tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-  activeTab: { backgroundColor: 'white', elevation: 2 },
-  tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-  activeTabText: { color: '#3b5998', fontWeight: 'bold' },
   navRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 8, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#eee' },
   navText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
-  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f0f0', marginHorizontal: 15, paddingHorizontal: 10, borderRadius: 8, height: 36, marginBottom: 5 },
+  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f0f0', marginHorizontal: 12, paddingHorizontal: 10, borderRadius: 8, height: 36, marginBottom: 0, marginTop: 6 },
   input: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
   filterChip: { paddingHorizontal: 15, paddingVertical: 6, backgroundColor: '#eee', borderRadius: 20, marginRight: 10 },
   activeChip: { backgroundColor: '#3b5998' },
   chipText: { fontSize: 12, color: '#555' },
-  employeeFilterBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e8f5e9', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2e7d32' },
-  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 4, marginHorizontal: 15, borderRadius: 8, marginBottom: 5, borderWidth: 1, borderColor: '#eee' },
-  monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
-  card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 15, elevation: 2, borderLeftWidth: 4, borderLeftColor: '#2196f3' },
+  card: { backgroundColor: 'white', borderRadius: 10, padding: 11, marginBottom: 8, elevation: 2, borderLeftWidth: 4, borderLeftColor: '#2196f3' },
   cardOverdue: { borderLeftColor: '#d32f2f' },
   cardDone: { borderLeftColor: '#4caf50' },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },

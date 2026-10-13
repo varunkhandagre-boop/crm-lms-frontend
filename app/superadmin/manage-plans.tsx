@@ -23,6 +23,7 @@ import {
     saveBillingSettings,
     updatePlan,
 } from '../../services/api/superadminPlans';
+import { useHeaderTop } from '../../hooks/useHeaderTop';
 
 type PlanForm = {
     id: string; // '' for a new plan, real uuid when editing
@@ -45,6 +46,7 @@ const EMPTY_FORM: PlanForm = {
 };
 
 export default function ManagePlansScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
 
     const [loading, setLoading] = useState(true);
@@ -57,6 +59,8 @@ export default function ManagePlansScreen() {
     const [upiPayeeName, setUpiPayeeName] = useState('');
     const [automationAddonPrice, setAutomationAddonPrice] = useState('3000');
     const [savingAutomationPrice, setSavingAutomationPrice] = useState(false);
+    const [gstPercent, setGstPercent] = useState('0');
+    const [savingGst, setSavingGst] = useState(false);
 
     // Modal / form state
     const [modalVisible, setModalVisible] = useState(false);
@@ -78,7 +82,8 @@ export default function ManagePlansScreen() {
             if (billingRes) {
                 setUpiId(billingRes.upiId || '');
                 setUpiPayeeName(billingRes.upiPayeeName || '');
-                setAutomationAddonPrice(String(billingRes.automationAddonPrice ?? '3000'));
+                setAutomationAddonPrice(String(Number(billingRes.automationAddonPrice ?? 3000)));
+                setGstPercent(String(Number(billingRes.gstPercent ?? 0)));
             }
         } catch (e: any) {
             Alert.alert('Error', e.message || 'Could not load plans. Check your connection.');
@@ -94,6 +99,7 @@ export default function ManagePlansScreen() {
             upiId,
             upiPayeeName,
             automationAddonPrice: Number(automationAddonPrice) || 0,
+            gstPercent: Number(gstPercent) || 0,
             ...overrides,
         };
         return saveBillingSettings(payload);
@@ -131,6 +137,26 @@ export default function ManagePlansScreen() {
             setSavingAutomationPrice(false);
         }
     };
+
+    const saveGst = async () => {
+        const g = Number(gstPercent);
+        if (gstPercent.trim() === '' || isNaN(g) || g < 0 || g > 28) {
+            Alert.alert('Invalid', 'GST must be between 0 and 28 (use 18 for software).');
+            return;
+        }
+        setSavingGst(true);
+        try {
+            await persistBilling({ gstPercent: g });
+            Alert.alert('Saved ✅', g > 0 ? `${g}% GST will be added on top of plan prices on the website and in Plan & Renewal.` : 'GST is now off.');
+        } catch (e: any) {
+            Alert.alert('Error', e.message || 'Could not save GST.');
+        } finally {
+            setSavingGst(false);
+        }
+    };
+
+    // Active plans first (in their sort order), deactivated ones at the bottom.
+    const sortedPlans = [...plans].sort((a, b) => Number(b.active) - Number(a.active));
 
     const openAddForm = () => {
         setForm(EMPTY_FORM);
@@ -247,7 +273,7 @@ export default function ManagePlansScreen() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}>
                     <Ionicons name="arrow-back" size={24} color="white" />
                 </TouchableOpacity>
@@ -265,10 +291,16 @@ export default function ManagePlansScreen() {
                     </Text>
                 )}
 
-                {plans.map((plan) => (
-                    <View key={plan.id} style={[styles.card, !plan.active && styles.cardInactive]}>
+                {sortedPlans.map((plan) => {
+                    const mods = plan.modules || [];
+                    const tone = planTone(mods);
+                    const effective = Math.round(plan.pricePerEmployee * (1 - (plan.discountPercent || 0) / 100));
+                    const years = plan.durationMonths % 12 === 0 ? plan.durationMonths / 12 : 0;
+                    return (
+                    <View key={plan.id} style={[styles.card, { borderLeftColor: plan.active ? tone.color : '#bdbdbd' }, !plan.active && styles.cardInactive]}>
                         <View style={styles.cardTop}>
-                            <Text style={styles.planLabel}>{plan.label}</Text>
+                            <Text style={[styles.planLabel, { flex: 1 }]}>{plan.label}</Text>
+                            <Text style={[styles.statusPill, plan.active ? styles.statusOn : styles.statusOff]}>{plan.active ? 'Active' : 'Inactive'}</Text>
                             <Switch
                                 trackColor={{ false: "#767577", true: "#81b0ff" }}
                                 thumbColor={plan.active ? "#2e7d32" : "#f4f3f4"}
@@ -276,17 +308,41 @@ export default function ManagePlansScreen() {
                                 value={plan.active}
                             />
                         </View>
-                        <Text style={styles.planDetail}>Duration: {plan.durationMonths} months</Text>
-                        <Text style={styles.planDetail}>Price: ₹{plan.pricePerEmployee} / employee / year</Text>
-                        <Text style={styles.planDetail}>Discount: {plan.discountPercent}%</Text>
-                        <Text style={styles.planDetail}>
-                            Modules: {(!plan.modules || plan.modules.length === 0) ? 'None'
-                                : (plan.modules.length === 3 ? 'All (Sales, Service, HR)'
-                                : plan.modules.map(m => ({ sales: 'Sales', service: 'Service', hr: 'HR' } as any)[m] || m).join(', '))}
-                        </Text>
+
+                        <View style={[styles.priceBox, { backgroundColor: tone.bg }]}>
+                            <View style={{ flex: 1 }}>
+                                <Text style={[styles.priceBig, { color: tone.color }]}>₹{effective.toLocaleString('en-IN')}</Text>
+                                <Text style={styles.priceUnit}>per employee / year{Number(gstPercent) > 0 ? ` + ${Number(gstPercent)}% GST` : ''}</Text>
+                                {plan.discountPercent > 0 && (
+                                    <Text style={styles.priceWas}>₹{Number(plan.pricePerEmployee).toLocaleString('en-IN')} before discount</Text>
+                                )}
+                            </View>
+                            <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                                <View style={[styles.chip, { backgroundColor: tone.color }]}>
+                                    <Ionicons name="calendar" size={13} color="white" />
+                                    <Text style={styles.chipTextLight}>{years ? `${years} year${years > 1 ? 's' : ''}` : `${plan.durationMonths} months`}</Text>
+                                </View>
+                                {plan.discountPercent > 0 && (
+                                    <View style={[styles.chip, { backgroundColor: '#ef6c00' }]}>
+                                        <Ionicons name="pricetag" size={13} color="white" />
+                                        <Text style={styles.chipTextLight}>{plan.discountPercent}% off</Text>
+                                    </View>
+                                )}
+                            </View>
+                        </View>
+
+                        <View style={styles.moduleRow}>
+                            {mods.length === 0 && <Text style={styles.planDetail}>No modules</Text>}
+                            {(['hr', 'sales', 'service'] as const).filter((m) => mods.includes(m)).map((m) => (
+                                <View key={m} style={[styles.moduleChip, { backgroundColor: MODULE_STYLE[m].bg }]}>
+                                    <Ionicons name={MODULE_STYLE[m].icon as any} size={13} color={MODULE_STYLE[m].color} />
+                                    <Text style={[styles.moduleChipText, { color: MODULE_STYLE[m].color }]}>{MODULE_STYLE[m].label}</Text>
+                                </View>
+                            ))}
+                        </View>
                         <Text style={styles.planId}>id: {plan.id}</Text>
 
-                        <View style={styles.cardActions}>
+                <View style={styles.cardActions}>
                             <TouchableOpacity style={styles.editBtn} onPress={() => openEditForm(plan)}>
                                 <Ionicons name="create-outline" size={16} color="#3b5998" />
                                 <Text style={styles.editBtnText}>Edit</Text>
@@ -297,7 +353,8 @@ export default function ManagePlansScreen() {
                             </TouchableOpacity>
                         </View>
                     </View>
-                ))}
+                    );
+                })}
 
                 {/* AUTOMATION ADD-ON PRICE SECTION */}
                 <View style={styles.automationCard}>
@@ -308,8 +365,9 @@ export default function ManagePlansScreen() {
                         </Text>
                     </View>
                     <Text style={styles.helperText}>
-                        This price is shown to every client on the Subscription screen
-                        when they select the "WhatsApp/Email Automation" add-on.
+                        One price for the whole company (not per employee), charged when the client
+                        ticks "WhatsApp / Email Automation" in Plan & Renewal or on the website. It covers
+                        our setup; the client buys their own WhatsApp / email API. GST is added on top.
                     </Text>
                     <Text style={styles.label}>Price (₹)</Text>
                     <TextInput
@@ -328,6 +386,29 @@ export default function ManagePlansScreen() {
                             ? <ActivityIndicator color="white" />
                             : <Text style={styles.btnText}>Save Automation Price</Text>
                         }
+                    </TouchableOpacity>
+                </View>
+
+                {/* GST SECTION */}
+                <View style={styles.gstCard}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                        <Ionicons name="receipt" size={18} color="#ef6c00" />
+                        <Text style={[styles.sectionHeader, { marginBottom: 0, marginLeft: 6 }]}>GST on Subscriptions</Text>
+                    </View>
+                    <Text style={styles.helperText}>
+                        Plan and add-on prices are before GST. This % is added on top at checkout
+                        (website and Plan & Renewal). Software (SaaS) in India: 18%. 0 = no GST.
+                    </Text>
+                    <Text style={styles.label}>GST (%)</Text>
+                    <TextInput
+                        style={styles.inputBox}
+                        value={gstPercent}
+                        onChangeText={setGstPercent}
+                        placeholder="18"
+                        keyboardType="numeric"
+                    />
+                    <TouchableOpacity style={[styles.saveUpiBtn, { backgroundColor: '#ef6c00' }]} onPress={saveGst} disabled={savingGst}>
+                        {savingGst ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Save GST</Text>}
                     </TouchableOpacity>
                 </View>
 
@@ -387,7 +468,7 @@ export default function ManagePlansScreen() {
                                 keyboardType="numeric"
                             />
 
-                            <Text style={styles.label}>Price per Employee / Year (₹)</Text>
+                            <Text style={styles.label}>Price per Employee / Year (₹, before GST)</Text>
                             <TextInput
                                 style={styles.inputBox}
                                 value={form.pricePerEmployee}
@@ -457,14 +538,39 @@ export default function ManagePlansScreen() {
     );
 }
 
+const MODULE_STYLE: Record<'hr' | 'sales' | 'service', { label: string; icon: string; color: string; bg: string }> = {
+    hr: { label: 'HR', icon: 'people', color: '#2e7d32', bg: '#e8f5e9' },
+    sales: { label: 'Sales', icon: 'trending-up', color: '#1565c0', bg: '#e3f2fd' },
+    service: { label: 'Service', icon: 'construct', color: '#6a1b9a', bg: '#f3e5f5' },
+};
+
+// Card colour follows the richest module in the plan.
+function planTone(mods: string[]) {
+    if (mods.includes('service')) return { color: '#6a1b9a', bg: '#f6effa' };
+    if (mods.includes('sales')) return { color: '#1565c0', bg: '#eef5fd' };
+    return { color: '#2e7d32', bg: '#eef7ef' };
+}
+
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { backgroundColor: '#3b5998', padding: 20, paddingTop: 50, flexDirection: 'row', alignItems: 'center', gap: 12 },
+    header: { backgroundColor: '#3b5998', padding: 20, flexDirection: 'row', alignItems: 'center', gap: 12 },
     headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold', flex: 1 },
     addBtn: { backgroundColor: 'rgba(255,255,255,0.2)', padding: 8, borderRadius: 8 },
 
-    card: { backgroundColor: 'white', padding: 15, borderRadius: 10, marginBottom: 15, elevation: 2 },
-    cardInactive: { opacity: 0.6, borderLeftWidth: 4, borderLeftColor: '#d32f2f' },
+    card: { backgroundColor: 'white', padding: 15, borderRadius: 12, marginBottom: 15, elevation: 2, borderLeftWidth: 6 },
+    cardInactive: { opacity: 0.6 },
+    statusPill: { fontSize: 11, fontWeight: 'bold', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, overflow: 'hidden', marginRight: 4 },
+    statusOn: { backgroundColor: '#e8f5e9', color: '#2e7d32' },
+    statusOff: { backgroundColor: '#ffebee', color: '#c62828' },
+    priceBox: { flexDirection: 'row', alignItems: 'center', borderRadius: 10, padding: 12, marginTop: 10 },
+    priceBig: { fontSize: 28, fontWeight: 'bold' },
+    priceUnit: { fontSize: 12, color: '#555', marginTop: -2 },
+    priceWas: { fontSize: 12, color: '#888', textDecorationLine: 'line-through', marginTop: 3 },
+    chip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14 },
+    chipTextLight: { color: 'white', fontSize: 12, fontWeight: 'bold' },
+    moduleRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+    moduleChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14 },
+    moduleChipText: { fontSize: 12, fontWeight: 'bold' },
     cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     planLabel: { fontSize: 17, fontWeight: 'bold', color: '#333' },
     planDetail: { color: '#666', fontSize: 13, marginTop: 4 },
@@ -477,6 +583,7 @@ const styles = StyleSheet.create({
     deleteBtnText: { color: '#d32f2f', fontWeight: 'bold', fontSize: 13 },
 
     automationCard: { backgroundColor: '#fff', borderRadius: 10, padding: 15, marginTop: 10, marginBottom: 15, elevation: 2, borderWidth: 1, borderColor: '#c8e6c9' },
+    gstCard: { backgroundColor: '#fff', borderRadius: 10, padding: 15, marginTop: 10, marginBottom: 15, elevation: 2, borderWidth: 1, borderColor: '#ffe0b2' },
     helperText: { fontSize: 12, color: '#888', marginBottom: 5, lineHeight: 17 },
 
     upiCard: { backgroundColor: '#fff', borderRadius: 10, padding: 15, marginTop: 10, marginBottom: 30, elevation: 2 },

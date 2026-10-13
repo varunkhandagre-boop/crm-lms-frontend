@@ -1,5 +1,7 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -20,7 +22,9 @@ import { urlToBase64Image } from '../utils/pdfImageHelper';
 
 import { useData } from './context/DataContext';
 
+import { fetchCompanyProfile } from '../services/api/companies';
 import { createCourier } from '../services/api/couriers';
+import { mergeOrgs, useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -30,10 +34,13 @@ import { buildCacheKey } from '../utils/listCache';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddCourierScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
-  const { currentUser, companyProfile, addNotification } = useData();
+  const { currentUser, companyProfile } = useData();
 
   // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
   const [productList, setProductList] = useState<any[]>([]);
@@ -74,6 +81,9 @@ export default function AddCourierScreen() {
       enabled: !!currentUser?.companyId,
       fetcher: () => fetchOrganizations({ limit: 500 }),
   });
+  // Beyond the first 500: search the server while the organization picker is open.
+  const [orgServerHits, setOrgServerHits] = useState<any[]>([]);
+  useOrgServerSearch(showOrgModal, searchOrg, setOrgServerHits);
 
   useEffect(() => {
       const loadData = async () => {
@@ -92,34 +102,34 @@ export default function AddCourierScreen() {
       loadData();
   }, [currentUser]);
 
+  // Our side of the courier (Outward FROM / Inward TO) is always the company, for every role.
+  // Was: non-office roles got their own name + a fixed "Nagpur" on Inward.
+  // If the profile hasn't loaded yet (cold start / fresh install), fetch it here once.
+  const [ownProfile, setOwnProfile] = useState<any>(null);
+  const loadedName = companyProfile?.companyName && companyProfile.companyName !== 'Loading...' ? companyProfile : null;
   useEffect(() => {
-      const myCompName = companyProfile?.companyName;
-      const myCity = (companyProfile as any)?.fullAddress?.city || (companyProfile as any)?.address || '';
-      if (!myCompName || myCompName === 'Loading...') return;
+      if (loadedName || ownProfile || !currentUser?.companyId) return;
+      fetchCompanyProfile().then(setOwnProfile).catch(() => {});
+  }, [loadedName, ownProfile, currentUser?.companyId]);
+  const ourCompany: any = loadedName || ownProfile;
 
+  useEffect(() => {
+      const myCompName = ourCompany?.companyName;
+      if (!myCompName) return;
+      const myCity = ourCompany?.fullAddress?.city || ourCompany?.city || ourCompany?.address || '';
+
+      setSelectedOrg(null); setIsManualEntry(false);
+      setOrgId('');
       if (type === 'Outward') {
           setFromName(myCompName);
           setFromCity(myCity);
           setToName(''); setToCity('');
-          setSelectedOrg(null); setIsManualEntry(false);
-          setOrgId(''); 
       } else {
           setFromName(''); setFromCity('');
-          setSelectedOrg(null); setIsManualEntry(false);
-          setOrgId(''); 
-
-          const myRole = currentUser?.role || '';
-          const isOfficeRole = ['Admin', 'Manager', 'Account', 'Accountant', 'Store', 'Store Keeper', 'Hr', 'SuperAdmin'].includes(myRole);
-
-          if (isOfficeRole) {
-              setToName(myCompName);
-              setToCity(myCity);
-          } else {
-              setToName(currentUser?.name || 'Office'); 
-              setToCity('Nagpur');
-          }
+          setToName(myCompName);
+          setToCity(myCity);
       }
-  }, [type, currentUser, companyProfile]);
+  }, [type, ourCompany]);
 
   const formatDate = (rawDate: Date) => {
       let day = rawDate.getDate().toString().padStart(2, '0');
@@ -334,19 +344,10 @@ export default function AddCourierScreen() {
             </body>
           </html>`;
 
-          const { uri } = await Print.printToFileAsync({ html: htmlContent });
           
           const cleanName = `${data.dcNo}_${data.receiver.split(',')[0].replace(/[^a-zA-Z0-9]/g, '_')}`;
           const newFileName = `${cleanName}.pdf`;
-          // @ts-ignore
-          const newPath = `${FileSystem.cacheDirectory}${newFileName}`;
-
-          try {
-              await FileSystem.copyAsync({ from: uri, to: newPath });
-              await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Challan` });
-          } catch (renameError) {
-              await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-          }
+          await sharePdfFromHtml(htmlContent, newFileName, `Share Challan`);
 
       } catch (error) { 
           Alert.alert("Error", "Could not generate challan."); 
@@ -412,20 +413,6 @@ export default function AddCourierScreen() {
           });
           
           if (res.success) {
-              const dcNumber = res.record.dcNo;
-
-              if (addNotification) {
-                  let notifTitle = type === 'Inward' ? "New Courier Received 📦" : "Courier Dispatched 🚀";
-                  let notifMsg = type === 'Inward' ? `Courier from ${fromName}` : `Outward to ${toName}. DC: ${dcNumber}`;
-                  await addNotification({
-                      title: notifTitle, 
-                      message: notifMsg, 
-                      to: "Admin", 
-                      route: "/courier", 
-                      type: "info"
-                  });
-              }
-
               if (type === 'Outward') {
                   Alert.alert("Success ✅", "Saved! Share Delivery Challan?", [
                       { text: "No", onPress: () => router.back(), style: 'cancel' },
@@ -442,14 +429,17 @@ export default function AddCourierScreen() {
       finally { setLoading(false); }
   };
 
-  const filteredOrgs = orgList.filter((o:any) => (o.name || '').toLowerCase().includes(searchOrg.toLowerCase()) || (o.orgName || '').toLowerCase().includes(searchOrg.toLowerCase()));
+  const filteredOrgs = mergeOrgs(
+      orgList.filter((o:any) => (o.name || '').toLowerCase().includes(searchOrg.toLowerCase()) || (o.orgName || '').toLowerCase().includes(searchOrg.toLowerCase())),
+      searchOrg.trim().length >= 2 ? orgServerHits : [],
+  );
   const filteredProducts = productList.filter((p:any) => (p.name || '').toLowerCase().includes(searchProduct.toLowerCase()));
 
   return (
     <View style={styles.container}>
       
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
+        <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="white" /></TouchableOpacity>
         <Text style={styles.headerTitle}>Log New Courier</Text>
         <View style={{width:24}} /> 
       </View>
@@ -465,7 +455,7 @@ export default function AddCourierScreen() {
                         <Text style={{marginLeft:5, fontWeight:'bold', color:'#333'}}>{formatDate(date)}</Text>
                     </View>
                 </TouchableOpacity>
-                {showDatePicker && <DateTimePicker value={date} mode="date" onChange={(e, d) => { setShowDatePicker(false); if(d) setDate(d); }} />}
+                {showDatePicker && <DateTimePicker value={date} mode="date" {...pickerHandlers((e, d) => { setShowDatePicker(false); if(d) setDate(d); })} />}
 
                 <View style={styles.toggleBox}>
                     <TouchableOpacity style={[styles.toggleBtn, type==='Outward' && styles.activeOutward]} onPress={() => setType('Outward')}>
@@ -546,7 +536,7 @@ export default function AddCourierScreen() {
                     <Text style={{color:'#333', fontWeight:'bold'}}>{formatDate(courierDate)}</Text>
                     <Ionicons name="calendar" size={20} color="#3b5998" />
                 </TouchableOpacity>
-                {showCourierDatePicker && <DateTimePicker value={courierDate} mode="date" onChange={(e, d) => { setShowCourierDatePicker(false); if(d) setCourierDate(d); }} />}
+                {showCourierDatePicker && <DateTimePicker value={courierDate} mode="date" {...pickerHandlers((e, d) => { setShowCourierDatePicker(false); if(d) setCourierDate(d); })} />}
             </View>
 
             <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginTop:10}}>
@@ -614,7 +604,7 @@ export default function AddCourierScreen() {
       </KeyboardAvoidingView>
 
       <Modal visible={showOrgModal} animationType="slide">
-        <View style={styles.modalContainer}>
+        <View style={[styles.modalContainer, { paddingTop: headerTop }]}>
             <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Select {type === 'Outward' ? 'Receiver' : 'Sender'}</Text>
                 <TouchableOpacity onPress={() => setShowOrgModal(false)}><Ionicons name="close-circle" size={30} color="#d32f2f"/></TouchableOpacity>
@@ -649,7 +639,7 @@ export default function AddCourierScreen() {
       </Modal>
 
       <Modal visible={showProductModal} animationType="slide">
-        <View style={styles.modalContainer}>
+        <View style={[styles.modalContainer, { paddingTop: headerTop }]}>
             <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Select Item</Text>
                 <TouchableOpacity onPress={() => setShowProductModal(false)}><Ionicons name="close-circle" size={30} color="#d32f2f"/></TouchableOpacity>
@@ -680,9 +670,9 @@ export default function AddCourierScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8f9fa' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   content: { padding: 15, paddingBottom: 50 },
   topRow: { flexDirection:'row', justifyContent:'space-between', marginBottom: 20 },
@@ -702,7 +692,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row' },
   saveBtn: { backgroundColor: '#3b5998', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 20, elevation: 3 },
   saveText: { color: 'white', fontWeight: 'bold', fontSize: 18 },
-  modalContainer: { flex: 1, backgroundColor: 'white', padding: 20, paddingTop: 50 },
+  modalContainer: { flex: 1, backgroundColor: 'white', padding: 20 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#333' },
   searchBox: { flexDirection:'row', alignItems:'center', backgroundColor: '#f0f2f5', paddingHorizontal: 10, borderRadius: 10, marginBottom: 15, height: 50 },
@@ -743,4 +733,4 @@ const styles = StyleSheet.create({
       borderStyle: 'dashed',
       backgroundColor: '#f0f4ff'
   }
-});
+}), FORM_ACCENT.courier);

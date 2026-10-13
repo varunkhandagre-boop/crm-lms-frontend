@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -16,27 +16,24 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (organizations still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: orders (Phase 3), payment dues, payment collections now via new backend API
-import { listOrders, remindOrder } from '../services/api/orders';
-import { fetchOrganizations } from '../services/api/organizations';
-import { listPaymentCollections } from '../services/api/paymentCollections';
-import { listPaymentDues, remindPaymentDue } from '../services/api/paymentDues';
-// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
-import { useCachedList } from '../hooks/useCachedList';
+import { remindOrder } from '../services/api/orders';
+import { fetchDueItemPayments, listOutstandingPage, OutstandingFilters, remindPaymentDue } from '../services/api/paymentDues';
+import { useServerPagedList } from '../hooks/useServerPagedList';
 import { buildCacheKey } from '../utils/listCache';
+import { periodRange, useDebounced } from '../utils/periodRange';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
+import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
 
 export default function PaymentDueList() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     
     const { currentUser, companyProfile } = useData(); 
-    // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); dues/orders/payments no longer go through this
-    const { isDbLoading } = useSaaSDB();
 
-    // dueList now comes from useCachedList below (cache-first)
-    // orderList now comes from useCachedList below (cache-first, shares key with orders.tsx)
-    // paymentList/orgList now come from useCachedList below (cache-first, shared keys)
 
     const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('All');
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -44,59 +41,69 @@ export default function PaymentDueList() {
     
     const [selectedItem, setSelectedItem] = useState<any>(null);
 
-    const [visibleCount, setVisibleCount] = useState(20);
 
-    useEffect(() => {
-        if (viewMode === 'Day') setVisibleCount(500); 
-        else setVisibleCount(20); 
-    }, [viewMode, currentDate, searchTerm]);
-
-    // 🔥 PAYMENT DUES — cache-first (instant from AsyncStorage, then
-    // background refresh). See hooks/useCachedList.ts.
-    const duesCacheKey = buildCacheKey('payment_dues', currentUser?.companyId);
+    // 🔥 PENDING DUES — manual dues + unpaid billed orders, merged, filtered and
+    // paged on the server (oldest first, 20 per page). Was: every due, every order,
+    // every payment and every organization downloaded and merged on the phone.
+    const debouncedSearch = useDebounced(searchTerm.trim());
+    const dueFilters = useMemo<OutstandingFilters>(() => ({
+        ...periodRange(viewMode, currentDate),
+        search: debouncedSearch || undefined,
+    }), [viewMode, currentDate, debouncedSearch]);
+    const [totalPending, setTotalPending] = useState(0);
+    const fetchDuesPage = useCallback(async (p: OutstandingFilters & { page: number; limit: number }) => {
+        const r = await listOutstandingPage(p);
+        if (p.page === 1) setTotalPending(r.totalAmount);
+        return r;
+    }, []);
     const {
-        data: dueList,
-        setData: setDueList,
+        items: dueItems,
+        setItems: setDueItems,
+        total: dueTotal,
         loading: duesLoading,
+        loadingMore: duesLoadingMore,
+        hasMore: duesHasMore,
+        loadMore: loadMoreDues,
         refreshing: duesRefreshing,
         refresh: refreshDues,
-    } = useCachedList({
-        cacheKey: duesCacheKey,
+        error: duesError,
+    } = useServerPagedList<OutstandingFilters, any>({
+        fetchPage: fetchDuesPage,
+        filters: dueFilters,
         enabled: !!currentUser?.companyId,
-        fetcher: listPaymentDues, // was: fetchSaaSData("payment_dues")
+        // Default view is "All" (no dates) with no search.
+        cacheKey: viewMode === 'All' && !debouncedSearch ? buildCacheKey('pending_dues_page1_v2', currentUser?.companyId) : null,
     });
 
-    // 🔥 ORDERS — the visible "dues" list on this screen is actually a merge
-    // of dueList + unpaid orderList (see getData() below), so orderList also
-    // needs to be cache-first or the merged list stays visibly incomplete
-    // until orders finish a fresh network fetch, even with dues cached.
-    // Deliberately reuses the SAME cache key as app/orders.tsx ('orders',
-    // companyId) — visiting either screen warms the other's cache too.
-    const ordersCacheKey = buildCacheKey('orders', currentUser?.companyId);
-    const {
-        data: orderList,
-        setData: setOrderList,
-        loading: ordersLoading,
-        refresh: refreshOrdersForDues,
-    } = useCachedList({
-        cacheKey: ordersCacheKey,
-        enabled: !!currentUser?.companyId,
-        fetcher: listOrders, // was: fetchSaaSData("orders")
-    });
-
-    // Payment collections/organizations — cache-first, sharing the SAME
-    // cache keys as payment_collection.tsx ('payment_collections') and
-    // organization.tsx/messaging_center.tsx ('organizations').
-    const { data: paymentList } = useCachedList({
-        cacheKey: buildCacheKey('payment_collections', currentUser?.companyId),
-        enabled: !!currentUser?.companyId,
-        fetcher: listPaymentCollections, // was: fetchSaaSData("payment_collections")
-    });
-    const { data: orgList } = useCachedList({
-        cacheKey: buildCacheKey('organizations', currentUser?.companyId),
-        enabled: !!currentUser?.companyId,
-        fetcher: () => fetchOrganizations({ limit: 500 }),
-    });
+    // Payments for the entry open in the details popup (last 5), loaded when it opens.
+    const [partyHistory, setPartyHistory] = useState<any[]>([]);
+    useEffect(() => {
+        let cancelled = false;
+        if (!selectedItem) return;
+        const kind = selectedItem.collectionName === 'orders' ? 'order' : 'due';
+        fetchDueItemPayments(kind, selectedItem.id, selectedItem.billNo || selectedItem.poNumber || undefined)
+            .then((rows) => {
+                if (cancelled) return;
+                // Old orders: the advance has no payment row, so show it as a display-only line.
+                // Orders booked since release 19 already have it as a real payment.
+                const hasAdvanceRow = rows.some((r: any) => /advance received at the time of order booking/i.test(r.note || ''));
+                const advance = kind === 'order' && Number(selectedItem.advanceAmount) > 0 && !hasAdvanceRow
+                    ? [{
+                        id: `advance-${selectedItem.id}`,
+                        amount: Number(selectedItem.advanceAmount),
+                        mode: 'Advance (at Order)',
+                        date: selectedItem.date || selectedItem.dateIso,
+                        dateIso: selectedItem.dateIso || selectedItem.date,
+                        isAdvancePseudoEntry: true,
+                    }]
+                    : [];
+                const all = [...rows, ...advance].sort((a: any, b: any) =>
+                    new Date(b.dateIso || b.date || 0).getTime() - new Date(a.dateIso || a.date || 0).getTime());
+                setPartyHistory(all.slice(0, 5));
+            })
+            .catch(() => { if (!cancelled) setPartyHistory([]); });
+        return () => { cancelled = true; setPartyHistory([]); };
+    }, [selectedItem?.id, selectedItem?.collectionName]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const roleToCheck = currentUser?.role || 'employee';
     const canAddDue = ['Admin', 'Accountant', 'Account', 'Manager', 'Hr', 'SuperAdmin'].includes(roleToCheck);
@@ -150,11 +157,7 @@ export default function PaymentDueList() {
                                 ? await remindOrder(item.id)
                                 : await remindPaymentDue(item.id);
 
-                            if (collectionName === 'payment_dues') {
-                                setDueList(prev => prev.map(d => d.id === item.id ? { ...d, lastReminderDate: updated.lastReminderDate, reminderHistory: updated.reminderHistory } : d));
-                            } else {
-                                setOrderList(prev => prev.map(o => o.id === item.id ? { ...o, lastReminderDate: updated.lastReminderDate, reminderHistory: updated.reminderHistory } : o));
-                            }
+                            setDueItems(prev => prev.map(d => d.id === item.id ? { ...d, lastReminderDate: updated.lastReminderDate, reminderHistory: updated.reminderHistory } : d));
                             
                             setSelectedItem((prev: any) => prev ? ({ ...prev, lastReminderDate: updated.lastReminderDate, reminderHistory: updated.reminderHistory }) : prev);
                             
@@ -168,99 +171,6 @@ export default function PaymentDueList() {
         );
     };
 
-    // MERGING MANUAL DUES AND SYSTEM ORDERS (unchanged logic, now fed by API data)
-        const getData = () => {
-        const validDues = dueList ? dueList.filter((d:any) => {
-            const rawBal = d.balance !== undefined ? d.balance : d.amount;
-            const currentBal = parseFloat(String(rawBal).replace(/[^0-9.-]/g, '')) || 0;
-            if (currentBal <= 0) return false;
-            
-            const oStatus = (d.status || '').trim().toLowerCase();
-            const payStatus = (d.paymentStatus || '').trim().toLowerCase();
-            if (oStatus === 'collected' || oStatus === 'paid' || payStatus === 'paid') return false;
-                       
-            return true;
-        }).map((d: any) => ({ ...d, collectionName: 'payment_dues' })) : [];
-
-        // A payment_dues row's `orderId` (its displayId, e.g. "DUE-ORD-2026-27-095")
-        // sometimes carries the underlying order's own ref ("ORD-2026-27-095")
-        // after the "DUE-" prefix. When that's the case, this due and that
-        // order both represent the SAME outstanding balance — count it once
-        // (via the due), not twice (due + order). Native dues get a
-        // "DUE-<timestamp>" displayId that won't match any real order ref,
-        // so they're unaffected.
-        const referencedOrderRefs = new Set(
-            validDues
-                .map((d: any) => String(d.orderId || '').replace(/^DUE-/, ''))
-                .filter(Boolean)
-        );
-
-        const validOrders = orderList ? orderList.filter((o:any) => {
-            if (referencedOrderRefs.has(String(o.orderId || ''))) return false;
-
-            const rawBal = o.balance !== undefined ? o.balance : o.amount;
-            const currentBal = parseFloat(String(rawBal).replace(/[^0-9.-]/g, '')) || 0;
-            if (currentBal <= 0) return false;
-            
-            const oStatus = (o.status || '').trim().toLowerCase();
-            const payStatus = (o.paymentStatus || '').trim().toLowerCase();
-            const payMode = (o.paymentMode || '').trim().toLowerCase();
-
-            if (oStatus === 'collected' || payStatus === 'paid') return false;
-            
-            const isCreditStatus = ['billed', 'dispatched', 'completed'].includes(oStatus);
-            if (!isCreditStatus) return false;
-            if (payMode === 'cash') return false;
-            
-            return true;
-        }).map((o: any) => ({ ...o, collectionName: 'orders' })) : [];
-
-        let filtered = [...validDues, ...validOrders];
-
-        if (searchTerm) {
-            const lowerTerm = searchTerm.toLowerCase();
-            filtered = filtered.filter((item:any) => {
-                const fullString = `${item.orgName || item.hospitalName} ${item.amount} ${item.billNo || item.poNumber} ${item.date} ${item.dueDate || ''} ${item.orderId || ''}`.toLowerCase();
-                return fullString.includes(lowerTerm);
-            });
-        }
-
-        if (viewMode !== 'All') {
-            const targetYear = currentDate.getFullYear();
-            const targetMonth = currentDate.getMonth();
-            const targetDay = currentDate.getDate();
-
-            const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-            const fyStartDate = new Date(fyStartYear, 3, 1); 
-            const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59);
-
-            filtered = filtered.filter((item: any) => {
-                const dateVal = item.date || item.createdAt;
-                if(!dateVal) return false;
-                
-                const itemDate = parseDate(dateVal);
-                if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-                if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-                if (viewMode === 'FY') return itemDate >= fyStartDate && itemDate <= fyEndDate;
-                return true;
-            });
-        }
-        
-        return filtered.sort((a: any, b: any) => {
-            const dateA = a.date || a.createdAt;
-            const dateB = b.date || b.createdAt;
-            return parseDate(dateA).getTime() - parseDate(dateB).getTime();
-        });
-    };
-
-    const fullFilteredList = getData(); 
-    const renderedList = fullFilteredList.slice(0, visibleCount);
-    
-    const totalPending = fullFilteredList.reduce((sum: number, item: any) => {
-        const currentBal = item.balance !== undefined ? item.balance : item.amount;
-        return sum + (parseFloat(currentBal) || 0);
-    }, 0);
-
     const getOverdueDays = (dateStr: string) => {
         if(!dateStr) return 0;
         const targetDate = parseDate(dateStr);
@@ -270,63 +180,6 @@ export default function PaymentDueList() {
         const diffTime = todayDate.getTime() - targetDate.getTime();
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         return diffDays > 0 ? diffDays : 0;
-    };
-
-        const getPartyHistory = (partyItem: any) => {
-        if (!partyItem) return [];
-
-        const realPayments = paymentList ? paymentList
-            .filter((p: any) => {
-                const pOrderRef = String(p.orderRef || '').trim().toLowerCase();
-                const pLinkedOrderId = String(p.linkedOrderId || '').trim().toLowerCase();
-                const pLinkedDueId = String(p.linkedDueId || '').trim().toLowerCase();
-                const pBillRef = String(p.billRef || '').trim().toLowerCase();
-
-                const partyId = String(partyItem.id || '').trim().toLowerCase();
-                const partyOrderId = String(partyItem.orderId || '').trim().toLowerCase();
-                const partyBillNo = String(partyItem.billNo || partyItem.poNumber || '').trim().toLowerCase();
-
-                if (partyId && (pLinkedDueId === partyId || pLinkedOrderId === partyId)) return true;
-                if (partyOrderId && pOrderRef === partyOrderId) return true;
-                if (partyBillNo && (pBillRef === partyBillNo || pOrderRef === partyBillNo)) return true;
-
-                return false;
-            }) : [];
-
-                // Order advance amounts are captured at order-creation time — they
-        // never become a real PaymentCollection row, so they'd otherwise be
-        // invisible here even though they reduced the balance. Surface them
-        // as a display-only pseudo-entry (id prefixed so it's obviously not
-        // a real payment record if ever inspected/clicked).
-        // Two shapes reach here: a manual PaymentDue with an `orderId` link,
-        // OR the Order itself shown directly as a "due" (collectionName ===
-        // 'orders'), where the order's own id IS partyItem.id.
-        const pseudoEntries: any[] = [];
-        let linkedOrder: any = null;
-        if (partyItem.collectionName === 'orders') {
-            linkedOrder = partyItem;
-        } else if (partyItem.orderId && orderList) {
-            linkedOrder = orderList.find((o: any) => String(o.id).trim().toLowerCase() === String(partyItem.orderId).trim().toLowerCase());
-        }
-        if (linkedOrder && Number(linkedOrder.advanceAmount) > 0) {
-            pseudoEntries.push({
-                id: `advance-${linkedOrder.id}`,
-                amount: Number(linkedOrder.advanceAmount),
-                mode: 'Advance (at Order)',
-                date: linkedOrder.date || linkedOrder.dateIso,
-                dateIso: linkedOrder.dateIso || linkedOrder.date,
-                billRef: partyItem.billNo || partyItem.poNumber,
-                isAdvancePseudoEntry: true,
-            });
-        }
-
-        return [...realPayments, ...pseudoEntries]
-            .sort((a: any, b: any) => {
-                const dateA = new Date(a.dateIso || a.date || 0).getTime();
-                const dateB = new Date(b.dateIso || b.date || 0).getTime();
-                return dateB - dateA;
-            })
-            .slice(0, 5);
     };
 
     const handleCollect = (item: any) => {
@@ -348,12 +201,42 @@ export default function PaymentDueList() {
         });
     };
 
+    // Laptop: the same list as a table (tap a row → same details popup).
+    const isDesktop = useIsDesktop();
+    const dueColumns: TableColumn<any>[] = [
+        { key: 'date', label: 'Date', width: 96, render: (d) => d.date || d.createdAt || '-' },
+        { key: 'days', label: 'Days due', width: 80, align: 'right', render: (d) => {
+            const n = getOverdueDays(d.date || d.createdAt);
+            return n > 0 ? <Text style={{ color: '#d32f2f', fontWeight: 'bold', fontSize: 13 }}>{n}</Text> : '-';
+        } },
+        { key: 'party', label: 'Party', flex: 2, render: (d) => d.orgName || d.hospitalName || '-' },
+        { key: 'ref', label: 'Order / Bill', width: 150, render: (d) => {
+            const isOrder = d.collectionName === 'orders';
+            return <Pill text={isOrder ? `Order ${d.orderId}` : `Bill ${d.billNo || 'Manual'}`} color={isOrder ? '#1565c0' : '#6d4c41'} bg={isOrder ? '#e3f2fd' : '#efebe9'} />;
+        } },
+        { key: 'total', label: 'Bill amount', width: 110, align: 'right', render: (d) => inr(d.amount) },
+        { key: 'balance', label: 'Balance', width: 110, align: 'right', render: (d) => <Text style={{ fontWeight: 'bold', color: '#c0392b', fontSize: 13 }}>{inr(d.balance !== undefined ? d.balance : d.amount)}</Text> },
+        { key: 'reminder', label: 'Last reminder', width: 120, render: (d) => <TwoLine main={d.lastReminderDate || 'Never'} /> },
+        { key: 'act', label: '', width: 170, align: 'right', render: (d) => (
+            <View style={{ flexDirection: 'row', gap: 6 }}>
+                <TouchableOpacity style={[styles.collectBtn, { backgroundColor: '#25D366' }]} onPress={() => handleSendReminder(d)}>
+                    <Ionicons name="logo-whatsapp" size={12} color="white" />
+                    <Text style={[styles.collectBtnText, { marginLeft: 3 }]}>Remind</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.collectBtn} onPress={() => handleCollect(d)}>
+                    <Text style={styles.collectBtnText}>Collect</Text>
+                </TouchableOpacity>
+            </View>
+        ) },
+    ];
+
     const renderItem = ({ item }: any) => {
         const dateToShow = item.date || item.createdAt;
         const daysOutstanding = getOverdueDays(dateToShow);
         const displayAmount = item.balance !== undefined ? item.balance : item.amount;
         
-        const isOrder = item.orderId && typeof item.orderId === 'string' && item.orderId.startsWith('ORD');
+        // Order IDs look like LIF-26-27-019 now, so check where the row came from.
+        const isOrder = item.collectionName === 'orders';
 
         return (
             <TouchableOpacity 
@@ -412,7 +295,7 @@ export default function PaymentDueList() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <View style={{flexDirection:'row', alignItems:'center'}}>
                     <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
                     <Text style={styles.headerTitle}>Pending Dues</Text>
@@ -428,47 +311,45 @@ export default function PaymentDueList() {
             </View>
 
             <View style={styles.filterBox}>
-                <View style={styles.tabContainer}>
-                    {['Day', 'Month', 'FY', 'All'].map((m) => (
-                        <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
-                            <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
-                        </TouchableOpacity>
-                    ))}
-                </View>
-                {viewMode !== 'All' && (
-                    <View style={styles.navRow}>
-                        <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-                        <Text style={styles.navText}>{getHeaderDate()}</Text>
-                        <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-                    </View>
-                )}
+                <PeriodTabs value={viewMode} onChange={setViewMode} />
+                <StaffPeriodRow
+                    periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+                    onPrev={() => changeDate(-1)}
+                    onNext={() => changeDate(1)}
+                />
                 <View style={styles.searchBar}>
-                    {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={18} color="gray" />}
+                    {<Ionicons name="search" size={18} color="gray" />}
                     <TextInput style={styles.searchInput} placeholder="Search Party, Bill No..." value={searchTerm} onChangeText={setSearchTerm} />
                     {searchTerm.length > 0 && <TouchableOpacity onPress={()=>setSearchTerm('')}><Ionicons name="close-circle" size={18} color="gray"/></TouchableOpacity>}
                 </View>
-                <View style={styles.summaryRow}>
-                    <Text style={styles.totalLabel}>Total Pending:</Text>
-                    <Text style={[styles.totalValue, {color: '#d32f2f'}]}>₹{totalPending.toLocaleString('en-IN')}</Text>
-                </View>
+                <TotalBar label="Total Pending" count={dueTotal} amount={totalPending} accent="#d32f2f" />
             </View>
 
             <FlatList 
-                data={renderedList}
+                data={dueItems}
                 keyExtractor={item => item.id}
-                renderItem={renderItem}
+                renderItem={isDesktop
+                    ? ({ item, index }) => <TableRow columns={dueColumns} item={item} index={index} onPress={() => setSelectedItem(item)} tint={getOverdueDays(item.date || item.createdAt) > 0 ? '#e57373' : undefined} />
+                    : renderItem}
+                ListHeaderComponent={isDesktop && dueItems.length > 0 ? <TableHeader columns={dueColumns} /> : null}
+                stickyHeaderIndices={isDesktop && dueItems.length > 0 ? [0] : undefined}
                 contentContainerStyle={{padding: 15, paddingBottom: 100}}
                 refreshControl={
                     <RefreshControl
                         refreshing={duesRefreshing}
-                        onRefresh={() => { refreshDues(); refreshOrdersForDues(); }}
+                        onRefresh={refreshDues}
                         colors={['#3b5998']}
                         tintColor="#3b5998"
                     />
                 }
                 ListEmptyComponent={
                     <View style={styles.empty}>
-                        {(duesLoading || ordersLoading) ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                        {duesLoading ? <ActivityIndicator size="large" color="#3b5998" /> : duesError ? (
+                            <>
+                                <Ionicons name="cloud-offline-outline" size={60} color="#ccc" />
+                                <Text style={{color:'gray', marginTop:10, fontSize:16}}>Could not load dues — pull down to retry.</Text>
+                            </>
+                        ) : (
                             <>
                                 <Ionicons name="checkmark-circle-outline" size={60} color="#4caf50" />
                                 <Text style={{color:'gray', marginTop:10, fontSize:16}}>No Pending Dues!</Text>
@@ -478,9 +359,10 @@ export default function PaymentDueList() {
                 }
                 ListFooterComponent={
                     <View style={{ paddingBottom: 80 }}>
-                        {visibleCount < fullFilteredList.length ? (
+                        {duesHasMore ? (
                             <TouchableOpacity 
-                                onPress={() => setVisibleCount(prev => prev + 20)} 
+                                onPress={loadMoreDues}
+                                disabled={duesLoadingMore}
                                 style={{
                                     padding: 12, 
                                     backgroundColor: '#fff', 
@@ -491,12 +373,14 @@ export default function PaymentDueList() {
                                     borderColor: '#ddd'
                                 }}
                             >
-                                <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                                    👇 Load More Records ({fullFilteredList.length - visibleCount} remaining)
-                                </Text>
+                                {duesLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                                    <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                                        👇 Load More Records ({dueTotal - dueItems.length} remaining)
+                                    </Text>
+                                )}
                             </TouchableOpacity>
                         ) : (
-                            fullFilteredList.length > 0 ? (
+                            dueItems.length > 0 ? (
                                 <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
                                     --- End of List ---
                                 </Text>
@@ -554,8 +438,8 @@ export default function PaymentDueList() {
 
                                 <View style={{marginTop:20, paddingTop:10, borderTopWidth:1, borderTopColor:'#eee'}}>
                                     <Text style={{fontSize:12, fontWeight:'bold', color:'#3b5998', marginBottom:10}}>PAYMENTS FOR THIS ENTRY</Text>
-                                    {getPartyHistory(selectedItem).length > 0 ? (
-                                        getPartyHistory(selectedItem).map((p: any) => (
+                                    {partyHistory.length > 0 ? (
+                                        partyHistory.map((p: any) => (
                                             <View key={p.id} style={{flexDirection:'row', justifyContent:'space-between', paddingVertical:6, borderBottomWidth:1, borderBottomColor:'#f0f0f0'}}>
                                                                                                 <View>
                                                     <Text style={{fontSize:12, fontWeight:'bold', color:'#333'}}>₹ {p.amount}</Text>
@@ -616,24 +500,14 @@ const DetailRow = ({label, value}: any) => (
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 4, alignItems:'center' },
+    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, backgroundColor: 'white', elevation: 4, alignItems:'center' },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
     backBtn: { paddingRight: 10 },
     addBtn: { flexDirection:'row', backgroundColor:'#3b5998', paddingVertical:6, paddingHorizontal:12, borderRadius:20, alignItems:'center' },
-    filterBox: { backgroundColor:'white', padding:15, paddingBottom:10, marginBottom:5 },
-    tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', borderRadius: 8, padding: 2, marginBottom: 5 },
-    tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-    activeTab: { backgroundColor: 'white', elevation: 2 },
-    tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-    activeTabText: { color: '#3b5998', fontWeight: 'bold' },
-    navRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 8, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#eee' },
-    navText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
-    searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f0f0', borderRadius: 8, paddingHorizontal: 10, height: 36 },
+    filterBox: { backgroundColor:'white', paddingBottom:6, marginBottom:4 },
+    searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f0f0', borderRadius: 8, paddingHorizontal: 10, height: 36, marginHorizontal: 12, marginTop: 6 },
     searchInput: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
-    summaryRow: { flexDirection:'row', justifyContent:'space-between', marginTop:15, borderTopWidth:1, borderTopColor:'#eee', paddingTop:10 },
-    totalLabel: { fontWeight:'bold', color:'#555' },
-    totalValue: { fontWeight:'bold', fontSize:16 },
-    historyCard: { backgroundColor: 'white', padding: 15, borderRadius: 12, marginBottom: 10, flexDirection: 'row', alignItems: 'center', elevation: 2, marginHorizontal:15, borderLeftWidth: 5 },
+    historyCard: { backgroundColor: 'white', padding: 11, borderRadius: 12, marginBottom: 8, flexDirection: 'row', alignItems: 'center', elevation: 2, marginHorizontal:12, borderLeftWidth: 5 },
     normalCard: { borderLeftColor: '#f39c12' },
     overdueCard: { borderLeftColor: '#d32f2f' },
     hOrg: { fontWeight: 'bold', fontSize: 15, color: '#333' },

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -17,30 +17,30 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (organizations/users still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { markAllNotificationsRead } from '../services/api/notifications';
-import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: sales visits now go through the new backend API
-import { deleteSalesVisit as apiDeleteSalesVisit, listSalesVisits } from '../services/api/salesVisits';
+import { deleteSalesVisit as apiDeleteSalesVisit, listSalesVisitsPage, SalesVisitPageFilters } from '../services/api/salesVisits';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { isCurrentFy, localYmd, periodRange, useDebounced } from '../utils/periodRange';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
+import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
 
 export default function SalesReportScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   const { currentUser } = useData();
 
-  // 🔥 SaaS Engine kept for organizations/users only
-  const { isDbLoading } = useSaaSDB();
 
-  // salesVisitList now comes from useCachedList below (cache-first)
-  // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
   // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
   const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
       if (markAllNotificationsRead) {
@@ -62,32 +62,37 @@ export default function SalesReportScreen() {
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const [visibleCount, setVisibleCount] = useState(20);
 
   const userRole = currentUser?.role ? currentUser.role.toLowerCase() : 'unknown';
   const isAdmin = userRole === 'admin' || userRole === 'manager' || userRole === 'accountant' || userRole === 'hr' || userRole === 'store' || userRole === 'superadmin';
   const isStrictAdmin = userRole === 'admin' || userRole === 'manager';
 
-  useEffect(() => {
-      if (viewMode === 'Day' && visitTypeFilter === 'All' && !searchText) {
-          setVisibleCount(500); 
-      } else {
-          setVisibleCount(20); 
-      }
-  }, [viewMode, currentDate, visitTypeFilter, searchText, selectedEmployee]);
 
-  // 🔥 SALES VISITS (DSR) — cache-first (instant from AsyncStorage, then
-  // background refresh). See hooks/useCachedList.ts.
-  const salesVisitsCacheKey = buildCacheKey('sales_visits', currentUser?.companyId);
+  // 🔥 SALES VISITS (DSR) — 20 per page from the server. Visit type, date range,
+  // employee and search all run there; a search looks across all dates (as before).
+  const debouncedSearch = useDebounced(searchText.trim());
+  const visitFilters = useMemo<SalesVisitPageFilters>(() => ({
+      ...(debouncedSearch ? {} : periodRange(viewMode, currentDate)),
+      visitType: visitTypeFilter === 'All' ? undefined : visitTypeFilter,
+      createdById: isAdmin && selectedEmployee !== 'All' ? selectedEmployee : undefined,
+      search: debouncedSearch || undefined,
+  }), [viewMode, currentDate, visitTypeFilter, isAdmin, selectedEmployee, debouncedSearch]);
+  const isDefaultView = isCurrentFy(viewMode, currentDate) && visitTypeFilter === 'All' && selectedEmployee === 'All' && !debouncedSearch;
   const {
-      data: salesVisitList,
-      setData: setSalesVisitList,
+      items: salesVisitList,
+      total: visitTotal,
       loading: salesVisitsLoading,
+      loadingMore: visitsLoadingMore,
+      hasMore: visitsHasMore,
+      loadMore: loadMoreVisits,
+      refreshing,
       refresh: refreshSalesVisits,
-  } = useCachedList({
-      cacheKey: salesVisitsCacheKey,
+      error: visitsError,
+  } = useServerPagedList<SalesVisitPageFilters, any>({
+      fetchPage: listSalesVisitsPage,
+      filters: visitFilters,
       enabled: !!currentUser?.companyId,
-      fetcher: listSalesVisits, // was: fetchSaaSData("sales_reports")
+      cacheKey: isDefaultView ? buildCacheKey('sales_visits_page1_v1', currentUser?.companyId) : null,
   });
 
   // 🔥 Users — cache-first, shares the SAME 'team_members' cache key as
@@ -98,16 +103,6 @@ export default function SalesReportScreen() {
       fetcher: fetchTeamMembers,
   });
 
-  // 🔥 senderName was never populated — the API only returns senderId (see
-  // services/api/salesVisits.ts), so DSR entries showed no name. Fill it
-  // in once team members are available.
-  useEffect(() => {
-      if (userList.length === 0 || salesVisitList.length === 0) return;
-      const nameById = new Map(userList.map((u: any) => [u.id, u.name || 'Unknown']));
-      const needsEnrichment = salesVisitList.some((v: any) => v.senderName === undefined);
-      if (!needsEnrichment) return;
-      setSalesVisitList(salesVisitList.map((v: any) => ({ ...v, senderName: nameById.get(v.senderId) || 'Unknown' })));
-  }, [salesVisitList, userList]);
 
   useEffect(() => {
       if (isAdmin) {
@@ -119,25 +114,9 @@ export default function SalesReportScreen() {
       }
   }, [userList, isAdmin]);
 
-  // Organizations — cache-first, shares the SAME 'organizations' cache key
-  // as organization.tsx/messaging_center.tsx.
-  const { data: orgList } = useCachedList({
-      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 500 }),
-  });
 
-  const onRefresh = async () => {
-      setRefreshing(true);
-      await refreshSalesVisits();
-      setRefreshing(false);
-  };
-
-  const getCity = (item: any) => {
-      if (item.city) return item.city;
-      const orgData = orgList.find((o: any) => (item.orgId && o.id === item.orgId) || o.orgName === item.hospital || o.name === item.hospital);
-      return orgData?.city || '';
-  };
+  // City comes with the visit (its own, else the organization's — added by the server).
+  const getCity = (item: any) => item.city || '';
 
   const parseDate = (dateStr: any) => {
       if (!dateStr) return 0;
@@ -215,70 +194,19 @@ export default function SalesReportScreen() {
       return null;
   };
 
-  const getData = () => {
-      let list = salesVisitList ? [...salesVisitList] : [];
-
-      if (!isAdmin) {
-          const myId = currentUser?.uid || currentUser?.id;
-          list = list.filter((item: any) => item.senderId === myId || item.senderUid === myId);
-      } else if (selectedEmployee !== 'All') {
-          list = list.filter((item: any) => (item.senderId === selectedEmployee) || (item.senderUid === selectedEmployee) || (item.senderName === selectedEmployeeName));
-      }
-
-      if (visitTypeFilter === 'Cold Call') list = list.filter((i: any) => i.visitType === 'Cold Call');
-      else if (visitTypeFilter === 'Follow Up') list = list.filter((i: any) => i.visitType === 'Follow Up');
-
-      if (searchText) {
-          const term = searchText.toLowerCase();
-          list = list.filter((item: any) => {
-              const city = getCity(item).toLowerCase();
-              const prodStr = getProductDisplay(item.product);
-              const mainText = `${item.hospital || ''} ${city} ${item.person || ''} ${item.senderName || ''} ${item.outcome || ''} ${prodStr}`.toLowerCase();
-              return mainText.includes(term);
-          });
-      } 
-      else if (viewMode !== 'All') {
-          const tYear = currentDate.getFullYear();
-          const tMonth = currentDate.getMonth();
-          const tDay = currentDate.getDate();
-
-          const fyStartYear = tMonth >= 3 ? tYear : tYear - 1;
-          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime();
-
-          list = list.filter((item: any) => {
-              const dateField = item.dateIso || item.date || item.createdAt;
-              if(!dateField) return false;
-              const itemDate = new Date(parseDate(dateField));
-              const itemTime = itemDate.getTime();
-              
-              if (viewMode === 'Month') return itemDate.getFullYear() === tYear && itemDate.getMonth() === tMonth;
-              if (viewMode === 'Day') return itemDate.getFullYear() === tYear && itemDate.getMonth() === tMonth && itemDate.getDate() === tDay;
-              if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-              return true;
-          });
-      }
-
-      return list.sort((a: any, b: any) => {
-          const dateA = a.nextFollowUp ? parseDate(a.nextFollowUp) : parseDate(a.dateIso || a.date);
-          const dateB = b.nextFollowUp ? parseDate(b.nextFollowUp) : parseDate(b.dateIso || b.date);
-          return dateB - dateA; 
-      });
-  };
-
-  const displayList = getData(); 
-  const renderedList = displayList.slice(0, visibleCount);
 
   const shareDailyReport = async () => {
       const now = new Date();
-      const localTodayStr = now.toISOString().split('T')[0];
-
-      const todaysVisits = salesVisitList.filter((item: any) => {
-          const isDateMatch = (item.dateIso === localTodayStr || item.date === localTodayStr);
-          const targetId = selectedEmployee !== 'All' ? selectedEmployee : (currentUser?.uid || currentUser?.id);
-          const isUserMatch = item.senderId === targetId || item.senderUid === targetId; 
-          return isDateMatch && isUserMatch;
-      });
+      const localTodayStr = localYmd(now);
+      const targetId = selectedEmployee !== 'All' ? selectedEmployee : (currentUser?.uid || currentUser?.id);
+      let todaysVisits: any[] = [];
+      try {
+          // Only today's visits of one person — fetched when the button is pressed.
+          const r = await listSalesVisitsPage({ fromDate: localTodayStr, toDate: localTodayStr, createdById: isAdmin ? targetId : undefined, page: 1, limit: 100 });
+          todaysVisits = r.items.reverse(); // oldest first, as the day went
+      } catch (e: any) {
+          return Alert.alert("Error", e?.message || "Could not load today's visits.");
+      }
 
       if (todaysVisits.length === 0) return Alert.alert("No Data", `No visits found for date: ${localTodayStr}`);
 
@@ -334,6 +262,21 @@ export default function SalesReportScreen() {
       );
   };
 
+    // Laptop: the same list as a table (tap a row → same details / lead).
+    const isDesktop = useIsDesktop();
+    const visitColumns: TableColumn<any>[] = [
+        { key: 'date', label: 'Date', width: 100, render: (v) => formatDateDisplay(v.dateIso || v.date) },
+        { key: 'type', label: 'Type', width: 100, render: (v) => v.visitType === 'Cold Call'
+            ? <Pill text="Cold Call" color="#1565c0" bg="#e3f2fd" />
+            : <Pill text={v.visitType || 'Visit'} color="#f57f17" bg="#fff3e0" /> },
+        { key: 'org', label: 'Hospital', flex: 1.6, render: (v) => <TwoLine main={v.hospital || v.hospitalName} sub={[getCity(v), v.person].filter(Boolean).join(' • ')} /> },
+        { key: 'product', label: 'Product', flex: 1.2, render: (v) => (Array.isArray(v.product) ? v.product.join(', ') : v.product) || '-' },
+        { key: 'outcome', label: 'Outcome', width: 140, render: (v) => v.outcome || '-' },
+        { key: 'notes', label: 'Discussion', flex: 1.8, render: (v) => (v.discussion ? String(v.discussion).split('\n')[0] : '-') },
+        { key: 'next', label: 'Next follow-up', width: 120, render: (v) => v.nextFollowUp ? <Text style={{ color: '#d32f2f', fontWeight: 'bold', fontSize: 13 }}>{v.nextFollowUp}</Text> : '-' },
+        { key: 'by', label: 'Staff', width: 120, render: (v) => v.senderName || v.userName || (userList || []).find((u: any) => u.id === v.senderId)?.name || '-' },
+    ];
+
     const renderItem = ({ item }: any) => {
       const isColdCall = item.visitType === 'Cold Call';
       const city = getCity(item); 
@@ -387,7 +330,7 @@ export default function SalesReportScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={{flexDirection:'row', alignItems:'center'}}>
             <TouchableOpacity onPress={() => router.back()} style={{padding:5}}>
                 <Ionicons name="arrow-back" size={24} color="#333" />
@@ -395,6 +338,9 @@ export default function SalesReportScreen() {
             <Text style={styles.headerTitle}>Visits DSR</Text>
         </View>
         <View style={{flexDirection:'row'}}>
+            <TouchableOpacity style={[styles.addBtn, {backgroundColor:'#ff9800', marginRight:10}]} onPress={() => router.push('/visit_targets' as any)} accessibilityLabel="Visit targets">
+                <Ionicons name="trophy" size={20} color="white" />
+            </TouchableOpacity>
             <TouchableOpacity style={[styles.addBtn, {backgroundColor:'#4caf50', marginRight:10}]} onPress={shareDailyReport}>
                 <Ionicons name="share-social" size={20} color="white" />
             </TouchableOpacity>
@@ -416,9 +362,9 @@ export default function SalesReportScreen() {
           </TouchableOpacity>
       </View>
 
-      <View style={{backgroundColor:'white', padding:10, marginBottom:5}}>
+      <View style={{backgroundColor:'white', paddingTop:6, paddingBottom:6, marginBottom:2}}>
           <View style={styles.searchBar}>
-              {isDbLoading ? <ActivityIndicator size="small" color="#1565c0" style={{marginRight: 5}}/> : <Ionicons name="search" size={24} color="#1565c0" />} 
+              {salesVisitsLoading ? <ActivityIndicator size="small" color="#1565c0" style={{marginRight: 5}}/> : <Ionicons name="search" size={20} color="#1565c0" />} 
               <TextInput style={styles.input} placeholder="Search: Hospital, City..." value={searchText} onChangeText={setSearchText} />
               {searchText.length > 0 && (
                   <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={20} color="#d32f2f" /></TouchableOpacity>
@@ -427,62 +373,40 @@ export default function SalesReportScreen() {
 
           {!searchText && (
             <>
-              <View style={styles.dateTabContainer}>
-                  {['Day', 'Month', 'FY', 'All'].map((m) => (
-                      <TouchableOpacity key={m} style={[styles.dateTab, viewMode === m && styles.activeDateTab]} onPress={() => setViewMode(m as any)}>
-                          <Text style={[styles.dateTabText, viewMode === m && styles.activeDateTabText]}>{m}</Text>
-                      </TouchableOpacity>
-                  ))}
-              </View>
+              <PeriodTabs value={viewMode} onChange={setViewMode} />
 
-              {isAdmin && (
-                <View style={{flexDirection:'row', justifyContent:'space-between', paddingHorizontal:15, marginBottom:10}}>
-                    <TouchableOpacity style={styles.employeeFilterBtn} onPress={() => setShowEmployeePicker(true)}>
-                        <Ionicons name="people" size={18} color="#2e7d32" />
-                        <Text style={{fontSize:13, marginLeft:8, color:'#2e7d32', fontWeight:'600'}}>
-                            {selectedEmployee === 'All' ? 'View All Staff' : selectedEmployeeName}
-                        </Text>
-                        <Ionicons name="chevron-down" size={16} color="#2e7d32" style={{marginLeft:5}}/>
-                    </TouchableOpacity>
-                    {viewMode !== 'All' && (
-                        <View style={styles.miniDateNav}>
-                            <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={20} color="#555" /></TouchableOpacity>
-                            <Text style={{fontWeight:'bold', color:'#3b5998', fontSize:12, marginHorizontal:5}}>{getHeaderDate()}</Text>
-                            <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={20} color="#555" /></TouchableOpacity>
-                        </View>
-                    )}
-                </View>
-              )}
-
-              {(!isAdmin && viewMode !== 'All') && (
-                  <View style={styles.dateNav}>
-                      <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-                      <Text style={styles.monthText}>{getHeaderDate()}</Text>
-                      <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-                  </View>
-              )}
+              <StaffPeriodRow
+                  showStaff={isAdmin}
+                  staffLabel={selectedEmployee === 'All' ? 'All Staff' : selectedEmployeeName}
+                  onStaffPress={() => setShowEmployeePicker(true)}
+                  periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+                  onPrev={() => changeDate(-1)}
+                  onNext={() => changeDate(1)}
+              />
             </>
           )}
           
-          <Text style={{textAlign:'right', fontSize:12, color:'gray', paddingRight:15, marginTop:5}}>
-              Total: <Text style={{fontWeight:'bold', color:'green'}}>{displayList.length}</Text> Records
-          </Text>
+          <TotalBar label="Total" count={visitTotal} accent="#2e7d32" />
       </View>
 
       <FlatList 
-          data={renderedList}
+          data={salesVisitList}
           keyExtractor={item => item.id}
           contentContainerStyle={styles.listContent}
-          renderItem={renderItem}
+          renderItem={isDesktop
+              ? ({ item, index }) => <TableRow columns={visitColumns} item={item} index={index} onPress={() => openDetails(item)} tint={item.visitType === 'Cold Call' ? '#1976d2' : '#f57f17'} />
+              : renderItem}
+          ListHeaderComponent={isDesktop && salesVisitList.length > 0 ? <TableHeader columns={visitColumns} /> : null}
+          stickyHeaderIndices={isDesktop && salesVisitList.length > 0 ? [0] : undefined}
           refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#1565c0']} tintColor="#1565c0" />
+              <RefreshControl refreshing={refreshing} onRefresh={refreshSalesVisits} colors={['#1565c0']} tintColor="#1565c0" />
           }
           ListEmptyComponent={
               <View style={{alignItems:'center', marginTop:50}}>
                   {salesVisitsLoading ? <ActivityIndicator size="large" color="#1565c0"/> : (
                       <>
                         <Ionicons name="folder-open-outline" size={60} color="#ddd" />
-                        <Text style={{color:'gray', marginTop:0}}>No Visits Found.</Text>
+                        <Text style={{color:'gray', marginTop:0}}>{visitsError ? 'Could not load visits — pull down to retry.' : 'No Visits Found.'}</Text>
                       </>
                   )}
               </View>
@@ -490,19 +414,20 @@ export default function SalesReportScreen() {
           
           ListFooterComponent={
               <View style={{ paddingBottom: 80 }}>
-                  {visibleCount < displayList.length ? (
+                  {visitsHasMore ? (
                       <TouchableOpacity 
-                          onPress={() => setVisibleCount(prev => prev + 20)} 
+                          onPress={loadMoreVisits}
+                          disabled={visitsLoadingMore}
                           style={{
                               padding: 12, backgroundColor: '#fff', alignItems: 'center', marginVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ddd'
                           }}
                       >
-                          <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                              👇 Load More Records ({displayList.length - visibleCount} remaining)
-                          </Text>
+                          {visitsLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                              <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({visitTotal - salesVisitList.length} remaining)</Text>
+                          )}
                       </TouchableOpacity>
                   ) : (
-                      displayList.length > 0 ? (
+                      salesVisitList.length > 0 ? (
                           <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
                               --- End of List ---
                           </Text>
@@ -591,40 +516,29 @@ export default function SalesReportScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 0, zIndex: 10 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, paddingBottom: 10, alignItems: 'center', backgroundColor: 'white', elevation: 0, zIndex: 10 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
-  addBtn: { flexDirection:'row', backgroundColor:'#3b5998', paddingHorizontal:12, paddingVertical:8, borderRadius:20, alignItems:'center' },
+  addBtn: { flexDirection:'row', backgroundColor:'#3b5998', paddingHorizontal:11, paddingVertical:7, borderRadius:20, alignItems:'center' },
   addBtnText: { color:'white', fontWeight:'bold', marginLeft:5 },
-  
+
   subTabContainer: { flexDirection: 'row', padding: 5, backgroundColor: 'white', justifyContent:'space-between', borderTopWidth:1, borderTopColor:'#eee' },
-  subTab: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 8, marginHorizontal: 4, backgroundColor: '#f0f0f0' },
+  subTab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 8, marginHorizontal: 4, backgroundColor: '#f0f0f0' },
   activeSubTabColdCall: { backgroundColor: '#1976d2' },
   activeSubTabFollow: { backgroundColor: '#f57f17' },
   activeSubTabAll: { backgroundColor: '#3b5998' },
   subTabText: { fontSize: 12, fontWeight: 'bold', color: '#555' },
-  
-  dateTabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', margin: 5, borderRadius: 8, padding: 3, marginBottom: 5 },
-  dateTab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-  activeDateTab: { backgroundColor: 'white', elevation: 2 },
-  dateTabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-  activeDateTabText: { color: '#3b5998', fontWeight: 'bold' },
-  
-  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 10, marginHorizontal: 15, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#eee' },
-  miniDateNav: { flexDirection:'row', alignItems:'center', backgroundColor:'#f0f0f0', borderRadius:15, paddingHorizontal:5, paddingVertical:5 },
-  employeeFilterBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#e8f5e9', paddingHorizontal:12, paddingVertical:8, borderRadius:20, borderWidth:1, borderColor:'#2e7d32' },
-  monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
-  
-  searchBar: { backgroundColor: '#e3f2fd', borderRadius: 10, flexDirection:'row', alignItems:'center', paddingHorizontal: 15, height: 40, marginHorizontal: 15, marginBottom: 0, borderWidth: 1, borderColor: '#90caf9', elevation: 0 },
-  input: { flex:1, marginLeft:10, fontSize:16, color:'#1565c0', fontWeight:'500' },
-  
-  listContent: { paddingHorizontal: 15, paddingBottom: 20 },
-  card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 5, elevation: 2, marginTop: 10 },
+
+  searchBar: { backgroundColor: '#e3f2fd', borderRadius: 8, flexDirection:'row', alignItems:'center', paddingHorizontal: 10, height: 36, marginHorizontal: 12, borderWidth: 1, borderColor: '#90caf9', elevation: 0 },
+  input: { flex:1, marginLeft:8, fontSize:14, color:'#1565c0', fontWeight:'500' },
+
+  listContent: { paddingHorizontal: 12, paddingBottom: 20 },
+  card: { backgroundColor: 'white', borderRadius: 10, padding: 11, marginBottom: 2, elevation: 2, marginTop: 6 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  hospitalName: { fontSize: 16, fontWeight: 'bold', color: '#333' },
+  hospitalName: { fontSize: 15, fontWeight: 'bold', color: '#333' },
   subText: { fontSize: 13, color: '#555', marginTop: 2 }, 
   badge: { paddingHorizontal:8, paddingVertical:4, borderRadius:4 },
   badgeText: { fontSize:10, fontWeight:'bold' },
-  divider: { height: 1, backgroundColor: '#eee', marginVertical: 8 },
+  divider: { height: 1, backgroundColor: '#eee', marginVertical: 6 },
   dateText: { fontSize: 12, color: '#555' },
   noteText: { fontSize: 13, color: '#444', marginTop:5, fontStyle:'italic' },
   

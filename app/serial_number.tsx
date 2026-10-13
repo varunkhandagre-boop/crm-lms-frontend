@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
+import { saveAndShareFile } from '../utils/saveFile';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -21,7 +22,6 @@ import * as Sharing from 'expo-sharing';
 
 // 🔥 SAAS IMPORTS (installations/organizations/service_calls/pms_reports/
 // payments/dues/couriers still Firestore — out of scope until Phase 4/6/8)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Light Phase 3 patch: sales visits (Phase 2) and orders (Phase 3) now
 // come from the new backend API. NOTE: order detail fields here (name,
@@ -29,26 +29,22 @@ import { useData } from './context/DataContext';
 // those specific detail-modal lines may show blank/undefined until this
 // screen gets a full rewrite in a later phase; the org-level financial
 // totals and timeline dates/amounts are correct.
-import { fetchCouriers } from '../services/api/couriers';
-import { listInstallations } from '../services/api/installations';
-import { listOrders } from '../services/api/orders';
+import { searchMachines } from '../services/api/installations';
+import { fetchMachineHistory, fetchOrgHistory } from '../services/api/history';
+import { useDebounced } from '../utils/periodRange';
 import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
-import { listPaymentCollections } from '../services/api/paymentCollections';
-import { listPaymentDues } from '../services/api/paymentDues';
-import { listPmsReports } from '../services/api/pmsReports';
-import { listSalesVisits } from '../services/api/salesVisits';
-import { listServiceCalls } from '../services/api/serviceCalls';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function SerialNumberScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   const { currentUser } = useData();
 
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
   const userRole = (currentUser?.role || '').toLowerCase().trim();
   const isFinanceRole = ['admin', 'manager', 'account', 'accountant', 'superadmin'].includes(userRole);
@@ -59,7 +55,6 @@ export default function SerialNumberScreen() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [viewMode, setViewMode] = useState<'IDLE' | 'LIST' | 'DETAILS' | 'ORG_DETAILS'>('IDLE');
   
-  // installList/orgList/isDataFetching now come from useCachedList below (cache-first, shared keys)
   
   const [machineList, setMachineList] = useState<any[]>([]); 
   const [selectedMachine, setSelectedMachine] = useState<any>(null); 
@@ -80,19 +75,6 @@ export default function SerialNumberScreen() {
       setActiveTimelineFilter('All');
   }, [viewMode, selectedOrg, selectedMachine]);
 
-  // 🔥 Installations + Organizations — cache-first, sharing the SAME cache
-  // keys as installation.tsx ('installations') and organization.tsx
-  // ('organizations').
-  const { data: installList, loading: installsLoading } = useCachedList({
-      cacheKey: buildCacheKey('installations', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: listInstallations,
-  });
-    const { data: orgList, loading: orgsLoading } = useCachedList({
-      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 500 }),
-  });
 
   // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
   // as manage_team.tsx/employee_timeline.tsx.
@@ -116,32 +98,30 @@ export default function SerialNumberScreen() {
   // initial-masters-load spinner specifically.
   const [isDataFetching, setIsDataFetching] = useState(false);
 
+  // Suggestions come from the server (5 matches) once typing pauses — the
+  // screen no longer downloads every machine and organization up front.
   const handleSearchInput = (text: string) => {
       setSearchInput(text);
-      if (text.length > 0) {
-          const lowerText = text.toLowerCase();
-          let matches: any[] = [];
-          if (searchType === 'MACHINE') {
-              matches = installList.filter((item: any) => 
-                  (item.serialNo && item.serialNo.toLowerCase().includes(lowerText)) ||
-                  (item.hospital && item.hospital.toLowerCase().includes(lowerText)) ||
-                  (item.product && item.product.toLowerCase().includes(lowerText))
-              ).slice(0, 5);
-          } else {
-              matches = orgList.filter((item: any) => 
-                  (item.orgName && item.orgName.toLowerCase().includes(lowerText)) ||
-                  (item.name && item.name.toLowerCase().includes(lowerText)) ||
-                  (item.city && item.city.toLowerCase().includes(lowerText))
-              ).slice(0, 5);
-          }
-          setSuggestions(matches);
-          setShowSuggestions(true);
-      } else {
+      if (!text) {
           setSuggestions([]);
           setShowSuggestions(false);
           setViewMode('IDLE');
       }
   };
+  const debouncedInput = useDebounced(searchInput.trim(), 350);
+  const suggestReq = useRef(0);
+  useEffect(() => {
+      if (!debouncedInput || !currentUser?.companyId) return;
+      const id = ++suggestReq.current;
+      const run = searchType === 'MACHINE'
+          ? searchMachines(debouncedInput, 5)
+          : fetchOrganizations({ search: debouncedInput, limit: 5 });
+      run.then((matches) => {
+          if (id !== suggestReq.current) return; // a newer search is on its way
+          setSuggestions(matches);
+          setShowSuggestions(true);
+      }).catch(() => {});
+  }, [debouncedInput, searchType, currentUser?.companyId]);
 
   const handleSelectSuggestion = (item: any) => {
       setShowSuggestions(false); 
@@ -155,32 +135,37 @@ export default function SerialNumberScreen() {
       }
   };
 
-  const handleMasterSearch = () => {
+  const handleMasterSearch = async () => {
       setShowSuggestions(false);
       Keyboard.dismiss();
       if (!searchInput.trim()) return;
-
-      const lowerQuery = searchInput.toLowerCase().trim();
-      if (searchType === 'MACHINE') {
-          const directMatch = installList.find((item: any) => (item.serialNo || '').toLowerCase() === lowerQuery);
-          if (directMatch) {
-              openMachineHistory(directMatch);
+      const query = searchInput.trim();
+      const lowerQuery = query.toLowerCase();
+      suggestReq.current++; // ignore suggestions still on their way
+      setIsDataFetching(true);
+      try {
+          if (searchType === 'MACHINE') {
+              const items = await searchMachines(query, 50);
+              const directMatch = items.find((item: any) => (item.serialNo || '').toLowerCase() === lowerQuery);
+              if (directMatch) {
+                  await openMachineHistory(directMatch);
+              } else {
+                  setMachineList(items);
+                  setViewMode('LIST');
+              }
           } else {
-              const matches = installList.filter((item: any) => 
-                  (item.hospital || '').toLowerCase().includes(lowerQuery) || 
-                  (item.product || '').toLowerCase().includes(lowerQuery) ||
-                  (item.serialNo || '').toLowerCase().includes(lowerQuery)
-              );
-              setMachineList(matches);
-              setViewMode('LIST');
+              const orgs = await fetchOrganizations({ search: query, limit: 10 });
+              const directOrg = orgs.find((item: any) => (item.orgName || item.name || '').toLowerCase().trim() === lowerQuery);
+              if (directOrg) {
+                  await openHospitalKundali(directOrg);
+              } else {
+                  Alert.alert("Not Found", "Please select a valid organization from the suggestions.");
+              }
           }
-      } else {
-          const directOrg = orgList.find((item: any) => (item.orgName || item.name || '').toLowerCase().trim() === lowerQuery);
-          if (directOrg) {
-              openHospitalKundali(directOrg);
-          } else {
-              Alert.alert("Not Found", "Please select a valid organization from the suggestions.");
-          }
+      } catch (e: any) {
+          Alert.alert("Error", e?.message || "Could not search. Check internet and try again.");
+      } finally {
+          setIsDataFetching(false);
       }
   };
 
@@ -189,13 +174,15 @@ export default function SerialNumberScreen() {
       setSelectedMachine(machine);
       setIsDataFetching(true);
       
-      const [serviceCalls, pmsReports] = await Promise.all([
-          listServiceCalls(),
-          listPmsReports(),
-      ]);
-
-      const services = serviceCalls.filter((item: any) => item.serialNo?.toLowerCase() === machine.serialNo?.toLowerCase());
-      const pms = pmsReports.filter((item: any) => item.serialNo?.toLowerCase() === machine.serialNo?.toLowerCase());
+      let services: any[] = [];
+      let pms: any[] = [];
+      try {
+          ({ services, pms } = await fetchMachineHistory(machine.serialNo || ''));
+      } catch (e: any) {
+          setIsDataFetching(false);
+          Alert.alert("Error", e?.message || "Could not load the machine history.");
+          return;
+      }
 
       const events = [
           {
@@ -242,57 +229,21 @@ export default function SerialNumberScreen() {
       setSelectedOrg(org);
       setIsDataFetching(true);
       
-      const [services, pmsData, visits, orders, payments, dues, couriers] = await Promise.all([
-          listServiceCalls(),
-          listPmsReports(),
-          listSalesVisits(),
-          listOrders(),
-          listPaymentCollections(),
-          listPaymentDues(),
-          fetchCouriers({ limit: 500 }),
-      ]);
-      
-      const orgId = String(org.id || '').trim(); 
-      const orgNameClean = (org.orgName || org.name || '').toLowerCase().trim();
-
-      const matchOrg = (item: any) => {
-          if (!item) return false;
-          if (item.orgId && String(item.orgId).trim() === orgId) return true;
-          if (item.hospitalId && String(item.hospitalId).trim() === orgId) return true;
-          
-          const possibleNames = [
-              item.client, item.clientName, item.orgName, item.hospital, 
-              item.hospitalName, item.partyName, item.name, item.customerName, 
-              item.to, item.receiverName, item.receiver
-          ];
-          
-          if (possibleNames.some(n => n && String(n).toLowerCase().trim() === orgNameClean)) return true;
-          if (orgNameClean.length > 3) {
-              if (possibleNames.some(n => n && String(n).toLowerCase().includes(orgNameClean))) return true;
-          }
-          return false;
-      };
-
-      const matchedInstalls = installList.filter(matchOrg);
-      const matchedServices = services.filter(matchOrg);
-      const matchedPms = pmsData.filter(matchOrg);
-      const matchedVisits = visits.filter(matchOrg);
-      const matchedOrders = orders.filter(matchOrg);
-      const matchedPayments = payments.filter(matchOrg);
-      const matchedDues = dues.filter(matchOrg);
-      const matchedCouriers = couriers.filter(matchOrg);
-
-      let tValue = 0; let tReceived = 0; let tDues = 0;
-      matchedOrders.forEach((o: any) => tValue += Number(o.totalValue || o.orderValue || o.amount) || 0);
-      matchedPayments.forEach((p: any) => tReceived += Number(p.amount || p.receivedAmount) || 0);
-      matchedDues.forEach((d: any) => tDues += Number(d.balance !== undefined ? d.balance : (d.dueAmount || d.amount || 0)));
-      
-      setOrgFinance({ totalValue: tValue, totalReceived: tReceived, totalDues: tDues });
-
-      setOrgSummary({
-          installs: matchedInstalls.length, services: matchedServices.length, pms: matchedPms.length, visits: matchedVisits.length,
-          orders: matchedOrders.length, payments: matchedPayments.length, couriers: matchedCouriers.length, dues: matchedDues.length
-      });
+      let history;
+      try {
+          history = await fetchOrgHistory(org.id || undefined, org.orgName || org.name || '');
+      } catch (e: any) {
+          setIsDataFetching(false);
+          Alert.alert("Error", e?.message || "Could not load the hospital history.");
+          return;
+      }
+      // Matching (by organization id or name) and the totals are done on the server.
+      const {
+          installs: matchedInstalls, services: matchedServices, pms: matchedPms, visits: matchedVisits,
+          orders: matchedOrders, payments: matchedPayments, dues: matchedDues, couriers: matchedCouriers,
+      } = history;
+      setOrgFinance(history.finance);
+      setOrgSummary(history.summary);
 
       const events = [
           ...matchedOrders.map((o: any) => ({
@@ -464,16 +415,7 @@ export default function SerialNumberScreen() {
       const safeName = (rawName || 'Report').replace(/[^a-z0-9]/gi, '_').toLowerCase();
       const fileName = `${safeName}_${Date.now()}.csv`;
       
-      const uri = FileSystem.cacheDirectory + fileName;
-
-      await FileSystem.writeAsStringAsync(uri, csvString, {
-        encoding: FileSystem.EncodingType.UTF8,
-      });
-
-      await Sharing.shareAsync(uri, {
-        mimeType: 'text/csv',
-        dialogTitle: 'Download Detailed Report'
-      });
+      await saveAndShareFile({ content: csvString, fileName, mimeType: 'text/csv', dialogTitle: 'Download Detailed Report' });
 
     } catch (error: any) {
       console.error("Export Error:", error);
@@ -485,14 +427,14 @@ export default function SerialNumberScreen() {
     <TouchableWithoutFeedback onPress={() => { setShowSuggestions(false); Keyboard.dismiss(); }}>
         <View style={styles.container}>
         
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: headerTop }]}>
             <TouchableOpacity onPress={() => ['DETAILS', 'ORG_DETAILS'].includes(viewMode) ? setViewMode('IDLE') : router.back()}>
                 <Ionicons name="arrow-back" size={24} color="#333" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>
                 {viewMode === 'DETAILS' ? 'Machine History' : viewMode === 'ORG_DETAILS' ? 'Organization Record' : 'Universal Tracker'}
             </Text>
-            {(isDataFetching || installsLoading || orgsLoading) ? <ActivityIndicator size="small" color="#333" /> : <View style={{width:24}} />}
+            {isDataFetching ? <ActivityIndicator size="small" color="#333" /> : <View style={{width:24}} />}
         </View>
 
         {!['DETAILS', 'ORG_DETAILS'].includes(viewMode) && (
@@ -831,7 +773,7 @@ const DetailRow = ({label, value}: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 0, zIndex: 10 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 0, zIndex: 10 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
   toggleContainer: { flexDirection: 'row', backgroundColor: 'white', paddingHorizontal: 15, paddingBottom: 10, elevation: 2 },
   toggleBtn: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingVertical: 8, borderWidth: 1, borderColor: '#eee', backgroundColor: '#f9f9f9' },

@@ -1,3 +1,4 @@
+import { WorkSchedule } from '../../utils/workSchedule';
 // 🔥 Users API adapter (Postgres) — real backend user ids, unlike
 // fetchSaaSData("users") which still reads Firestore (whose doc ids are
 // NOT valid Postgres uuids). fetchUsers() (minimal) powers Assign-To /
@@ -17,10 +18,14 @@ export interface LegacyTeamMember {
   email: string;
   mobile: string;
   role: string;
+  jobTitle: string; // field users: Sales Executive / Service Engineer
   status: 'Active' | 'Disabled'; // mapped from isActive for the existing UI
   empId: string;
   joiningDate: string; // YYYY-MM-DD
   monthlyTarget: string;
+  dailyVisitTarget: string;   // '' = no target
+  workSchedule: WorkSchedule | null; // null = company default
+  monthlyVisitTarget: string;
   baseSalary: string;
   yearlyLeaves: string;
   personalEmail: string;
@@ -50,10 +55,14 @@ function toLegacyTeamMember(u: any): LegacyTeamMember {
     email: u.email ?? '',
     mobile: u.mobile ?? '',
     role: u.role,
+    jobTitle: u.jobTitle ?? '',
     status: u.isActive === false ? 'Disabled' : 'Active',
     empId: u.empId ?? '',
     joiningDate: (u.joiningDate || '').slice(0, 10),
     monthlyTarget: u.monthlyTarget != null ? String(u.monthlyTarget) : '0',
+    dailyVisitTarget: u.dailyVisitTarget != null ? String(u.dailyVisitTarget) : '',
+    workSchedule: u.workSchedule ?? null,
+    monthlyVisitTarget: u.monthlyVisitTarget != null ? String(u.monthlyVisitTarget) : '',
     baseSalary: u.baseSalary != null ? String(u.baseSalary) : '0',
     yearlyLeaves: u.yearlyLeaves != null ? String(u.yearlyLeaves) : '18',
     personalEmail: u.personalEmail ?? '',
@@ -110,8 +119,10 @@ export async function fetchTeamMembers(): Promise<LegacyTeamMember[]> {
 }
 
 export async function createTeamMember(payload: {
-  name: string; email: string; password: string; mobile?: string; role: string;
+  name: string; email: string; password: string; mobile?: string; role: string; jobTitle?: string | null;
   empId?: string; joiningDate?: string; monthlyTarget?: number; baseSalary?: number; yearlyLeaves?: number;
+  dailyVisitTarget?: number | null; monthlyVisitTarget?: number | null;
+  workSchedule?: WorkSchedule | null;
   personalEmail?: string; personalMobile?: string; bloodGroup?: string;
   address?: string; city?: string; state?: string; permanentAddress?: string;
   bankName?: string; bankAccountNo?: string; bankIfsc?: string;
@@ -122,7 +133,9 @@ export async function createTeamMember(payload: {
 }
 
 export async function updateTeamMember(id: string, payload: Partial<{
-  name: string; mobile: string; empId: string; joiningDate: string; monthlyTarget: number; baseSalary: number; yearlyLeaves: number;
+  name: string; mobile: string; jobTitle: string | null; empId: string; joiningDate: string; monthlyTarget: number; baseSalary: number; yearlyLeaves: number;
+  dailyVisitTarget: number | null; monthlyVisitTarget: number | null;
+  workSchedule: WorkSchedule | null;
   personalEmail: string; personalMobile: string; bloodGroup: string;
   address: string; city: string; state: string; permanentAddress: string;
   bankName: string; bankAccountNo: string; bankIfsc: string;
@@ -152,9 +165,24 @@ export interface BulkUserRow {
   mobile?: string;
   roleText: string;
   empId?: string;
-  joiningDate?: string;
+  joiningDate?: string; // YYYY-MM-DD
   monthlyTarget?: number;
+  dailyVisitTarget?: number;
+  monthlyVisitTarget?: number;
   baseSalary?: number;
+  yearlyLeaves?: number;
+  personalEmail?: string;
+  personalMobile?: string;
+  bloodGroup?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  permanentAddress?: string;
+  bankName?: string;
+  bankAccountNo?: string;
+  bankIfsc?: string;
+  aadhar?: string;
+  pan?: string;
 }
 
 export interface BulkUserPreviewItem {
@@ -169,7 +197,50 @@ export async function previewBulkUserImport(rows: BulkUserRow[]): Promise<BulkUs
   return res.data;
 }
 
-export async function commitBulkUserImport(rows: BulkUserRow[]): Promise<{ created: number; skipped: number; defaultPassword: string; errors: string[] }> {
-  const res = await apiClient.post<{ data: { created: number; skipped: number; defaultPassword: string; errors: string[] } }>('/users/bulk-import/commit', { rows });
+export interface BulkUserResult { created: number; updated?: number; skipped: number; defaultPassword: string; errors: string[] }
+
+/** updateExisting: employees already in the app get the filled-in columns (name / role / email / password never change). */
+export async function commitBulkUserImport(rows: BulkUserRow[], updateExisting = false): Promise<BulkUserResult> {
+  const res = await apiClient.post<{ data: BulkUserResult }>('/users/bulk-import/commit', { rows, updateExisting });
+  return res.data;
+}
+// ── Employee 360 (GET /users/:id/overview) ─────────────────────────────────
+export interface EmployeeOverview {
+  asOf: string;
+  profile: {
+    id: string; name: string; email: string | null; mobile: string | null; role: string; jobTitle: string | null;
+    empId: string | null; isActive: boolean; joiningDate: string | null; city: string | null; profileImage: string | null;
+    monthlyTarget: number | null; dailyVisitTarget: number | null; monthlyVisitTarget: number | null;
+    baseSalary: number | null; yearlyLeaves: number; tenure: { years: number; months: number } | null; schedule: string;
+  };
+  period: { key: OverviewPeriod; label: string; from: string; to: string };
+  attendance: AttendanceCounts; // for the chosen period
+  salaryThisMonth: {
+    perDaySalary: number; lateDays: number; lateDeduction: number; absentDays: number; absentDeduction: number;
+    overtimeHours: number; overtimeAmount: number; incentiveAmount: number; expenseAmount: number;
+    advanceDeduction: number; netPayable: number;
+  } | null;
+  leave: {
+    summary: Awaited<ReturnType<typeof import('./leaves').fetchLeaveSummary>>;
+    recent: { id: string; type: string; fromDate: string; toDate: string; days: number; halfDay: boolean; status: string }[];
+  };
+  advances: {
+    outstanding: number;
+    items: { id: string; date: string; amount: number; recoveredAmount: number; remaining: number; status: string; monthlyDeductionAmount: number | null }[];
+  };
+  expenses: { inPeriod: number; pendingCount: number; pendingAmount: number };
+  payslips: { id: string; month: number; year: number; netPayable: number; runStatus: string; paidAt: string | null }[];
+  work: {
+    sales: number; orders: number; collection: number; collections: number; visits: number;
+    monthlyVisitTarget: number | null; salesTarget: number | null; // "This month" only
+    openLeads: number; serviceCallsOpen: number; serviceCallsClosed: number; tasksPending: number; tasksOverdue: number;
+  };
+}
+export interface AttendanceCounts { present: number; absent: number; leave: number; holiday: number; short?: number; [k: string]: any }
+
+export type OverviewPeriod = 'month' | 'fy' | 'lastfy' | 'all';
+
+export async function fetchEmployeeOverview(id: string, period: OverviewPeriod = 'month'): Promise<EmployeeOverview> {
+  const res = await apiClient.get<{ data: EmployeeOverview }>(`/users/${id}/overview?period=${period}`);
   return res.data;
 }

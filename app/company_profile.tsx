@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+import { getCurrentLocation as getGpsFix } from '../utils/getLocation';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -21,15 +22,18 @@ import {
 } from 'react-native';
 
 import { statesList as allStatesList, districtPincodes, indianStatesAndDistricts } from '../constants/indianStatesData';
+import WebsiteLeadsProfileCard from '../components/WebsiteLeadsProfileCard';
 import { useData } from './context/DataContext';
 
 // 🔥 Phase 10: company profile now lives on the Company row in Postgres via
 // this adapter — replaces the Firestore "company_profile" + "companies" collections.
 import { fetchCompanyProfile, updateCompanyProfile } from '../services/api/companies';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 const USE_STORAGE_BUCKET = false; 
 
 export default function CompanyProfileScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     
     const { companyProfile, setCompanyProfile, currentUser } = useData();
@@ -45,13 +49,7 @@ export default function CompanyProfileScreen() {
     const [stateSearchQuery, setStateSearchQuery] = useState('');
     const [citySearchQuery, setCitySearchQuery] = useState('');
 
-    const [subscriptionInfo, setSubscriptionInfo] = useState({
-        planName: 'Loading...',
-        expiryDate: 'Loading...',
-        maxEmployees: 10,
-        currentEmployees: 0,
-        isActive: false
-    });
+
 
     const [profile, setProfile] = useState({
         companyName: '', shortName: '', tagline: '',
@@ -79,17 +77,7 @@ export default function CompanyProfileScreen() {
                     officeLatitude: cp.officeLatitude ?? null, officeLongitude: cp.officeLongitude ?? null,
                 }));
 
-                let formattedExpiry = 'Unknown';
-                if (cp.expiryDate) {
-                    formattedExpiry = new Date(cp.expiryDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-                }
-                setSubscriptionInfo({
-                    planName: cp.plan || 'Free Trial',
-                    expiryDate: formattedExpiry,
-                    maxEmployees: cp.maxEmployees || 10,
-                    currentEmployees: cp.currentEmployees || 0,
-                    isActive: cp.isActive
-                });
+
             } finally {
                 setLoading(false);
             }
@@ -105,7 +93,7 @@ export default function CompanyProfileScreen() {
                 if (status !== 'granted') return Alert.alert("Permission", "Gallery permission required in Settings.");
             }
             let result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                mediaTypes: ['images'],
                 allowsEditing: true,
                 aspect: field === 'signatureUrl' ? [3, 1] : [1, 1],
                 quality: 0.2,
@@ -191,7 +179,7 @@ export default function CompanyProfileScreen() {
                 Alert.alert('Permission Denied', 'Location access is required to set the office location.');
                 return;
             }
-            const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+            const location = await getGpsFix();
             setProfile((prev: any) => ({
                 ...prev,
                 officeLatitude: location.coords.latitude,
@@ -223,16 +211,14 @@ export default function CompanyProfileScreen() {
 
     if (loading) return <View style={styles.center}><ActivityIndicator size="large" color="#3b5998" /></View>;
 
-    const usagePercent = subscriptionInfo.maxEmployees > 0 
-        ? (subscriptionInfo.currentEmployees / subscriptionInfo.maxEmployees) * 100 
-        : 0;
+
 
     // ✅ MODALS + MAIN UI sab return() ke ANDAR hain
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" backgroundColor="#3b5998" />
             
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}>
                     <Ionicons name="arrow-back" size={24} color="white" />
                 </TouchableOpacity>
@@ -250,43 +236,6 @@ export default function CompanyProfileScreen() {
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled" 
                 >
-                    {/* 0. SUBSCRIPTION INFO CARD */}
-                    <View style={[styles.section, { backgroundColor: '#f0f4ff', borderColor: '#d0d9ff', borderWidth: 1 }]}>
-                        <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10}}>
-                            <View>
-                                <Text style={{fontSize: 12, color: '#555', fontWeight: 'bold'}}>CURRENT PLAN</Text>
-                                <Text style={{fontSize: 18, color: '#3b5998', fontWeight: 'bold'}}>{subscriptionInfo.planName}</Text>
-                            </View>
-                            <View style={{alignItems: 'flex-end'}}>
-                                <Text style={{fontSize: 12, color: '#555', fontWeight: 'bold'}}>VALID TILL</Text>
-                                <Text style={{fontSize: 16, color: subscriptionInfo.isActive ? '#2e7d32' : '#d32f2f', fontWeight: 'bold'}}>
-                                    {subscriptionInfo.expiryDate}
-                                </Text>
-                            </View>
-                        </View>
-                        <View style={{marginTop: 10}}>
-                            <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5}}>
-                                <Text style={{fontSize: 12, color: '#555', fontWeight: 'bold'}}>EMPLOYEES USED</Text>
-                                <Text style={{fontSize: 12, color: '#333', fontWeight: 'bold'}}>{subscriptionInfo.currentEmployees} / {subscriptionInfo.maxEmployees}</Text>
-                            </View>
-                            <View style={{height: 8, backgroundColor: '#ddd', borderRadius: 4, overflow: 'hidden'}}>
-                                <View style={{height: '100%', width: `${Math.min(usagePercent, 100)}%`, backgroundColor: usagePercent >= 100 ? '#d32f2f' : '#4caf50'}} />
-                            </View>
-                            {usagePercent >= 100 && (
-                                <Text style={{fontSize: 10, color: '#d32f2f', marginTop: 5, textAlign: 'right'}}>Limit reached. Contact Admin to upgrade.</Text>
-                            )}
-                        </View>
-                        {currentUser?.role?.toLowerCase() === 'admin' && (
-                            <TouchableOpacity 
-                                style={{ backgroundColor: '#2e7d32', padding: 12, borderRadius: 8, marginTop: 15, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', elevation: 2 }}
-                                onPress={() => router.push({ pathname: '/SubscriptionScreen' as any, params: { companyId: currentUser?.companyId } })}
-                            >
-                                <Ionicons name="rocket-outline" size={18} color="white" style={{ marginRight: 8 }} />
-                                <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 14 }}>Upgrade / Renew Plan</Text>
-                            </TouchableOpacity>
-                        )}
-                    </View>
-
                     {/* 1. BRANDING */}
                     <View style={styles.section}>
                         <Text style={styles.sectionHeader}>🏢 Branding & Identity</Text>
@@ -478,6 +427,13 @@ export default function CompanyProfileScreen() {
                     <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={saving || uploading}>
                         {saving || uploading ? <ActivityIndicator color="white" /> : <Text style={styles.saveText}>Save Global Settings</Text>}
                     </TouchableOpacity>
+
+                    {/* Website enquiry form → leads (has its own Save; Admin only) */}
+                    {currentUser?.role?.toLowerCase() === 'admin' && (
+                        <View style={{ marginTop: 20 }}>
+                            <WebsiteLeadsProfileCard />
+                        </View>
+                    )}
                     
                     <View style={{height: 100}} /> 
                 </ScrollView>
@@ -575,7 +531,7 @@ const InputLabel = ({label}: {label: string}) => (
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
     center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    header: { backgroundColor: '#3b5998', paddingTop: 50, padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', elevation:4 },
+    header: { backgroundColor: '#3b5998', padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', elevation:4 },
     headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },
     section: { backgroundColor: 'white', padding: 15, borderRadius: 10, marginBottom: 15, elevation: 1 },
     sectionHeader: { fontSize: 16, fontWeight: 'bold', color: '#3b5998', marginBottom: 15, borderBottomWidth: 1, borderBottomColor: '#eee', paddingBottom: 5 },

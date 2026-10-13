@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -19,27 +19,35 @@ import {
 } from 'react-native';
 
 import { useData } from './context/DataContext';
-import { listLeads } from '../services/api/leads';
 import {
     fetchTemplates,
     MessageTemplate,
 } from '../services/api/messageTemplates';
-import { fetchOrganizations } from '../services/api/organizations';
 import {
+    AudienceContact,
+    AudienceFilter,
     cancelMessage,
-    fetchOutboundMessages,
+    fetchAudiencePage,
+    fetchAudienceTypes,
+    fetchOutboundMessagesPage,
     markEmailSent,
+    MessageChannel,
     MessageStatus,
     OutboundMessage,
     sendBroadcast,
 } from '../services/api/outboundMessages';
+import { useServerPagedList } from '../hooks/useServerPagedList';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 
-import { TemplatesTab } from './TemplatesTab';
+import { TemplatesTab } from '../components/TemplatesTab';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function MessagingCenterScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     const [activeTab, setActiveTab] = useState<'Templates' | 'Pending' | 'History' | 'Broadcast'>('Templates');
 
@@ -48,12 +56,15 @@ export default function MessagingCenterScreen() {
             <View style={styles.container}>
                 <StatusBar barStyle="light-content" backgroundColor="#3b5998" />
 
-                <View style={styles.header}>
+                <View style={[styles.header, { paddingTop: headerTop }]}>
                     <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} style={{ padding: 5 }}>
                         <Ionicons name="arrow-back" size={24} color="white" />
                     </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Messaging Center</Text>
-                    <View style={{ width: 30 }} />
+                    <Text style={styles.headerTitle}>WhatsApp & Email</Text>
+                    {/* Automation (API keys, on/off) used to be its own sidebar item. */}
+                    <TouchableOpacity onPress={() => router.push('/automation_settings' as any)} style={{ padding: 5 }} accessibilityLabel="Automation settings">
+                        <Ionicons name="settings-outline" size={22} color="white" />
+                    </TouchableOpacity>
                 </View>
 
                 <View>
@@ -92,23 +103,26 @@ const PendingEmailsTab = () => {
     const { currentUser } = useData();
     const [processingId, setProcessingId] = useState<string | null>(null);
 
-    // 🔥 PENDING EMAILS + TEMPLATES — cache-first. See hooks/useCachedList.ts.
-    const pendingCacheKey = buildCacheKey('pending_emails', currentUser?.companyId);
+    // Pending emails: due ones only, 20 per page, filtered on the server.
+    const [handledCount, setHandledCount] = useState(0);
+    const pendingFilters = useMemo(() => ({ channel: 'email' as MessageChannel, status: 'PENDING' as MessageStatus, dueOnly: true }), []);
     const {
-        data: pendingList,
-        setData: setPendingList,
+        items: pendingList,
+        setItems: setPendingList,
+        total: pendingTotal,
         loading,
+        loadingMore: pendingLoadingMore,
+        hasMore: pendingHasMore,
+        loadMore: loadMorePending,
         refreshing: pendingRefreshing,
         refresh: refreshPending,
-    } = useCachedList({
-        cacheKey: pendingCacheKey,
+    } = useServerPagedList<{ channel: MessageChannel; status: MessageStatus; dueOnly: boolean }, OutboundMessage>({
+        fetchPage: fetchOutboundMessagesPage,
+        filters: pendingFilters,
         enabled: !!currentUser?.companyId,
-        fetcher: async () => {
-            const messages = await fetchOutboundMessages({ channel: 'email', status: 'PENDING' });
-            const now = Date.now();
-            return messages.filter((m) => !m.scheduledFor || new Date(m.scheduledFor).getTime() <= now);
-        },
+        cacheKey: buildCacheKey('pending_emails_page1', currentUser?.companyId),
     });
+    // 🔥 TEMPLATES — cache-first. See hooks/useCachedList.ts.
     const templatesCacheKey = buildCacheKey('email_templates', currentUser?.companyId);
     const {
         data: templates,
@@ -121,6 +135,7 @@ const PendingEmailsTab = () => {
     });
 
     const onRefresh = async () => {
+        setHandledCount(0);
         await Promise.all([refreshPending(), refreshTemplates()]);
     };
 
@@ -155,6 +170,7 @@ const PendingEmailsTab = () => {
             await Linking.openURL(url);
             await markEmailSent(msg.id);
             setPendingList((prev) => prev.filter((m) => m.id !== msg.id));
+            setHandledCount((n) => n + 1);
         } catch (e: any) {
             Alert.alert('Error', e.message || 'Could not open email app.');
         } finally {
@@ -170,6 +186,7 @@ const PendingEmailsTab = () => {
                     try {
                         await cancelMessage(id);
                         setPendingList((prev) => prev.filter((m) => m.id !== id));
+                        setHandledCount((n) => n + 1);
                     } catch (e: any) {
                         Alert.alert('Error', e.message || 'Could not cancel.');
                     }
@@ -177,6 +194,29 @@ const PendingEmailsTab = () => {
             },
         ]);
     };
+
+    // Laptop: the same list as a table (no row tap, same as the card; Send / Cancel in the last column).
+    const isDesktop = useIsDesktop();
+    const pendingColumns: TableColumn<any>[] = [
+        { key: 'to', label: 'To', flex: 2, render: (m) => <TwoLine main={m.to} /> },
+        { key: 'tpl', label: 'Template', flex: 2, render: (m) => m.templateName || '-' },
+        { key: 'date', label: 'Generated', width: 170, render: (m) => new Date(m.createdAt).toLocaleString() },
+        { key: 'act', label: '', width: 130, align: 'center', render: (m) => (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <TouchableOpacity style={styles.sendBtn} onPress={() => handleSendEmail(m)} disabled={processingId === m.id}>
+                    {processingId === m.id ? <ActivityIndicator color="white" size="small" /> : (
+                        <>
+                            <Ionicons name="paper-plane" size={14} color="white" />
+                            <Text style={styles.sendText}>Send</Text>
+                        </>
+                    )}
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => handleCancel(m.id)}>
+                    <Ionicons name="close-circle" size={22} color="#ccc" />
+                </TouchableOpacity>
+            </View>
+        ) },
+    ];
 
     if (loading) return <ActivityIndicator size="large" color="#1565c0" style={{ marginTop: 50 }} />;
 
@@ -192,13 +232,21 @@ const PendingEmailsTab = () => {
                 refreshControl={
                     <RefreshControl refreshing={pendingRefreshing} onRefresh={onRefresh} colors={['#1565c0']} tintColor="#1565c0" />
                 }
+                ListHeaderComponent={<>{pendingTotal - handledCount > 0 ? <Text style={{ textAlign: 'right', fontSize: 12, color: 'gray', marginBottom: 6 }}>Pending: {pendingTotal - handledCount}</Text> : null}{isDesktop && pendingList.length > 0 ? <TableHeader columns={pendingColumns} /> : null}</>}
+                ListFooterComponent={pendingHasMore ? (
+                    <TouchableOpacity style={styles.loadMoreBtn} onPress={loadMorePending} disabled={pendingLoadingMore}>
+                        {pendingLoadingMore ? <ActivityIndicator color="#3b5998" /> : <Text style={styles.loadMoreText}>Load more ({pendingTotal - handledCount - pendingList.length} remaining)</Text>}
+                    </TouchableOpacity>
+                ) : null}
                 ListEmptyComponent={
                     <View style={{ alignItems: 'center', marginTop: 50 }}>
                         <Ionicons name="checkmark-done-circle" size={60} color="#ccc" />
                         <Text style={{ color: 'gray', marginTop: 10 }}>All emails are sent! You're caught up.</Text>
                     </View>
                 }
-                renderItem={({ item }) => (
+                renderItem={isDesktop
+                    ? ({ item, index }) => <TableRow columns={pendingColumns} item={item} index={index} />
+                    : ({ item }) => (
                     <View style={styles.card}>
                         <View style={{ flex: 1 }}>
                             <Text style={styles.toText}>✉️ {item.to}</Text>
@@ -240,22 +288,44 @@ const SentHistoryTab = () => {
     const [channelFilter, setChannelFilter] = useState<'all' | 'whatsapp' | 'email'>('all');
     const [statusFilter, setStatusFilter] = useState<'all' | MessageStatus>('all');
 
-    // 🔥 SENT HISTORY — cache-first, parameterized by channel+status filter
-    // (same pattern as attendance.tsx/travel.tsx). See hooks/useCachedList.ts.
-    const historyCacheKey = buildCacheKey(`message_history:${channelFilter}:${statusFilter}`, currentUser?.companyId);
+    // 🔥 SENT HISTORY — server-paged (20 at a time, Load more). This table
+    // grows with every message, so it is never downloaded whole.
+    const historyFilters = useMemo(() => ({
+        channel: channelFilter === 'all' ? undefined : channelFilter,
+        status: statusFilter === 'all' ? undefined : statusFilter,
+    }), [channelFilter, statusFilter]);
     const {
-        data: messages,
+        items: messages,
+        total: historyTotal,
         loading,
+        loadingMore: historyLoadingMore,
+        hasMore: historyHasMore,
+        loadMore: loadMoreHistory,
         refreshing: historyRefreshing,
         refresh: refreshHistory,
-    } = useCachedList({
-        cacheKey: historyCacheKey,
+    } = useServerPagedList<{ channel?: MessageChannel; status?: MessageStatus }, OutboundMessage>({
+        fetchPage: fetchOutboundMessagesPage,
+        filters: historyFilters,
         enabled: !!currentUser?.companyId,
-        fetcher: () => fetchOutboundMessages({
-            channel: channelFilter === 'all' ? undefined : channelFilter,
-            status: statusFilter === 'all' ? undefined : statusFilter,
-        }),
+        cacheKey: channelFilter === 'all' && statusFilter === 'all' ? buildCacheKey('message_history_page1', currentUser?.companyId) : null,
     });
+
+    // Laptop: the same list as a table (no row tap, same as the card).
+    const isDesktop = useIsDesktop();
+    const historyColumns: TableColumn<any>[] = [
+        { key: 'ch', label: 'Channel', width: 100, render: (m) => (
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name={m.channel === 'whatsapp' ? 'logo-whatsapp' : 'mail'} size={16} color={m.channel === 'whatsapp' ? '#25D366' : '#1565c0'} />
+                <Text style={{ fontSize: 12, marginLeft: 4 }}>{m.channel === 'whatsapp' ? 'WhatsApp' : 'Email'}</Text>
+            </View>
+        ) },
+        { key: 'to', label: 'To', flex: 2, render: (m) => <TwoLine main={m.to} /> },
+        { key: 'tpl', label: 'Template', flex: 2, render: (m) => m.templateName || '-' },
+        { key: 'status', label: 'Status', width: 100, render: (m) => <Pill text={m.status} color={STATUS_COLORS[m.status] || '#999'} bg={(STATUS_COLORS[m.status] || '#999') + '20'} /> },
+        { key: 'date', label: 'Created', width: 170, render: (m) => new Date(m.createdAt).toLocaleString() },
+        { key: 'sent', label: 'Sent At', width: 170, render: (m) => (m.sentAt ? new Date(m.sentAt).toLocaleString() : '-') },
+        { key: 'fail', label: 'Failure Reason', flex: 2, render: (m) => (m.status === 'FAILED' && m.failureReason ? m.failureReason : '-') },
+    ];
 
     return (
         <View style={{ flex: 1 }}>
@@ -284,7 +354,15 @@ const SentHistoryTab = () => {
                         <RefreshControl refreshing={historyRefreshing} onRefresh={refreshHistory} colors={['#3b5998']} tintColor="#3b5998" />
                     }
                     ListEmptyComponent={<Text style={{ textAlign: 'center', color: 'gray', marginTop: 30 }}>No messages found.</Text>}
-                    renderItem={({ item }) => (
+                    ListHeaderComponent={<>{historyTotal > 0 ? <Text style={{ textAlign: 'right', fontSize: 12, color: 'gray', marginBottom: 6 }}>Total: {historyTotal}</Text> : null}{isDesktop && messages.length > 0 ? <TableHeader columns={historyColumns} /> : null}</>}
+                    ListFooterComponent={historyHasMore ? (
+                        <TouchableOpacity style={styles.loadMoreBtn} onPress={loadMoreHistory} disabled={historyLoadingMore}>
+                            {historyLoadingMore ? <ActivityIndicator color="#3b5998" /> : <Text style={styles.loadMoreText}>Load more ({historyTotal - messages.length} remaining)</Text>}
+                        </TouchableOpacity>
+                    ) : <View style={{ height: 30 }} />}
+                    renderItem={isDesktop
+                        ? ({ item, index }) => <TableRow columns={historyColumns} item={item} index={index} />
+                        : ({ item }) => (
                         <View style={styles.historyCard}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
                                 <Ionicons name={item.channel === 'whatsapp' ? 'logo-whatsapp' : 'mail'} size={16} color={item.channel === 'whatsapp' ? '#25D366' : '#1565c0'} />
@@ -312,14 +390,6 @@ const SentHistoryTab = () => {
 type Audience = 'Customers' | 'Leads' | 'Both';
 type Channel = 'WhatsApp' | 'Email' | 'Both';
 
-interface Target {
-    id: string;
-    name: string;
-    orgName: string;
-    mobile: string;
-    email: string;
-    type: string;
-}
 
 const BroadcastTab = () => {
     const { currentUser } = useData();
@@ -330,109 +400,102 @@ const BroadcastTab = () => {
 
     const [searchText, setSearchText] = useState('');
     const [selectedType, setSelectedType] = useState('All');
-    const [targetList, setTargetList] = useState<Target[]>([]);
-    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    // Selection: by default everyone matching the filter is selected ("all
+    // except these"); after "Deselect all" only hand-picked contacts are.
+    const [selectAllMatching, setSelectAllMatching] = useState(true);
+    const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
+    const [picked, setPicked] = useState<Map<string, AudienceContact>>(new Map());
     const [isSending, setIsSending] = useState(false);
     const [testContact, setTestContact] = useState('');
 
-    // 🔥 ORGANIZATIONS + LEADS — cache-first, deliberately sharing the SAME
-    // cache keys as app/organization.tsx and app/leads.tsx. See
-    // hooks/useCachedList.ts.
-    const {
-        data: orgList,
-        loading: orgsLoading,
-        refreshing: orgsRefreshing,
-        refresh: refreshOrgs,
-    } = useCachedList({
-        cacheKey: buildCacheKey('organizations', currentUser?.companyId),
-        enabled: !!currentUser?.companyId,
-        fetcher: () => fetchOrganizations({ limit: 500 }),
-    });
-    const {
-        data: leadsList,
-        loading: leadsLoading,
-        refreshing: leadsRefreshing,
-        refresh: refreshLeads,
-    } = useCachedList({
-        cacheKey: buildCacheKey('leads', currentUser?.companyId),
-        enabled: !!currentUser?.companyId,
-        fetcher: listLeads,
-    });
-    const loadingContacts = orgsLoading || leadsLoading;
-    const contactsRefreshing = orgsRefreshing || leadsRefreshing;
-    const onRefreshContacts = () => Promise.all([refreshOrgs(), refreshLeads()]);
-
-    const availableTypes = ['All', ...Array.from(new Set(orgList.map((o: any) => o.type).filter(Boolean)))];
-
+    // 🔥 AUDIENCE — built and filtered on the server (one row per mobile/email),
+    // 50 at a time. Was: every organization (500) + every lead (1000, with
+    // full history) downloaded and filtered on the phone.
+    const [debouncedSearch, setDebouncedSearch] = useState('');
     useEffect(() => {
-        let rawTargets: Target[] = [];
-        if (audience === 'Customers' || audience === 'Both') {
-            orgList.forEach((org: any) => {
-                if (org.mobile || org.phone || org.email) {
-                    rawTargets.push({
-                        id: org.id || Math.random().toString(),
-                        name: org.contactPerson || 'Customer',
-                        orgName: org.name || org.orgName || '',
-                        mobile: org.mobile || org.phone || '',
-                        email: org.email || '',
-                        type: org.type || 'Unknown',
-                    });
-                }
-            });
-        }
-        if (audience === 'Leads' || audience === 'Both') {
-            leadsList.forEach((lead: any) => {
-                if (lead.mobile || lead.email) {
-                    rawTargets.push({
-                        id: lead.id || Math.random().toString(),
-                        name: lead.contactPerson || lead.name || 'Sir/Madam',
-                        orgName: lead.orgName || lead.companyName || '',
-                        mobile: lead.mobile || '',
-                        email: lead.email || '',
-                        type: 'Lead',
-                    });
-                }
-            });
-        }
-        const uniqueTargets = Array.from(new Set(rawTargets.map((t) => t.mobile || t.email)))
-            .map((identifier) => rawTargets.find((t) => (t.mobile || t.email) === identifier))
-            .filter(Boolean) as Target[];
-        setTargetList(uniqueTargets);
-        setSelectedIds(new Set(uniqueTargets.map((u) => u.id)));
-    }, [audience, orgList, leadsList]);
-
-    const filteredList = targetList.filter((item) => {
-        const fullString = `${item.name} ${item.orgName} ${item.mobile}`.toLowerCase();
-        const matchesSearch = fullString.includes(searchText.toLowerCase());
-        const matchesType = selectedType === 'All' || item.type === selectedType;
-        return matchesSearch && matchesType;
+        const t = setTimeout(() => setDebouncedSearch(searchText.trim()), 400);
+        return () => clearTimeout(t);
+    }, [searchText]);
+    const audienceFilter = useMemo<AudienceFilter>(() => ({
+        audience: audience === 'Customers' ? 'customers' : audience === 'Leads' ? 'leads' : 'both',
+        type: selectedType === 'All' ? undefined : selectedType,
+        search: debouncedSearch || undefined,
+    }), [audience, selectedType, debouncedSearch]);
+    const {
+        items: contacts,
+        total: matchingTotal,
+        loading: loadingContacts,
+        loadingMore: contactsLoadingMore,
+        hasMore: contactsHasMore,
+        loadMore: loadMoreContacts,
+        refreshing: contactsRefreshing,
+        refresh: onRefreshContacts,
+    } = useServerPagedList<AudienceFilter, AudienceContact>({
+        fetchPage: fetchAudiencePage,
+        filters: audienceFilter,
+        enabled: !!currentUser?.companyId,
+        pageSize: 50,
     });
 
-    const toggleSelection = (id: string) => {
-        const newSelected = new Set(selectedIds);
-        if (newSelected.has(id)) newSelected.delete(id); else newSelected.add(id);
-        setSelectedIds(newSelected);
+    // A new filter starts a new selection: everyone matching it.
+    useEffect(() => {
+        setSelectAllMatching(true);
+        setExcludedIds(new Set());
+        setPicked(new Map());
+    }, [audienceFilter]);
+
+    const [orgTypes, setOrgTypes] = useState<string[]>([]);
+    useEffect(() => {
+        if (!currentUser?.companyId) return;
+        fetchAudienceTypes().then(setOrgTypes).catch(() => {});
+    }, [currentUser?.companyId]);
+    const availableTypes = ['All', ...(audience === 'Customers' ? orgTypes : [...orgTypes, 'Lead'])];
+
+    const isSelected = (id: string) => (selectAllMatching ? !excludedIds.has(id) : picked.has(id));
+    const selectedCount = selectAllMatching ? Math.max(0, matchingTotal - excludedIds.size) : picked.size;
+
+    const toggleSelection = (c: AudienceContact) => {
+        if (selectAllMatching) {
+            const next = new Set(excludedIds);
+            if (next.has(c.id)) next.delete(c.id); else next.add(c.id);
+            setExcludedIds(next);
+        } else {
+            const next = new Map(picked);
+            if (next.has(c.id)) next.delete(c.id); else next.set(c.id, c);
+            setPicked(next);
+        }
     };
 
     const toggleSelectAll = () => {
-        const filteredIds = filteredList.map((item) => item.id);
-        const allSelected = filteredIds.every((id) => selectedIds.has(id));
-        const newSelected = new Set(selectedIds);
-        if (allSelected) filteredIds.forEach((id) => newSelected.delete(id));
-        else filteredIds.forEach((id) => newSelected.add(id));
-        setSelectedIds(newSelected);
+        if (selectAllMatching && excludedIds.size === 0) {
+            setSelectAllMatching(false);
+            setPicked(new Map());
+        } else {
+            setSelectAllMatching(true);
+            setExcludedIds(new Set());
+        }
     };
 
-    const runBroadcast = async (targets: { name: string; email?: string; phone?: string }[]) => {
+    // targets = explicit list (test / hand-picked); 'audience' = everyone
+    // matching the filter except the unticked ones (resolved on the server).
+    const runBroadcast = async (targets: { name: string; email?: string; phone?: string }[] | 'audience') => {
         setIsSending(true);
         try {
             const apiChannel = channel === 'WhatsApp' ? 'whatsapp' : channel === 'Email' ? 'email' : 'both';
-            const recipients = targets.map((t) => ({
-                email: t.email || undefined,
-                phone: t.phone || undefined,
-                variables: { customer_name: t.name, broadcast_subject: subject, broadcast_message: messageBody },
-            }));
-            const result = await sendBroadcast({ channel: apiChannel, templateName: 'bulk_broadcast', recipients });
+            const shared = { broadcast_subject: subject, broadcast_message: messageBody };
+            const result = targets === 'audience'
+                ? await sendBroadcast({
+                    channel: apiChannel, templateName: 'bulk_broadcast',
+                    audienceFilter, excludeIds: Array.from(excludedIds), variables: shared,
+                })
+                : await sendBroadcast({
+                    channel: apiChannel, templateName: 'bulk_broadcast',
+                    recipients: targets.map((t) => ({
+                        email: t.email || undefined,
+                        phone: t.phone || undefined,
+                        variables: { customer_name: t.name, ...shared },
+                    })),
+                });
             const sent = result.results.filter((r) => r.status === 'SENT').length;
             const failed = result.results.filter((r) => r.status === 'FAILED').length;
             const pending = result.results.filter((r) => r.status === 'PENDING').length;
@@ -457,11 +520,16 @@ const BroadcastTab = () => {
     const handleSendBroadcast = () => {
         if (!messageBody.trim()) { Alert.alert('Required', 'Please write a message.'); return; }
         if (channel !== 'WhatsApp' && !subject.trim()) { Alert.alert('Required', 'Please enter a subject (used for email).'); return; }
-        const selectedTargets = filteredList.filter((t) => selectedIds.has(t.id));
-        if (selectedTargets.length === 0) { Alert.alert('Empty List', 'Please select at least one contact.'); return; }
-        Alert.alert('Double Confirmation ⚠️', `Send this message to ${selectedTargets.length} contacts via ${channel}?`, [
+        if (selectedCount === 0) { Alert.alert('Empty List', 'Please select at least one contact.'); return; }
+        Alert.alert('Double Confirmation ⚠️', `Send this message to ${selectedCount} contacts via ${channel}?`, [
             { text: 'No, Cancel', style: 'cancel' },
-            { text: 'Yes, Send 🔥', style: 'destructive', onPress: () => runBroadcast(selectedTargets.map((t) => ({ name: t.name, email: t.email, phone: t.mobile }))) },
+            {
+                text: 'Yes, Send 🔥', style: 'destructive', onPress: () => runBroadcast(
+                    selectAllMatching
+                        ? 'audience'
+                        : Array.from(picked.values()).map((t) => ({ name: t.name, email: t.email || undefined, phone: t.mobile || undefined }))
+                )
+            },
         ]);
     };
 
@@ -507,7 +575,7 @@ const BroadcastTab = () => {
                     </TouchableOpacity>
                 </View>
 
-                <Text style={styles.sectionTitle}>4. Recipients ({selectedIds.size} selected)</Text>
+                <Text style={styles.sectionTitle}>4. Recipients ({selectedCount} of {matchingTotal} selected)</Text>
                 <View style={styles.searchBox}>
                     <Ionicons name="search" size={18} color="gray" />
                     <TextInput style={styles.searchInput} placeholder="Search name, org, mobile..." value={searchText} onChangeText={setSearchText} />
@@ -520,18 +588,25 @@ const BroadcastTab = () => {
                     ))}
                 </ScrollView>
                 <TouchableOpacity onPress={toggleSelectAll} style={{ marginBottom: 8 }}>
-                    <Text style={{ color: '#3b5998', fontWeight: 'bold', fontSize: 12 }}>Select / Deselect All ({filteredList.length} shown)</Text>
+                    <Text style={{ color: '#3b5998', fontWeight: 'bold', fontSize: 12 }}>
+                        {selectAllMatching && excludedIds.size === 0 ? `Deselect all (${matchingTotal})` : `Select all matching (${matchingTotal})`}
+                    </Text>
                 </TouchableOpacity>
 
                 {loadingContacts ? <ActivityIndicator size="large" color="#3b5998" style={{ marginTop: 20 }} /> : (
                     <FlatList
-                        data={filteredList}
+                        data={contacts}
                         keyExtractor={(item) => item.id}
                         scrollEnabled={false}
                         ListEmptyComponent={<Text style={{ textAlign: 'center', color: 'gray', marginTop: 20 }}>No contacts found.</Text>}
+                        ListFooterComponent={contactsHasMore ? (
+                            <TouchableOpacity style={styles.loadMoreBtn} onPress={loadMoreContacts} disabled={contactsLoadingMore}>
+                                {contactsLoadingMore ? <ActivityIndicator color="#3b5998" /> : <Text style={styles.loadMoreText}>Load more ({matchingTotal - contacts.length} remaining)</Text>}
+                            </TouchableOpacity>
+                        ) : null}
                         renderItem={({ item }) => (
-                            <TouchableOpacity style={styles.contactRow} onPress={() => toggleSelection(item.id)}>
-                                <Ionicons name={selectedIds.has(item.id) ? 'checkbox' : 'square-outline'} size={22} color={selectedIds.has(item.id) ? '#2e7d32' : '#ccc'} />
+                            <TouchableOpacity style={styles.contactRow} onPress={() => toggleSelection(item)}>
+                                <Ionicons name={isSelected(item.id) ? 'checkbox' : 'square-outline'} size={22} color={isSelected(item.id) ? '#2e7d32' : '#ccc'} />
                                 <View style={{ marginLeft: 10, flex: 1 }}>
                                     <Text style={styles.contactName}>{item.name} {item.orgName ? `(${item.orgName})` : ''}</Text>
                                     <Text style={styles.contactSub}>{item.mobile || '—'} {item.email ? `• ${item.email}` : ''}</Text>
@@ -550,8 +625,10 @@ const BroadcastTab = () => {
 };
 
 const styles = StyleSheet.create({
+    loadMoreBtn: { padding: 12, backgroundColor: '#fff', alignItems: 'center', marginVertical: 12, borderRadius: 8, borderWidth: 1, borderColor: '#ddd' },
+    loadMoreText: { fontWeight: 'bold', color: '#3b5998' },
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { backgroundColor: '#3b5998', padding: 15, paddingTop: 50, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    header: { backgroundColor: '#3b5998', padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },
     tabContainer: { flexDirection: 'row', backgroundColor: 'white', elevation: 2 },
     tabBtn: { paddingVertical: 15, paddingHorizontal: 16, alignItems: 'center', borderBottomWidth: 3, borderBottomColor: 'transparent', minWidth: 100 },

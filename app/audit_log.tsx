@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { AuditLogEntry, fetchAuditLogs } from '../services/api/auditLogs';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 const ACTION_ICONS: Record<string, { icon: string; color: string }> = {
   USER_UPDATED: { icon: 'person-outline', color: '#3b5998' },
@@ -22,6 +23,7 @@ function formatAction(action: string): string {
 }
 
 export default function AuditLogScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,7 +60,7 @@ export default function AuditLogScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
@@ -112,7 +114,7 @@ export default function AuditLogScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { backgroundColor: '#3b5998', paddingTop: 50, padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 4 },
+  header: { backgroundColor: '#3b5998', padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 4 },
   headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },
   centerLoading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emptyText: { color: '#999', marginTop: 10, fontSize: 14 },

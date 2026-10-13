@@ -1,3 +1,4 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
@@ -21,13 +22,15 @@ import { useData } from './context/DataContext';
 
 // 🔥 Phase 8: visiting card requests now go to Postgres via this adapter
 import { createVisitingCardRequest } from '../services/api/visitingCards';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddVisitingCardScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   // 🔥 1. Context se User aur Notification engine (cardRequestList ab zaroori nahi —
   // reqId ab server-side generate hota hai, is FY ke count se)
-  const { currentUser, addNotification } = useData();
+  const { currentUser } = useData();
 
   // --- FORM DATA ---
   const [shippingAddress, setShippingAddress] = useState('');
@@ -103,17 +106,6 @@ export default function AddVisitingCardScreen() {
           const res = await createVisitingCardRequest({ shippingAddress, items: finalItems });
 
           if (res.success) {
-              // 🔥 REAL PUSH NOTIFICATION
-              if (addNotification) {
-                  const itemSummary = finalItems.map(i => `${i.type} (${i.quantity})`).join(', ');
-                  await addNotification({
-                      title: "New Stationery Request 📇",
-                      message: `${currentUser?.name} requested: ${itemSummary}.`,
-                      to: "Admin", // Ya 'Store'
-                      route: "/visiting_cards",
-                      type: "warning"
-                  });
-              }
 
               Alert.alert("Success", "Request Submitted & Admin Notified!");
               router.back();
@@ -129,9 +121,9 @@ export default function AddVisitingCardScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#333" />
+            <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>New Request</Text>
         <View style={{width:24}} /> 
@@ -257,9 +249,9 @@ export default function AddVisitingCardScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   contentContainer: { padding: 20, paddingBottom: 100 },
   label: { marginBottom: 5, color:'#aaa', fontWeight:'600', fontSize:13 },
@@ -285,4 +277,4 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center', color: '#3b5998' },
   modalItem: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#eee' },
   modalItemText: { fontSize: 16, color: '#333' }
-});
+}), FORM_ACCENT.visitingCard);

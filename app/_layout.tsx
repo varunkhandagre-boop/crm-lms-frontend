@@ -1,34 +1,38 @@
+import '../utils/webAlert';
 import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
 import { Slot, usePathname, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Dimensions, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DataProvider, useData } from './context/DataContext';
-import { MENU_TAG_BUCKET } from '../constants/modules';
+import { canSeeTab as canSeeTabFor } from '../utils/menuAccess';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import DesktopSidebar from '../components/DesktopSidebar';
 
-import * as Notifications from 'expo-notifications';
+import { Notifications, notificationsAvailable } from '../utils/notificationsModule';
 import { manageAttendanceReminders, setupNotificationPermissions } from '../utils/notificationHelper';
 
 import * as Location from 'expo-location';
 // 🔥 Firestore direct imports minimized
 import { fetchCompanyProfile } from '../services/api/companies';
-import { recordLocationLog } from '../services/api/locationLogs';
+// Also registers the background location task — must stay imported here (app root).
+import { recordThrottledLocation, syncBackgroundTracking } from '../utils/backgroundLocation';
 import { fetchTodayAttendance } from '../services/api/attendance';
 import { getLeadCounts } from '../services/api/leads';
-import { listServiceCalls } from '../services/api/serviceCalls';
-import { fetchOrganizations } from '../services/api/organizations';
-import { fetchTasks } from '../services/api/tasks';
+import { getServiceCallCounts } from '../services/api/serviceCalls';
+import { countOrganizationsSince } from '../services/api/organizations';
+import { localYmd } from '../utils/periodRange';
+import { listTasksPage } from '../services/api/tasks';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 
 // 🔥 SAAS IMPORT
-import { useSaaSDB } from '../hooks/useSaaSDB';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
     shouldShowBanner: true,
@@ -37,10 +41,30 @@ Notifications.setNotificationHandler({
 });
 
 export default function Layout() {
-  return (
+  const isDesktop = useIsDesktop();
+  // Phones stay upright (the screens are designed for portrait). Tablets and
+  // foldables may rotate — the manifest has no orientation lock, as Play asks
+  // for Android 16 large screens.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const { width, height } = Dimensions.get('screen');
+    if (Math.min(width, height) < 600) {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+    }
+  }, []);
+  const app = (
     <DataProvider>
       <NavigationLayout />
     </DataProvider>
+  );
+  if (Platform.OS !== 'web') return app;
+  // Laptop / desktop: full width (left menu + wide page, see NavigationLayout).
+  if (isDesktop) return app;
+  // Narrow browser window: the phone screens sit in a centred column.
+  return (
+    <View style={{ flex: 1, backgroundColor: '#dfe3ea', alignItems: 'center' }}>
+      <View style={{ flex: 1, width: '100%', maxWidth: 1100, backgroundColor: '#f5f5f5' }}>{app}</View>
+    </View>
   );
 }
 function PlanExpiryIndicator() {
@@ -49,7 +73,6 @@ function PlanExpiryIndicator() {
     const router = useRouter();
     const pathname = usePathname();
     const { currentUser } = useData();
-    const { fetchSaaSData } = useSaaSDB();
 
     useEffect(() => {
     const check = async () => {
@@ -95,7 +118,7 @@ function NetworkIndicator() {
     const insets = useSafeAreaInsets();
     const pathname = usePathname();
     
-    const { isFirebaseSynced, currentUser } = useData(); 
+    const { isSessionReady, currentUser } = useData(); 
 
     useEffect(() => {
         // 🔥 '(state: any)' add kar diya gaya hai TS error hatane ke liye
@@ -116,7 +139,7 @@ function NetworkIndicator() {
         );
     }
 
-    if (isConnected === true && currentUser && isFirebaseSynced === false) {
+    if (isConnected === true && currentUser && isSessionReady === false) {
          return (
              <View style={[styles.networkPill, { top: insets.top + 50 }]}>
                  <ActivityIndicator size="small" color="#f57c00" style={{ marginRight: 6, transform: [{ scale: 0.6 }] }} />
@@ -137,16 +160,15 @@ function NavigationLayout() {
   const router = useRouter();
   const pathname = usePathname();
   
-  // 🔥 SAAS ENGINE HOOK INJECTED HERE
-  const { addSaaSData } = useSaaSDB();
-
   const { 
       currentUser, 
       appPermissions, 
       loading,
       isSubscriptionExpired, 
       companyProfile,
+      logout,
   } = useData();
+  const isDesktop = useIsDesktop();
 
   // 🔥 These 5 were previously read from DataContext (a big Firestore-backed
   // "God Context" that's since been cleaned up — see DataContext.tsx's own
@@ -163,17 +185,18 @@ function NavigationLayout() {
           return rec ? [rec] : [];
       },
   });
-  const { data: taskList } = useCachedList({
-      cacheKey: buildCacheKey('all_tasks_merged', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: async () => {
-          const [given, received] = await Promise.all([
-              fetchTasks({ direction: 'given', userId: 'all', limit: 1000 }),
-              fetchTasks({ direction: 'received', userId: 'all', limit: 1000 }),
-          ]);
-          return Array.from(new Map([...given, ...received].map((t: any) => [t.id, t])).values());
-      },
-  });
+  // Tasks badge = pending counts from the server (two COUNT queries) — this used
+  // to download up to 2000 tasks at every app start just to count them.
+  // Admin / Manager: every pending task. Others: pending tasks given to them +
+  // pending tasks they gave to someone else.
+  const [taskCount, setTaskCount] = useState(0);
+  useEffect(() => {
+      if (!currentUser?.companyId) return;
+      const boss = currentUser?.role === 'Admin' || currentUser?.role === 'Manager';
+      listTasksPage({ view: 'received', userId: boss ? 'all' : undefined, status: 'Pending', page: 1, limit: 1 })
+          .then(r => setTaskCount(boss ? (r.counts?.receivedPending ?? 0) : (r.counts?.receivedPending ?? 0) + (r.counts?.givenPending ?? 0)))
+          .catch(() => {});
+  }, [currentUser?.companyId, currentUser?.role, pathname === '/']);
   // Leads badge = open-lead count from the server (one COUNT query) — this
   // used to download every lead at app start just to count them.
   const [leadCount, setLeadCount] = useState(0);
@@ -182,72 +205,76 @@ function NavigationLayout() {
       getLeadCounts().then(c => setLeadCount(c.open)).catch(() => {});
       // Refreshed when the person lands back on Home, where the badge shows.
   }, [currentUser?.companyId, pathname === '/']);
-  const { data: serviceCallList } = useCachedList({
-      cacheKey: buildCacheKey('service_calls', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: listServiceCalls,
-  });
-  const { data: orgList } = useCachedList({
-      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 200 }),
-  });
+  // Service badge = open calls (Open + Assigned) visible to this user — one
+  // COUNT on the server instead of downloading every call at app start.
+  const [serviceCount, setServiceCount] = useState(0);
+  useEffect(() => {
+      if (!currentUser?.companyId) return;
+      getServiceCallCounts().then(c => setServiceCount(c.open)).catch(() => {});
+  }, [currentUser?.companyId, pathname === '/']);
+  const [orgCount, setOrgCount] = useState(0);
+  useEffect(() => {
+      if (!currentUser?.companyId) return;
+      countOrganizationsSince(localYmd(new Date())).then(setOrgCount).catch(() => {});
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.companyId, pathname === '/']);
   
   const insets = useSafeAreaInsets(); 
 
-  useEffect(() => {
-    let isMounted = true;
+  // ── Tapping a push notification opens its screen (route in data.route) ──
+  // Two cases: the app was running (listener), or the tap STARTED the app —
+  // then the response is only available via getLastNotificationResponseAsync().
+  // Either way we wait until the user session is loaded, otherwise the login /
+  // home redirect would override the navigation.
+  const pendingRoute = useRef<string | null>(null);
+  const handledResponseId = useRef<string | null>(null);
+  // The listener below is registered once, so it reads readiness from a ref, not stale state.
+  const sessionReady = useRef(false);
+  sessionReady.current = !loading && !!currentUser;
 
-    const subscription = Notifications.addNotificationResponseReceivedListener(response => {
-      if (!isMounted) return;
-
-      const data = response.notification.request.content.data as any;
-      let targetPath = data?.route || data?.url || data?.screen || "";
-
-      if (!targetPath) return; 
-
-      if (typeof targetPath === 'string') {
-          if (!targetPath.startsWith('/')) {
-              targetPath = '/' + targetPath;
-          }
+  const openPendingRoute = () => {
+    if (!pendingRoute.current || !sessionReady.current) return;
+    const target = pendingRoute.current;
+    pendingRoute.current = null;
+    setTimeout(() => {
+      try {
+        router.push(target as any);
+      } catch (error) {
+        router.push('/');
       }
+    }, 300);
+  };
 
-      setTimeout(() => {
-          try {
-              router.push(targetPath as any);
-          } catch (error) {
-              router.push('/');
-          }
-      }, 800); 
-    });
+  const takeResponse = (response: any) => {
+    const id = response?.notification?.request?.identifier;
+    if (!id || handledResponseId.current === id) return;
+    handledResponseId.current = id;
+    const data = response.notification.request.content?.data as any;
+    let target = data?.route || data?.url || data?.screen || '';
+    if (!target || typeof target !== 'string') return;
+    if (!target.startsWith('/')) target = '/' + target;
+    pendingRoute.current = target;
+    openPendingRoute();
+  };
 
-    return () => {
-        isMounted = false;
-        subscription.remove();
-    };
+  useEffect(() => {
+    const subscription = Notifications.addNotificationResponseReceivedListener(takeResponse);
+    // Expo Go uses a no-op stand-in (utils/notificationsModule.ts) whose calls
+    // don't return promises — only ask for the launch notification in real builds.
+    if (notificationsAvailable) {
+      Promise.resolve(Notifications.getLastNotificationResponseAsync())
+        .then((r: any) => r && takeResponse(r))
+        .catch(() => {});
+    }
+    return () => subscription.remove();
   }, []);
 
-  const isBoss = currentUser?.role === 'Admin' || currentUser?.role === 'Manager';
-  const todayStr = new Date().toISOString().split('T')[0];
-
-  const calculateTaskBadge = () => {
-      if (!currentUser) return 0;
-      const myPending = taskList.filter((t: any) => (t.to === 'Self' || t.to === currentUser?.name) && t.status === 'Pending').length;
-      const assignedPending = taskList.filter((t: any) => t.from === currentUser?.name && t.to !== 'Self' && t.to !== currentUser?.name && t.status === 'Pending').length;
-      return isBoss ? taskList.filter((t:any) => t.status === 'Pending').length : (myPending + assignedPending);
-  };
-  const taskCount = calculateTaskBadge();
+  useEffect(() => { openPendingRoute(); }, [loading, currentUser]);
 
 
-  const serviceCount = serviceCallList.filter((s: any) => {
-      if (s.status !== 'Open' && s.status !== 'Assigned') return false;
-      return isBoss || s.senderId === currentUser?.uid || s.engineerId === currentUser?.uid || s.engineerId === currentUser?.id;
-  }).length;
 
-  const orgCount = orgList.filter((o: any) => {
-      const itemDate = o.createdAt ? o.createdAt.split('T')[0] : '';
-      return itemDate === todayStr; 
-  }).length;
+
+
 
   // ==========================================
   // 🕵️‍♂️ AUTO LOCATION TRACKER (🔥 UPGRADED TO SAAS)
@@ -256,17 +283,19 @@ function NavigationLayout() {
     if (loading || !currentUser) return;
 
     let locationSubscription: any = null;
-    let lastUpdateTimestamp = 0; 
+    // startTracking is async (permission prompts + watchPositionAsync), so the cleanup
+    // below can run before locationSubscription is set — e.g. on logout. Without this
+    // flag the watcher kept running after logout and posted location logs with no token.
+    let cancelled = false;
 
     const startTracking = async () => {
         try {
             const { status: foreStatus } = await Location.requestForegroundPermissionsAsync();
             if (foreStatus !== 'granted') return;
 
-            try {
-                const { status: backStatus } = await Location.requestBackgroundPermissionsAsync();
-                if (backStatus !== 'granted') console.log("Bg Permission denied");
-            } catch (err) { }
+            // "Allow all the time" is asked at Day In (with an explanation first), not here.
+            // Re-start background tracking if Day In was today and Android stopped it.
+            syncBackgroundTracking().catch(() => {});
 
             locationSubscription = await Location.watchPositionAsync(
                 {
@@ -275,27 +304,15 @@ function NavigationLayout() {
                     distanceInterval: 0           
                 },
                 async (loc) => {
-                    const now = Date.now();
-                    const THIRTY_MINUTES = 30 * 60 * 1000; 
-
-                    if (lastUpdateTimestamp !== 0 && (now - lastUpdateTimestamp) < THIRTY_MINUTES) {
-                        return; 
-                    }
-
-                    lastUpdateTimestamp = now;
-
-                    try {
-    await recordLocationLog({
-        latitude: loc.coords.latitude,
-        longitude: loc.coords.longitude,
-        type: "Auto-Track (30 min)",
-        device: "App",
-    });
-} catch (dbError) {
-    console.error("DB Error:", dbError);
-}
+                    if (cancelled) return;
+                    // Shared 30-minute throttle with the background task (one log per 30 min).
+                    await recordThrottledLocation(loc.coords, 'App');
                 }
             );
+            if (cancelled) {
+                locationSubscription.remove();
+                locationSubscription = null;
+            }
 
         } catch (error) {
             console.error("Tracking Error:", error);
@@ -305,6 +322,7 @@ function NavigationLayout() {
     startTracking();
 
     return () => {
+        cancelled = true;
         if (locationSubscription) {
             locationSubscription.remove();
         }
@@ -342,25 +360,43 @@ if (currentUser && isSubscriptionExpired) {
     return <SubscriptionExpiredScreen />;
 }
 
-  const canSeeTab = (moduleKey: string) => {
-      const userRole = currentUser?.role || 'Service Engineer';
-      const myRole = userRole.toLowerCase().trim();
-      // Same company-level gate as index.tsx's canSee() — checked before
-      // role, applies even to Admin, skipped for SuperAdmin.
-      const bucket = MENU_TAG_BUCKET[moduleKey];
-      if (bucket && myRole !== 'superadmin' && !(companyProfile?.enabledModules || []).includes(bucket)) return false;
+  const menuCtx = { currentUser, companyProfile, appPermissions };
+  const canSeeTab = (moduleKey: string) => canSeeTabFor(moduleKey, menuCtx);
 
-      if (userRole === 'Admin' || userRole === 'SuperAdmin') return true;
-      const myPerms = appPermissions?.[userRole];
-      if (!myPerms) return true;
-      return myPerms[moduleKey] === true;
-  };
+  // Laptop / desktop web: the full menu stays on the left instead of the bottom bar.
+  const NO_SHELL = ['/login', '/register_company', '/onboarding'];
+  const desktopShell = isDesktop && !!currentUser && !NO_SHELL.includes(pathname);
+  if (desktopShell) {
+    return (
+      <View style={styles.desktopRoot}>
+        <NetworkIndicator />
+        <DesktopSidebar
+          ctx={menuCtx}
+          companyName={companyProfile?.shortName || companyProfile?.companyName || 'LMS'}
+          logoUrl={companyProfile?.logoUrl}
+          userName={currentUser?.name || ''}
+          userRole={currentUser?.role || ''}
+          badges={{ '/tasks': taskCount, '/leads': leadCount, '/service_call': serviceCount, '/organization': orgCount }}
+          onLogout={async () => { await logout(); router.replace('/login' as any); }}
+        />
+        <View style={styles.desktopMain}>
+          <PlanExpiryIndicator />
+          <View style={styles.desktopPage}>
+            <Slot />
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   const showNavBar = ['/', '/activity_plan', '/tasks', '/leads', '/service_call', '/organization'].includes(pathname);
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="white" />
+      {/* backgroundColor only matters where the app is NOT edge-to-edge (Expo Go):
+          without it the bar is black and the dark icons disappear. Real builds
+          (edge-to-edge) ignore it and show the screen behind a transparent bar. */}
+      <StatusBar barStyle="dark-content" backgroundColor="#f5f5f5" />
       
       {/* 🔥 GLOBAL NETWORK INDICATOR */}
       <NetworkIndicator />
@@ -480,7 +516,10 @@ const NavButton = ({ title, iconName, active, onPress, badgeCount }: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  content: { flex: 1 }, 
+  content: { flex: 1 },
+  desktopRoot: { flex: 1, flexDirection: 'row', backgroundColor: '#eef1f6' },
+  desktopMain: { flex: 1 },
+  desktopPage: { flex: 1, width: '100%', maxWidth: 1240, alignSelf: 'center', backgroundColor: '#f5f5f5', borderLeftWidth: 1, borderRightWidth: 1, borderColor: '#e4e7ee' }, 
   
   // 🔥 NETWORK INDICATOR STYLES
   networkPill: {

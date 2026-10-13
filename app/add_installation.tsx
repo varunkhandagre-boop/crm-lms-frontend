@@ -1,6 +1,9 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as Location from 'expo-location';
+import { getCurrentLocation as getGpsFix, locationErrorMessage } from '../utils/getLocation';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -20,17 +23,19 @@ import {
 import { urlToBase64Image } from '../utils/pdfImageHelper';
 
 // 🔥 SAAS IMPORTS (organizations/users still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: installations & products now via new backend API
 import { completeActivityPlan } from '../services/api/activityPlans';
-import { createInstallationBatch } from '../services/api/installations';
+import { createInstallationBatch, uploadInstallationPhoto } from '../services/api/installations';
+import PhotoPickerField, { PendingPhoto } from '../components/PhotoPickerField';
+import { findOrgByName, useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 import { listProducts } from '../services/api/products';
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 import { recordLocationLog } from '../services/api/locationLogs';
 import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
@@ -39,13 +44,15 @@ import { buildCacheKey } from '../utils/listCache';
 
 // 🔥 OCR & CAMERA IMPORT
 import * as ImagePicker from 'expo-image-picker';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { scanTextFromImage } from '../services/api/ocr';
 
 export default function AddInstallationScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   const params = useLocalSearchParams(); 
   
-  const { currentUser, companyProfile, addNotification } = useData();
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+  const { currentUser, companyProfile } = useData();
 
   // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
   const [productList, setProductList] = useState<any[]>([]);
@@ -79,6 +86,10 @@ export default function AddInstallationScreen() {
 
   const [addedMachines, setAddedMachines] = useState<any[]>([]);
 
+  // One photo for the whole report; uploaded after the machines are saved.
+  const [sitePhoto, setSitePhoto] = useState<PendingPhoto | null>(null);
+  const [preparingPhoto, setPreparingPhoto] = useState(false);
+
   const [modalVisible, setModalVisible] = useState(false);
   const [currentModalType, setCurrentModalType] = useState('');
   const [filteredData, setFilteredData] = useState<any[]>([]); 
@@ -104,6 +115,8 @@ export default function AddInstallationScreen() {
       enabled: !!currentUser?.companyId,
       fetcher: () => fetchOrganizations({ limit: 500 }),
   });
+  // Beyond the first 500: search the server while the organization picker is open.
+  useOrgServerSearch(modalVisible && currentModalType === 'Hospital', searchText, setFilteredData);
 
   // 🔥 Products — unchanged plain fetch-on-mount (out of scope for this pass).
   useEffect(() => {
@@ -133,7 +146,7 @@ export default function AddInstallationScreen() {
   };
 
   useEffect(() => {
-      if (params.hospital && orgList.length > 0) {
+      if (params.hospital) {
           setHospital(params.hospital as string);
           setOrgId(params.orgId as string || '');
           setCity(params.city as string || '');
@@ -141,8 +154,8 @@ export default function AddInstallationScreen() {
           setMobile(params.mobile as string || '');
           setAddress(params.address as string || '');
 
-          const found = orgList.find((o:any) => (o.orgName === params.hospital || o.name === params.hospital));
-          if(found) selectOrganization(found);
+          // Also finds organizations beyond the first 500 (one server search).
+          findOrgByName(params.hospital as string, orgList).then((found) => { if (found) selectOrganization(found); });
       }
       if (params.product) {
           setProduct(params.product as string);
@@ -201,42 +214,22 @@ export default function AddInstallationScreen() {
           }
 
           const result = await ImagePicker.launchCameraAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              mediaTypes: ['images'],
               quality: 0.2, 
               base64: true,
           });
 
           if (!result.canceled && result.assets[0].base64) {
               setIsScanning(true);
-              const base64Image = `data:image/jpeg;base64,${result.assets[0].base64}`;
-
-              const formData = new FormData();
-              formData.append('base64Image', base64Image);
-              formData.append('language', 'eng');
-              formData.append('isOverlayRequired', 'false');
-
-              const response = await fetch('https://api.ocr.space/parse/image', {
-                  method: 'POST',
-                  headers: { 'apikey': 'helloworld' },
-                  body: formData,
-              });
-
-              const data = await response.json();
-
-              if (data.IsErroredOnProcessing) {
-                  Alert.alert('API Error', data.ErrorMessage?.[0] || 'Image size might be too large.');
-                  return;
-              }
-
-              if (data.ParsedResults && data.ParsedResults.length > 0) {
-                  const extractedText = data.ParsedResults[0].ParsedText;
+              const extractedText = await scanTextFromImage(result.assets[0].base64);
+              if (extractedText) {
                   processMachineOCR(extractedText);
               } else {
                   Alert.alert('Scan Failed', 'Could not read label clearly. Please hold steady and try again.');
               }
           }
-      } catch (error) {
-          Alert.alert('Error', 'Failed to scan the label. Check your internet.');
+      } catch (error: any) {
+          Alert.alert('Scan Failed', error?.message || 'Failed to scan the label. Check your internet.');
       } finally {
           setIsScanning(false);
       }
@@ -455,16 +448,8 @@ export default function AddInstallationScreen() {
           </body>
         </html>`;
 
-        const { uri } = await Print.printToFileAsync({ html: htmlContent });
         const cleanName = `${installId}_${hospital.replace(/ /g, '_')}.pdf`;
-        const newPath = `${(FileSystem as any).cacheDirectory}${cleanName}`;
-
-        try {
-            await FileSystem.copyAsync({ from: uri, to: newPath });
-            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Report` });
-        } catch (error) {
-            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-        }
+        await sharePdfFromHtml(htmlContent, cleanName, `Share Report`);
     } catch (error) { Alert.alert("Error", "Could not generate PDF"); }
   };
 
@@ -472,9 +457,9 @@ export default function AddInstallationScreen() {
       try {
           let { status } = await Location.requestForegroundPermissionsAsync();
           if (status !== 'granted') { Alert.alert('Permission Denied'); return null; }
-          let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          let location = await getGpsFix();
           return { lat: location.coords.latitude, lng: location.coords.longitude, timestamp: new Date().toISOString() };
-      } catch (error) { Alert.alert("GPS Required", "Please turn on GPS."); return null; }
+      } catch (error) { Alert.alert("GPS Required", locationErrorMessage(error)); return null; }
   };
 
   const openModal = (type: string) => {
@@ -565,6 +550,7 @@ export default function AddInstallationScreen() {
 
   // 🔥 SAVE LOGIC — one batch API call for all machines (server auto-generates installId)
   const handleFinalSubmit = async () => {
+      if (preparingPhoto) return Alert.alert("Please wait", "The photo is still being prepared.");
       if (!hospital || !department) return Alert.alert("Missing", "Select Hospital and enter Department.");
       if (addedMachines.length === 0) return Alert.alert("Empty", "Add at least one machine.");
 
@@ -580,7 +566,7 @@ export default function AddInstallationScreen() {
 }
 
       try {
-        const { installId } = await createInstallationBatch({
+        const { installId, installations } = await createInstallationBatch({
             orgId: orgId || undefined,
             orgName: hospital,
             city, address, contactPerson, mobile, department, engineer,
@@ -595,15 +581,17 @@ export default function AddInstallationScreen() {
             })),
         });
 
-        if (addNotification) {
-            await addNotification({
-                title: "Installation Completed 🛠️",
-                message: `${currentUser?.name} installed ${addedMachines.length} machine(s) at ${hospital}.`,
-                to: "Admin",
-                route: "/installations",
-                type: "success"
-            });
+        // One photo for the whole report — set on every machine row.
+        let photoFailed = false;
+        if (sitePhoto && installations.length > 0) {
+            try {
+                await uploadInstallationPhoto(installations[0].id, sitePhoto.dataUri, true);
+            } catch (e) {
+                console.log("Installation photo upload failed:", e);
+                photoFailed = true;
+            }
         }
+
 
         if (params.activityId) {
             await completeActivityPlan(params.activityId as string);
@@ -611,7 +599,9 @@ export default function AddInstallationScreen() {
 
         Alert.alert(
             "Success ✅", 
-            `Installation Report ${installId} Saved!\nDo you want to share PDF?`,
+            `Installation Report ${installId} Saved!` +
+                (photoFailed ? `\n\n⚠️ The photo could not be uploaded. Open the installation and tap "Add Photo".` : '') +
+                `\nDo you want to share PDF?`,
             [
                 { text: "No", onPress: () => router.back(), style: 'cancel' },
                 { text: "Yes, Share PDF", onPress: async () => { await generateInstallationPDF(installId); router.back(); }}
@@ -624,13 +614,13 @@ export default function AddInstallationScreen() {
       }
   };
 
-  const isSubmitDisabled = !hospital || !department || addedMachines.length === 0 || isSaving;
+  const isSubmitDisabled = preparingPhoto || !hospital || !department || addedMachines.length === 0 || isSaving;
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <View style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
+        <View style={[styles.header, { paddingTop: headerTop }]}>
+          <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="white" /></TouchableOpacity>
           <Text style={styles.headerTitle}>New Installation</Text>
           <View style={{width:24}} /> 
         </View>
@@ -641,7 +631,7 @@ export default function AddInstallationScreen() {
             <Text style={styles.label}>Hospital / Client *</Text>
             <TouchableOpacity style={styles.dropdown} onPress={() => openModal('Hospital')}>
                 <Text style={{color: hospital ? 'black' : 'gray'}}>{hospital || 'Select from List'}</Text>
-                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998"/> : <Ionicons name="search" size={18} color="gray" />}
+                {<Ionicons name="search" size={18} color="gray" />}
             </TouchableOpacity>
 
             {hospital ? (
@@ -669,7 +659,7 @@ export default function AddInstallationScreen() {
                         <Text style={{color: '#333'}}>{formatDate(installDate)}</Text>
                         <Ionicons name="calendar-outline" size={18} color="gray" />
                     </TouchableOpacity>
-                    {showDatePicker && <DateTimePicker value={installDate} mode="date" onChange={(e, d) => { setShowDatePicker(false); if(d) setInstallDate(d); }} />}
+                    {showDatePicker && <DateTimePicker value={installDate} mode="date" {...pickerHandlers((e, d) => { setShowDatePicker(false); if(d) setInstallDate(d); })} />}
                 </View>
             </View>
 
@@ -730,7 +720,7 @@ export default function AddInstallationScreen() {
                         <View style={styles.col}>
                             <Text style={styles.label}>Expiry Date</Text>
                             <TouchableOpacity style={styles.inputGray} onPress={() => setShowManualExpiryPicker(true)}><Text style={{color: '#333', marginTop: 4}}>{formatDate(manualExpiry)}</Text></TouchableOpacity>
-                            {showManualExpiryPicker && <DateTimePicker value={manualExpiry} mode="date" onChange={(e, d) => { setShowManualExpiryPicker(false); if(d) setManualExpiry(d); }} />}
+                            {showManualExpiryPicker && <DateTimePicker value={manualExpiry} mode="date" {...pickerHandlers((e, d) => { setShowManualExpiryPicker(false); if(d) setManualExpiry(d); })} />}
                         </View>
                     </View>
                 </View>
@@ -758,6 +748,9 @@ export default function AddInstallationScreen() {
                     ))}
                 </View>
             )}
+
+            <Text style={styles.sectionHeader}>3. Installation Photo (optional)</Text>
+            <PhotoPickerField value={sitePhoto} onChange={setSitePhoto} onBusyChange={setPreparingPhoto} buttonLabel="Take Photo of Installed Machine" />
 
             <TouchableOpacity 
                 style={[styles.saveBtn, { backgroundColor: isSubmitDisabled ? '#ccc' : '#3b5998' }]} 
@@ -802,9 +795,9 @@ export default function AddInstallationScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   sectionHeader: { fontSize: 16, fontWeight: 'bold', color: '#3b5998', marginTop: 15, marginBottom: 10 },
   label: { marginBottom: 5, color:'#555', fontWeight:'600', fontSize:13, marginTop:10 },
@@ -834,4 +827,4 @@ const styles = StyleSheet.create({
   iconBox: { width: 35, height: 35, borderRadius: 8, justifyContent:'center', alignItems:'center', backgroundColor:'#e3f2fd' },
   modalMainText: { fontWeight: 'bold', fontSize: 15, color: '#333' },
   modalSubText: { fontSize: 12, color: 'gray' }
-});
+}), FORM_ACCENT.installation);

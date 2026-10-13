@@ -17,6 +17,7 @@ export const MODULE_LABELS: Record<ModuleKey, string> = {
 // superadmin_only), not CRM/ops features tied to a particular kind of work.
 export const MENU_TAG_BUCKET: Record<string, ModuleKey> = {
     // Sales
+    leads: 'sales',
     asset_history: 'sales',
     catalogs: 'sales',
     sales_team_report: 'sales',
@@ -44,3 +45,6 @@ export const MENU_TAG_BUCKET: Record<string, ModuleKey> = {
     quotations: 'hr',
     personal_notes: 'hr',
 };
+
+/** Bottom-bar modules that are ON for every role until an admin switches them off in Permissions. */
+export const DEFAULT_ON_TABS: string[] = ['activity', 'tasks'];

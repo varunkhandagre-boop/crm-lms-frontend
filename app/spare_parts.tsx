@@ -15,24 +15,24 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (users + office_machines still Firestore — office_machines
-// is explicitly out of scope for this phase, see spareParts.ts adapter note)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 3: spare parts catalog + stock now go through the new backend API
-import { issueStock as apiIssueStock, listSpareParts } from '../services/api/spareParts';
+import { issueStock as apiIssueStock, listSpareParts, updateSparePart } from '../services/api/spareParts';
 import { fetchTeamMembers } from '../services/api/users';
+import { createOfficeMachine, deleteOfficeMachine, listOfficeMachines } from '../services/api/officeMachines';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function SparePartsScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   const { currentUser } = useData();
 
-  // 🔥 SaaS Engine kept for users + office_machines only
-  const { fetchSaaSData, addSaaSData, deleteSaaSData, isDbLoading } = useSaaSDB();
 
   // sparePartsList now comes from useCachedList below (cache-first)
   // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
@@ -50,6 +50,8 @@ export default function SparePartsScreen() {
 
   const [detailsModalVisible, setDetailsModalVisible] = useState(false);
   const [selectedPart, setSelectedPart] = useState<any>(null);
+  const [minStockInput, setMinStockInput] = useState('');
+  const [savingMin, setSavingMin] = useState(false);
   
   const [machineDetailVisible, setMachineDetailVisible] = useState(false);
   const [selectedMachine, setSelectedMachine] = useState<any>(null);
@@ -89,12 +91,14 @@ export default function SparePartsScreen() {
       fetcher: fetchTeamMembers,
   });
 
-  // office_machines — unchanged plain fetch-on-mount (stays Firestore CRUD,
-  // out of scope for this pass).
+  // Office Stock machines — a short list, loaded on open and on pull-to-refresh.
   const loadRest = async () => {
       if (currentUser?.companyId) {
-          const machines = await fetchSaaSData("office_machines");
-          setMachinesList(machines);
+          try {
+              setMachinesList(await listOfficeMachines());
+          } catch (e) {
+              console.log("Office machines load failed:", e);
+          }
       }
   };
 
@@ -162,7 +166,7 @@ export default function SparePartsScreen() {
 
   const renderedList = currentList.slice(0, visibleCount);
 
-  // --- ADD MACHINE (still Firestore — office_machines out of scope) ---
+  // --- ADD MACHINE ---
   const handleAddMachine = async () => {
       if (!newMachineName || !newQuantity) {
           Alert.alert("Error", "Please fill Name and Quantity");
@@ -170,21 +174,12 @@ export default function SparePartsScreen() {
       }
       setLoading(true);
       try {
-          const res = await addSaaSData("office_machines", {
-              name: newMachineName,
-              quantity: parseInt(newQuantity) || 1,
-              addedBy: currentUser?.name,
-              createdAt: new Date().toISOString()
-          });
-          if (res.success) {
-              setModalVisible(false);
-              setNewMachineName('');
-              setNewQuantity('');
-              await loadRest();
-              Alert.alert("Success", "Machine Added to Office Stock List");
-          } else {
-              Alert.alert("Error", "Failed to add machine.");
-          }
+          await createOfficeMachine(newMachineName.trim(), parseInt(newQuantity) || 1);
+          setModalVisible(false);
+          setNewMachineName('');
+          setNewQuantity('');
+          await loadRest();
+          Alert.alert("Success", "Machine Added to Office Stock List");
       } catch (e: any) {
           Alert.alert("Error", e.message);
       } finally {
@@ -192,16 +187,16 @@ export default function SparePartsScreen() {
       }
   };
 
-  // --- DELETE MACHINE (still Firestore) ---
+  // --- DELETE MACHINE ---
   const handleDeleteMachine = async (id: string) => {
       Alert.alert("Confirm", "Delete this machine?", [
           { text: "Cancel" },
           { text: "Delete", style: 'destructive', onPress: async () => {
-              const res = await deleteSaaSData("office_machines", id);
-              if (res.success) {
+              try {
+                  await deleteOfficeMachine(id);
                   setMachinesList(prev => prev.filter(m => m.id !== id));
-              } else {
-                  Alert.alert("Error", "Could not delete.");
+              } catch (e: any) {
+                  Alert.alert("Error", e?.message || "Could not delete.");
               }
           }}
       ]);
@@ -235,6 +230,7 @@ export default function SparePartsScreen() {
       const officeQty = item.officeStock || 0;
       
       setSelectedPart({ ...item, myQty, officeQty });
+      setMinStockInput(item.minStock ? String(item.minStock) : '');
       setDetailsModalVisible(true);
   };
 
@@ -242,6 +238,35 @@ export default function SparePartsScreen() {
       setSelectedMachine(item);
       setMachineDetailVisible(true);
   };
+
+  // Laptop: each list as a table (tap a row → same details popup as the card).
+  const isDesktop = useIsDesktop();
+  const stockColumns: TableColumn<any>[] = [
+      { key: 'part', label: 'Part', flex: 2, render: (p) => <TwoLine main={p.partName} sub={p.partNo ? `PN: ${p.partNo}` : undefined} /> },
+      { key: 'models', label: 'Compatible Models', flex: 2, render: (p) => p.compatibleModels || '-' },
+      { key: 'emp', label: 'Employee', flex: 1, render: (p) => <Pill text={p.empName} color="#1b5e20" bg="#e8f5e9" /> },
+      { key: 'qty', label: 'Qty', width: 70, align: 'right', render: (p) => String(p.empQty ?? 0) },
+  ];
+  const machineColumns: TableColumn<any>[] = [
+      { key: 'name', label: 'Machine', flex: 3, render: (m) => <TwoLine main={m.name} /> },
+      { key: 'qty', label: 'Qty', width: 80, align: 'right', render: (m) => String(m.quantity ?? 0) },
+      ...(isAdmin ? [{ key: 'act', label: '', width: 44, align: 'center' as const, render: (m: any) => (
+          <TouchableOpacity onPress={() => handleDeleteMachine(m.id)}><Ionicons name="trash-outline" size={18} color="#d32f2f" /></TouchableOpacity>
+      ) }] : []),
+  ];
+  const catalogColumns: TableColumn<any>[] = [
+      { key: 'part', label: 'Part', flex: 2, render: (p) => <TwoLine main={p.partName} sub={p.partNo ? `PN: ${p.partNo}` : undefined} /> },
+      { key: 'models', label: 'Compatible Models', flex: 2, render: (p) => p.compatibleModels || '-' },
+      { key: 'price', label: 'Price', width: 100, align: 'right', render: (p) => inr(p.price) },
+      { key: 'office', label: 'Office Stock', width: 100, align: 'right', render: (p) => String(p.officeStock || 0) },
+      { key: 'total', label: 'Total', width: 80, align: 'right', render: (p) => String(p.totalStock ?? p.officeStock ?? 0) },
+      { key: 'min', label: 'Min', width: 60, align: 'right', render: (p) => (p.minStock ? String(p.minStock) : '-') },
+      { key: 'flag', label: 'Status', width: 100, render: (p) => p.minStock > 0 && (p.totalStock ?? 0) <= p.minStock
+          ? <Pill text="LOW STOCK" color="#c62828" bg="#ffebee" />
+          : null },
+  ];
+  const isMachineList = activeTab === 'StockList' && stockSubTab === 'OfficeStock';
+  const tableColumns = activeTab === 'Parts' ? stockColumns : (isMachineList ? machineColumns : catalogColumns);
 
   const renderStockItem = ({item}: any) => (
       <TouchableOpacity style={styles.stockCard} onPress={() => openPartDetails(item)}>
@@ -295,13 +320,19 @@ export default function SparePartsScreen() {
           <View style={{flexDirection:'row', marginTop:8, alignItems:'center'}}>
               <Text style={{fontSize:12, color:'#555'}}>Office Stock: </Text>
               <Text style={styles.bigStockTextOrange}>{item.officeStock || 0}</Text>
+              <Text style={{fontSize:12, color:'#555', marginLeft: 12}}>Total: {item.totalStock ?? item.officeStock ?? 0}</Text>
+              {item.minStock > 0 && (item.totalStock ?? 0) <= item.minStock && (
+                  <View style={{ backgroundColor: '#ffebee', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 8 }}>
+                      <Text style={{ color: '#c62828', fontSize: 10, fontWeight: 'bold' }}>LOW STOCK</Text>
+                  </View>
+              )}
           </View>
       </TouchableOpacity>
   );
 
   return (
     <View style={styles.container}>
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: headerTop }]}>
             <View style={{flexDirection:'row', alignItems:'center'}}>
                 <TouchableOpacity onPress={() => router.back()}>
                     <Ionicons name="arrow-back" size={24} color="#333" />
@@ -336,7 +367,7 @@ export default function SparePartsScreen() {
         </View>
 
         <View style={styles.searchBar}>
-            {isDbLoading ? <ActivityIndicator size="small" color="#3b5998"/> : <Ionicons name="search" size={20} color="gray" />}
+            {<Ionicons name="search" size={20} color="gray" />}
             <TextInput style={styles.input} placeholder="Search..." value={searchText} onChangeText={setSearchText} />
             {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={18} color="gray"/></TouchableOpacity>}
         </View>
@@ -364,10 +395,13 @@ export default function SparePartsScreen() {
                     {sparePartsLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={styles.emptyText}>No Items Found.</Text>}
                 </View>
             }
-            renderItem={
-                activeTab === 'Parts' ? renderStockItem : 
-                (stockSubTab === 'OfficeStock' ? renderMachineItem : renderCatalogItem)
+            renderItem={isDesktop
+                ? ({ item, index }) => <TableRow columns={tableColumns} item={item} index={index} onPress={() => isMachineList ? openMachineDetails(item) : openPartDetails(item)} />
+                : (activeTab === 'Parts' ? renderStockItem : 
+                (stockSubTab === 'OfficeStock' ? renderMachineItem : renderCatalogItem))
             }
+            ListHeaderComponent={isDesktop && renderedList.length > 0 ? <TableHeader columns={tableColumns} /> : null}
+            stickyHeaderIndices={isDesktop && renderedList.length > 0 ? [0] : undefined}
             ListFooterComponent={
                 <View style={{ paddingBottom: 80 }}>
                     {visibleCount < currentList.length ? (
@@ -444,6 +478,38 @@ export default function SparePartsScreen() {
                                     <Text style={[styles.officeStockValue, {fontSize:24}]}>{selectedPart.officeStock || 0}</Text>
                                 </View>
                             </View>
+
+                            {isAdmin && (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12 }}>
+                                    <Text style={{ fontSize: 12, color: '#555', flex: 1 }}>Low-stock alert at (0 = off)</Text>
+                                    <TextInput
+                                        style={{ borderWidth: 1, borderColor: '#ddd', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4, width: 60, textAlign: 'center' }}
+                                        keyboardType="numeric"
+                                        value={minStockInput}
+                                        onChangeText={setMinStockInput}
+                                        placeholder="0"
+                                    />
+                                    <TouchableOpacity
+                                        style={{ marginLeft: 8, backgroundColor: '#3b5998', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 6 }}
+                                        disabled={savingMin}
+                                        onPress={async () => {
+                                            setSavingMin(true);
+                                            try {
+                                                const updated = await updateSparePart(selectedPart.id, { minStock: parseInt(minStockInput) || 0 });
+                                                setSelectedPart({ ...selectedPart, minStock: updated.minStock });
+                                                refreshSpareParts();
+                                                Alert.alert('Saved', updated.minStock ? `Store will be alerted at ${updated.minStock} or fewer.` : 'Low-stock alert turned off for this part.');
+                                            } catch (e: any) {
+                                                Alert.alert('Error', e?.message || 'Could not save');
+                                            } finally {
+                                                setSavingMin(false);
+                                            }
+                                        }}
+                                    >
+                                        {savingMin ? <ActivityIndicator color="white" size="small" /> : <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 12 }}>Save</Text>}
+                                    </TouchableOpacity>
+                                </View>
+                            )}
 
                             {isAdmin && (selectedPart.officeStock > 0) && (
                                 <TouchableOpacity 
@@ -562,7 +628,7 @@ const DetailRow = ({label, value, full, color}: any) => (
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f5f5f5' },
-    header: { backgroundColor: 'white', paddingTop: 50, padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 4 },
+    header: { backgroundColor: 'white', padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 4 },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
     
     addButton: { flexDirection:'row', backgroundColor:'#3b5998', paddingHorizontal:12, paddingVertical:6, borderRadius:5, alignItems:'center' },

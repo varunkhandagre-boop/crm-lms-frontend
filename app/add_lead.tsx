@@ -1,6 +1,9 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as Location from 'expo-location';
+import { getCurrentLocation as getGpsFix } from '../utils/getLocation';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -19,16 +22,17 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (organizations/users/products still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 1/2: leads now go through the new backend API
 import { updateLead as apiUpdateLead, checkDuplicateLeads, createLead, DuplicateLeadMatch, getLead } from '../services/api/leads';
+import { useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 import { listProducts } from '../services/api/products';
 import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 type ChoiceButton = { key: string; text: string; style?: 'cancel' | 'destructive' };
 
@@ -45,13 +49,13 @@ function askChoice(title: string, message: string, buttons: ChoiceButton[]): Pro
 }
 
 export default function AddLeadScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   // 🔥 1. Context se sirf user aur notification nikala
-  const { currentUser, addNotification } = useData(); 
+  const { currentUser } = useData(); 
 
   // 🔥 2. SaaS Engine ab sirf organizations/users/products ke liye
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
   // 🔥 3. Lazy Loaded States
   // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
@@ -115,6 +119,8 @@ export default function AddLeadScreen() {
       enabled: !!currentUser?.companyId,
       fetcher: () => fetchOrganizations({ limit: 500 }),
   });
+  // Beyond the first 500: search the server while the organization picker is open.
+  useOrgServerSearch(modalVisible && currentModalType === 'Organization', searchText, setFilteredData);
 
   // 🔥 Products — unchanged plain fetch-on-mount (out of scope for this pass).
   useEffect(() => {
@@ -158,7 +164,7 @@ export default function AddLeadScreen() {
               Alert.alert('Permission Denied', 'Location access is required.');
               return null;
           }
-          let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          let location = await getGpsFix();
           return {
               lat: location.coords.latitude,
               lng: location.coords.longitude,
@@ -377,15 +383,6 @@ export default function AddLeadScreen() {
                   location: { latitude: locationData.lat, longitude: locationData.lng },
               });
 
-              if (addNotification) {
-                  await addNotification({
-                      title: "New Lead Added 👥",
-                      message: `${currentUser?.name} added a new lead: ${org}.`,
-                      to: "Admin",
-                      route: "/leads", 
-                      type: "info"
-                  });
-              }
               Alert.alert("Success", "New Lead Added!");
               router.back();
           } catch (err: any) {
@@ -398,9 +395,9 @@ export default function AddLeadScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#333" />
+            <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Create New Lead</Text>
         <View style={{width:24}} /> 
@@ -413,7 +410,7 @@ export default function AddLeadScreen() {
             <Text style={styles.label}>Select Organization <Text style={{color:'red'}}>*</Text></Text>
             <TouchableOpacity style={[styles.dropdown, errors.org && styles.errorBorder]} onPress={() => openModal('Organization', orgList)}>
                 <Text style={{color: org ? '#333' : 'gray', flex:1}}>{org || "Search Hospital / Clinic..."}</Text>
-                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998"/> : <Ionicons name="search" size={20} color="gray" />}
+                {<Ionicons name="search" size={20} color="gray" />}
             </TouchableOpacity>
             {errors.org && <Text style={styles.errorText}>Organization is required</Text>}
 
@@ -508,7 +505,7 @@ export default function AddLeadScreen() {
                         <Text style={{color:'#3b5998', fontWeight:'bold'}}>{formatDate(nextDate)}</Text>
                         <Ionicons name="calendar" size={16} color="#3b5998" />
                     </TouchableOpacity>
-                    {showNextPicker && <DateTimePicker value={nextDate} mode="date" minimumDate={new Date()} onChange={(e, d) => { setShowNextPicker(false); if(d) setNextDate(d); }} />}
+                    {showNextPicker && <DateTimePicker value={nextDate} mode="date" minimumDate={new Date()} {...pickerHandlers((e, d) => { setShowNextPicker(false); if(d) setNextDate(d); })} />}
                 </View>
                 <View style={styles.col}>
                     <Text style={styles.label}>Expected Closing</Text>
@@ -516,7 +513,7 @@ export default function AddLeadScreen() {
                         <Text style={{color:'#333'}}>{formatDate(closingDate)}</Text>
                         <Ionicons name="calendar-outline" size={16} color="gray" />
                     </TouchableOpacity>
-                    {showClosingPicker && <DateTimePicker value={closingDate} mode="date" minimumDate={new Date()} onChange={(e, d) => { setShowClosingPicker(false); if(d) setClosingDate(d); }} />}
+                    {showClosingPicker && <DateTimePicker value={closingDate} mode="date" minimumDate={new Date()} {...pickerHandlers((e, d) => { setShowClosingPicker(false); if(d) setClosingDate(d); })} />}
                 </View>
             </View>
 
@@ -645,9 +642,9 @@ export default function AddLeadScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
   contentContainer: { padding: 20 },
   sectionTitle: { fontSize: 14, fontWeight: 'bold', marginTop: 10, marginBottom: 15, color:'#3b5998', textTransform:'uppercase', letterSpacing:1 },
@@ -674,4 +671,4 @@ const styles = StyleSheet.create({
   iconBox: { width: 35, height: 35, borderRadius: 8, justifyContent:'center', alignItems:'center' },
   modalMainText: { fontWeight: 'bold', fontSize: 15, color: '#333' },
   modalSubText: { fontSize: 12, color: 'gray' }
-});
+}), FORM_ACCENT.lead);

@@ -25,6 +25,7 @@ import { fetchSelf, updateTeamMember } from '../services/api/users';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -54,7 +55,8 @@ export default function ProfileScreen() {
     try {
       const data = await fetchSelf();
       setCurrentImage(data.profileImage || null);
-      setUserData({ ...currentUser, ...data });
+      // Keep the login role ("Sales Executive", "Manager" …) — /users/me returns the raw enum (FIELD_USER).
+      setUserData({ ...currentUser, ...data, role: currentUser.role });
       setProfileLoadFailed(false);
     } catch (error) {
       console.log("Error fetching profile:", error);
@@ -115,7 +117,7 @@ export default function ProfileScreen() {
             if (status !== 'granted') return Alert.alert("Permission Needed", "Please allow gallery access in Settings.");
         }
         let result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.2, base64: true, 
+            mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.2, base64: true, 
         });
         if (!result.canceled && result.assets[0].base64) {
             savePhoto(result.assets[0].base64);
@@ -163,7 +165,7 @@ export default function ProfileScreen() {
           // Employee Info
           const user = userData || currentUser; 
           const empName = user?.name || 'Employee Name';
-          const designation = user?.role || 'Staff Member';
+          const designation = designationOf(user);
           const empMobile = user?.mobile || '';
           const empEmail = user?.email || '';
 
@@ -251,15 +253,8 @@ export default function ProfileScreen() {
             </body>
           </html>`;
 
-          const { uri } = await Print.printToFileAsync({ html: htmlContent, width: 600, height: 350 });
           const newFileName = `Card_${empName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
-          // @ts-ignore
-          const newPath = `${FileSystem.cacheDirectory}${newFileName}`;
-
-          try {
-             await FileSystem.copyAsync({ from: uri, to: newPath });
-             await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: 'Share Visiting Card' });
-          } catch (e) { await Sharing.shareAsync(uri); }
+          await sharePdfFromHtml(htmlContent, newFileName, 'Share Visiting Card', { width: 600, height: 350 });
       } catch (error) { Alert.alert("Error", "Could not generate card."); } 
       finally { setSharing(false); }
   };
@@ -292,7 +287,7 @@ export default function ProfileScreen() {
                     </View>
                 </TouchableOpacity>
                 <View style={styles.nameContainer}>
-                    <Text style={styles.empId}>{currentUser?.role || 'Employee'}</Text> 
+                    <Text style={styles.empId}>{designationOf(userData || currentUser)}</Text> 
                     <Text style={styles.empName}>{currentUser?.name || 'User'}</Text>
                     <View style={styles.statusBadge}>
                       <View style={styles.activeDot} />
@@ -314,7 +309,7 @@ export default function ProfileScreen() {
                 </View>
                 <View style={styles.infoItem}>
                     <Text style={styles.label}>Designation</Text>
-                    <Text style={styles.value}>{currentUser?.role || 'Staff'}</Text>
+                    <Text style={styles.value}>{designationOf(userData || currentUser)}</Text>
                 </View>
                 <View style={styles.infoItem}>
                     <Text style={styles.label}>Location</Text>
@@ -398,3 +393,16 @@ const styles = StyleSheet.create({
   visitingCardBtn: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', backgroundColor: '#e65100', paddingVertical: 12, borderRadius: 12, marginTop: 20, shadowColor: '#e65100', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 5, elevation: 4 },
   visitingCardText: { color: 'white', fontWeight: 'bold', fontSize: 14, marginLeft: 8 }
 });
+
+// Title for the profile and visiting card: field staff by designation, others by role.
+const ROLE_TITLES: Record<string, string> = {
+    SuperAdmin: 'Admin', Admin: 'Admin', Manager: 'Manager', Accountant: 'Accountant', Account: 'Accountant',
+    Hr: 'HR Executive', 'Store Keeper': 'Store Keeper',
+    ADMIN: 'Admin', MANAGER: 'Manager', ACCOUNT: 'Accountant', HR: 'HR Executive', STORE: 'Store Keeper',
+};
+function designationOf(user: any): string {
+    if (!user) return 'Staff Member';
+    if (user.jobTitle) return user.jobTitle;
+    if (user.role === 'FIELD_USER') return 'Sales Executive';
+    return ROLE_TITLES[user.role] || user.role || 'Staff Member';
+}

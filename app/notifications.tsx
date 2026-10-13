@@ -21,11 +21,15 @@ import { useData } from './context/DataContext';
 // server-enforced — the old client-side name/id/role string-matching
 // (getMyNotifications) is gone, it's just the fetched list now.
 import { fetchNotifications, markNotificationRead as markNotificationReadApi, markAllNotificationsRead } from '../services/api/notifications';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 // Tab State Memory
 let savedTabState = 'Unread'; 
 
 export default function NotificationScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   // 🔥 1. Context se sirf current user nikala
@@ -121,18 +125,15 @@ export default function NotificationScreen() {
   const handlePress = async (item: any) => {
       let targetRoute = item.route || item.screen;
 
-      if (targetRoute === 'organization' || item.type === 'organization') targetRoute = '/organization'; 
-      
-      if (
-          targetRoute === 'service_call' || 
-          targetRoute === 'service_calls' || 
-          item.title?.includes('Service Call')
-      ) {
-          targetRoute = '/service_call'; 
+      // Old notifications stored bare names ("leads") or nothing at all — map
+      // those. A full route ("/lead_details?id=…") is always used as sent;
+      // guessing from the title used to override it and lose the record id.
+      if (!targetRoute || !String(targetRoute).startsWith('/')) {
+          if (targetRoute === 'organization' || item.type === 'organization') targetRoute = '/organization';
+          else if (targetRoute === 'service_call' || targetRoute === 'service_calls' || (!targetRoute && item.title?.includes('Service Call'))) targetRoute = '/service_call';
+          else if (targetRoute === 'leads' || (!targetRoute && item.title?.includes('Lead'))) targetRoute = '/leads';
+          else if (targetRoute === 'tasks' || (!targetRoute && item.title?.includes('Task'))) targetRoute = '/tasks';
       }
-
-      if (targetRoute === 'leads' || item.title?.includes('Lead')) targetRoute = '/leads';
-      if (targetRoute === 'tasks' || item.title?.includes('Task')) targetRoute = '/tasks';
 
       if (!item.read) {
           item.read = true; // Optimistic UI update
@@ -193,10 +194,29 @@ export default function NotificationScreen() {
       }
   };
 
+  // Laptop: the same list as a table (tap a row → same navigation as the card; unread rows get a blue left edge).
+  const isDesktop = useIsDesktop();
+  const notificationColumns: TableColumn<any>[] = [
+      { key: 'icon', label: '', width: 40, align: 'center', render: (n) => {
+          const config = getIconConfig(n.type);
+          return <Ionicons name={config.name as any} size={18} color={config.color} />;
+      } },
+      { key: 'title', label: 'Notification', flex: 3, render: (n) => <TwoLine main={n.title} sub={n.message} /> },
+      { key: 'type', label: 'Type', width: 90, render: (n) => {
+          const config = getIconConfig(n.type);
+          return <Pill text={n.type || 'general'} color={config.color} bg={config.bg} />;
+      } },
+      { key: 'time', label: 'Time', width: 100, render: (n) => formatTimeAgo(n.createdAt) },
+      { key: 'read', label: 'Status', width: 80, render: (n) => n.read
+          ? <Pill text="Read" color="#555" bg="#F5F5F5" />
+          : <Pill text="Unread" color="#1A237E" bg="#E8EAF6" /> },
+      { key: 'go', label: '', width: 40, align: 'center', render: (n) => (n.route || n.screen) ? <Ionicons name="chevron-forward" size={14} color="#1A237E" /> : null },
+  ];
+
   return (
     <View style={styles.container}>
       {/* HEADER */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={styles.headerLeft}>
             <TouchableOpacity onPress={() => router.back()} style={styles.backCircle}>
                 <Ionicons name="arrow-back" size={22} color="white" />
@@ -273,7 +293,11 @@ export default function NotificationScreen() {
                 )}
             </View>
         }
-        renderItem={({ item }: any) => {
+        ListHeaderComponent={isDesktop && renderedList.length > 0 ? <TableHeader columns={notificationColumns} /> : null}
+        stickyHeaderIndices={isDesktop && renderedList.length > 0 ? [0] : undefined}
+        renderItem={isDesktop
+          ? ({ item, index }: any) => <TableRow columns={notificationColumns} item={item} index={index} tint={!item.read ? '#1A237E' : undefined} onPress={() => handlePress(item)} />
+          : ({ item }: any) => {
             const config = getIconConfig(item.type);
             
             return (
@@ -342,7 +366,7 @@ export default function NotificationScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F0F2F5' },
-  header: { backgroundColor: '#1A237E', padding: 20, paddingTop: 55, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomLeftRadius: 25, borderBottomRightRadius: 25, elevation: 8 },
+  header: { backgroundColor: '#1A237E', padding: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomLeftRadius: 25, borderBottomRightRadius: 25, elevation: 8 },
   headerLeft: { flexDirection: 'row', alignItems: 'center' },
   backCircle: { backgroundColor: 'rgba(255,255,255,0.2)', padding: 8, borderRadius: 20 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: 'white', marginLeft: 12 },

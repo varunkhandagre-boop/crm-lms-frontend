@@ -1,8 +1,11 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+import { getCurrentLocation as getGpsFix } from '../utils/getLocation';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -22,22 +25,25 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (organizations/users still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 3: orders & products now go through the new backend API
-import { createOrder } from '../services/api/orders';
+import { createOrder, uploadOrderPoFile } from '../services/api/orders';
+import { compressPhoto, pdfToDataUri } from '../utils/attachments';
 import { listProducts } from '../services/api/products';
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 import { recordLocationLog } from '../services/api/locationLogs';
+import { useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTeamMembers } from '../services/api/users';
 import { urlToBase64Image } from '../utils/pdfImageHelper';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 // Legacy organizations sometimes carry a placeholder/malformed value in
 // their email field from the old Firestore data (blank isn't the only bad
@@ -51,12 +57,11 @@ import { buildCacheKey } from '../utils/listCache';
 const looksLikeEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 
 export default function AddOrderScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
 
-  const { currentUser, addNotification, companyProfile } = useData();
+  const { currentUser, companyProfile } = useData();
 
-  // 🔥 SaaS Engine kept for organizations/users + payment_collections (advance record)
-  const { fetchSaaSData, addSaaSData, isDbLoading } = useSaaSDB();
 
   const { mode, leadId, leadOrg, leadOrgId, leadPerson, leadMobile, leadEmail, leadCity, leadAddress, leadProduct } = useLocalSearchParams(); 
 
@@ -96,7 +101,9 @@ export default function AddOrderScreen() {
   const [poDate, setPoDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
 
+  // { type: 'image' | 'pdf', uri (preview), name, dataUri (ready to upload), kb? }
   const [selectedFile, setSelectedFile] = useState<any>(null);
+  const [preparingFile, setPreparingFile] = useState(false);
 
   const [modalVisible, setModalVisible] = useState(false);
   const [filteredData, setFilteredData] = useState<any[]>([]);
@@ -123,6 +130,8 @@ export default function AddOrderScreen() {
       enabled: !!currentUser?.companyId,
       fetcher: () => fetchOrganizations({ limit: 500 }),
   });
+  // Beyond the first 500: search the server while the organization picker is open.
+  useOrgServerSearch(modalVisible && currentModalType === 'Hospital', searchText, setFilteredData);
 
   // 🔥 Products — unchanged plain fetch-on-mount (out of scope for this pass).
   useEffect(() => {
@@ -291,16 +300,8 @@ export default function AddOrderScreen() {
         </body>
         </html>`;
 
-        const { uri } = await Print.printToFileAsync({ html: htmlContent });
         const cleanName = `Order_${orderData.orderId}.pdf`;
-        const newPath = `${(FileSystem as any).cacheDirectory}${cleanName}`;
-
-        try {
-            await FileSystem.copyAsync({ from: uri, to: newPath });
-            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Order PDF` });
-        } catch (error) {
-            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-        }
+        await sharePdfFromHtml(htmlContent, cleanName, `Share Order PDF`);
     } catch (error) {
         Alert.alert("Error", "Could not generate PDF");
     }
@@ -310,7 +311,7 @@ export default function AddOrderScreen() {
       try {
           let { status } = await Location.requestForegroundPermissionsAsync();
           if (status !== 'granted') return null;
-          let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          let location = await getGpsFix();
           return { lat: location.coords.latitude, lng: location.coords.longitude, timestamp: new Date().toISOString() };
       } catch (error) { return null; }
   };
@@ -404,16 +405,35 @@ export default function AddOrderScreen() {
           const result = await DocumentPicker.getDocumentAsync({ type: 'application/pdf', copyToCacheDirectory: true });
           if (!result.canceled && result.assets && result.assets.length > 0) {
               const file = result.assets[0];
-              setSelectedFile({ type: 'pdf', uri: file.uri, name: file.name });
+              setPreparingFile(true);
+              const dataUri = await pdfToDataUri(file.uri);
+              setSelectedFile({ type: 'pdf', uri: file.uri, name: file.name, dataUri });
           }
-      } catch (err) {}
+      } catch (err: any) {
+          Alert.alert("PDF", err?.message || "Could not read this PDF.");
+      } finally {
+          setPreparingFile(false);
+      }
+  };
+
+  // Shrinks the photo right away so the upload at save time is small.
+  const acceptPhoto = async (asset: ImagePicker.ImagePickerAsset, name: string) => {
+      setPreparingFile(true);
+      try {
+          const photo = await compressPhoto(asset);
+          setSelectedFile({ type: 'image', uri: photo.previewUri, name, dataUri: photo.dataUri, kb: photo.kb });
+      } catch {
+          Alert.alert("Photo", "Could not prepare this photo. Please try again.");
+      } finally {
+          setPreparingFile(false);
+      }
   };
 
   const openCamera = async () => {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') return Alert.alert("Permission Denied");
-      let result = await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.5 });
-      if (!result.canceled) setSelectedFile({ type: 'image', uri: result.assets[0].uri, name: "camera_img.jpg" });
+      let result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.8 });
+      if (!result.canceled) await acceptPhoto(result.assets[0], "PO photo.jpg");
   };
 
   const openGallery = async () => {
@@ -422,18 +442,21 @@ export default function AddOrderScreen() {
               const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
               if (status !== 'granted') return Alert.alert("Permission Denied", "Please allow gallery access in Settings.");
           }
-          let result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.5 });
-          if (!result.canceled) setSelectedFile({ type: 'image', uri: result.assets[0].uri, name: "gallery_img.jpg" });
+          let result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+          if (!result.canceled) await acceptPhoto(result.assets[0], "PO photo.jpg");
       } catch (error) { Alert.alert("Error", "Could not open gallery."); }
   };
 
   // 🔥 SAVE LOGIC — order via new backend API (auto-generates order ID,
   // auto-closes the lead if leadId given). Advance payment record still
   // goes to Firestore payment_collections until Phase 6.
-  // NOTE: PO file upload is not yet wired to the new backend (needs
-  // Supabase Storage) — the selected file is not persisted anywhere;
-  // flagged here rather than silently dropped.
+  // The PO file is uploaded right after the order is created; if that part
+  // fails the order is still saved and the PO can be attached from Orders.
   const handleSave = async () => {
+      if (preparingFile) {
+          Alert.alert("Please wait", "The PO file is still being prepared.");
+          return;
+      }
       const finalProductString = getSelectedProductsText();
       
       if (!hospitalName || !poNumber || !amount || !finalProductString) {
@@ -477,46 +500,32 @@ if (locationData) {
               location: locationData ? { latitude: locationData.lat, longitude: locationData.lng } : null,
               leadId: (leadId as string) || undefined,
               assignedToId,
+              // Saved by the server as a payment linked to this order.
+              advancePayment: cleanAdvance > 0 ? {
+                  mode: advanceMode as 'Cash' | 'Cheque' | 'NEFT' | 'UPI',
+                  refNumber: advanceMode !== 'Cash' ? advanceRef || undefined : undefined,
+                  bankName: advanceMode !== 'Cash' ? advanceBankName || undefined : undefined,
+                  pdcDate: advanceMode !== 'Cash' ? formatDate(advancePdcDate) : undefined,
+              } : undefined,
           });
 
-          // Record Advance Payment (still Firestore until Phase 6)
-          if (cleanAdvance > 0) {
-              await addSaaSData("payment_collections", {
-                  orgId: orgId,
-                  orgName: hospitalName,
-                  amount: cleanAdvance,
-                  paymentType: 'Advance',
-                  mode: advanceMode,            
-                  refNumber: advanceMode !== 'Cash' ? advanceRef : '',        
-                  bankName: advanceMode !== 'Cash' ? advanceBankName : '',
-                  pdcDate: advanceMode !== 'Cash' ? formatDate(advancePdcDate) : '',
-                  date: new Date().toISOString().split('T')[0],
-                  dateIso: new Date().toISOString().split('T')[0],
-                  orderId: savedOrder.orderId,
-                  orderRef: savedOrder.id,
-                  addedBy: currentUser?.name || 'Unknown',
-                  userName: finalSenderName,
-                  senderId: assignedToId || currentUser?.id,
-                  timestamp: Date.now(),
-                  note: 'Advance received at the time of Order Booking'
-              });
-          }
-
-          if (addNotification) {
-              await addNotification({
-                  title: "New Order Received 📦",
-                  message: `Order ${savedOrder.orderId} added by ${finalSenderName} for ${hospitalName}.`,
-                  to: "Admin", 
-                  type: "info",
-                  route: "/orders"
-              });
+          let poUploadFailed = false;
+          if (selectedFile?.dataUri) {
+              try {
+                  await uploadOrderPoFile(savedOrder.id, selectedFile.dataUri, selectedFile.name);
+              } catch (e) {
+                  console.log("PO upload failed:", e);
+                  poUploadFailed = true;
+              }
           }
 
           setIsSaving(false);
 
           Alert.alert(
               "Order Booked! 🎉", 
-              `Order ${savedOrder.orderId} has been saved successfully.\n\nDo you want to share the Order PDF now?`,
+              `Order ${savedOrder.orderId} has been saved successfully.` +
+                  (poUploadFailed ? `\n\n⚠️ The PO file could not be uploaded. Open the order in Orders and tap "Attach PO".` : '') +
+                  `\n\nDo you want to share the Order PDF now?`,
               [
                   { 
                       text: "No", 
@@ -575,9 +584,9 @@ if (locationData) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#333" />
+            <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{mode === 'from_lead' ? 'Book Order from Lead' : 'New Order Booking'}</Text>
         <View style={{width:24}} /> 
@@ -609,14 +618,14 @@ if (locationData) {
                 <Text style={{color: '#333', fontSize:16}}>{formatDate(poDate)}</Text>
                 <Ionicons name="calendar-outline" size={20} color="gray" />
             </TouchableOpacity>
-            {showDatePicker && <DateTimePicker value={poDate} mode="date" onChange={(e, d) => { setShowDatePicker(false); if(d) setPoDate(d); }} />}
+            {showDatePicker && <DateTimePicker value={poDate} mode="date" {...pickerHandlers((e, d) => { setShowDatePicker(false); if(d) setPoDate(d); })} />}
 
             <Text style={styles.label}>Select Client / Hospital *</Text>
             <TouchableOpacity style={styles.dropdownBtn} onPress={() => openModal('Hospital', orgList)}>
                 <Text style={{color: hospitalName ? '#333' : 'gray', fontSize:16}}>
                     {hospitalName || "Select from Organization List"}
                 </Text>
-                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998"/> : <Ionicons name="search" size={20} color="gray" />}
+                {<Ionicons name="search" size={20} color="gray" />}
             </TouchableOpacity>
 
             <Text style={styles.label}>Order Type (Cash / Billed) *</Text>
@@ -690,7 +699,7 @@ if (locationData) {
                                 <Text style={{color: '#333', fontSize: 13}}>{formatDate(advancePdcDate)}</Text>
                             </TouchableOpacity>
                             {showAdvancePdcPicker && (
-                                <DateTimePicker value={advancePdcDate} mode="date" onChange={(e, d) => { setShowAdvancePdcPicker(false); if(d) setAdvancePdcDate(d); }} />
+                                <DateTimePicker value={advancePdcDate} mode="date" {...pickerHandlers((e, d) => { setShowAdvancePdcPicker(false); if(d) setAdvancePdcDate(d); })} />
                             )}
                         </View>
                     )}
@@ -740,9 +749,14 @@ if (locationData) {
                         )}
                         <View style={{flex:1, marginLeft:10}}>
                             <Text style={{fontWeight:'bold', color:'#333'}} numberOfLines={1}>{selectedFile.name}</Text>
-                            <Text style={{fontSize:12, color: 'gray'}}>{selectedFile.type === 'pdf' ? 'PDF Document' : 'Image File'}</Text>
+                            <Text style={{fontSize:12, color: 'gray'}}>{selectedFile.type === 'pdf' ? 'PDF Document' : `Photo${selectedFile.kb ? ` • ${selectedFile.kb} KB` : ''}`} • uploads when you submit</Text>
                         </View>
                         <TouchableOpacity onPress={() => setSelectedFile(null)} style={{padding:5}}><Ionicons name="trash" size={22} color="gray" /></TouchableOpacity>
+                    </View>
+                ) : preparingFile ? (
+                    <View style={styles.uploadBtn}>
+                        <ActivityIndicator color="#3b5998" />
+                        <Text style={{color:'#3b5998', marginTop:5}}>Preparing file...</Text>
                     </View>
                 ) : (
                     <TouchableOpacity style={styles.uploadBtn} onPress={handleUploadOptions}>
@@ -751,11 +765,6 @@ if (locationData) {
                     </TouchableOpacity>
                 )}
             </View>
-            {selectedFile && (
-                <Text style={{fontSize: 10, color: '#e65100', marginTop: -10, marginBottom: 15}}>
-                    ⚠️ Attachment upload isn't wired to the server yet — this file won't be saved with the order.
-                </Text>
-            )}
 
             <Text style={styles.label}>Remarks / Notes</Text>
             <TextInput style={[styles.input, {height: 60, textAlignVertical:'top'}]} multiline placeholder="Any special instructions..." value={notes} onChangeText={setNotes} />
@@ -804,11 +813,12 @@ if (locationData) {
                                 </View>
                             ) : (
                                 <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%'}}>
-                                    <Text style={[styles.modalText, isSelected && {color: '#1976d2', fontWeight: 'bold'}]}>
+                                    {/* flex:1 lets long names wrap so the checkbox keeps its column */}
+                                    <Text style={[styles.modalText, { flex: 1, marginRight: 12 }, isSelected && {color: '#1976d2', fontWeight: 'bold'}]}>
                                         {typeof item === 'string' ? item : (item.name)}
                                     </Text>
                                     {currentModalType === 'Product' && (
-                                        <Ionicons name={isSelected ? "checkbox" : "square-outline"} size={24} color={isSelected ? "#1976d2" : "gray"} />
+                                        <Ionicons name={isSelected ? "checkbox" : "square-outline"} size={24} color={isSelected ? "#1976d2" : "gray"} style={{ width: 24 }} />
                                     )}
                                 </View>
                             )}
@@ -861,9 +871,9 @@ if (locationData) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   content: { padding: 20, paddingBottom: 50 },
   label: { marginBottom: 5, color:'#555', fontWeight:'600', fontSize:13 },
@@ -892,4 +902,4 @@ const styles = StyleSheet.create({
   modalSubText: { fontSize: 12, color: 'gray' },
   iconBox: { width: 35, height: 35, borderRadius: 8, justifyContent:'center', alignItems:'center', backgroundColor:'#e3f2fd' },
   closeBtn: { marginTop: 15, alignItems: 'center', padding: 10 }
-});
+}), FORM_ACCENT.order);

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -16,27 +16,30 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (Direct DB imports removed)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 
 // 🔥 Phase 8: travel notes now come from Postgres via these adapters
-import { fetchTravelNotes, settleTravelNotesForUser } from '../services/api/travelNotes';
+import { listTravelNotesPage, settleTravelNotesForUser, TravelPageFilters } from '../services/api/travelNotes';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { periodRange, useDebounced } from '../utils/periodRange';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { PeriodTabs, StaffPeriodRow } from '../components/compact';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function TravelNoteScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
 
   // 🔥 1. Context se current user nikala
   const { currentUser } = useData(); 
 
-  // 🔥 2. SaaS Engine kept only for isDbLoading (search-icon spinner); travel notes no longer go through this
-  const { isDbLoading } = useSaaSDB();
 
   // 🔥 3. Lazy Loaded States for DB
-  // travelList now comes from useCachedList below (cache-first)
   // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
 
   // --- STATES ---
@@ -46,7 +49,6 @@ export default function TravelNoteScreen() {
   
   const [selectedItem, setSelectedItem] = useState<any>(null); 
   const [modalVisible, setModalVisible] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   
   // SETTLEMENT LOADING STATE
   const [isSettling, setIsSettling] = useState(false);
@@ -56,32 +58,8 @@ export default function TravelNoteScreen() {
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All'); 
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  const [visibleCount, setVisibleCount] = useState(20);
 
   const canManage = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
-
-  useEffect(() => {
-      if (viewMode === 'Day') {
-          setVisibleCount(500); 
-      } else {
-          setVisibleCount(20); 
-      }
-  }, [viewMode, currentDate, searchText, selectedEmployeeName]);
-
-  function getFetchRange(): { fromDate?: string; toDate?: string } {
-      const toIso = (d: Date) => d.toISOString().split('T')[0];
-      if (viewMode === 'All') return {};
-      if (viewMode === 'Day') return { fromDate: toIso(currentDate), toDate: toIso(currentDate) };
-      if (viewMode === 'Month') {
-          const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-          const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-          return { fromDate: toIso(start), toDate: toIso(end) };
-      }
-      const m = currentDate.getMonth();
-      const y = currentDate.getFullYear();
-      const fyStartYear = m >= 3 ? y : y - 1;
-      return { fromDate: toIso(new Date(fyStartYear, 3, 1)), toDate: toIso(new Date(fyStartYear + 1, 2, 31)) };
-  }
 
   // 🔥 4a. Users list — cache-first, shares the SAME 'team_members' cache
   // key as manage_team.tsx/employee_timeline.tsx.
@@ -98,52 +76,45 @@ export default function TravelNoteScreen() {
       }
   }, [userList, canManage]);
 
-  // 🔥 TRAVEL NOTES — cache-first, but like attendance.tsx this screen's data
-  // is parameterized by date-range + employee filter, not a flat "whole
-  // company" list — so the cache key includes those params. A repeat visit
-  // to the same view/date/filter (the common case) is instant; a genuinely
-  // new range still goes to the network. See hooks/useCachedList.ts.
+  // 🔥 TRAVEL NOTES — 20 per page from the server: date range (local days, not
+  // UTC), employee, search, and Outstanding / Total for the whole filter.
   const usersReady = !(canManage && selectedEmployeeName !== 'All' && employees.length === 0);
-  const { fromDate, toDate } = getFetchRange();
   const resolveTargetUserId = (): string | undefined => {
       if (!canManage) return undefined; // self, enforced server-side
       if (selectedEmployeeName === 'All') return 'all';
       return employees.find(e => e.name === selectedEmployeeName)?.id;
   };
   const targetUserId = resolveTargetUserId();
-  const travelCacheKey = buildCacheKey(
-      `travel:${viewMode}:${fromDate || 'none'}:${toDate || 'none'}:${targetUserId || 'self'}`,
-      currentUser?.companyId
-  );
+  const debouncedSearch = useDebounced(searchText.trim());
+  const travelFilters = useMemo<TravelPageFilters>(() => ({
+      ...periodRange(viewMode, currentDate),
+      userId: targetUserId,
+      search: debouncedSearch || undefined,
+  }), [viewMode, currentDate, targetUserId, debouncedSearch]);
+  const [outstandingAmount, setOutstandingAmount] = useState(0);
+  const [totalHistoryAmount, setTotalHistoryAmount] = useState(0);
+  const fetchTravelPage = useCallback(async (p: TravelPageFilters & { page: number; limit: number }) => {
+      const r = await listTravelNotesPage(p);
+      if (p.page === 1) { setOutstandingAmount(r.outstanding); setTotalHistoryAmount(r.totalAmount); }
+      return r;
+  }, []);
+  const isDefaultView = viewMode === 'All' && selectedEmployeeName === 'All' && !debouncedSearch;
   const {
-      data: travelList,
+      items: travelList,
+      total: travelTotal,
       loading: travelLoading,
+      loadingMore: travelLoadingMore,
+      hasMore: travelHasMore,
+      loadMore: loadMoreTravel,
       refreshing: travelRefreshing,
       refresh: refreshTravel,
-  } = useCachedList({
-      cacheKey: travelCacheKey,
+      error: travelError,
+  } = useServerPagedList<TravelPageFilters, any>({
+      fetchPage: fetchTravelPage,
+      filters: travelFilters,
       enabled: !!currentUser?.companyId && usersReady,
-      fetcher: () => fetchTravelNotes({ userId: targetUserId, fromDate, toDate, limit: 500 }),
+      cacheKey: isDefaultView ? buildCacheKey('travel_page1_v1', currentUser?.companyId) : null,
   });
-
-  const onRefresh = async () => {
-      setRefreshing(true);
-      await refreshTravel();
-      setRefreshing(false);
-  };
-
-  const parseDate = (dateStr: any) => {
-      if (!dateStr) return new Date();
-      if (dateStr instanceof Date) return dateStr;
-      
-      if (typeof dateStr === 'string' && dateStr.includes('/')) {
-          const parts = dateStr.split('/');
-          if (parts.length === 3) {
-              return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-          }
-      }
-      return new Date(dateStr);
-  };
 
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
@@ -165,66 +136,6 @@ export default function TravelNoteScreen() {
       return "All Time";
   };
 
-  // --- FILTER LOGIC ---
-  const getFilteredData = () => {
-      let data = Array.isArray(travelList) ? [...travelList] : [];
-
-      // employee + date-range already applied server-side (see the useCachedList fetcher above);
-      // search stays client-side over the bounded fetched set.
-
-      if (searchText) {
-          const term = searchText.toLowerCase();
-          data = data.filter((item: any) => {
-             const fullString = `
-                ${item.dateIso || item.date || ''} 
-                ${item.amount ? item.amount.toString() : ''} 
-                ${item.from || ''} 
-                ${item.to || ''} 
-                ${item.senderName || item.userName || ''} 
-                ${item.mode || ''} 
-                ${item.status || ''}
-             `.toLowerCase();
-             return fullString.includes(term);
-          });
-      }
-
-      if (viewMode !== 'All') {
-          const targetYear = currentDate.getFullYear();
-          const targetMonth = currentDate.getMonth();
-          const targetDay = currentDate.getDate();
-
-          const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime();
-
-          data = data.filter(item => {
-              const dateField = item.dateIso || item.date || item.createdAt;
-              if(!dateField) return false;
-              
-              const itemDate = parseDate(dateField);
-              const itemTime = itemDate.getTime();
-              
-              if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-              if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-              if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-              return true;
-          });
-      }
-
-      data.sort((a: any, b: any) => parseDate(b.dateIso || b.date).getTime() - parseDate(a.dateIso || a.date).getTime());
-      return data;
-  };
-
-  const displayList = getFilteredData(); 
-  const renderedList = displayList.slice(0, visibleCount);
-  
-  const outstandingAmount = displayList
-      .filter((item: any) => item.status === 'Pending' || item.status === 'Approved')
-      .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
-
-  const totalHistoryAmount = displayList
-      .filter((item: any) => item.status !== 'Rejected')
-      .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
 
   // --- 🔥 SAAS ENGINE: SETTLEMENT LOGIC ---
   const handleSettlement = async () => {
@@ -248,11 +159,7 @@ export default function TravelNoteScreen() {
       );
   };
 
-  // --- 🔥 Phase 8: SETTLEMENT via settleTravelNotesForUser() — single atomic bulk update.
-  // (The old "notify employee their claims were settled" push is dropped here: the old
-  // code sourced the Firestore userId off the first pre-fetched note; the new bulk
-  // endpoint settles server-side without returning individual records to key off of.
-  // Re-add via addNotification once notifications move off Firestore in Phase 9.)
+  // Settlement: one atomic bulk update on the server, which also notifies the employee.
   const processSettlement = async () => {
       setIsSettling(true);
       try {
@@ -294,6 +201,29 @@ export default function TravelNoteScreen() {
       if(m.includes('flight')) return 'airplane';
       return 'walk';
   };
+
+  // Laptop: the same list as a table (tap a row → same details popup).
+  const isDesktop = useIsDesktop();
+  const travelColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Date', width: 100, render: (i) => i.date || '-' },
+      { key: 'staff', label: 'Staff', width: 160, render: (i) => i.senderName || i.userName || 'Unknown' },
+      { key: 'from', label: 'From', flex: 2, render: (i) => i.from || '-' },
+      { key: 'to', label: 'To', flex: 2, render: (i) => i.to || '-' },
+      { key: 'purpose', label: 'Purpose', flex: 2, render: (i) => <TwoLine main={i.purpose || '-'} sub={i.note} /> },
+      { key: 'mode', label: 'Mode', width: 100, render: (i) => (
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Ionicons name={getModeIcon(i.mode) as any} size={14} color="#3b5998" style={{ marginRight: 4 }} />
+              <Text style={{ fontSize: 13, color: '#2d3748' }} numberOfLines={1}>{i.mode || '-'}</Text>
+          </View>
+      ) },
+      { key: 'km', label: 'Km', width: 70, align: 'right', render: (i) => i.distance ?? '-' },
+      { key: 'amount', label: 'Amount', width: 110, align: 'right', render: (i) => inr(i.amount || 0) },
+      { key: 'status', label: 'Status', width: 100, render: (i) => {
+          if (i.status === 'Settled' || i.status === 'Paid') return <Pill text="PAID" color="#1565c0" bg="#e3f2fd" />;
+          if (i.status === 'Pending') return <Pill text="PENDING" color="#ef6c00" bg="#fff3e0" />;
+          return i.status || '-';
+      } },
+  ];
 
   const renderItem = ({ item }: any) => {
     const isSettled = item.status === 'Settled' || item.status === 'Paid';
@@ -351,7 +281,7 @@ export default function TravelNoteScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={{flexDirection:'row', alignItems:'center'}}>
             <TouchableOpacity onPress={() => router.back()}>
                 <Ionicons name="arrow-back" size={24} color="#333" />
@@ -403,36 +333,19 @@ export default function TravelNoteScreen() {
           </View>
       </View>
 
-      <View style={{backgroundColor:'white', paddingBottom:10}}>
-          <View style={styles.tabContainer}>
-              {['Day', 'Month', 'FY', 'All'].map((m) => (
-                  <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
-                      <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
-                  </TouchableOpacity>
-              ))}
-          </View>
-
-          {canManage && (
-              <TouchableOpacity style={styles.employeeFilterBtn} onPress={() => setShowEmployeePicker(true)}>
-                  <Ionicons name="people" size={18} color="#2e7d32" />
-                  <Text style={{fontSize:13, marginLeft:8, color:'#2e7d32', fontWeight:'600'}}>
-                      {selectedEmployeeName === 'All' ? 'View All Staff' : selectedEmployeeName}
-                  </Text>
-                  <Ionicons name="chevron-down" size={16} color="#2e7d32" style={{marginLeft:'auto'}}/>
-              </TouchableOpacity>
-          )}
-
-          {viewMode !== 'All' && (
-              <View style={styles.dateNav}>
-                  <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-                  <Text style={styles.monthText}>{getHeaderDate()}</Text>
-                  <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-              </View>
-          )}
-
-          <View style={{paddingHorizontal:15}}>
+      <View style={{backgroundColor:'white', paddingBottom:6}}>
+          <PeriodTabs value={viewMode} onChange={setViewMode} />
+          <StaffPeriodRow
+              showStaff={canManage}
+              staffLabel={selectedEmployeeName === 'All' ? 'All Staff' : selectedEmployeeName}
+              onStaffPress={() => setShowEmployeePicker(true)}
+              periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+              onPrev={() => changeDate(-1)}
+              onNext={() => changeDate(1)}
+          />
+          <View style={{paddingHorizontal:12, marginTop:6}}>
               <View style={styles.searchBar}>
-                  {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+                  {travelLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
                   <TextInput 
                       style={styles.searchInput}
                       placeholder="Search..."
@@ -445,31 +358,36 @@ export default function TravelNoteScreen() {
       </View>
 
       <FlatList 
-          data={renderedList}
+          data={travelList}
           keyExtractor={(item: any) => item.id}
-          renderItem={renderItem}
-          contentContainerStyle={{padding: 15}}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          renderItem={isDesktop
+              ? ({ item, index }) => <TableRow columns={travelColumns} item={item} index={index} onPress={() => openDetails(item)} />
+              : renderItem}
+          ListHeaderComponent={isDesktop && travelList.length > 0 ? <TableHeader columns={travelColumns} /> : null}
+          stickyHeaderIndices={isDesktop && travelList.length > 0 ? [0] : undefined}
+          contentContainerStyle={{padding: 12}}
+          refreshControl={<RefreshControl refreshing={travelRefreshing} onRefresh={refreshTravel} colors={['#3b5998']} tintColor="#3b5998" />}
           ListEmptyComponent={
               <View style={{alignItems: 'center', marginTop: 50}}>
-                {travelLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{textAlign:'center', color:'gray'}}>No travel records found.</Text>}
+                {travelLoading ? <ActivityIndicator size="large" color="#3b5998" /> : <Text style={{textAlign:'center', color:'gray'}}>{travelError ? 'Could not load travel notes — pull down to retry.' : 'No travel records found.'}</Text>}
               </View>
           }
           ListFooterComponent={
               <View style={{ paddingBottom: 80 }}>
-                  {visibleCount < displayList.length ? (
+                  {travelHasMore ? (
                       <TouchableOpacity 
-                          onPress={() => setVisibleCount(prev => prev + 20)} 
+                          onPress={loadMoreTravel}
+                          disabled={travelLoadingMore}
                           style={{
                               padding: 12, backgroundColor: '#fff', alignItems: 'center', marginVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ddd', elevation: 1
                           }}
                       >
-                          <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                              👇 Load More Records ({displayList.length - visibleCount} remaining)
-                          </Text>
+                          {travelLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                              <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({travelTotal - travelList.length} remaining)</Text>
+                          )}
                       </TouchableOpacity>
                   ) : (
-                      displayList.length > 0 ? (
+                      travelList.length > 0 ? (
                           <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
                               --- End of List ---
                           </Text>
@@ -557,7 +475,7 @@ const DetailRow = ({label, value, icon}: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 4 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, backgroundColor: 'white', elevation: 4 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#333', marginLeft: 10 },
   addBtn: { flexDirection:'row', backgroundColor:'#3b5998', paddingHorizontal:12, paddingVertical:6, borderRadius:5, alignItems:'center' },
   
@@ -569,18 +487,10 @@ const styles = StyleSheet.create({
   settleBtn: { backgroundColor: '#2e7d32', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, marginLeft: 'auto' },
   settleText: { color: 'white', fontSize: 12, fontWeight: 'bold' },
 
-  tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', margin: 15, borderRadius: 8, padding: 3, marginBottom: 10 },
-  tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-  activeTab: { backgroundColor: 'white', elevation: 2 },
-  tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-  activeTabText: { color: '#3b5998', fontWeight: 'bold' },
-  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 10, marginHorizontal: 15, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#eee' },
-  monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
-  employeeFilterBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#e8f5e9', paddingHorizontal:12, paddingVertical:10, marginHorizontal:15, borderRadius:8, borderWidth:1, borderColor:'#2e7d32', marginBottom:10 },
-  searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', paddingHorizontal: 10, borderRadius: 8, alignItems: 'center', height: 40 },
+  searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', paddingHorizontal: 10, borderRadius: 8, alignItems: 'center', height: 36 },
   searchInput: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
 
-  card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 15, elevation: 2 },
+  card: { backgroundColor: 'white', borderRadius: 10, padding: 11, marginBottom: 8, elevation: 2 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom:10 },
   date: { fontWeight:'bold', color:'gray', fontSize:13 },
   modeBadge: { flexDirection:'row', backgroundColor:'#f57c00', paddingHorizontal:8, paddingVertical:4, borderRadius:12, alignItems:'center' },
@@ -589,7 +499,7 @@ const styles = StyleSheet.create({
   routeRow: { flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
   label: { fontSize:10, color:'gray' },
   place: { fontSize:15, fontWeight:'600', color:'#333' },
-  divider: { height:1, backgroundColor:'#eee', marginVertical:10 },
+  divider: { height:1, backgroundColor:'#eee', marginVertical:7 },
   footer: { flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
   senderName: { color:'gray', fontSize:12, fontStyle:'italic' },
   distance: { fontWeight:'bold', color:'#3b5998', fontSize:16 },

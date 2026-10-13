@@ -1,6 +1,9 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as Location from 'expo-location';
+import { getCurrentLocation as getGpsFix, locationErrorMessage } from '../utils/getLocation';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
@@ -22,12 +25,14 @@ import { useData } from './context/DataContext';
 
 // 🔥 Phase 8: travel notes now go to Postgres via this adapter
 import { createTravelNote } from '../services/api/travelNotes';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddTravelScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   // 🔥 1. Context se Current User aur Notification Engine nikala
-  const { currentUser, addNotification } = useData(); 
+  const { currentUser } = useData(); 
 
   // Form States
   const [date, setDate] = useState(new Date()); 
@@ -76,7 +81,7 @@ export default function AddTravelScreen() {
         return;
       }
 
-      let loc = await Location.getCurrentPositionAsync({});
+      let loc = await getGpsFix();
       let address = await Location.reverseGeocodeAsync({
         latitude: loc.coords.latitude,
         longitude: loc.coords.longitude
@@ -87,7 +92,7 @@ export default function AddTravelScreen() {
         setFromLoc(`${addr.city || ''}, ${addr.region || ''}`);
       }
     } catch (error) {
-      Alert.alert("Error", "Could not fetch location.");
+      Alert.alert("Location", locationErrorMessage(error, "Could not fetch location."));
     } finally {
       setLocLoading(false);
     }
@@ -114,16 +119,6 @@ export default function AddTravelScreen() {
         });
         
         if (result.success) {
-            // 🔥 4. REAL PUSH NOTIFICATION
-            if (addNotification) {
-                await addNotification({
-                    title: "New Travel Logged 🚴",
-                    message: `${currentUser?.name} logged travel: ${fromLoc} to ${toLoc} (${distance} km).`,
-                    to: "Accountant", // Admin/Accountant ko alert jayega
-                    route: "/travel",
-                    type: "info"
-                });
-            }
 
             Alert.alert("Success", "Travel Note Added & Admin Notified!");
             router.back();
@@ -140,9 +135,9 @@ export default function AddTravelScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#333" />
+            <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>New Travel Note</Text>
         <View style={{width:24}} /> 
@@ -170,7 +165,7 @@ export default function AddTravelScreen() {
                     value={date}
                     mode="date"
                     display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={onDateChange}
+                    {...pickerHandlers(onDateChange)}
                 />
             )}
 
@@ -269,9 +264,9 @@ export default function AddTravelScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   contentContainer: { padding: 20 },
   label: { marginBottom: 5, color:'#555', fontWeight:'600', fontSize:13, marginTop:10 },
@@ -288,4 +283,4 @@ const styles = StyleSheet.create({
   modalItem: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#eee' },
   modalItemText: { fontSize: 16, color: '#333' },
   closeBtn: { marginTop:15, alignItems:'center', padding:10 }
-});
+}), FORM_ACCENT.travel);

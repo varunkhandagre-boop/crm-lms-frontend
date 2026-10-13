@@ -16,6 +16,7 @@ import {
     View,
 } from 'react-native';
 import { fetchGatewaySettings, GatewaySettings, saveGatewaySettings } from '../../services/api/superadminSettings';
+import { useHeaderTop } from '../../hooks/useHeaderTop';
 
 type GatewayForm = {
     isEnabled: boolean;
@@ -42,6 +43,7 @@ const EMPTY_FORM: GatewayForm = {
 };
 
 export default function PaymentGatewaySettings() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     const [config, setConfig] = useState<GatewayForm>(EMPTY_FORM);
     const [original, setOriginal] = useState<GatewayForm>(EMPTY_FORM);
@@ -90,13 +92,8 @@ export default function PaymentGatewaySettings() {
 
     const validate = (): string | null => {
         if (!config.keyId.trim()) return 'Razorpay Key ID is required.';
-        // The backend never returns the real secret, so every save must
-        // include it fresh — even when one is already configured.
-        if (!config.keySecret.trim()) {
-            return hasExistingSecret
-                ? 'Please re-enter your Key Secret to confirm this save (it is never shown back to you).'
-                : 'Razorpay Key Secret is required.';
-        }
+        // Blank keeps the secret already saved on the server.
+        if (!config.keySecret.trim() && !hasExistingSecret) return 'Razorpay Key Secret is required.';
         if (!config.companyName.trim()) return 'Company Name is required for checkout display.';
 
         const prefix = config.isTestMode ? 'rzp_test_' : 'rzp_live_';
@@ -127,7 +124,7 @@ export default function PaymentGatewaySettings() {
                                 isEnabled: config.isEnabled,
                                 isTestMode: config.isTestMode,
                                 keyId: config.keyId.trim(),
-                                keySecret: config.keySecret.trim(),
+                                keySecret: config.keySecret.trim() || undefined,
                                 webhookSecret: config.webhookSecret.trim() || undefined,
                                 currency: config.currency,
                                 companyName: config.companyName.trim(),
@@ -189,7 +186,7 @@ export default function PaymentGatewaySettings() {
 
     return (
         <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}>
                     <Ionicons name="arrow-back" size={24} color="white" />
                 </TouchableOpacity>
@@ -259,7 +256,7 @@ export default function PaymentGatewaySettings() {
                     <View style={styles.fieldHeader}>
                         <Ionicons name="lock-closed" size={18} color="#d32f2f" />
                         <Text style={styles.fieldLabel}>Key Secret</Text>
-                        <Text style={styles.fieldRequired}>{hasExistingSecret ? 're-enter to change' : 'required'}</Text>
+                        <Text style={styles.fieldRequired}>{hasExistingSecret ? 'saved' : 'required'}</Text>
                         <TouchableOpacity onPress={() => setShowSecret(p => !p)} style={{ marginLeft: 'auto' }}>
                             <Ionicons name={showSecret ? 'eye-off' : 'eye'} size={18} color="#888" />
                         </TouchableOpacity>
@@ -396,7 +393,7 @@ function PreviewRow({ icon, color, label, value }: { icon: any; color: string; l
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { backgroundColor: '#d32f2f', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 50, paddingBottom: 16 },
+    header: { backgroundColor: '#d32f2f', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 16 },
     headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },
     content: { padding: 16 },
     statusBanner: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, padding: 14, borderWidth: 1.5, marginBottom: 12 },

@@ -86,6 +86,35 @@ export async function fetchLeaves(opts: {
   return (res.data ?? []).map(toLegacyLeave);
 }
 
+export type LeaveFeedKind = 'leave' | 'absent' | 'short' | 'earned' | 'cancelled';
+export interface LeaveFeedFilters {
+  userId?: string; fromDate?: string; toDate?: string; search?: string;
+  kind?: LeaveFeedKind;
+  bucket?: 'CL' | 'SL' | 'EL' | 'COMP' | 'LWP' | 'PAID';
+}
+
+/**
+ * One page of the Leave screen: leave requests plus system rows (Absent /
+ * Half Day / Earned / Leave Cancelled), built on the server. Pending first.
+ */
+export async function listLeaveFeedPage(
+  params: LeaveFeedFilters & { page: number; limit: number },
+): Promise<{ items: any[]; total: number; totalPages: number; pending: number }> {
+  const res = await apiClient.get<ListResponse<any> & { totals?: { pending: number } }>(`/leaves/feed${buildQuery({ ...params })}`);
+  return {
+    items: (res.data ?? []).map((x: any) => (x.isAutoRecord ? x : toLegacyLeave(x))),
+    total: res.meta.total,
+    totalPages: res.meta.totalPages,
+    pending: res.totals?.pending ?? 0,
+  };
+}
+
+/** One request by id — for opening it from a notification when it isn't on the loaded page. */
+export async function getLeave(id: string): Promise<LegacyLeave> {
+  const res = await apiClient.get<OneResponse<any>>(`/leaves/${id}`);
+  return toLegacyLeave(res.data);
+}
+
 export async function fetchLeaveSummary(opts: { userId?: string; fyStartYear?: number } = {}) {
   const qs = buildQuery({ userId: opts.userId, fyStartYear: opts.fyStartYear });
   const res = await apiClient.get<OneResponse<any>>(`/leaves/summary${qs}`);
@@ -99,10 +128,13 @@ export async function fetchLeaveSummary(opts: { userId?: string; fyStartYear?: n
     shortDays: number;
     balance: number;
     lwp: number;
+    // Leave Policy (CL/SL/EL) — present on newer servers
+    policy?: LeavePolicyInfo;
+    balances?: LeaveTypeBalance[]; // only when policy.enabled
   };
 }
 
-export async function applyLeave(payload: { fromDate: string; toDate: string; type: string; reason: string }) {
+export async function applyLeave(payload: { fromDate: string; toDate: string; type: string; reason: string; halfDay?: boolean }) {
   const res = await apiClient.post<OneResponse<any>>(`/leaves`, payload);
   return { success: true, id: res.data?.id, record: toLegacyLeave(res.data) };
 }
@@ -112,4 +144,58 @@ export async function updateLeaveStatus(leaveId: string, status: "Approved" | "R
     status: status === "Approved" ? "APPROVED" : "REJECTED",
   });
   return { success: true, record: toLegacyLeave(res.data) };
+}
+
+// ── Leave Policy ────────────────────────────────────────────────────────────
+export interface LeavePolicyInfo { enabled: boolean; countOffDays: boolean; halfDayAllowed: boolean; otherTypesMode: 'cl' | 'paid' | 'lwp' }
+export interface LeaveTypeBalance {
+  type: 'CL' | 'SL' | 'EL' | 'COMP';
+  label: string;
+  opening: number;
+  quota: number;
+  used: number;
+  balance: number;
+  overdrawn: number;
+}
+
+// Which balance a leave type uses (same mapping as the server).
+export function leaveBucket(type: string, otherTypesMode: LeavePolicyInfo['otherTypesMode']): 'CL' | 'SL' | 'EL' | 'COMP' | 'LWP' | 'PAID' {
+  switch (type) {
+    case 'Casual Leave': return 'CL';
+    case 'Sick Leave': return 'SL';
+    case 'Earned Leave': return 'EL';
+    case 'Compensatory Off': return 'COMP';
+    case 'Leave Without Pay': return 'LWP';
+    default: return otherTypesMode === 'paid' ? 'PAID' : otherTypesMode === 'lwp' ? 'LWP' : 'CL';
+  }
+}
+
+export interface EmployeeLeaveBalances { userId: string; name: string; empId: string | null; summary: Awaited<ReturnType<typeof fetchLeaveSummary>> }
+
+export async function fetchAllLeaveBalances(fyStartYear: number): Promise<EmployeeLeaveBalances[]> {
+  const res = await apiClient.get<OneResponse<EmployeeLeaveBalances[]>>(`/leaves/balances?fyStartYear=${fyStartYear}`);
+  return res.data;
+}
+
+export async function saveOpeningBalance(payload: { userId: string; fyStartYear: number; type: 'CL' | 'SL' | 'EL'; days: number }) {
+  const res = await apiClient.put<OneResponse<any>>('/leaves/opening-balances', payload);
+  return res.data;
+}
+
+export interface CarryForwardResult {
+  fromFyStartYear: number;
+  toFyStartYear: number;
+  fyEnded: boolean;
+  types: string[];
+  rows: { userId: string; name: string; items: { type: string; closing: number; carry: number; skipped: boolean }[] }[];
+}
+
+export async function previewCarryForward(fromFyStartYear: number): Promise<CarryForwardResult> {
+  const res = await apiClient.get<OneResponse<CarryForwardResult>>(`/leaves/carry-forward/preview?fromFyStartYear=${fromFyStartYear}`);
+  return res.data;
+}
+
+export async function commitCarryForward(fromFyStartYear: number): Promise<CarryForwardResult> {
+  const res = await apiClient.post<OneResponse<CarryForwardResult>>('/leaves/carry-forward', { fromFyStartYear });
+  return res.data;
 }

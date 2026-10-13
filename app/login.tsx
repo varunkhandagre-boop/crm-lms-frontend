@@ -17,10 +17,6 @@ import {
     View
 } from 'react-native';
 
-// 🔥 FIREBASE AUTH IMPORT FOR FORGOT PASSWORD
-import { sendPasswordResetEmail } from 'firebase/auth';
-import { auth } from '../firebaseConfig'; // Path check kar lein agar galat ho toh
-
 // 🔥 SAAS IMPORTS
 import { useData } from './context/DataContext';
 
@@ -35,14 +31,17 @@ export default function LoginScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  // Android keyboard handling. With edge-to-edge (default since Expo SDK 53) the OS no
-  // longer resizes the window when the keyboard opens, and this screen used to rely on
-  // exactly that (KeyboardAvoidingView behavior was undefined on Android) — so in the
-  // Play Store build the keyboard covered the password field. Track the keyboard height
-  // ourselves, pad the scroll content by it, and scroll the form into view. If the OS
-  // does still resize, the worst case is some extra blank space under the form.
+  // Android keyboard handling. Under edge-to-edge, whether the OS shrinks the screen
+  // when the keyboard opens depends on the React Native version (SDK 54 didn't, SDK 57
+  // does) and on Expo Go vs a real build. Padding by the full keyboard height on top of
+  // an OS resize pushed the form far up. So measure how much the screen actually shrank
+  // and pad only the part of the keyboard the OS didn't already make room for.
   const scrollRef = useRef<ScrollView>(null);
   const [kbHeight, setKbHeight] = useState(0);
+  const fullHeightRef = useRef(0);
+  const [viewHeight, setViewHeight] = useState(0);
+  const osShrink = Math.max(0, fullHeightRef.current - viewHeight);
+  const extraKbPad = Math.max(0, kbHeight - osShrink);
   useEffect(() => {
     if (Platform.OS !== 'android') return;
     const show = Keyboard.addListener('keyboardDidShow', (e) => setKbHeight(e.endCoordinates.height));
@@ -81,35 +80,12 @@ export default function LoginScreen() {
   }, []);
 
   // 🔥 FORGOT PASSWORD FUNCTION
-    const handleForgotPassword = async () => {
-      if (!email) {
-          Alert.alert("Email Required", "Please enter your registered email ID in the box above to reset your password.");
-          return;
-      }
-      
-      try {
-          await sendPasswordResetEmail(auth, email.trim().toLowerCase());
-          Alert.alert(
-              "Email Sent ✅", 
-              "A password reset link has been sent to your email address. Please check your inbox (and spam folder) to create a new password."
-          );
-      } catch (error: any) {
-          // Employees created via the migrated Users tab have no Firebase
-          // account, so this always fails with "user-not-found" for them —
-          // that's expected, not a real error. Guide them to the one
-          // reset path that always works instead of showing a confusing
-          // Firebase-specific message.
-          if (error.message?.includes('user-not-found')) {
-              Alert.alert(
-                  "Contact Your Admin",
-                  "We couldn't find a self-service reset for this account. Please ask your company Admin to reset your password from Manage Team."
-              );
-              return;
-          }
-          let msg = error.message;
-          if (msg.includes('invalid-email')) msg = "Please enter a valid email address.";
-          Alert.alert("Error", msg);
-      }
+    // No self-service reset yet: passwords are reset by the company Admin.
+    const handleForgotPassword = () => {
+      Alert.alert(
+          "Reset Password",
+          "Please ask your company Admin to reset your password from Team & Settings. If you are the Admin, contact support."
+      );
   };
 
   // 🔥 SAAS LOGIN LOGIC
@@ -136,14 +112,21 @@ export default function LoginScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <View
+      style={styles.container}
+      onLayout={(e) => {
+        const h = e.nativeEvent.layout.height;
+        if (kbHeight === 0) fullHeightRef.current = Math.max(fullHeightRef.current, h);
+        setViewHeight(h);
+      }}
+    >
       <KeyboardAvoidingView 
         behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
         style={{ flex: 1 }}
       >
         <ScrollView 
           ref={scrollRef}
-          contentContainerStyle={[styles.scrollContent, kbHeight > 0 && { paddingBottom: 20 + kbHeight }]}
+          contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled" 
           showsVerticalScrollIndicator={false}
           keyboardDismissMode="on-drag" 
@@ -163,7 +146,7 @@ export default function LoginScreen() {
           </View>
 
           {/* --- FORM SECTION --- */}
-          <View style={styles.formContainer}>
+          <View style={[styles.formContainer, kbHeight > 0 && { paddingBottom: 30 + extraKbPad }]}>
               <Text style={styles.welcomeText}>Welcome Back!</Text>
               <Text style={styles.subText}>Sign in to continue</Text>
 
@@ -232,7 +215,7 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#3b5998' },
-  scrollContent: { flexGrow: 1, paddingBottom: 20 },
+  scrollContent: { flexGrow: 1 },
   
   logoContainer: { alignItems: 'center', marginTop: 60, marginBottom: 40 },
   logoBox: { 

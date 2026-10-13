@@ -1,3 +1,4 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
@@ -15,17 +16,19 @@ import {
 import { useData } from './context/DataContext';
 // 🔥 Phase 3: spare parts now go through the new backend API
 import { createSparePart } from '../services/api/spareParts';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddSparePartScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
-  const { addNotification } = useData();
-
+  
   const [partName, setPartName] = useState('');
   const [partNo, setPartNo] = useState('');
   const [price, setPrice] = useState('');
   const [models, setModels] = useState('');
   const [stock, setStock] = useState('0');
+  const [minStock, setMinStock] = useState('');
   const [loading, setLoading] = useState(false);
 
   // 🔥 SAVE LOGIC — via new backend API
@@ -43,17 +46,9 @@ export default function AddSparePartScreen() {
               price: parseFloat(price.trim()) || 0,
               compatibleModels: models.trim(),
               officeStock: parseInt(stock) || 0,
+              minStock: parseInt(minStock) || 0,
           });
 
-          if (addNotification) {
-              await addNotification({
-                  title: "New Spare Part ⚙️",
-                  message: `${partName} (PN: ${partNo}) added to inventory.`,
-                  to: "Admin",
-                  route: "/spare_parts",
-                  type: "info"
-              });
-          }
 
           Alert.alert("Success", "Spare Part Added Successfully!", [
               { text: "OK", onPress: () => router.back() }
@@ -67,9 +62,9 @@ export default function AddSparePartScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
           <TouchableOpacity onPress={() => router.back()}>
-              <Ionicons name="arrow-back" size={24} color="#333" />
+              <Ionicons name="arrow-back" size={24} color="white" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Add New Spare Part</Text>
       </View>
@@ -91,6 +86,9 @@ export default function AddSparePartScreen() {
           <Text style={styles.label}>Initial Office Stock</Text>
           <TextInput style={styles.input} placeholder="e.g. 10" keyboardType="numeric" value={stock} onChangeText={setStock} />
 
+          <Text style={styles.label}>Low-stock alert at (optional)</Text>
+          <TextInput style={styles.input} placeholder="e.g. 3 — Store gets an alert at 3 or fewer" keyboardType="numeric" value={minStock} onChangeText={setMinStock} />
+
           <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={loading}>
               {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Save Spare Part</Text>}
           </TouchableOpacity>
@@ -100,13 +98,13 @@ export default function AddSparePartScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
-  header: { flexDirection: 'row', alignItems: 'center', padding: 15, paddingTop: 50, borderBottomWidth: 1, borderColor: '#eee' },
+  header: { flexDirection: 'row', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderColor: '#eee' },
   headerTitle: { fontSize: 18, fontWeight: 'bold', marginLeft: 15, color: '#333' },
   form: { padding: 20 },
   label: { fontSize: 13, color: '#555', marginBottom: 5, fontWeight: '600', marginTop: 10 },
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 12, fontSize: 15, backgroundColor: '#f9f9f9' },
   saveBtn: { backgroundColor: '#3b5998', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 30 },
   btnText: { color: 'white', fontWeight: 'bold', fontSize: 16 }
-});
+}), FORM_ACCENT.sparePart);

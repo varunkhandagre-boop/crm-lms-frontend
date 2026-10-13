@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
+import { saveAndShareFile } from '../utils/saveFile';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import { readFileBase64 } from '../utils/readFileBase64';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import React, { useState } from 'react';
@@ -17,6 +19,8 @@ import {
 import * as XLSX from 'xlsx';
 
 import { BulkImportPreviewItem, BulkProductRow, commitBulkImport, previewBulkImport } from '../services/api/products';
+import { cellNumber } from '../utils/excelImport';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 const TEMPLATE_COLUMNS = [
   'Product Name', 'Model', 'Series', 'Description', 'Specifications',
@@ -36,6 +40,7 @@ const SAMPLE_ROW = {
 };
 
 export default function BulkImportProductsScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
 
   const [step, setStep] = useState<'start' | 'preview' | 'done'>('start');
@@ -51,13 +56,7 @@ export default function BulkImportProductsScreen() {
       XLSX.utils.book_append_sheet(wb, ws, 'Products');
 
       const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-      const uri = FileSystem.cacheDirectory + 'Product_Import_Template.xlsx';
-      await FileSystem.writeAsStringAsync(uri, wbout, { encoding: FileSystem.EncodingType.Base64 });
-
-      await Sharing.shareAsync(uri, {
-        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        dialogTitle: 'Download Product Import Template',
-      });
+      await saveAndShareFile({ content: wbout, base64: true, fileName: 'Product_Import_Template.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle: 'Download Product Import Template' });
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Could not generate template.');
     }
@@ -77,7 +76,7 @@ export default function BulkImportProductsScreen() {
 
       setLoading(true);
       const fileUri = result.assets[0].uri;
-      const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
+      const base64 = await readFileBase64(fileUri);
       const wb = XLSX.read(base64, { type: 'base64' });
       const sheetName = wb.SheetNames[0];
       const rawRows: any[] = XLSX.utils.sheet_to_json(wb.Sheets[sheetName]);
@@ -96,8 +95,8 @@ export default function BulkImportProductsScreen() {
           series: r['Series'] ? String(r['Series']).trim() : undefined,
           description: r['Description'] ? String(r['Description']).trim() : undefined,
           specifications: r['Specifications'] ? String(r['Specifications']).trim() : undefined,
-          price: r['Price'] ? Number(r['Price']) : undefined,
-          gstRate: r['GST %'] ? Number(r['GST %']) : undefined,
+          price: cellNumber(r['Price']),
+          gstRate: cellNumber(r['GST %']),
           catalogUrl: r['Catalog/PDF Link'] ? String(r['Catalog/PDF Link']).trim() : undefined,
           videoUrl: r['YouTube Link'] ? String(r['YouTube Link']).trim() : undefined,
         }));
@@ -146,7 +145,7 @@ export default function BulkImportProductsScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
@@ -262,7 +261,7 @@ export default function BulkImportProductsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { backgroundColor: '#3b5998', paddingTop: 50, padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 4 },
+  header: { backgroundColor: '#3b5998', padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 4 },
   headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },
   content: { padding: 20 },
   loadingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255,255,255,0.7)', justifyContent: 'center', alignItems: 'center', zIndex: 10 },

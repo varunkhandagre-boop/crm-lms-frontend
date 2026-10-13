@@ -1,7 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
-import * as Notifications from 'expo-notifications';
+import { coordsText, getAddressFromCoords, getCurrentLocation as getGpsFix, LocationError, tryGetCurrentLocation } from '../utils/getLocation';
+import { startBackgroundTracking, stopBackgroundTracking } from '../utils/backgroundLocation';
+import { Notifications } from '../utils/notificationsModule';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -20,8 +22,9 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS ("users" stays on Firestore until Phase 10)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
+import { useWorkSchedules } from '../hooks/useWorkSchedules';
+import { isOffDay, offDayLabel } from '../utils/workSchedule';
 
 import { manageAttendanceReminders } from '../utils/notificationHelper';
 
@@ -33,18 +36,22 @@ import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { localYmd } from '../utils/periodRange';
 
 export default function DayInScreen() {
+    const headerTop = useHeaderTop();
     useKeepAwake();
     const router = useRouter();
     
     // 🔥 1. Context se sirf User nikalenge
     const { currentUser } = useData();
+    // Weekly off per employee (was: Sunday for everyone)
+    const { forUser: scheduleFor } = useWorkSchedules(currentUser?.companyId, currentUser?.id);
 
     // 🔥 2. "users" still Firestore; attendance/leaves/holidays are Postgres now
-    const { fetchSaaSData, isDbLoading: isUsersLoading } = useSaaSDB();
     const [isAttendanceLoading, setIsAttendanceLoading] = useState(true);
-    const isDbLoading = isUsersLoading || isAttendanceLoading;
+    const isDbLoading = isAttendanceLoading;
 
     // 🔥 3. Lazy Loaded Lists
     const [attendanceList, setAttendanceList] = useState<any[]>([]);
@@ -95,17 +102,17 @@ export default function DayInScreen() {
     // 🔥 Bounded fetch range matching the currently selected history view
     const getFetchRange = () => {
         if (viewMode === 'Day') {
-            const d = currentDate.toISOString().split('T')[0];
+            const d = localYmd(currentDate);
             return { fromDate: d, toDate: d };
         }
         if (viewMode === 'Month') {
             const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
             const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-            return { fromDate: start.toISOString().split('T')[0], toDate: end.toISOString().split('T')[0] };
+            return { fromDate: localYmd(start), toDate: localYmd(end) };
         }
         const start = new Date(currentDate.getFullYear(), 0, 1);
         const end = new Date(currentDate.getFullYear(), 11, 31);
-        return { fromDate: start.toISOString().split('T')[0], toDate: end.toISOString().split('T')[0] };
+        return { fromDate: localYmd(start), toDate: localYmd(end) };
     };
 
     // 🔥 4b. Attendance/leaves/holidays — bounded date-range fetch, re-run when the
@@ -129,9 +136,10 @@ export default function DayInScreen() {
         setIsAttendanceLoading(true);
         try {
             const [attendance, holidays, leaves] = await Promise.all([
-                fetchAttendance({ userId: targetUserId, fromDate, toDate, limit: 500 }),
+                fetchAttendance({ userId: targetUserId, fromDate, toDate, limit: 5000 }),
                 fetchHolidays(fromDate, toDate),
-                fetchLeaves({ userId: targetUserId, limit: 200 }),
+                // Leaves are filtered by start date, so look back 60 days to catch ones that began earlier.
+                fetchLeaves({ userId: targetUserId, fromDate: localYmd(new Date(new Date(fromDate).getTime() - 60 * 86400000)), toDate, limit: 2000 }),
             ]);
             setAttendanceList(attendance);
             setHolidayList(holidays);
@@ -271,7 +279,7 @@ export default function DayInScreen() {
         if (item.type === 'HOLIDAY') return 'HOLIDAY';
         if (item.type === 'ABSENT') return 'ABSENT';
 
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = localYmd(new Date());
         const isToday = item.date === todayStr;
         const hasLoggedOut = item.outTime && item.outTime !== '--';
         const hours = getHours(item.workHrs);
@@ -286,7 +294,7 @@ export default function DayInScreen() {
         let rawData: any[] = [];
 
         if (viewMode === 'Day') {
-            const selectedDateStr = currentDate.toISOString().split('T')[0];
+            const selectedDateStr = localYmd(currentDate);
             const finalOutput: any[] = [];
             const usersToCheck = (filterUser !== 'All' && canManage) 
                 ? userList.filter((u:any) => isSameUser(u.name, filterUser)) 
@@ -323,13 +331,12 @@ export default function DayInScreen() {
                     return;
                 }
 
-                const d = new Date(selectedDateStr);
-                if (d.getDay() === 0) {
-                     finalOutput.push({ id: `sunday-${selectedDateStr}-${emp.id}`, date: selectedDateStr, type: 'HOLIDAY', senderName: emp.name, outTime: 'Sunday Off', workHrs: '0' });
+                if (isOffDay(selectedDateStr, scheduleFor(emp.id))) {
+                     finalOutput.push({ id: `weeklyoff-${selectedDateStr}-${emp.id}`, date: selectedDateStr, type: 'HOLIDAY', senderName: emp.name, outTime: offDayLabel(selectedDateStr), workHrs: '0' });
                      return;
                 }
 
-                if (selectedDateStr <= new Date().toISOString().split('T')[0]) {
+                if (selectedDateStr <= localYmd(new Date())) {
                     finalOutput.push({ id: `absent-${selectedDateStr}-${emp.id}`, date: selectedDateStr, type: 'ABSENT', senderName: emp.name, inTime: '-', outTime: '-', workHrs: '0' });
                 }
             });
@@ -339,6 +346,9 @@ export default function DayInScreen() {
             let attSource = [...attendanceList];
             let leaveSource = [...leaveList];
             const targetUser = (canManage && filterUser !== 'All') ? filterUser : (canManage ? null : currentUser?.name);
+            const targetUserId = canManage
+                ? userList.find((u: any) => u.name === filterUser)?.id
+                : currentUser?.id;
 
             if (targetUser) {
                 attSource = attSource.filter((item: any) => isSameUser(item.userName, targetUser) || isSameUser(item.senderName, targetUser));
@@ -392,7 +402,7 @@ export default function DayInScreen() {
                     
                     const logs = rawData.filter(item => item.date === dateStr);
                     const holiday = holidayList.find((h:any) => normalizeDate(h.date, h.dateIso) === dateStr);
-                    const isSunday = d.getDay() === 0;
+                    const isWeeklyOff = isOffDay(dateStr, scheduleFor(targetUserId));
 
                     if (logs.length > 0) {
                         fullMonthData.push(...logs); 
@@ -400,8 +410,8 @@ export default function DayInScreen() {
                     else if (holiday) {
                         fullMonthData.push({ id: `holiday-${i}`, date: dateStr, type: 'HOLIDAY', outTime: holiday.name, workHrs: '0', senderName: targetUser || 'N/A' });
                     }
-                    else if (isSunday) {
-                        fullMonthData.push({ id: `sunday-${i}`, date: dateStr, type: 'HOLIDAY', outTime: 'Sunday Off', workHrs: '0', senderName: targetUser || 'N/A' });
+                    else if (isWeeklyOff) {
+                        fullMonthData.push({ id: `weeklyoff-${i}`, date: dateStr, type: 'HOLIDAY', outTime: offDayLabel(dateStr), workHrs: '0', senderName: targetUser || 'N/A' });
                     }
                     else if (targetUser && d <= new Date()) {
                         fullMonthData.push({ id: `absent-${i}`, date: dateStr, type: 'ABSENT', inTime: '-', outTime: '-', workHrs: '0', senderName: targetUser });
@@ -410,7 +420,7 @@ export default function DayInScreen() {
                 return fullMonthData.reverse();
             }
 
-            const filterPrefix = viewMode === 'Year' ? currentDate.getFullYear().toString() : currentDate.toISOString().slice(0, 7);
+            const filterPrefix = viewMode === 'Year' ? currentDate.getFullYear().toString() : localYmd(currentDate).slice(0, 7);
             rawData = rawData.filter(item => (item.date || "").startsWith(filterPrefix));
             return rawData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         }
@@ -431,8 +441,9 @@ export default function DayInScreen() {
     const todayStrFull = getStandardDateForHoliday(todayObj);
     const tomorrowStrFull = getStandardDateForHoliday(tomorrowObj);
 
-    const todayIsSunday = todayObj.getDay() === 0;
-    const tomorrowIsSunday = tomorrowObj.getDay() === 0;
+    const mySchedule = scheduleFor(currentUser?.id);
+    const todayIsOff = isOffDay(todayStrFull, mySchedule); // own weekly off
+    const tomorrowIsOff = isOffDay(tomorrowStrFull, mySchedule);
 
     const todayHoliday = holidayList?.find((h:any) => normalizeDate(h.date, h.dateIso) === todayStrFull);
     const tomorrowHoliday = holidayList?.find((h:any) => normalizeDate(h.date, h.dateIso) === tomorrowStrFull);
@@ -440,11 +451,11 @@ export default function DayInScreen() {
     let holidayMessage = null;
     let isTodayHoliday = false;
 
-    if (todayHoliday || todayIsSunday) {
+    if (todayHoliday || todayIsOff) {
         isTodayHoliday = true;
-        holidayMessage = `🎉 Today is ${todayHoliday ? todayHoliday.name : 'Sunday'}. Enjoy your day off!`;
-    } else if (tomorrowHoliday || tomorrowIsSunday) {
-        holidayMessage = `💡 Reminder: Tomorrow is ${tomorrowHoliday ? tomorrowHoliday.name : 'Sunday'}.`;
+        holidayMessage = `🎉 Today is ${todayHoliday ? todayHoliday.name : 'your weekly off'}. Enjoy your day off!`;
+    } else if (tomorrowHoliday || tomorrowIsOff) {
+        holidayMessage = `💡 Reminder: Tomorrow is ${tomorrowHoliday ? tomorrowHoliday.name : 'your weekly off'}.`;
     }
 
     const daysPresent = finalData.filter(i => getStatus(i) === 'PRESENT').length;
@@ -470,29 +481,13 @@ export default function DayInScreen() {
                 return;
             }
 
-            let { status: permStatus } = await Location.requestForegroundPermissionsAsync();
-            if (permStatus !== 'granted') throw new Error("Denied");
-
-            let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+            // Permission, GPS on, precise → normal → last known fix (see utils/getLocation.ts).
+            const loc = await getGpsFix();
             setLocation(loc);
 
-            let addrRes = await Location.reverseGeocodeAsync({ 
-                latitude: loc.coords.latitude, 
-                longitude: loc.coords.longitude 
-            });
-
-            let currentAddr = "Unknown Location";
-            if (addrRes.length > 0) {
-                const obj = addrRes[0];
-                let city = obj.city || '';
-                let building = obj.name || '';
-                if (building.includes(',')) building = ''; 
-                let street = obj.street || '';
-                if(street === building) street = '';
-                let area = obj.district || obj.subregion || '';
-                if (area === city) area = ''; 
-                currentAddr = [building, street, area, city].filter(Boolean).join(', ');
-            }
+            // The address is a nice-to-have: some phones' geocoder fails or is slow,
+            // and that used to fail the whole Day In.
+            const currentAddr = (await getAddressFromCoords(loc.coords)) || coordsText(loc.coords);
             setAddress(currentAddr);
 
             const res = await dayInApi({
@@ -513,23 +508,36 @@ export default function DayInScreen() {
                 // Silent refresh
                 await loadAllData();
                 const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                Alert.alert("Success", `✅ Punched In at ${timeString}\n📍 ${currentAddr}`);
+                // Background tracking asks for "Allow all the time" once — only after this alert is closed.
+                Alert.alert("Success", `✅ Punched In at ${timeString}\n📍 ${currentAddr}`, [
+                    { text: 'OK', onPress: () => { startBackgroundTracking(); } },
+                ], { cancelable: true, onDismiss: () => { startBackgroundTracking(); } });
             } else {
                 throw new Error("Could not save to Postgres");
             }
         } catch (error) {
             console.log(error);
-            Alert.alert("Error", "Check GPS/Internet or Permission");
-            setAddress("Error fetching location");
+            if (error instanceof LocationError) {
+                Alert.alert("Location needed", error.message);
+                setAddress("Location not available");
+            } else {
+                Alert.alert("Error", "Could not save Day In. Check internet and try again.");
+                setAddress("Error saving Day In");
+            }
         } finally { 
             setLoading(false); 
         }
     };
 
     const handleMainButton = () => {
+        // Day In / Day Out records the phone's GPS — a desktop browser only knows a rough network location.
+        if (Platform.OS === 'web') {
+            Alert.alert("Use the phone app", "Day In and Day Out can be marked only from the mobile app. The web version shows the attendance history.");
+            return;
+        }
         if (status === 'Out') handleDayIn();
         else if (status === 'In') setExpenseModalVisible(true);
-        else Alert.alert("Done", "Aaj ka kaam ho gaya hai.");
+        else Alert.alert("Done", "Today's Day In and Day Out are already marked.");
     };
 
     // 🔥 6. Day-Out — Phase 7: PATCHes /api/v1/attendance/:id via dayOutApi()
@@ -552,22 +560,12 @@ export default function DayInScreen() {
 
             let outLocData: { latitude: number; longitude: number } | undefined;
             let outAddr = "Unknown";
-            try {
-                let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+            // Day Out never fails because of GPS: location is saved when we can get it.
+            const loc = await tryGetCurrentLocation();
+            if (loc) {
                 outLocData = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
-                let addrRes = await Location.reverseGeocodeAsync(outLocData);
-                if (addrRes.length > 0) {
-                    const obj = addrRes[0];
-                    let building = obj.name || '';
-                    if (building.includes(',')) building = '';
-                    let street = obj.street || '';
-                    if (street === building) street = '';
-                    let area = obj.district || obj.subregion || '';
-                    let city = obj.city || '';
-                    if (area === city) area = '';
-                    outAddr = [building, street, area, city].filter(Boolean).join(', ');
-                }
-            } catch (e) { console.log("Out loc failed"); }
+                outAddr = (await getAddressFromCoords(outLocData)) || coordsText(outLocData);
+            }
 
             const res = await dayOutApi(todayDocId, {
                 checkOutAt: new Date().toISOString(),
@@ -580,6 +578,7 @@ export default function DayInScreen() {
             });
 
             if (res.success) {
+                await stopBackgroundTracking();
                 await Notifications.dismissAllNotificationsAsync();
                 await Notifications.cancelAllScheduledNotificationsAsync();
                 await manageAttendanceReminders('COMPLETED', holidayList);
@@ -643,7 +642,7 @@ export default function DayInScreen() {
 
     return (
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="white" /></TouchableOpacity>
                 <Text style={styles.headerTitle}>Attendance</Text>
                 <View style={{width:24}} />
@@ -886,7 +885,7 @@ export default function DayInScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f5f5f5' },
-    header: { backgroundColor: '#3b5998', paddingTop: 50, padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    header: { backgroundColor: '#3b5998', padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     headerTitle: { color: 'white', fontSize: 20, fontWeight: 'bold' },
     
     card: { backgroundColor: 'white', margin: 15, padding: 20, borderRadius: 15, alignItems: 'center', elevation: 3 },
@@ -904,9 +903,9 @@ const styles = StyleSheet.create({
     monthSelector: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'white', padding: 8, borderRadius: 8, marginBottom: 10 },
     monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
 
-    tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', borderRadius: 8, padding: 3, marginBottom: 10 },
-    tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-    activeTab: { backgroundColor: 'white', elevation: 2 },
+    tabContainer: { flexDirection: 'row', backgroundColor: '#eceff1', borderRadius: 8, padding: 2, marginBottom: 8},
+    tab: { flex: 1, paddingVertical: 5, alignItems: 'center', borderRadius: 6 },
+    activeTab: { backgroundColor: 'white', elevation: 1},
     tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
     activeTabText: { color: '#3b5998', fontWeight: 'bold' },
 

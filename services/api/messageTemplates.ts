@@ -9,8 +9,12 @@ export interface MessageTemplate {
     type: 'email' | 'whatsapp';
     subject: string | null;
     body: string;
-    createdAt: string;
-    updatedAt: string;
+    createdAt: string | null;
+    updatedAt: string | null;
+    /** Shared by every company (not saved for this company yet). Editing it saves your own copy. */
+    isStandard?: boolean;
+    /** Your own version of a standard template — deleting it brings the standard back. */
+    overridesStandard?: boolean;
 }
 
 interface OneResponse<T> { data: T }

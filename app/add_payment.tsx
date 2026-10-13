@@ -1,7 +1,9 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -18,28 +20,31 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (organizations still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: orders (Phase 3), payment dues, payment collections now via new backend API
 import { listOrders } from '../services/api/orders';
-import { createPaymentCollection } from '../services/api/paymentCollections';
+import { createPaymentCollection, uploadChequePhoto } from '../services/api/paymentCollections';
+import PhotoPickerField, { PendingPhoto } from '../components/PhotoPickerField';
 import { listPaymentDues } from '../services/api/paymentDues';
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
+import { findOrgByName, useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import { urlToBase64Image } from '../utils/pdfImageHelper';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddPaymentScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     const params = useLocalSearchParams(); 
     
-    const { currentUser, companyProfile, addNotification } = useData();
-    const { fetchSaaSData, isDbLoading } = useSaaSDB();
+    const { currentUser, companyProfile } = useData();
 
     // orgList/orderList/dueList now come from useCachedList below (cache-first, shared keys)
 
@@ -62,6 +67,9 @@ export default function AddPaymentScreen() {
     const [amount, setAmount] = useState('');     
     
     const [mode, setMode] = useState('Cash'); 
+    // Cheque photo (only for mode Cheque) — uploaded right after the payment is saved.
+    const [chequePhoto, setChequePhoto] = useState<PendingPhoto | null>(null);
+    const [preparingPhoto, setPreparingPhoto] = useState(false);
     const [bankName, setBankName] = useState('');
     const [refNumber, setRefNumber] = useState(''); 
     const [billRef, setBillRef] = useState('');
@@ -78,16 +86,22 @@ export default function AddPaymentScreen() {
         enabled: !!currentUser?.companyId,
         fetcher: () => fetchOrganizations({ limit: 500 }),
     });
-    const { data: orderList } = useCachedList({
-        cacheKey: buildCacheKey('orders', currentUser?.companyId),
-        enabled: !!currentUser?.companyId,
-        fetcher: listOrders, // was: fetchSaaSData("orders")
-    });
-    const { data: dueList } = useCachedList({
-        cacheKey: buildCacheKey('payment_dues', currentUser?.companyId),
-        enabled: !!currentUser?.companyId,
-        fetcher: listPaymentDues, // was: fetchSaaSData("payment_dues")
-    });
+    // Beyond the first 500: search the server while the organization picker is open.
+    useOrgServerSearch(showOrgModal, searchOrg, setFilteredOrgs);
+    // Only the chosen client's orders and manual dues (was: every order and due of the company).
+    const [orderList, setOrderList] = useState<any[]>([]);
+    const [dueList, setDueList] = useState<any[]>([]);
+    const orgKey = selectedOrg ? `${selectedOrg.id || ''}|${(selectedOrg.name || selectedOrg.orgName || '').trim()}` : '';
+    useEffect(() => {
+        if (!orgKey) { setOrderList([]); setDueList([]); return; }
+        const [id, name] = orgKey.split('|');
+        const filter = { forOrgId: /^[0-9a-f-]{36}$/i.test(id) ? id : undefined, forOrgName: name || undefined };
+        let alive = true;
+        Promise.all([listOrders(filter), listPaymentDues(filter)])
+            .then(([orders, dues]) => { if (alive) { setOrderList(orders); setDueList(dues); } })
+            .catch(() => { if (alive) { setOrderList([]); setDueList([]); } });
+        return () => { alive = false; };
+    }, [orgKey]);
     useEffect(() => {
         setFilteredOrgs(orgList);
     }, [orgList]);
@@ -103,31 +117,39 @@ export default function AddPaymentScreen() {
             hasPrefilledFromParams.current = true;
             const org = orgList.find((o: any) => o.name === params.orgName || o.orgName === params.orgName);
             if (org) setSelectedOrg(org);
-            else setSelectedOrg({ name: params.orgName });
+            else {
+                setSelectedOrg({ name: params.orgName });
+                // Not in the first 500 — look it up so address / id are filled too.
+                findOrgByName(params.orgName as string, []).then((found) => { if (found) setSelectedOrg(found); });
+            }
 
             if (params.amount) {
                 setTotalDue(params.amount as string);
                 setAmount(params.amount as string); 
             }
             if (params.billNo) setBillRef(params.billNo as string);
-
-            if (params.linkedId && orderList.length > 0) {
-                const linkedOrder = orderList.find((o:any) => o.id === params.linkedId);
-                
-                if (linkedOrder) {
-                    setSelectedOrder({ ...linkedOrder, collectionName: 'orders' });
-                } else {
-                    const isManual = params.source === 'payment_dues';
-                    setSelectedOrder({ 
-                        id: params.linkedId, 
-                        orderId: isManual ? 'Manual Due' : 'Linked Order', 
-                        amount: params.amount,
-                        collectionName: params.source || 'payment_dues'
-                    });
-                }
-            }
         }
-    }, [params, orgList, orderList]);
+    }, [params, orgList]);
+
+    // Linked order / due from params — once that client's orders have loaded.
+    const hasLinkedFromParams = useRef(false);
+    useEffect(() => {
+        if (hasLinkedFromParams.current || !params.linkedId || !selectedOrg) return;
+        if (orderList.length === 0 && dueList.length === 0) return;
+        hasLinkedFromParams.current = true;
+        const linkedOrder = orderList.find((o:any) => o.id === params.linkedId);
+        if (linkedOrder) {
+            setSelectedOrder({ ...linkedOrder, collectionName: 'orders' });
+        } else {
+            const isManual = params.source === 'payment_dues';
+            setSelectedOrder({
+                id: params.linkedId,
+                orderId: isManual ? 'Manual Due' : 'Linked Order',
+                amount: params.amount,
+                collectionName: params.source || 'payment_dues'
+            });
+        }
+    }, [params, selectedOrg, orderList, dueList]);
 
     // BULLETPROOF ORDER & MANUAL DUE MATCHER (unchanged logic, now fed by API data)
     useEffect(() => {
@@ -248,7 +270,7 @@ export default function AddPaymentScreen() {
         try {
             let orgAddr = paymentData.orgAddress || '';
             if (!orgAddr) {
-                const org = orgList.find((o: any) => o.name === paymentData.orgName || o.orgName === paymentData.orgName);
+                const org = await findOrgByName(paymentData.orgName || '', orgList);
                 if (org) orgAddr = org.address || org.city || '';
             }
 
@@ -359,16 +381,9 @@ export default function AddPaymentScreen() {
               </body>
             </html>`;
 
-            const { uri } = await Print.printToFileAsync({ html: htmlContent });
             const cleanName = (paymentData.receiptNo || 'Receipt').replace(/[^a-zA-Z0-9-_]/g, '_');
             const fileName = `${cleanName}_${Date.now()}.pdf`; 
-            const newPath = `${FileSystem.cacheDirectory}${fileName}`;
-            try {
-                await FileSystem.moveAsync({ from: uri, to: newPath });
-                await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share ${cleanName}` });
-            } catch (error) {
-                await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-            }
+            await sharePdfFromHtml(htmlContent, fileName, `Share ${cleanName}`);
         } catch (error) { 
             Alert.alert("Error", "Could not generate receipt."); 
         }
@@ -392,6 +407,7 @@ export default function AddPaymentScreen() {
             Alert.alert("Missing Fields", "Please Select Customer and Amount.");
             return;
         }
+        if (preparingPhoto) return Alert.alert("Please wait", "The cheque photo is still being prepared.");
         
         setLoading(true);
         
@@ -424,17 +440,20 @@ export default function AddPaymentScreen() {
                 notes,
             });
 
-            if (addNotification) {
-                await addNotification({
-                    title: "Payment Received 💰",
-                    message: `₹${saved.amount} received from ${saved.orgName}. Receipt: ${saved.receiptNo}`,
-                    to: "Admin",
-                    type: "success",
-                    route: "/payment_collections"
-                });
+            let photoFailed = false;
+            if (mode === 'Cheque' && chequePhoto) {
+                try {
+                    await uploadChequePhoto(saved.id, chequePhoto.dataUri);
+                } catch (e) {
+                    console.log("Cheque photo upload failed:", e);
+                    photoFailed = true;
+                }
             }
 
-            Alert.alert("Success ✅", "Payment Saved & Linked! Share Receipt?", [
+
+            Alert.alert("Success ✅", "Payment Saved & Linked!" +
+                (photoFailed ? `\n\n⚠️ The cheque photo could not be uploaded. Open the payment in Payment Collections and tap "Add Cheque Photo".` : '') +
+                "\nShare Receipt?", [
                 { text: "No", onPress: () => router.back(), style: 'cancel' },
                 { text: "Yes, Share PDF", onPress: async () => { await generateAndShareReceipt(saved); router.back(); }}
             ]);
@@ -478,8 +497,8 @@ export default function AddPaymentScreen() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
+                <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="white" /></TouchableOpacity>
                 <Text style={styles.headerTitle}>Add New Payment</Text>
                 <View style={{ width: 24 }} />
             </View>
@@ -495,7 +514,7 @@ export default function AddPaymentScreen() {
                                 <Text style={styles.dateText}>{formatDate(date)}</Text>
                             </TouchableOpacity>
                         </View>
-                        {showDatePicker && <DateTimePicker value={date} mode="date" onChange={onChangeDate} />}
+                        {showDatePicker && <DateTimePicker value={date} mode="date" {...pickerHandlers(onChangeDate)} />}
 
                         <Text style={styles.label}>Select Customer *</Text>
                         <TouchableOpacity style={styles.selector} onPress={() => setShowOrgModal(true)}>
@@ -503,7 +522,7 @@ export default function AddPaymentScreen() {
                                 <Text style={[styles.selectorValue, !selectedOrg && {color:'#999'}]}>{selectedOrg ? (selectedOrg.name || selectedOrg.orgName) : "Choose Party..."}</Text>
                                 {selectedOrg && <Text style={{fontSize:11, color:'gray', marginTop:2}}>{selectedOrg.city} • {selectedOrg.contactPerson}</Text>}
                             </View>
-                            {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="#3b5998" />}
+                            {<Ionicons name="search" size={20} color="#3b5998" />}
                         </TouchableOpacity>
 
                         {selectedOrg && (
@@ -569,7 +588,13 @@ export default function AddPaymentScreen() {
                                 <TouchableOpacity style={[styles.input, {justifyContent:'center'}]} onPress={() => setShowPdcDatePicker(true)}>
                                     <Text style={{color: '#333'}}>{formatDate(pdcDate)}</Text>
                                 </TouchableOpacity>
-                                {showPdcDatePicker && <DateTimePicker value={pdcDate} mode="date" onChange={onChangePdcDate} />}
+                                {showPdcDatePicker && <DateTimePicker value={pdcDate} mode="date" {...pickerHandlers(onChangePdcDate)} />}
+                                {mode === 'Cheque' && (
+                                    <>
+                                        <Text style={[styles.label, {marginTop:10}]}>Cheque Photo (optional)</Text>
+                                        <PhotoPickerField value={chequePhoto} onChange={setChequePhoto} onBusyChange={setPreparingPhoto} buttonLabel="Take Cheque Photo" />
+                                    </>
+                                )}
                             </View>
                         )}
 
@@ -584,7 +609,7 @@ export default function AddPaymentScreen() {
             </KeyboardAvoidingView>
 
             <Modal visible={showOrgModal} animationType="slide">
-                <View style={styles.modalContainer}>
+                <View style={[styles.modalContainer, { paddingTop: headerTop }]}>
                     <View style={styles.modalHeader}>
                         <Text style={styles.modalTitle}>Select Party</Text>
                         <TouchableOpacity onPress={() => setShowOrgModal(false)}><Ionicons name="close-circle" size={30} color="#d32f2f"/></TouchableOpacity>
@@ -654,9 +679,9 @@ export default function AddPaymentScreen() {
     );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 2, alignItems:'center' },
+    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, backgroundColor: 'white', elevation: 2, alignItems:'center' },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
     formCard: { backgroundColor: 'white', padding: 20, borderRadius: 15, elevation: 2 },
     label: { fontSize: 12, fontWeight: 'bold', color: '#777', marginTop: 15, marginBottom: 5 },
@@ -680,7 +705,7 @@ const styles = StyleSheet.create({
     calcBox: { flexDirection:'row', justifyContent:'space-between', backgroundColor:'#ffebee', padding:10, borderRadius:8, marginTop:5 },
     calcText: { fontSize:12, color:'#333' },
     
-    modalContainer: { flex: 1, backgroundColor: 'white', padding: 20, paddingTop: 50 },
+    modalContainer: { flex: 1, backgroundColor: 'white', padding: 20 },
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
     modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#333' },
     searchBox: { flexDirection:'row', alignItems:'center', backgroundColor: '#f0f2f5', paddingHorizontal: 10, borderRadius: 10, marginBottom: 15, height: 50 },
@@ -695,4 +720,4 @@ const styles = StyleSheet.create({
     modalTitleSmall: { fontSize: 18, fontWeight: 'bold', marginBottom: 5, color:'#3b5998', textAlign:'center' },
     modalItem: { padding: 15, borderBottomWidth: 1, borderBottomColor: '#eee' },
     closeBtnSmall: { marginTop: 15, alignItems: 'center', padding: 10 }
-});
+}), FORM_ACCENT.payment);

@@ -26,8 +26,12 @@ import { bulkDeleteProducts, createProduct, deleteProduct, listProducts, updateP
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { inr, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function ProductMasterScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     
     const { currentUser } = useData();
@@ -214,6 +218,26 @@ const handleBulkDelete = () => {
     );
 };
 
+    // Laptop: the same list as a table. Tap a row → same expand (full card with links shown under the row).
+    const isDesktop = useIsDesktop();
+    const productColumns: TableColumn<any>[] = [
+        ...(bulkMode ? [{ key: 'sel', label: '', width: 36, align: 'center' as const, render: (p: any) => (
+            <Ionicons name={selectedForBulk.has(p.id) ? 'checkbox' : 'square-outline'} size={20} color="#3b5998" />
+        ) }] : []),
+        { key: 'name', label: 'Product', flex: 2, render: (p) => <TwoLine main={p.name} sub={p.description} /> },
+        { key: 'model', label: 'Model', width: 150, render: (p) => p.model || 'N/A' },
+        { key: 'series', label: 'Series', width: 120, render: (p) => p.series || '-' },
+        { key: 'price', label: 'Price', width: 110, align: 'right', render: (p) => inr(p.price || 0) },
+        { key: 'gst', label: 'GST', width: 60, align: 'right', render: (p) => `${p.gstRate || 0}%` },
+        { key: 'docs', label: 'Docs / Videos', width: 100, align: 'center', render: (p) => `${(p.catalogs || []).length} / ${(p.videos || []).length}` },
+        ...(canEdit && !bulkMode ? [{ key: 'act', label: '', width: 70, align: 'center' as const, render: (p: any) => (
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+                <TouchableOpacity onPress={() => handleEdit(p)}><Ionicons name="create-outline" size={18} color="#3b5998" /></TouchableOpacity>
+                <TouchableOpacity onPress={() => handleDelete(p.id, p.name)}><Ionicons name="trash-outline" size={18} color="#d32f2f" /></TouchableOpacity>
+            </View>
+        ) }] : []),
+    ];
+
     const renderItem = ({ item }: any) => {
         const isExpanded = expandedId === item.id;
         const displayCatalogs = item.catalogs || [];
@@ -330,7 +354,7 @@ const handleBulkDelete = () => {
 
     return (
         <View style={styles.container}>
-                        <View style={styles.header}>
+                        <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={28} color="#333" /></TouchableOpacity>
                 <Text style={styles.headerTitle}>Product Master</Text>
                 {canEdit ? (
@@ -371,7 +395,16 @@ const handleBulkDelete = () => {
             <FlatList 
                 data={renderedList}
                 keyExtractor={item => item.id}
-                renderItem={renderItem}
+                renderItem={isDesktop
+                    ? ({ item, index }) => (
+                        <>
+                            <TableRow columns={productColumns} item={item} index={index} onPress={() => bulkMode ? toggleBulkSelect(item.id) : setExpandedId(expandedId === item.id ? null : item.id)} />
+                            {!bulkMode && expandedId === item.id && renderItem({ item })}
+                        </>
+                    )
+                    : renderItem}
+                ListHeaderComponent={isDesktop && renderedList.length > 0 ? <TableHeader columns={productColumns} /> : null}
+                stickyHeaderIndices={isDesktop && renderedList.length > 0 ? [0] : undefined}
                 contentContainerStyle={{padding: 15, paddingBottom: 100}}
                 refreshControl={
                     <RefreshControl refreshing={productsRefreshing} onRefresh={refreshProducts} colors={['#3b5998']} tintColor="#3b5998" />
@@ -496,7 +529,7 @@ const handleBulkDelete = () => {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f5f5f5' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 2, alignItems:'center' },
+    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, backgroundColor: 'white', elevation: 2, alignItems:'center' },
     headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
     addIconBtn: { backgroundColor:'#3b5998', padding:10, borderRadius:25 },
 

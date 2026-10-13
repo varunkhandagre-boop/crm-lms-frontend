@@ -2,19 +2,24 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // 🔥 SAAS IMPORTS (users still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: quotations now go through the new backend API
-import { listQuotations } from '../services/api/quotations';
+import { listQuotationsPage, QuotationPageFilters } from '../services/api/quotations';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { periodRange, useDebounced } from '../utils/periodRange';
 import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { sharePdfFromHtml } from '../utils/sharePdf';
+import { PeriodTabs, StaffPeriodRow } from '../components/compact';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 
 export default function QuotationsListScreen() {
@@ -23,8 +28,6 @@ export default function QuotationsListScreen() {
     
     const { companyProfile, currentUser } = useData(); 
     
-    // 🔥 SaaS Engine kept only for users
-    const { isDbLoading } = useSaaSDB();
 
     // quotations now comes from useCachedList below (cache-first)
     const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
@@ -41,31 +44,35 @@ export default function QuotationsListScreen() {
     const [selectedEmployeeName, setSelectedEmployeeName] = useState('All'); 
     const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-    const [visibleCount, setVisibleCount] = useState(20); 
     const canManage = ['Admin', 'Manager', 'Account', 'Accountant', 'SuperAdmin'].includes(currentUser?.role || '');
-
-    useEffect(() => {
-        if (viewMode === 'Day') setVisibleCount(100);
-        else setVisibleCount(20); 
-    }, [viewMode, currentDate, selectedEmployeeName, searchText]);
 
     // 🔥 QUOTATIONS — cache-first (instant from AsyncStorage, then
     // background refresh). See hooks/useCachedList.ts.
-    const quotationsCacheKey = buildCacheKey('quotations', currentUser?.companyId);
+    const quotationsCacheKey = buildCacheKey('quotations_page1_v1', currentUser?.companyId);
+    // 20 per page from the server: date range, person and search (was: up to 1000 downloaded, older ones missing).
+    const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | undefined>(undefined);
+    const debouncedSearch = useDebounced(searchText.trim());
+    const quoteFilters = useMemo<QuotationPageFilters>(() => ({
+        ...periodRange(viewMode, currentDate),
+        createdById: canManage ? selectedEmployeeId : undefined,
+        search: debouncedSearch || undefined,
+    }), [viewMode, currentDate, canManage, selectedEmployeeId, debouncedSearch]);
+    const isDefaultQuoteView = viewMode === 'Month' && !selectedEmployeeId && !debouncedSearch
+        && currentDate.getMonth() === new Date().getMonth() && currentDate.getFullYear() === new Date().getFullYear();
     const {
-        data: quotations,
-        setData: setQuotations,
+        items: quotations,
+        setItems: setQuotations,
         loading,
-        refreshing: quotationsRefreshing,
         refresh: refreshQuotations,
-    } = useCachedList({
-        cacheKey: quotationsCacheKey,
+        hasMore: quotesHaveMore,
+        loadMore: loadMoreQuotes,
+        loadingMore: quotesLoadingMore,
+        total: quotesTotal,
+    } = useServerPagedList<QuotationPageFilters, any>({
+        fetchPage: listQuotationsPage,
+        filters: quoteFilters,
         enabled: !!currentUser?.companyId,
-        fetcher: async () => {
-            const quotes = await listQuotations(); // was: fetchSaaSData("quotations")
-            quotes.sort((a: any, b: any) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
-            return quotes;
-        },
+        cacheKey: isDefaultQuoteView ? quotationsCacheKey : null,
     });
 
     // 🔥 Users — cache-first, shares the SAME 'team_members' cache key as
@@ -129,49 +136,8 @@ export default function QuotationsListScreen() {
         return "All Time";
     };
 
-    const getFilteredData = () => {
-        let data = [...quotations];
-        if (canManage) {
-            if(selectedEmployeeName !== 'All') data = data.filter((item: any) => item.senderName === selectedEmployeeName);
-        } else {
-            const myId = currentUser?.id || currentUser?.uid;
-            data = data.filter((item: any) => item.senderId === myId);
-        }
-
-        if (viewMode !== 'All') {
-            const targetYear = currentDate.getFullYear();
-            const targetMonth = currentDate.getMonth();
-            const targetDay = currentDate.getDate();
-            const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-            const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-            const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime();
-
-            data = data.filter(item => {
-                const dateField = item.dateIso || item.createdAt || item.date;
-                if(!dateField) return false;
-                
-                const itemDate = parseDate(dateField);
-                const itemTime = itemDate.getTime();
-                
-                if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-                if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-                if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-                return true;
-            });
-        }
-
-        if (searchText) {
-            const term = searchText.toLowerCase();
-            data = data.filter((item: any) => {
-                const row = `${item.date} ${item.orgName} ${item.estimateNo} ${item.grandTotal}`.toLowerCase();
-                return row.includes(term);
-            });
-        }
-        return data;
-    };
-
-    const fullFilteredList = getFilteredData();
-    const renderedList = fullFilteredList.slice(0, visibleCount);
+    // The server already filters (period, person, search) and pages.
+    const renderedList = quotations;
 
     const numberToWords = (num: number) => {
         const a = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen '];
@@ -358,12 +324,24 @@ export default function QuotationsListScreen() {
             </body>
             </html>
             `;
-            const { uri } = await Print.printToFileAsync({ html: htmlContent });
-            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+            await sharePdfFromHtml(htmlContent, `Quotation_${item.estimateNo || item.id || Date.now()}`);
         } catch (error) {
+            console.log("PDF Error:", error);
             Alert.alert("Error", "Could not generate PDF");
         }
     };
+
+    // Laptop: the same list as a table (tap a row → same details popup).
+    const isDesktop = useIsDesktop();
+    const quoteColumns: TableColumn<any>[] = [
+        { key: 'date', label: 'Date', width: 100, render: (q) => q.date || '-' },
+        { key: 'est', label: 'Estimate No.', width: 170, render: (q) => <TwoLine main={q.estimateNo || '-'} sub={q.docTitle} /> },
+        { key: 'org', label: 'Client', flex: 2, render: (q) => <TwoLine main={q.orgName} sub={q.orgAddress} /> },
+        { key: 'items', label: 'Items', flex: 2, render: (q) => (q.items || []).map((i: any) => i.name).filter(Boolean).slice(0, 3).join(', ') + ((q.items?.length || 0) > 3 ? ` +${q.items.length - 3}` : '') || '-' },
+        { key: 'total', label: 'Grand total', width: 120, align: 'right', render: (q) => <Text style={{ fontWeight: 'bold', fontSize: 13, color: '#1565c0' }}>{inr(q.grandTotal)}</Text> },
+        { key: 'status', label: 'Status', width: 90, render: (q) => <Pill text={q.status || 'Saved'} color="#1565c0" bg="#e3f2fd" /> },
+        ...(canManage ? [{ key: 'by', label: 'Made by', width: 120, render: (q: any) => q.senderName || 'Admin' }] : []),
+    ];
 
     const renderItem = ({ item }: any) => {
         return (
@@ -406,36 +384,20 @@ export default function QuotationsListScreen() {
                 </TouchableOpacity>
             </View>
 
-            <View style={{backgroundColor:'white', paddingBottom:10, borderBottomLeftRadius: 15, borderBottomRightRadius: 15, elevation: 2, marginBottom: 10}}>
-                <View style={styles.tabContainer}>
-                    {['Day', 'Month', 'FY', 'All'].map((m) => (
-                        <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
-                            <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
-                        </TouchableOpacity>
-                    ))}
-                </View>
+            <View style={{backgroundColor:'white', paddingBottom:8, borderBottomLeftRadius: 15, borderBottomRightRadius: 15, elevation: 2, marginBottom: 10}}>
+                <PeriodTabs value={viewMode} onChange={setViewMode} />
+                <StaffPeriodRow
+                    showStaff={canManage}
+                    staffLabel={selectedEmployeeName === 'All' ? 'All Staff' : selectedEmployeeName}
+                    onStaffPress={() => setShowEmployeePicker(true)}
+                    periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+                    onPrev={() => changeDate(-1)}
+                    onNext={() => changeDate(1)}
+                />
 
-                {canManage && (
-                    <TouchableOpacity style={styles.employeeFilterBtn} onPress={() => setShowEmployeePicker(true)}>
-                        <Ionicons name="people" size={18} color="#2e7d32" />
-                        <Text style={{fontSize:13, marginLeft:8, color:'#2e7d32', fontWeight:'600'}}>
-                            {selectedEmployeeName === 'All' ? 'View All Staff' : selectedEmployeeName}
-                        </Text>
-                        <Ionicons name="chevron-down" size={16} color="#2e7d32" style={{marginLeft:'auto'}}/>
-                    </TouchableOpacity>
-                )}
-
-                {viewMode !== 'All' && (
-                    <View style={styles.dateNav}>
-                        <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-                        <Text style={styles.monthText}>{getHeaderDate()}</Text>
-                        <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-                    </View>
-                )}
-
-                <View style={{paddingHorizontal:15}}>
+                <View style={{paddingHorizontal:12, marginTop:6}}>
                     <View style={styles.searchBar}>
-                        {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+                        {<Ionicons name="search" size={20} color="gray" />}
                         <TextInput 
                             style={styles.searchInput}
                             placeholder="Search Client, Estimate No..."
@@ -445,7 +407,7 @@ export default function QuotationsListScreen() {
                         {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={20} color="gray" /></TouchableOpacity>}
                     </View>
                     <Text style={{textAlign:'right', fontSize:12, color:'gray', marginTop: 2}}>
-                        Total Quotes: <Text style={{fontWeight:'bold', color:'#3b5998'}}>{fullFilteredList.length}</Text>
+                        Total Quotes: <Text style={{fontWeight:'bold', color:'#3b5998'}}>{quotesTotal}</Text>
                     </Text>
                 </View>
             </View>
@@ -456,7 +418,11 @@ export default function QuotationsListScreen() {
                 <FlatList 
                     data={renderedList}
                     keyExtractor={item => item.id}
-                    renderItem={renderItem}
+                    renderItem={isDesktop
+                        ? ({ item, index }) => <TableRow columns={quoteColumns} item={item} index={index} onPress={() => setSelectedQuote(item)} />
+                        : renderItem}
+                    ListHeaderComponent={isDesktop && renderedList.length > 0 ? <TableHeader columns={quoteColumns} /> : null}
+                    stickyHeaderIndices={isDesktop && renderedList.length > 0 ? [0] : undefined}
                     contentContainerStyle={{padding: 15, paddingBottom: 50}}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                     ListEmptyComponent={
@@ -464,17 +430,20 @@ export default function QuotationsListScreen() {
                     }
                     ListFooterComponent={
                         <View style={{ paddingBottom: 80 }}>
-                            {visibleCount < fullFilteredList.length ? (
+                            {quotesHaveMore ? (
                                 <TouchableOpacity 
-                                    onPress={() => setVisibleCount(prev => prev + 20)} 
+                                    onPress={loadMoreQuotes}
+                                    disabled={quotesLoadingMore}
                                     style={styles.loadMoreBtn}
                                 >
+                                    {quotesLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
                                     <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                                        👇 Load More Records ({fullFilteredList.length - visibleCount} remaining)
+                                        👇 Load More Records ({quotesTotal - quotations.length} remaining)
                                     </Text>
+                                    )}
                                 </TouchableOpacity>
                             ) : (
-                                fullFilteredList.length > 0 ? (
+                                quotations.length > 0 ? (
                                     <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
                                         --- End of List ---
                                     </Text>
@@ -506,19 +475,15 @@ export default function QuotationsListScreen() {
                                 </View>
 
                                 <Text style={{fontWeight: 'bold', marginBottom: 10, color: '#555'}}>Items Included ({selectedQuote.items?.length}):</Text>
-                                <View style={{maxHeight: 180}}>
-                                    <FlatList 
-                                        data={selectedQuote.items}
-                                        keyExtractor={(item, idx) => idx.toString()}
-                                        nestedScrollEnabled={true}
-                                        renderItem={({item}) => (
-                                            <View style={{flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderColor: '#f0f0f0', paddingVertical: 10}}>
-                                                <Text style={{fontSize: 13, flex: 1, color: '#333'}} numberOfLines={2}>{item.qty}x {item.name}</Text>
-                                                <Text style={{fontSize: 13, fontWeight: 'bold', color: '#333'}}>₹{(item.qty * item.price).toLocaleString()}</Text>
-                                            </View>
-                                        )}
-                                    />
-                                </View>
+                                {/* Plain ScrollView, not FlatList: a FlatList inside the outer ScrollView triggers a nested-VirtualizedList error */}
+                                <ScrollView style={{maxHeight: 180}} nestedScrollEnabled={true}>
+                                    {(selectedQuote.items || []).map((item: any, idx: number) => (
+                                        <View key={idx} style={{flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderColor: '#f0f0f0', paddingVertical: 10}}>
+                                            <Text style={{fontSize: 13, flex: 1, color: '#333'}} numberOfLines={2}>{item.qty}x {item.name}</Text>
+                                            <Text style={{fontSize: 13, fontWeight: 'bold', color: '#333'}}>₹{(item.qty * item.price).toLocaleString()}</Text>
+                                        </View>
+                                    ))}
+                                </ScrollView>
 
                                 <View style={{marginTop: 15, borderTopWidth: 2, borderColor: '#eee', paddingTop: 15}}>
                                     <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5}}>
@@ -593,7 +558,7 @@ export default function QuotationsListScreen() {
                             data={employees} 
                             keyExtractor={(item, index) => index.toString()} 
                             renderItem={({item}) => (
-                                <TouchableOpacity style={styles.pickerItem} onPress={() => { setSelectedEmployeeName(item.name); setShowEmployeePicker(false); }}>
+                                <TouchableOpacity style={styles.pickerItem} onPress={() => { setSelectedEmployeeName(item.name); setSelectedEmployeeId(item.id === 'All' ? undefined : item.id); setShowEmployeePicker(false); }}>
                                     <Text style={{fontSize:16, color:'#333'}}>{item.name}</Text>
                                     {selectedEmployeeName === item.name && <Ionicons name="checkmark" size={18} color="green" />}
                                 </TouchableOpacity>
@@ -613,16 +578,8 @@ const styles = StyleSheet.create({
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 10 },
     addBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#3b5998', borderRadius:20, paddingHorizontal:12, paddingVertical:6 },
     
-    tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', margin: 15, borderRadius: 8, padding: 3, marginBottom: 10 },
-    tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-    activeTab: { backgroundColor: 'white', elevation: 2 },
-    tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-    activeTabText: { color: '#3b5998', fontWeight: 'bold' },
     
-    dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 10, marginHorizontal: 15, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#eee' },
-    monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
     
-    employeeFilterBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#e8f5e9', paddingHorizontal:12, paddingVertical:10, marginHorizontal:15, borderRadius:8, borderWidth:1, borderColor:'#2e7d32', marginBottom:10 },
     searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', paddingHorizontal: 10, borderRadius: 8, alignItems: 'center', height: 40 },
     searchInput: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
     

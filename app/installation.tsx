@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -19,32 +20,40 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (users still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: installations now via new backend API
 import {
   deleteInstallation as apiDeleteInstallation,
   updateInstallation as apiUpdateInstallation,
-  listInstallations,
+  InstallationPageFilters, listInstallationsPage,
   sendAmcReminder,
+  uploadInstallationPhoto,
+  deleteInstallationPhoto,
 } from '../services/api/installations';
+import RecordPhotoSection from '../components/RecordPhotoSection';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
 import { buildCacheKey } from '../utils/listCache';
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 import { fetchTeamMembers } from '../services/api/users';
 import { urlToBase64Image } from '../utils/pdfImageHelper';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { PeriodTabs, StaffPeriodRow } from '../components/compact';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function InstallationListScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   const { currentUser, companyProfile } = useData(); 
-  const { isDbLoading } = useSaaSDB();
 
-  // installList now comes from useCachedList below (cache-first)
   const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
 
   const [searchText, setSearchText] = useState('');
@@ -69,29 +78,42 @@ export default function InstallationListScreen() {
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  const [visibleCount, setVisibleCount] = useState(20);
 
   const isAdmin = ['Admin', 'Manager', 'Hr', 'Account', 'Accountant', 'SuperAdmin'].includes(currentUser?.role || '');
   const isStrictAdmin = ['Admin', 'Manager', 'SuperAdmin'].includes(currentUser?.role || '');
 
-  useEffect(() => {
-      if (viewMode === 'Day') setVisibleCount(500); 
-      else setVisibleCount(20); 
-  }, [viewMode, currentDate, searchText, selectedEmployee]);
+  // Photo change on one machine row (details) — saved immediately.
+  const applyInstallPhoto = (updated: any) => {
+      setSelectedItem((prev: any) => (prev ? { ...prev, photoUrl: updated.photoUrl } : prev));
+      setInstallList(prev => prev.map(i => i.id === updated.id ? { ...i, photoUrl: updated.photoUrl } : i));
+  };
 
-  // 🔥 INSTALLATIONS — cache-first (instant from AsyncStorage, then
-  // background refresh). See hooks/useCachedList.ts.
-  const installsCacheKey = buildCacheKey('installations', currentUser?.companyId);
+
+  // 🔥 INSTALLATIONS — 20 per page from the server: date range, employee (added by
+  // or named engineer), search, and the "Added by" name all come from there.
+  const debouncedSearch = useDebounced(searchText.trim());
+  const installFilters = useMemo<InstallationPageFilters>(() => ({
+      ...periodRange(viewMode, currentDate),
+      createdById: isAdmin && selectedEmployee !== 'All' ? selectedEmployee : undefined,
+      search: debouncedSearch || undefined,
+  }), [viewMode, currentDate, isAdmin, selectedEmployee, debouncedSearch]);
+  const isDefaultView = isCurrentFy(viewMode, currentDate) && selectedEmployee === 'All' && !debouncedSearch;
   const {
-      data: installList,
-      setData: setInstallList,
+      items: installList,
+      setItems: setInstallList,
+      total: installTotal,
       loading: installsLoading,
+      loadingMore: installsLoadingMore,
+      hasMore: installsHasMore,
+      loadMore: loadMoreInstalls,
       refreshing: installsRefreshing,
       refresh: refreshInstalls,
-  } = useCachedList({
-      cacheKey: installsCacheKey,
+      error: installsError,
+  } = useServerPagedList<InstallationPageFilters, any>({
+      fetchPage: listInstallationsPage,
+      filters: installFilters,
       enabled: !!currentUser?.companyId,
-      fetcher: listInstallations, // was: fetchSaaSData("installations")
+      cacheKey: isDefaultView ? buildCacheKey('installations_page1_v1', currentUser?.companyId) : null,
   });
 
   // 🔥 Users — cache-first, shares the SAME 'team_members' cache key as
@@ -102,18 +124,6 @@ export default function InstallationListScreen() {
       fetcher: fetchTeamMembers,
   });
 
-  // 🔥 senderName was never populated by the API (only senderId), so every
-  // installation showed "Unknown" — same fix pattern as orders.tsx.
-  useEffect(() => {
-      if (teamMembersForInstall.length === 0 || installList.length === 0) return;
-      const nameById = new Map(teamMembersForInstall.map((u: any) => [u.id, u.name || 'Unknown']));
-      const needsEnrichment = installList.some((i: any) => i.senderName === undefined);
-      if (!needsEnrichment) return;
-      setInstallList(installList.map((i: any) => ({
-          ...i,
-          senderName: nameById.get(i.senderId) || 'Unknown',
-      })));
-  }, [installList, teamMembersForInstall]);
 
   useEffect(() => {
       if (isAdmin) {
@@ -125,18 +135,6 @@ export default function InstallationListScreen() {
       }
   }, [teamMembersForInstall, isAdmin]);
 
-  // 🔥 senderName ("Added by") was never populated — the API only returns
-  // senderId (see services/api/installations.ts's comment). Note this is
-  // separate from the "Engineer" field, which is a directly-typed text
-  // field on the record and always worked fine. Fill senderName in once
-  // team members are available.
-  useEffect(() => {
-      if (teamMembersForInstall.length === 0 || installList.length === 0) return;
-      const nameById = new Map(teamMembersForInstall.map((u: any) => [u.id, u.name || 'Unknown']));
-      const needsEnrichment = installList.some((i: any) => i.senderName === undefined);
-      if (!needsEnrichment) return;
-      setInstallList(installList.map((i: any) => ({ ...i, senderName: nameById.get(i.senderId) || 'Unknown' })));
-  }, [installList, teamMembersForInstall]);
 
   const parseDate = (dateStr: any) => {
     if (!dateStr) return 0;
@@ -372,15 +370,8 @@ export default function InstallationListScreen() {
           </body>
         </html>`;
 
-        const { uri } = await Print.printToFileAsync({ html: htmlContent });
         const cleanName = `Installation_${(item.orgName || 'Client').replace(/ /g, '_')}_${Date.now()}.pdf`;
-        const newPath = `${(FileSystem as any).cacheDirectory}${cleanName}`;
-        try {
-            await FileSystem.copyAsync({ from: uri, to: newPath });
-            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Report` });
-        } catch (error) {
-            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-        }
+        await sharePdfFromHtml(htmlContent, cleanName, `Share Report`);
     } catch (error) {
         Alert.alert("Error", "Could not generate PDF");
     } finally {
@@ -388,86 +379,6 @@ export default function InstallationListScreen() {
     }
   };
 
-  const getSortedAndFilteredData = () => {
-    let data = installList ? [...installList] : [];
-
-    if (isAdmin && selectedEmployee !== 'All') {
-      const targetName = selectedEmployeeName ? selectedEmployeeName.toLowerCase().trim() : '';
-      data = data.filter((item: any) => {
-        if (item.senderId === selectedEmployee) return true;
-        if (item.engineer && item.engineer.toLowerCase().trim() === targetName) return true;
-        if (item.senderName && item.senderName.toLowerCase().trim() === targetName) return true;
-        if (item.userName && item.userName.toLowerCase().trim() === targetName) return true;
-        return false;
-      });
-    } 
-    else if (!isAdmin) {
-      const myId = currentUser?.id || currentUser?.uid;
-      data = data.filter((item: any) => 
-          item.senderId === myId || 
-          (item.engineer && item.engineer.toLowerCase() === currentUser?.name?.toLowerCase())
-      );
-    }
-
-    if (searchText) {
-      const term = searchText.toLowerCase();
-      data = data.filter((item: any) => {
-        const fullString = `
-          ${item.hospital || ''}
-          ${item.orgName || ''}
-          ${item.serialNo || ''}
-          ${item.product || ''}
-          ${item.productName || ''}
-          ${item.model || ''}
-          ${item.senderName || ''}
-          ${item.department || ''}
-          ${item.city || ''}
-        `.toLowerCase();
-        return fullString.includes(term);
-      });
-    }
-
-    if (viewMode !== 'All') {
-      const targetYear = currentDate.getFullYear();
-      const targetMonth = currentDate.getMonth();
-      const targetDay = currentDate.getDate();
-
-      const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-      const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-      const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
-
-      data = data.filter((item: any) => {
-        let ts = item.timestamp;
-        if (!ts && item.createdAt) ts = new Date(item.createdAt).getTime();
-        if (!ts) ts = parseDate(item.dateIso || item.date || item.displayDate);
-        
-        if (!ts || isNaN(ts)) return false;
-        
-        const itemDate = new Date(ts);
-        const itemTime = itemDate.getTime();
-
-        if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-        if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-        if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-        return true;
-      });
-    }
-
-    data.sort((a: any, b: any) => {
-        let tsA = a.timestamp || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
-        if (!tsA) tsA = parseDate(a.dateIso || a.date || a.displayDate);
-
-        let tsB = b.timestamp || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
-        if (!tsB) tsB = parseDate(b.dateIso || b.date || b.displayDate);
-
-        return tsB - tsA;
-    });
-
-    return data;
-  };
-
-  const fullList = getSortedAndFilteredData(); 
-  const renderedList = fullList.slice(0, visibleCount);
 
   const openDetails = (item: any) => {
     setSelectedItem(item);
@@ -549,6 +460,7 @@ export default function InstallationListScreen() {
                       try {
                           await apiDeleteInstallation(selectedItem.id);
                           setInstallList(prev => prev.filter(i => i.id !== selectedItem.id));
+                          refreshInstalls(); // keeps the total right
                           setModalVisible(false);
                           Alert.alert("Deleted", "Installation record has been deleted successfully.");
                       } catch (error: any) {
@@ -578,6 +490,25 @@ export default function InstallationListScreen() {
       return { label: 'Active', color: '#2e7d32' };
     }
   };
+
+  // Laptop: the same list as a table (tap a row → same details popup).
+  const isDesktop = useIsDesktop();
+  const installColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Install Date', width: 100, render: (i) => i.date || i.displayDate || i.dateIso || '-' },
+      { key: 'party', label: 'Hospital / Client', flex: 2, render: (i) => <TwoLine main={i.orgName || i.hospital} sub={[i.city, i.department].filter(Boolean).join(' • ') || undefined} /> },
+      { key: 'product', label: 'Product / Model', flex: 2, render: (i) => <TwoLine main={i.product || i.productName || '-'} sub={i.model ? `Model: ${i.model}` : undefined} /> },
+      { key: 'serial', label: 'Serial No', width: 130, render: (i) => i.serialNo || '-' },
+      { key: 'expiry', label: 'Warranty Expiry', width: 120, render: (i) => i.warrantyExpiry || '-' },
+      { key: 'warranty', label: 'Warranty', width: 90, render: (i) => {
+          const w = getWarrantyStatus(i.warrantyExpiry);
+          return <Pill text={w.label} color={w.color} bg={w.color + '20'} />;
+      } },
+      { key: 'eng', label: 'Engineer', width: 130, render: (i) => i.engineer || i.senderName || '-' },
+      { key: 'staff', label: 'Added By', width: 130, render: (i) => i.senderName || 'Unknown' },
+      { key: 'act', label: '', width: 44, align: 'center', render: (i) => isStrictAdmin
+          ? <TouchableOpacity onPress={() => openEditModal(i)}><Ionicons name="create" size={18} color="#d32f2f" /></TouchableOpacity>
+          : null },
+  ];
 
   const renderItem = ({ item, index }: any) => {
     const warranty = getWarrantyStatus(item.warrantyExpiry);
@@ -646,7 +577,7 @@ export default function InstallationListScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#333" />
@@ -660,40 +591,19 @@ export default function InstallationListScreen() {
       </View>
 
       <View style={{ backgroundColor: 'white', paddingBottom: 10 }}>
-        <View style={styles.tabContainer}>
-          {['Day', 'Month', 'FY', 'All'].map((m) => (
-            <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
-              <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        <PeriodTabs value={viewMode} onChange={setViewMode} />
+        <StaffPeriodRow
+            showStaff={isAdmin}
+            staffLabel={selectedEmployee === 'All' ? 'All Staff' : selectedEmployeeName}
+            onStaffPress={() => setShowEmployeePicker(true)}
+            periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+            onPrev={() => changeDate(-1)}
+            onNext={() => changeDate(1)}
+        />
 
-        {isAdmin && (
-          <View style={{ paddingHorizontal: 15, marginBottom: 10 }}>
-            <TouchableOpacity
-              style={styles.employeeFilterBtn}
-              onPress={() => setShowEmployeePicker(true)}
-            >
-              <Ionicons name="people" size={18} color="#2e7d32" />
-              <Text style={{ fontSize: 13, marginLeft: 8, color: '#2e7d32', fontWeight: '600' }}>
-                {selectedEmployee === 'All' ? 'View All Staff' : selectedEmployeeName}
-              </Text>
-              <Ionicons name="chevron-down" size={16} color="#2e7d32" style={{ marginLeft: 'auto' }} />
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {viewMode !== 'All' && (
-          <View style={styles.dateNav}>
-            <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-            <Text style={styles.monthText}>{getHeaderDate()}</Text>
-            <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-          </View>
-        )}
-
-        <View style={{ paddingHorizontal: 15 }}>
+        <View style={{ paddingHorizontal: 12, marginTop: 6 }}>
           <View style={styles.searchBar}>
-            {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+            {<Ionicons name="search" size={20} color="gray" />}
             <TextInput
               style={styles.input}
               placeholder="Search Hospital, Serial, Product..."
@@ -707,15 +617,19 @@ export default function InstallationListScreen() {
             )}
           </View>
           <Text style={{ textAlign: 'right', fontSize: 12, color: 'gray', marginTop: 5 }}>
-            Total: <Text style={{ fontWeight: 'bold', color: 'green' }}>{fullList.length}</Text> Records
+            Total: <Text style={{ fontWeight: 'bold', color: 'green' }}>{installTotal}</Text> Records
           </Text>
         </View>
       </View>
 
       <FlatList
-        data={renderedList}
+        data={installList}
         keyExtractor={item => item.id}
-        renderItem={renderItem}
+        renderItem={isDesktop
+            ? ({ item, index }) => <TableRow columns={installColumns} item={item} index={index} onPress={() => openDetails(item)} />
+            : renderItem}
+        ListHeaderComponent={isDesktop && installList.length > 0 ? <TableHeader columns={installColumns} /> : null}
+        stickyHeaderIndices={isDesktop && installList.length > 0 ? [0] : undefined}
         contentContainerStyle={{ padding: 5, paddingBottom: 50 }}
         refreshControl={
             <RefreshControl refreshing={installsRefreshing} onRefresh={refreshInstalls} colors={['#3b5998']} tintColor="#3b5998" />
@@ -725,24 +639,25 @@ export default function InstallationListScreen() {
             {installsLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
                 <>
                     <Ionicons name="cube-outline" size={60} color="#ddd" />
-                    <Text style={{ textAlign: 'center', marginTop: 10, color: 'gray' }}>No Installations Found</Text>
+                    <Text style={{ textAlign: 'center', marginTop: 10, color: 'gray' }}>{installsError ? 'Could not load installations — pull down to retry.' : 'No Installations Found'}</Text>
                 </>
             )}
           </View>
         }
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
-                {visibleCount < fullList.length ? (
-                    <TouchableOpacity 
-                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                {installsHasMore ? (
+                    <TouchableOpacity
+                        onPress={loadMoreInstalls}
+                        disabled={installsLoadingMore}
                         style={styles.loadMoreBtn}
                     >
-                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                            👇 Load More Records ({fullList.length - visibleCount} remaining)
-                        </Text>
+                        {installsLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({installTotal - installList.length} remaining)</Text>
+                        )}
                     </TouchableOpacity>
                 ) : (
-                    fullList.length > 0 ? (
+                    installList.length > 0 ? (
                         <Text style={styles.endListText}>--- End of List ---</Text>
                     ) : null
                 )}
@@ -789,13 +704,13 @@ export default function InstallationListScreen() {
                           <DateTimePicker 
                               value={editInstallDateObj} 
                               mode="date" 
-                              onChange={(e, d) => { 
+                              {...pickerHandlers((e, d) => { 
                                   setShowEditInstallDate(false); 
                                   if(d) { 
                                       setEditInstallDateObj(d); 
                                       setEditData({...editData, date: formatDateStr(d)}); 
                                   }
-                              }} 
+                              })} 
                           />
                       )}
 
@@ -808,13 +723,13 @@ export default function InstallationListScreen() {
                           <DateTimePicker 
                               value={editExpiryDateObj} 
                               mode="date" 
-                              onChange={(e, d) => { 
+                              {...pickerHandlers((e, d) => { 
                                   setShowEditExpiryDate(false); 
                                   if(d) { 
                                       setEditExpiryDateObj(d); 
                                       setEditData({...editData, warrantyExpiry: formatDateStr(d)}); 
                                   }
-                              }} 
+                              })} 
                           />
                       )}
 
@@ -879,6 +794,15 @@ export default function InstallationListScreen() {
                     <Text style={styles.noteText}>{selectedItem.note}</Text>
                   </View>
                 ) : null}
+
+                <RecordPhotoSection
+                    title="Installation Photo"
+                    url={selectedItem.photoUrl}
+                    canEdit={isStrictAdmin || selectedItem.senderId === currentUser?.id}
+                    onUpload={async (dataUri) => applyInstallPhoto(await uploadInstallationPhoto(selectedItem.id, dataUri))}
+                    onDelete={async () => applyInstallPhoto(await deleteInstallationPhoto(selectedItem.id))}
+                />
+                <View style={{ height: 12 }} />
 
                                 <TouchableOpacity 
                     style={styles.pdfBtn}
@@ -988,26 +912,18 @@ const DetailRow = ({ label, value, icon, highlight, color }: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 10, paddingTop: 50, backgroundColor: 'white', elevation: 0 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 10, backgroundColor: 'white', elevation: 0 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998', marginLeft: 15 },
   addBtn: { flexDirection: 'row', backgroundColor: '#3b5998', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, alignItems: 'center' },
   addBtnText: { color: 'white', fontWeight: 'bold', marginLeft: 5 },
 
-  tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', margin: 10, borderRadius: 8, padding: 2, marginBottom: 5 },
-  tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-  activeTab: { backgroundColor: 'white', elevation: 2 },
-  tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-  activeTabText: { color: '#3b5998', fontWeight: 'bold' },
 
-  employeeFilterBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e8f5e9', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2e7d32' },
 
-  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 4, marginHorizontal: 15, borderRadius: 8, marginBottom: 5, borderWidth: 1, borderColor: '#eee' },
-  monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
 
   searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', paddingHorizontal: 10, borderRadius: 8, alignItems: 'center', height: 36 },
   input: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
 
-  card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 15, elevation: 2 },
+  card: { backgroundColor: 'white', borderRadius: 10, padding: 11, marginBottom: 8, elevation: 2 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   hospitalName: { fontSize: 16, fontWeight: 'bold', color: '#333' },
   productName: { fontSize: 13, color: '#3b5998', marginTop: 2, fontWeight: '600' },
@@ -1016,7 +932,7 @@ const styles = StyleSheet.create({
   newBadge: { backgroundColor: '#ffeb3b', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8 },
   newBadgeText: { fontSize: 10, fontWeight: 'bold', color: '#f57f17' },
 
-  divider: { height: 1, backgroundColor: '#eee', marginVertical: 10 },
+  divider: { height: 1, backgroundColor: '#eee', marginVertical: 7},
   row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
   infoBox: { width: '48%' },
   label: { fontSize: 11, color: 'gray', marginBottom: 2 },

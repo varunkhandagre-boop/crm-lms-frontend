@@ -1,24 +1,27 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-// 🔥 SAAS IMPORTS (kept only for isDbLoading UX)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 5: projects now via new backend API
-import { listProjects } from '../services/api/projects';
+import { listProjectsPage, ProjectPageFilters } from '../services/api/projects';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { buildCacheKey } from '../utils/listCache';
+import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
+import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
 
 export default function ProjectsScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   const { currentUser } = useData(); 
-  const { isDbLoading } = useSaaSDB();
 
-  const [projectList, setProjectList] = useState<any[]>([]);
 
   const [searchText, setSearchText] = useState('');
-  const [visibleCount, setVisibleCount] = useState(20);
 
   const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY');
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -38,20 +41,39 @@ export default function ProjectsScreen() {
       }
   }, [currentUser, hasAccess]);
 
-  useEffect(() => {
-      setVisibleCount(20);
-  }, [searchText, viewMode, currentDate]);
+  // 🔥 PROJECTS — 20 per page from the server (a search looks across all dates, as before);
+  // page 1 also brings the Running / Completed counts.
+  const debouncedSearch = useDebounced(searchText.trim());
+  const projectFilters = useMemo<ProjectPageFilters>(() => ({
+      ...(debouncedSearch ? {} : periodRange(viewMode, currentDate)),
+      search: debouncedSearch || undefined,
+  }), [viewMode, currentDate, debouncedSearch]);
+  const [statusCounts, setStatusCounts] = useState({ ongoing: 0, completed: 0 });
+  const fetchProjectPage = useCallback(async (p: ProjectPageFilters & { page: number; limit: number }) => {
+      const r = await listProjectsPage(p);
+      if (r.counts) setStatusCounts(r.counts);
+      return r;
+  }, []);
+  const isDefaultView = isCurrentFy(viewMode, currentDate) && !debouncedSearch;
+  const {
+      items: fullList,
+      total: projectTotal,
+      loading: projectsLoading,
+      loadingMore: projectsLoadingMore,
+      hasMore: projectsHasMore,
+      loadMore: loadMoreProjects,
+      refreshing: projectsRefreshing,
+      refresh: refreshProjects,
+      error: projectsError,
+  } = useServerPagedList<ProjectPageFilters, any>({
+      fetchPage: fetchProjectPage,
+      filters: projectFilters,
+      enabled: !!currentUser?.companyId && hasAccess,
+      cacheKey: isDefaultView ? buildCacheKey('projects_page1_v1', currentUser?.companyId) : null,
+  });
 
-  // 🔥 LOAD DATA — via new backend API
-  useEffect(() => {
-      const loadData = async () => {
-          if (currentUser?.companyId && hasAccess) {
-              const data = await listProjects(); // was: fetchSaaSData("projects")
-              setProjectList(data);
-          }
-      };
-      loadData();
-  }, [currentUser, hasAccess]);
+  // Laptop table view (hook must run before the early return below).
+  const isDesktop = useIsDesktop();
 
   if (!hasAccess) {
       return null; 
@@ -61,23 +83,6 @@ export default function ProjectsScreen() {
       if (status === 'Completed') return '#4caf50'; 
       if (status === 'Ongoing') return '#2196f3';   
       return '#ff9800'; 
-  };
-
-  const parseDate = (dateStr: any) => {
-      if (!dateStr) return 0;
-      if (typeof dateStr === 'number') return dateStr;
-      if (dateStr instanceof Date) return dateStr.getTime();
-      if (typeof dateStr === 'string') {
-          if (dateStr.includes('T')) return new Date(dateStr).getTime();
-          if (dateStr.includes('-')) return new Date(dateStr).getTime();
-          if (dateStr.includes('/')) {
-              const parts = dateStr.split('/');
-              if (parts.length === 3) {
-                  return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0])).getTime();
-              }
-          }
-      }
-      return new Date(dateStr).getTime();
   };
 
   const changeDate = (dir: number) => {
@@ -100,57 +105,18 @@ export default function ProjectsScreen() {
       return "All Time";
   };
 
-  const getFilteredProjects = () => {
-      let data = Array.isArray(projectList) ? [...projectList] : [];
 
-      if (searchText) {
-          const lower = searchText.toLowerCase();
-          data = data.filter((item: any) => 
-              (item.name && item.name.toLowerCase().includes(lower)) ||
-              (item.client && item.client.toLowerCase().includes(lower)) ||
-              (item.location && item.location.toLowerCase().includes(lower)) ||
-              (item.orgId && item.orgId.toLowerCase().includes(lower)) 
-          );
-      } else if (viewMode !== 'All') {
-          const tYear = currentDate.getFullYear();
-          const tMonth = currentDate.getMonth();
-          const tDay = currentDate.getDate();
-
-          const fyStartYear = tMonth >= 3 ? tYear : tYear - 1;
-          let fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
-
-          const APP_LAUNCH_DATE = new Date(2026, 0, 1).getTime(); 
-          if (fyStartDate < APP_LAUNCH_DATE) {
-              fyStartDate = APP_LAUNCH_DATE;
-          }
-
-          data = data.filter((item: any) => {
-              const dateField = item.dateIso || item.createdAt || item.date;
-              if (!dateField) return false;
-              const ts = parseDate(dateField);
-              if (ts === 0) return false;
-              const itemDate = new Date(ts);
-              const itemTime = itemDate.getTime();
-
-              if (viewMode === 'Month') return itemDate.getFullYear() === tYear && itemDate.getMonth() === tMonth;
-              if (viewMode === 'Day') return itemDate.getFullYear() === tYear && itemDate.getMonth() === tMonth && itemDate.getDate() === tDay;
-              if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-              return true;
-          });
-      }
-
-      data.sort((a: any, b: any) => {
-          const dateA = parseDate(a.dateIso || a.createdAt || a.date);
-          const dateB = parseDate(b.dateIso || b.createdAt || b.date);
-          return dateB - dateA;
-      });
-
-      return data;
-  };
-
-  const fullList = getFilteredProjects(); 
-  const renderedList = fullList.slice(0, visibleCount);
+  const openProject = (item: any) => router.push(`/project_details?id=${item.id}` as any);
+  const projectColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Created', width: 96, render: (p) => p.dateIso ? p.dateIso.split('-').reverse().join('/') : '-' },
+      { key: 'name', label: 'Project', flex: 2, render: (p) => <TwoLine main={p.name} sub={p.description || undefined} /> },
+      { key: 'client', label: 'Client', flex: 2, render: (p) => <TwoLine main={p.client} sub={p.contactPerson ? `${p.contactPerson}${p.mobile ? ' · ' + p.mobile : ''}` : (p.mobile || undefined)} /> },
+      { key: 'location', label: 'Location', flex: 1, render: (p) => <TwoLine main={p.location || '-'} sub={p.state || undefined} /> },
+      { key: 'value', label: 'Order Value', width: 120, align: 'right', render: (p) => inr(parseInt(p.totalValue) || 0) },
+      { key: 'received', label: 'Received', width: 110, align: 'right', render: (p) => inr(parseInt(p.totalReceived) || 0) },
+      { key: 'expense', label: 'Expense', width: 110, align: 'right', render: (p) => inr(p.totalExpense ? parseInt(p.totalExpense) : 0) },
+      { key: 'status', label: 'Status', width: 100, render: (p) => <Pill text={p.status || '-'} color="white" bg={getStatusColor(p.status)} /> },
+  ];
 
   const renderProjectCard = ({ item }: any) => (
       <TouchableOpacity 
@@ -188,7 +154,7 @@ export default function ProjectsScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={{flexDirection:'row', alignItems:'center'}}>
             <TouchableOpacity onPress={() => router.back()}>
                 <Ionicons name="arrow-back" size={24} color="#333" />
@@ -203,7 +169,7 @@ export default function ProjectsScreen() {
 
       <View style={{backgroundColor:'white', paddingBottom:5}}>
           <View style={styles.searchContainer}>
-              {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" style={{marginRight: 10}}/> : <Ionicons name="search" size={20} color="gray" style={{marginRight: 10}} />}
+              {<Ionicons name="search" size={20} color="gray" style={{marginRight: 10}} />}
               <TextInput 
                   style={styles.searchInput} 
                   placeholder="Search Project, Client, City, ID..." 
@@ -219,21 +185,12 @@ export default function ProjectsScreen() {
 
           {!searchText && (
             <>
-              <View style={styles.tabContainer}>
-                  {['Day', 'Month', 'FY', 'All'].map((m) => (
-                      <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
-                          <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
-                      </TouchableOpacity>
-                  ))}
-              </View>
-
-              {viewMode !== 'All' && (
-                  <View style={styles.dateNav}>
-                      <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-                      <Text style={styles.monthText}>{getHeaderDate()}</Text>
-                      <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-                  </View>
-              )}
+              <PeriodTabs value={viewMode} onChange={setViewMode} />
+              <StaffPeriodRow
+                  periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+                  onPrev={() => changeDate(-1)}
+                  onNext={() => changeDate(1)}
+              />
             </>
           )}
 
@@ -241,43 +198,47 @@ export default function ProjectsScreen() {
               <View style={[styles.summaryCard, {backgroundColor:'#e3f2fd'}]}>
                   <Text style={styles.summaryLabel}>Running</Text>
                   <Text style={styles.summaryValue}>
-                      {fullList ? fullList.filter((p:any) => p.status === 'Ongoing').length : 0}
+                      {statusCounts.ongoing}
                   </Text>
               </View>
               <View style={[styles.summaryCard, {backgroundColor:'#e8f5e9'}]}>
                   <Text style={styles.summaryLabel}>Completed</Text>
                   <Text style={styles.summaryValue}>
-                      {fullList ? fullList.filter((p:any) => p.status === 'Completed').length : 0}
+                      {statusCounts.completed}
                   </Text>
               </View>
           </View>
 
-          <Text style={{textAlign:'right', paddingHorizontal: 15, fontSize:12, color:'gray', marginBottom: 5}}>
-              Total Projects: <Text style={{fontWeight:'bold', color:'#333'}}>{fullList.length}</Text>
-          </Text>
+          <TotalBar label="Total Projects" count={projectTotal} />
       </View>
 
       <FlatList 
-        data={renderedList}
+        data={fullList}
+        refreshControl={<RefreshControl refreshing={projectsRefreshing} onRefresh={refreshProjects} colors={['#3b5998']} tintColor="#3b5998" />}
         keyExtractor={(item:any) => item.id.toString()} 
         contentContainerStyle={{padding: 15, paddingBottom: 50}}
         ListEmptyComponent={
             <View style={{alignItems:'center', marginTop:50}}>
-                {isDbLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
+                {projectsLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
                     <>
                         <Ionicons name="business-outline" size={60} color="#ccc" />
-                        <Text style={{color:'gray', marginTop:10}}>No Projects Found.</Text>
+                        <Text style={{color:'gray', marginTop:10}}>{projectsError ? 'Could not load projects — pull down to retry.' : 'No Projects Found.'}</Text>
                     </>
                 )}
             </View>
         }
-        renderItem={renderProjectCard}
+        renderItem={isDesktop
+            ? ({ item, index }) => <TableRow columns={projectColumns} item={item} index={index} onPress={() => openProject(item)} />
+            : renderProjectCard}
+        ListHeaderComponent={isDesktop && fullList.length > 0 ? <TableHeader columns={projectColumns} /> : null}
+        stickyHeaderIndices={isDesktop && fullList.length > 0 ? [0] : undefined}
         
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
-                {visibleCount < fullList.length ? (
-                    <TouchableOpacity 
-                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                {projectsHasMore ? (
+                    <TouchableOpacity
+                        onPress={loadMoreProjects}
+                        disabled={projectsLoadingMore}
                         style={{
                             padding: 12, 
                             backgroundColor: '#fff', 
@@ -289,9 +250,9 @@ export default function ProjectsScreen() {
                             elevation: 1
                         }}
                     >
-                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                            👇 Load More Records ({fullList.length - visibleCount} remaining)
-                        </Text>
+                        {projectsLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({projectTotal - fullList.length} remaining)</Text>
+                        )}
                     </TouchableOpacity>
                 ) : (
                     fullList.length > 0 ? (
@@ -309,7 +270,7 @@ export default function ProjectsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 3 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 3 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginLeft: 10 },
   addBtn: { flexDirection:'row', backgroundColor:'#212121', paddingHorizontal:12, paddingVertical:8, borderRadius:5, alignItems:'center' },
   addBtnText: { color:'white', fontWeight:'bold', marginLeft:5 },
@@ -317,20 +278,13 @@ const styles = StyleSheet.create({
   searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e3f2fd', marginHorizontal: 15, marginTop: 10, marginBottom: 5, paddingHorizontal: 15, borderRadius: 10, height: 45, borderWidth: 1, borderColor: '#90caf9' },
   searchInput: { flex: 1, fontSize: 15, color: '#1565c0', fontWeight: '500' },
 
-  tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', marginHorizontal: 15, borderRadius: 8, padding: 2, marginBottom: 5 },
-  tab: { flex: 1, paddingVertical: 5, alignItems: 'center', borderRadius: 6 },
-  activeTab: { backgroundColor: 'white', elevation: 2 },
-  tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-  activeTabText: { color: '#3b5998', fontWeight: 'bold' },
-  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 5, marginHorizontal: 15, borderRadius: 8, marginBottom: 5, borderWidth: 1, borderColor: '#eee' },
-  monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
 
   summaryContainer: { flexDirection: 'row', paddingHorizontal: 15, justifyContent: 'space-between', marginBottom: 5, marginTop: 5 },
   summaryCard: { flex: 1, padding: 10, borderRadius: 10, alignItems: 'center', marginHorizontal: 5, elevation: 1 },
   summaryLabel: { fontSize: 12, color: '#555', fontWeight:'bold' },
   summaryValue: { fontSize: 20, fontWeight: 'bold', color: '#333', marginTop: 2 },
 
-  card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 15, elevation: 2, marginHorizontal: 2 },
+  card: { backgroundColor: 'white', borderRadius: 10, padding: 11, marginBottom: 8, elevation: 2, marginHorizontal: 2 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
   projectName: { fontSize: 18, fontWeight: 'bold', color: '#333', flex:1 },
   badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, marginLeft:5 },
@@ -338,7 +292,7 @@ const styles = StyleSheet.create({
   clientName: { fontSize: 14, color: '#555', marginTop: 2 },
   location: { fontSize: 13, color: '#777', marginTop: 2 },
   
-  divider: { height: 1, backgroundColor: '#eee', marginVertical: 10 },
+  divider: { height: 1, backgroundColor: '#eee', marginVertical: 7},
   row: { flexDirection: 'row', justifyContent: 'space-between' },
   label: { fontSize: 11, color: 'gray' },
   value: { fontSize: 16, fontWeight: 'bold', color: '#333' }

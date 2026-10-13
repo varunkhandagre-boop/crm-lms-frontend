@@ -21,6 +21,9 @@ export interface ApiSalesVisit {
   createdById: string;
   createdAt: string;
   updatedAt: string;
+  /** List endpoint only. */
+  createdBy?: { name: string } | null;
+  organization?: { city: string | null } | null;
 }
 
 interface ListResponse {
@@ -35,7 +38,8 @@ interface OneResponse {
 // doc had, so sales.tsx (which reads `salesVisitList` from DataContext)
 // keeps working unchanged — same adapter pattern used for leads.
 export function toLegacySalesVisit(v: ApiSalesVisit): any {
-  const dateOnly = v.createdAt ? v.createdAt.split('T')[0] : undefined;
+  // Visit day in IST (the UTC date is the previous day for visits before 5:30 am).
+  const dateOnly = v.createdAt ? new Date(new Date(v.createdAt).getTime() + 330 * 60_000).toISOString().slice(0, 10) : undefined;
   return {
     id: v.id,
     companyId: v.companyId,
@@ -45,7 +49,7 @@ export function toLegacySalesVisit(v: ApiSalesVisit): any {
     orgId: v.orgId || '',
     person: v.contactPerson || '',
     mobile: v.mobile || '',
-    city: v.city || '',
+    city: v.city || v.organization?.city || '',
     address: v.address || '',
     product: v.products || [],
     discussion: v.discussion || '',
@@ -54,6 +58,7 @@ export function toLegacySalesVisit(v: ApiSalesVisit): any {
     date: dateOnly,
     dateIso: dateOnly,
     senderId: v.createdById,
+    ...(v.createdBy ? { senderName: v.createdBy.name } : {}),
     senderUid: v.createdById,
     userId: v.createdById,
     timestamp: v.createdAt ? new Date(v.createdAt).getTime() : undefined,
@@ -93,6 +98,22 @@ export async function listSalesVisits(params: ListSalesVisitsParams = {}): Promi
   return all.map(toLegacySalesVisit);
 }
 
+export interface SalesVisitPageFilters {
+  visitType?: string;
+  search?: string;
+  fromDate?: string; // YYYY-MM-DD (IST day)
+  toDate?: string;
+  createdById?: string;
+}
+
+/** One page for the DSR screen (newest first); every filter runs on the server. */
+export async function listSalesVisitsPage(
+  params: SalesVisitPageFilters & { page: number; limit: number },
+): Promise<{ items: any[]; total: number; totalPages: number }> {
+  const res = await apiClient.get<ListResponse>(`/sales-visits${toQueryString({ ...params, sortBy: 'createdAt', sortOrder: 'desc' })}`);
+  return { items: res.data.map(toLegacySalesVisit), total: res.meta.total, totalPages: res.meta.totalPages };
+}
+
 export interface CreateSalesVisitPayload {
   visitType: string;
   orgName: string;
@@ -124,4 +145,29 @@ export async function createSalesVisit(payload: CreateSalesVisitPayload): Promis
 
 export async function deleteSalesVisit(id: string): Promise<void> {
   await apiClient.delete(`/sales-visits/${id}`);
+}
+
+// ── Visit Targets: target vs visits logged, per salesperson ────────────────
+export interface VisitTargetRow {
+  userId: string;
+  name: string;
+  jobTitle: string | null;
+  dailyTarget: number | null;
+  monthlyTarget: number | null;
+  today: number | null;       // null for a past month
+  month: number;
+  expectedByNow: number | null; // monthly target pro-rated to today
+}
+
+export interface VisitTargets {
+  month: string; // YYYY-MM
+  isCurrentMonth: boolean;
+  daysInMonth: number;
+  dayOfMonth: number;
+  rows: VisitTargetRow[];
+}
+
+export async function getVisitTargets(month?: string): Promise<VisitTargets> {
+  const res = await apiClient.get<{ data: VisitTargets }>(`/sales-visits/targets${month ? `?month=${month}` : ''}`);
+  return res.data;
 }

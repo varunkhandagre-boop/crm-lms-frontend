@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -19,10 +19,13 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (organizations/users still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: service calls now via new backend API
-import { closeServiceCall as apiCloseServiceCall, listServiceCalls } from '../services/api/serviceCalls';
+import { assignServiceCall, closeServiceCall as apiCloseServiceCall, deleteServiceCallPhoto, getServiceCall, getServiceCallCounts, listServiceCallsPage, ServiceCallPageParams, uploadServiceCallPhoto } from '../services/api/serviceCalls';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import * as ImagePicker from 'expo-image-picker';
+import { compressPhoto } from '../utils/attachments';
+import EngineerStatsModal, { formatHours } from '../components/EngineerStatsModal';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
@@ -31,20 +34,55 @@ import { buildCacheKey } from '../utils/listCache';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 import { listInstallations } from '../services/api/installations';
-import { fetchOrganizations } from '../services/api/organizations';
 import { fetchTeamMembers } from '../services/api/users';
+import { listSpareParts } from '../services/api/spareParts';
+import { sortAndFilterParts } from '../utils/sparePartSearch';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
+import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
+
+const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const fyStart = (d: Date) => (d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1);
+const isSameFy = (a: Date, b: Date) => fyStart(a) === fyStart(b);
+// Calls before this date are hidden in FY view (same rule the screen had on the phone).
+const APP_LAUNCH_YMD = '2026-01-01';
+
+/** Screen state → API params (the filters the screen used to apply on the phone). */
+function buildServiceCallFilters(s: {
+    statusFilter: 'Open' | 'Closed' | 'All'; search: string; viewMode: 'Day' | 'Month' | 'FY' | 'All';
+    currentDate: Date; employeeId?: string; myCallsOnly: boolean;
+}): ServiceCallPageParams {
+    const f: ServiceCallPageParams = {};
+    if (s.statusFilter === 'Open') f.outcome = 'open';
+    else if (s.statusFilter === 'Closed') f.outcome = 'closed';
+    if (s.employeeId) f.employeeId = s.employeeId;
+    if (s.myCallsOnly) f.engineerId = 'me';
+    if (s.search) f.search = s.search;
+    const d = s.currentDate;
+    if (s.viewMode === 'Day') { f.from = ymd(d); f.to = ymd(d); }
+    else if (s.viewMode === 'Month') {
+        f.from = ymd(new Date(d.getFullYear(), d.getMonth(), 1));
+        f.to = ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+    } else if (s.viewMode === 'FY') {
+        const start = `${fyStart(d)}-04-01`;
+        f.from = start < APP_LAUNCH_YMD ? APP_LAUNCH_YMD : start;
+        f.to = `${fyStart(d) + 1}-03-31`;
+    }
+    return f;
+}
 
 export default function ServiceCallScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   const params = useLocalSearchParams();
   
   const { currentUser, companyProfile } = useData(); 
 
-  // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); service calls no longer go through this
-  const { isDbLoading } = useSaaSDB();
 
-  // serviceCallList/orgList/installList now come from useCachedList below (cache-first, shared keys)
+  // Service calls come page by page from the server (useServerPagedList below)
   const [employees, setEmployees] = useState<{ id: string, name: string }[]>([]);
 
   const [statusFilter, setStatusFilter] = useState<'Open' | 'Closed' | 'All'>('Open');
@@ -69,32 +107,68 @@ export default function ServiceCallScreen() {
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  const [visibleCount, setVisibleCount] = useState(20);
-
+  // Search is sent to the server 400 ms after the last keystroke.
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   useEffect(() => {
-      if (viewMode === 'Day' && statusFilter === 'All' && !searchText) {
-          setVisibleCount(500); 
-      } else {
-          setVisibleCount(20); 
-      }
-  }, [viewMode, currentDate, statusFilter, searchText, selectedEmployee]);
+      const t = setTimeout(() => setDebouncedSearch(searchText.trim()), 400);
+      return () => clearTimeout(t);
+  }, [searchText]);
 
   const isAdmin = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
+  const canAssign = ['Admin', 'Manager', 'SuperAdmin'].includes(currentUser?.role || '');
+  const myId = currentUser?.uid || currentUser?.id;
+  const [myCallsOnly, setMyCallsOnly] = useState(false);
+  const [showAssignPicker, setShowAssignPicker] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const [showStats, setShowStats] = useState(false);
+  // Parts used, recorded while closing the call
+  const [closeParts, setCloseParts] = useState<{ id: string; partName: string; partNo?: string; usedQty: string }[]>([]);
+  const [showPartPicker, setShowPartPicker] = useState(false);
+  const [partSearch, setPartSearch] = useState('');
 
-  // 🔥 SERVICE CALLS — cache-first (instant from AsyncStorage, then
-  // background refresh). See hooks/useCachedList.ts.
-  const serviceCallsCacheKey = buildCacheKey('service_calls', currentUser?.companyId);
+  // 🔥 SERVICE CALLS — server-side filtered + paginated (20 per page, Load
+  // more). Only page 1 of the default view is cached for an instant open.
+  const callFilters = useMemo(
+      () => buildServiceCallFilters({
+          statusFilter, search: debouncedSearch, viewMode, currentDate,
+          employeeId: isAdmin && selectedEmployee !== 'All' ? selectedEmployee : undefined,
+          myCallsOnly,
+      }),
+      [statusFilter, debouncedSearch, viewMode, currentDate, isAdmin, selectedEmployee, myCallsOnly]
+  );
+  const isDefaultView = statusFilter === 'Open' && !debouncedSearch && viewMode === 'FY' && selectedEmployee === 'All' && !myCallsOnly
+      && isSameFy(currentDate, new Date());
   const {
-      data: serviceCallList,
-      setData: setServiceCallList,
+      items: pagedCalls,
+      setItems: setServiceCallList,
+      total: callTotal,
       loading: serviceCallsLoading,
+      loadingMore,
+      hasMore,
+      loadMore,
       refresh: refreshServiceCalls,
-  } = useCachedList({
-      cacheKey: serviceCallsCacheKey,
+      reload: reloadServiceCalls,
+  } = useServerPagedList<ServiceCallPageParams, any>({
+      fetchPage: listServiceCallsPage,
+      filters: callFilters,
       enabled: !!currentUser?.companyId,
-      fetcher: listServiceCalls, // was: fetchSaaSData("service_calls")
+      cacheKey: isDefaultView ? buildCacheKey('service_calls_page1', currentUser?.companyId) : null,
   });
-  const openCount = serviceCallList.filter((i: any) => i.status === 'Open' || i.status === 'Assigned').length;
+
+  // "Open (N)" tab — one COUNT on the server, scoped like the list.
+  const [openCount, setOpenCount] = useState(0);
+  const refreshCounts = useCallback(() => {
+      if (!currentUser?.companyId) return;
+      getServiceCallCounts().then(c => setOpenCount(c.open)).catch(() => {});
+  }, [currentUser?.companyId]);
+
+  // Quiet refresh when coming back (e.g. after logging a new call); skips the first focus.
+  const focusedOnce = useRef(false);
+  useFocusEffect(useCallback(() => {
+      refreshCounts();
+      if (focusedOnce.current) reloadServiceCalls();
+      focusedOnce.current = true;
+  }, [refreshCounts, reloadServiceCalls]));
 
   // 🔥 Team members — cache-first, shares the SAME 'team_members' cache key
   // as manage_team.tsx/employee_timeline.tsx.
@@ -113,35 +187,50 @@ export default function ServiceCallScreen() {
       }
   }, [teamMembersForServiceCall, isAdmin]);
 
-  // 🔥 senderName was never populated — the API only returns senderId (see
-  // services/api/serviceCalls.ts's comment), so every service call showed
-  // no name (the "Unknown" text seen in the list). Fill it in once team
-  // members are available.
-  useEffect(() => {
-      if (teamMembersForServiceCall.length === 0 || serviceCallList.length === 0) return;
+  // senderName isn't sent by the API (only senderId) — filled from team members.
+  const serviceCallList = useMemo(() => {
+      if (teamMembersForServiceCall.length === 0) return pagedCalls;
       const nameById = new Map(teamMembersForServiceCall.map((u: any) => [u.id, u.name || 'Unknown']));
-      const needsEnrichment = serviceCallList.some((s: any) => s.senderName === undefined);
-      if (!needsEnrichment) return;
-      setServiceCallList(serviceCallList.map((s: any) => ({ ...s, senderName: nameById.get(s.senderId) || 'Unknown' })));
-  }, [serviceCallList, teamMembersForServiceCall]);
+      return pagedCalls.map((c: any) => (c.senderName ? c : { ...c, senderName: nameById.get(c.senderId) || 'Unknown' }));
+  }, [pagedCalls, teamMembersForServiceCall]);
 
-  // 🔥 Organizations/installations — cache-first, sharing the SAME cache
-  // keys as organization.tsx ('organizations') and installation.tsx
-  // ('installations').
-  const { data: orgList, refresh: refreshOrgsForServiceCall } = useCachedList({
-      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
+  const { data: sparePartsList, refresh: refreshSpareParts } = useCachedList({
+      cacheKey: buildCacheKey('spare_parts', currentUser?.companyId),
       enabled: !!currentUser?.companyId,
-      fetcher: () => fetchOrganizations({ limit: 500 }),
+      fetcher: listSpareParts,
   });
-  const { data: installList, refresh: refreshInstallsForServiceCall } = useCachedList({
-      cacheKey: buildCacheKey('installations', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: listInstallations,
-  });
+
+  const engineerNameById = useMemo(
+      () => new Map(teamMembersForServiceCall.map((u: any) => [u.id, u.name || 'Unknown'])),
+      [teamMembersForServiceCall]
+  );
+  const activeEngineers = useMemo(
+      () => teamMembersForServiceCall.filter((u: any) => u.status !== 'Disabled'),
+      [teamMembersForServiceCall]
+  );
+
+  // Opened from an "assigned to you" notification: /service_call?id=<callId>
+  const openedFromLink = useRef<string | null>(null);
+  // The call may not be on the first page, so it is fetched by id.
+  useEffect(() => {
+      const id = typeof params.id === 'string' ? params.id : undefined;
+      if (!id || openedFromLink.current === id || !currentUser?.companyId) return;
+      openedFromLink.current = id;
+      getServiceCall(id)
+          .then((call) => {
+              const name = teamMembersForServiceCall.find((u: any) => u.id === call.senderId)?.name;
+              setSelectedCall({ ...call, senderName: call.senderName || name || 'Unknown' });
+              setResolutionNote(call.resolutionNote || '');
+              setDetailsModalVisible(true);
+          })
+          .catch(() => Alert.alert('Not found', 'This service call could not be opened.'));
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.id, currentUser?.companyId]);
 
   const onRefresh = async () => {
       setRefreshing(true);
-      await Promise.all([refreshServiceCalls(), refreshTeamMembersForServiceCall(), refreshOrgsForServiceCall(), refreshInstallsForServiceCall()]);
+      refreshCounts();
+      await Promise.all([refreshServiceCalls(), refreshTeamMembersForServiceCall()]);
       setRefreshing(false);
   };
 
@@ -185,7 +274,9 @@ export default function ServiceCallScreen() {
         // Warranty isn't stored on ServiceCall — looked up by matching
         // serialNo against the Installation record.
         let warrantyHTML = '';
-        const matchedInstall = installList.find((i: any) => 
+        // Only installations with this serial are fetched (not the whole list).
+        const candidates = ticketData.serialNo ? await listInstallations({ search: String(ticketData.serialNo).trim() }) : [];
+        const matchedInstall = candidates.find((i: any) => 
             i.serialNo && ticketData.serialNo && 
             String(i.serialNo).trim().toLowerCase() === String(ticketData.serialNo).trim().toLowerCase()
         );
@@ -389,17 +480,8 @@ export default function ServiceCallScreen() {
           </body>
         </html>`;
 
-        const { uri } = await Print.printToFileAsync({ html: htmlContent });
         const cleanName = `Service_${ticketData.scrId}.pdf`;
-        // @ts-ignore
-        const newPath = `${FileSystem.cacheDirectory}${cleanName}`;
-
-        try {
-            await FileSystem.copyAsync({ from: uri, to: newPath });
-            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Report` });
-        } catch (error) {
-            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-        }
+        await sharePdfFromHtml(htmlContent, cleanName, `Share Report`);
     } catch (error) {
         Alert.alert("Error", "Could not generate PDF");
     } finally {
@@ -407,67 +489,6 @@ export default function ServiceCallScreen() {
     }
   };
 
-  const getSortedFilteredData = () => {
-    let data = serviceCallList ? [...serviceCallList] : [];
-    if (isAdmin && selectedEmployee !== 'All') {
-      data = data.filter((item: any) => {
-        if (item.senderId === selectedEmployee) return true;
-        if (item.assignedToId === selectedEmployee) return true;
-        if (item.senderName && item.senderName.toLowerCase() === selectedEmployeeName.toLowerCase()) return true;
-        if (item.userName && item.userName.toLowerCase() === selectedEmployeeName.toLowerCase()) return true;
-        return false;
-      });
-    } else if (!isAdmin) {
-      const myId = currentUser?.uid || currentUser?.id;
-      data = data.filter((item: any) => item.senderId === myId || item.assignedToId === myId);
-    }
-
-    if (statusFilter === 'Open') {
-      data = data.filter((item: any) => item.status === 'Open' || item.status === 'Assigned');
-    } else if (statusFilter === 'Closed') {
-      data = data.filter((item: any) => item.status === 'Resolved' || item.status === 'Closed');
-    }
-
-    if (searchText) {
-      const lowerText = searchText.toLowerCase();
-      data = data.filter((item: any) =>
-        `${item.hospitalName} ${item.scrId} ${item.serialNo} ${item.city} ${item.model}`.toLowerCase().includes(lowerText)
-      );
-    }
-
-    if (viewMode !== 'All') {
-      const tYear = currentDate.getFullYear();
-      const tMonth = currentDate.getMonth();
-      const tDay = currentDate.getDate();
-
-      const fyStartYear = tMonth >= 3 ? tYear : tYear - 1;
-      let fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-      const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
-
-      const APP_LAUNCH_DATE = new Date(2026, 0, 1).getTime(); 
-      if (fyStartDate < APP_LAUNCH_DATE) {
-          fyStartDate = APP_LAUNCH_DATE;
-      }
-
-      data = data.filter((item: any) => {
-        const ts = parseDate(item.createdAt || item.dateIso || item.date);
-        if (!ts) return false;
-        const d = new Date(ts);
-        const itemTime = d.getTime();
-
-        if (viewMode === 'Month') return d.getFullYear() === tYear && d.getMonth() === tMonth;
-        if (viewMode === 'Day') return d.getFullYear() === tYear && d.getMonth() === tMonth && d.getDate() === tDay;
-        if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-        return true;
-      });
-    }
-
-    data.sort((a: any, b: any) => parseDate(b.dateIso || b.date || b.createdAt) - parseDate(a.dateIso || a.date || a.createdAt));
-    return data;
-  };
-
-  const displayList = getSortedFilteredData(); 
-  const renderedList = displayList.slice(0, visibleCount);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -481,7 +502,89 @@ export default function ServiceCallScreen() {
   const openDetails = (item: any) => {
     setSelectedCall(item);
     setResolutionNote(item.resolutionNote || '');
+    setCloseParts((item.partsUsed || []).map((p: any) => ({ id: p.id, partName: p.partName, partNo: p.partNo, usedQty: String(p.usedQty ?? 1) })));
+    setShowPartPicker(false);
     setDetailsModalVisible(true);
+  };
+
+  const addClosePart = (part: any) => {
+    setShowPartPicker(false);
+    if (closeParts.some((p) => p.id === part.id)) return;
+    setCloseParts([...closeParts, { id: part.id, partName: part.partName, partNo: part.partNo, usedQty: '1' }]);
+  };
+
+  // Assign / change / remove the engineer (Admin, Manager)
+  const handleAssign = async (engineerId: string | null) => {
+    if (!selectedCall) return;
+    setShowAssignPicker(false);
+    setAssigning(true);
+    try {
+      const updated = await assignServiceCall(selectedCall.id, engineerId);
+      const merged = { ...selectedCall, ...updated, senderName: selectedCall.senderName };
+      setSelectedCall(merged);
+      setServiceCallList(prev => prev.map(item => item.id === merged.id ? merged : item));
+      refreshCounts();
+    } catch (error: any) {
+      Alert.alert('Error', error?.message || 'Could not assign engineer');
+    } finally {
+      setAssigning(false);
+    }
+  };
+
+  // ── Call photo (details) — saved to the server immediately ──
+  const [photoBusy, setPhotoBusy] = useState(false);
+
+  const applyPhoto = (updated: any) => {
+    setSelectedCall((prev: any) => (prev ? { ...prev, imageUri: updated.imageUri } : prev));
+    setServiceCallList(prev => prev.map(item => item.id === updated.id ? { ...item, imageUri: updated.imageUri } : item));
+  };
+
+  const addCallPhoto = async (fromCamera: boolean) => {
+    if (!selectedCall) return;
+    const perm = fromCamera
+      ? await ImagePicker.requestCameraPermissionsAsync()
+      : Platform.OS === 'ios' ? await ImagePicker.requestMediaLibraryPermissionsAsync() : { status: 'granted' };
+    if (perm.status !== 'granted') return Alert.alert('Permission Denied');
+    const result = fromCamera
+      ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.8 })
+      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+    if (result.canceled) return;
+    setPhotoBusy(true);
+    try {
+      const photo = await compressPhoto(result.assets[0]);
+      applyPhoto(await uploadServiceCallPhoto(selectedCall.id, photo.dataUri));
+    } catch (e: any) {
+      Alert.alert('Upload failed', e?.message || 'Could not upload the photo. Please try again.');
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  const chooseCallPhoto = () => {
+    Alert.alert('Photo', 'Choose source', [
+      { text: 'Camera', onPress: () => addCallPhoto(true) },
+      { text: 'Gallery', onPress: () => addCallPhoto(false) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const removeCallPhoto = () => {
+    if (!selectedCall) return;
+    Alert.alert('Delete photo?', 'The photo will be removed from this call and from storage.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive', onPress: async () => {
+          setPhotoBusy(true);
+          try {
+            applyPhoto(await deleteServiceCallPhoto(selectedCall.id));
+          } catch (e: any) {
+            Alert.alert('Error', e?.message || 'Could not delete the photo.');
+          } finally {
+            setPhotoBusy(false);
+          }
+        }
+      },
+    ]);
   };
 
   // 🔥 CLOSE TICKET LOGIC — via new backend API
@@ -489,8 +592,15 @@ export default function ServiceCallScreen() {
     if (!resolutionNote) { Alert.alert("Required", "Please enter a resolution note."); return; }
     setLoading(true);
     try {
-      const updated = await apiCloseServiceCall(selectedCall.id, resolutionNote);
+      const parts = closeParts
+        .map((p) => ({ ...p, usedQty: String(Math.max(0, parseInt(p.usedQty) || 0)) }))
+        .filter((p) => p.usedQty !== '0');
+      const updated = await apiCloseServiceCall(selectedCall.id, resolutionNote, parts);
+      refreshSpareParts();
       setServiceCallList(prev => prev.map(item => item.id === selectedCall.id ? { ...item, ...updated } : item));
+      // A closed call leaves the Open tab — re-read the page and the count.
+      reloadServiceCalls();
+      refreshCounts();
 
       setDetailsModalVisible(false);
       
@@ -507,6 +617,44 @@ export default function ServiceCallScreen() {
     } catch (error: any) { Alert.alert("Error", error?.message || "Could not update status."); }
     finally { setLoading(false); }
   };
+
+  // "Open 3 days" (red after 2 days) / "Closed in 5 hrs"
+  const renderAge = (item: any) => {
+    const created = parseDate(item.createdAt);
+    if (!created) return null;
+    const isOpen = item.status === 'Open' || item.status === 'Assigned';
+    if (!isOpen && !item.closedAt) return null;
+    const end = isOpen ? Date.now() : parseDate(item.closedAt);
+    const hours = Math.max(0, (end - created) / 3600000);
+    const late = isOpen && hours >= 48;
+    return (
+      <View style={[styles.ageChip, { backgroundColor: isOpen ? (late ? '#ffebee' : '#fff8e1') : '#e8f5e9' }]}>
+        <Ionicons name={isOpen ? 'time-outline' : 'checkmark-done'} size={12} color={isOpen ? (late ? '#c62828' : '#f57f17') : '#2e7d32'} />
+        <Text style={[styles.ageText, { color: isOpen ? (late ? '#c62828' : '#f57f17') : '#2e7d32' }]}>
+          {isOpen ? `Open ${formatHours(hours)}` : `Closed in ${formatHours(hours)}`}
+        </Text>
+      </View>
+    );
+  };
+
+  // Laptop: the same list as a table (tap a row → same details popup).
+  const isDesktop = useIsDesktop();
+  const callColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Date', width: 100, render: (c) => c.dateIso || c.date || '-' },
+      { key: 'ticket', label: 'Ticket', width: 140, render: (c) => <TwoLine main={c.scrId || '-'} sub={c.serviceType || c.type} /> },
+      { key: 'party', label: 'Hospital', flex: 1.6, render: (c) => <TwoLine main={c.hospitalName} sub={c.city} /> },
+      { key: 'machine', label: 'Machine', flex: 1.4, render: (c) => <TwoLine main={c.machine || '-'} sub={[c.model, c.serialNo && `SN ${c.serialNo}`].filter(Boolean).join(' • ')} /> },
+      { key: 'problem', label: 'Problem', flex: 1.6, render: (c) => c.remark || '-' },
+      { key: 'eng', label: 'Engineer', width: 130, render: (c) => c.assignedToId
+          ? (engineerNameById.get(c.assignedToId) || '—')
+          : <Text style={{ color: '#c62828', fontSize: 13 }}>Not assigned</Text> },
+      { key: 'age', label: 'Time', width: 140, render: (c) => renderAge(c) || '-' },
+      { key: 'status', label: 'Status', width: 100, render: (c) => {
+          const s = getStatusColor(c.status);
+          return <Pill text={c.status || '-'} color={s.text} bg={s.bg} />;
+      } },
+      { key: 'by', label: 'Logged by', width: 110, render: (c) => (c.senderName || '-') },
+  ];
 
   const renderCard = ({ item }: any) => {
     const statusStyle = getStatusColor(item.status);
@@ -530,6 +678,13 @@ export default function ServiceCallScreen() {
           <Text style={styles.label}>Ticket:</Text>
           <Text style={[styles.value, { fontWeight: 'bold' }]}>{item.scrId}</Text>
         </View>
+        <View style={styles.row}>
+          <Text style={styles.label}>Engineer:</Text>
+          <Text style={[styles.value, !item.assignedToId && { color: '#c62828' }]} numberOfLines={1}>
+            {item.assignedToId ? (engineerNameById.get(item.assignedToId) || '—') : 'Not assigned'}
+          </Text>
+        </View>
+        {renderAge(item)}
         <View style={styles.divider} />
         <View style={styles.cardFooter}>
           <Text style={styles.footerText}>{item.dateIso || item.date}</Text>
@@ -543,7 +698,7 @@ export default function ServiceCallScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={styles.headerTop}>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 10 }}>
@@ -551,10 +706,17 @@ export default function ServiceCallScreen() {
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Service Calls</Text>
           </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          {isAdmin && (
+            <TouchableOpacity onPress={() => setShowStats(true)} style={{ marginRight: 12 }}>
+              <Ionicons name="stats-chart" size={22} color="#3b5998" />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/add_service_call' as any)}>
             <Ionicons name="add" size={20} color="white" />
             <Text style={{ color: 'white', fontWeight: 'bold', marginLeft: 5 }}>New</Text>
           </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -570,41 +732,31 @@ export default function ServiceCallScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={{ backgroundColor: 'white', paddingBottom: 10, marginBottom: 5 }}>
-        <View style={styles.dateTabRow}>
-          {['Day', 'Month', 'FY', 'All'].map((m) => (
-            <TouchableOpacity key={m} style={[styles.dateTab, viewMode === m && styles.activeDateTab]} onPress={() => setViewMode(m as any)}>
-              <Text style={[styles.dateTabText, viewMode === m && styles.activeDateTabText]}>{m}</Text>
-            </TouchableOpacity>
-          ))}
+      <View style={{ backgroundColor: 'white', paddingBottom: 6, marginBottom: 4 }}>
+        <PeriodTabs value={viewMode} onChange={setViewMode} />
+
+        <View style={{ flexDirection: 'row', paddingHorizontal: 12, marginTop: 6 }}>
+          <TouchableOpacity
+            style={[styles.myCallsChip, myCallsOnly && styles.myCallsChipActive]}
+            onPress={() => setMyCallsOnly(!myCallsOnly)}
+          >
+            <Ionicons name="person" size={12} color={myCallsOnly ? 'white' : '#1565c0'} />
+            <Text style={[styles.myCallsText, myCallsOnly && { color: 'white' }]}>My Calls</Text>
+          </TouchableOpacity>
         </View>
 
-        {isAdmin && (
-          <View style={{ paddingHorizontal: 10, marginBottom: 5 }}>
-            <TouchableOpacity
-              style={styles.employeeFilterBtn}
-              onPress={() => setShowEmployeePicker(true)}
-            >
-              <Ionicons name="people" size={18} color="#2e7d32" />
-              <Text style={{ fontSize: 13, marginLeft: 8, color: '#2e7d32', fontWeight: '600' }}>
-                {selectedEmployee === 'All' ? 'View All Staff' : selectedEmployeeName}
-              </Text>
-              <Ionicons name="chevron-down" size={16} color="#2e7d32" style={{ marginLeft: 'auto' }} />
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {viewMode !== 'All' && (
-          <View style={styles.dateNav}>
-            <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-            <Text style={styles.monthText}>{getHeaderDate()}</Text>
-            <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-          </View>
-        )}
+        <StaffPeriodRow
+          showStaff={isAdmin}
+          staffLabel={selectedEmployee === 'All' ? 'All Staff' : selectedEmployeeName}
+          onStaffPress={() => setShowEmployeePicker(true)}
+          periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+          onPrev={() => changeDate(-1)}
+          onNext={() => changeDate(1)}
+        />
 
         <View style={styles.searchRow}>
           <View style={styles.searchBar}>
-            {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+            {<Ionicons name="search" size={20} color="gray" />}
             <TextInput style={styles.input} placeholder="Search Ticket, Hospital..." value={searchText} onChangeText={setSearchText} />
             {searchText.length > 0 && (
               <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={18} color="gray" /></TouchableOpacity>
@@ -612,13 +764,17 @@ export default function ServiceCallScreen() {
           </View>
         </View>
         
-        <Text style={{textAlign:'right', fontSize:12, color:'gray', paddingRight:15}}>Total: {displayList.length}</Text>
+        <TotalBar label="Total" count={callTotal} />
       </View>
 
       <FlatList
-        data={renderedList}
+        data={serviceCallList}
         keyExtractor={item => item.id}
-        renderItem={renderCard}
+        renderItem={isDesktop
+            ? ({ item, index }) => <TableRow columns={callColumns} item={item} index={index} onPress={() => openDetails(item)} />
+            : renderCard}
+        ListHeaderComponent={isDesktop && serviceCallList.length > 0 ? <TableHeader columns={callColumns} /> : null}
+        stickyHeaderIndices={isDesktop && serviceCallList.length > 0 ? [0] : undefined}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         contentContainerStyle={styles.contentContainer}
         ListEmptyComponent={
@@ -633,9 +789,10 @@ export default function ServiceCallScreen() {
         }
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
-                {visibleCount < displayList.length ? (
+                {hasMore ? (
                     <TouchableOpacity 
-                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                        onPress={loadMore}
+                        disabled={loadingMore}
                         style={{
                             padding: 12, 
                             backgroundColor: '#fff', 
@@ -647,12 +804,14 @@ export default function ServiceCallScreen() {
                             elevation: 1
                         }}
                     >
-                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                            👇 Load More Records ({displayList.length - visibleCount} remaining)
-                        </Text>
+                        {loadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>
+                                👇 Load More Records ({callTotal - serviceCallList.length} remaining)
+                            </Text>
+                        )}
                     </TouchableOpacity>
                 ) : (
-                    displayList.length > 0 ? (
+                    serviceCallList.length > 0 ? (
                         <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
                             --- End of List ---
                         </Text>
@@ -670,7 +829,7 @@ export default function ServiceCallScreen() {
               <ScrollView showsVerticalScrollIndicator={false}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, borderBottomWidth: 1, borderColor: '#eee', paddingBottom: 5 }}>
                   <Text style={styles.modalTitle}>Ticket Details</Text>
-                  <TouchableOpacity onPress={() => setDetailsModalVisible(false)}>
+                  <TouchableOpacity onPress={() => { setDetailsModalVisible(false); setShowAssignPicker(false); }}>
                     <Ionicons name="close-circle" size={30} color="#d32f2f" />
                   </TouchableOpacity>
                 </View>
@@ -679,7 +838,40 @@ export default function ServiceCallScreen() {
                 <DetailRow label="City" value={selectedCall.city} icon="location" />
                 <DetailRow label="Ticket No" value={selectedCall.scrId} icon="pricetag" />
                 <DetailRow label="Date" value={selectedCall.dateIso || selectedCall.date} icon="calendar" />
-                <DetailRow label="Engineer" value={selectedCall.senderName || selectedCall.userName} icon="person" />
+                <DetailRow label="Logged by" value={selectedCall.senderName || selectedCall.userName} icon="person" />
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                  <View style={{ width: 25 }}><Ionicons name="construct" size={16} color="#3b5998" /></View>
+                  <Text style={{ fontSize: 12, color: 'gray', width: 80 }}>Assigned to</Text>
+                  <Text style={{ fontSize: 14, fontWeight: 'bold', color: selectedCall.assignedToId ? '#333' : '#c62828', flex: 1 }}>
+                    {selectedCall.assignedToId ? (engineerNameById.get(selectedCall.assignedToId) || '—') : 'Not assigned'}
+                  </Text>
+                  {canAssign && (selectedCall.status === 'Open' || selectedCall.status === 'Assigned') && (
+                    <TouchableOpacity style={styles.assignBtn} onPress={() => setShowAssignPicker(true)} disabled={assigning}>
+                      {assigning ? <ActivityIndicator size="small" color="#1565c0" /> : (
+                        <Text style={styles.assignBtnText}>{selectedCall.assignedToId ? 'Change' : 'Assign'}</Text>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                </View>
+                {showAssignPicker && (
+                  <View style={styles.assignList}>
+                    <Text style={styles.sectionHeader}>ASSIGN TO ENGINEER</Text>
+                    <ScrollView style={{ maxHeight: 220 }} nestedScrollEnabled>
+                      {activeEngineers.map((u: any) => (
+                        <TouchableOpacity key={u.id} style={styles.pickerItem} onPress={() => handleAssign(u.id)}>
+                          <Text style={{ fontSize: 15, color: '#333' }}>{u.name}</Text>
+                          {selectedCall.assignedToId === u.id && <Ionicons name="checkmark" size={18} color="green" />}
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
+                      {selectedCall.assignedToId ? (
+                        <TouchableOpacity onPress={() => handleAssign(null)}><Text style={{ color: '#c62828', fontWeight: 'bold' }}>Remove engineer</Text></TouchableOpacity>
+                      ) : <View />}
+                      <TouchableOpacity onPress={() => setShowAssignPicker(false)}><Text style={{ color: 'gray', fontWeight: 'bold' }}>Cancel</Text></TouchableOpacity>
+                    </View>
+                  </View>
+                )}
 
                 <View style={styles.divider} />
 
@@ -695,7 +887,7 @@ export default function ServiceCallScreen() {
                   <Text style={{ color: '#c62828' }}>{selectedCall.remark}</Text>
                 </View>
 
-                {selectedCall.partsText && (
+                {selectedCall.partsText && !(selectedCall.status === 'Open' || selectedCall.status === 'Assigned') && (
                   <View>
                     <Text style={styles.sectionHeader}>SPARE PARTS USED</Text>
                     <View style={{ backgroundColor: '#fff3e0', padding: 10, borderRadius: 8, marginBottom: 10 }}>
@@ -706,6 +898,56 @@ export default function ServiceCallScreen() {
 
                 {(selectedCall.status === 'Open' || selectedCall.status === 'Assigned') ? (
                   <View style={{ marginTop: 10 }}>
+                    <Text style={styles.sectionHeader}>SPARE PARTS USED</Text>
+                    {closeParts.map((p) => (
+                      <View key={p.id} style={styles.closePartRow}>
+                        <Text style={{ flex: 1, fontWeight: 'bold', color: '#333' }} numberOfLines={1}>{p.partName}</Text>
+                        <Text style={{ fontSize: 12, color: 'gray', marginRight: 6 }}>Qty</Text>
+                        <TextInput
+                          style={styles.closePartQty}
+                          keyboardType="numeric"
+                          value={p.usedQty}
+                          onChangeText={(v) => setCloseParts(closeParts.map((x) => x.id === p.id ? { ...x, usedQty: v } : x))}
+                        />
+                        <TouchableOpacity onPress={() => setCloseParts(closeParts.filter((x) => x.id !== p.id))} style={{ marginLeft: 8 }}>
+                          <Ionicons name="close-circle" size={22} color="#c62828" />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                    {showPartPicker ? (
+                      <View style={styles.assignList}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 8, marginBottom: 6 }}>
+                          <Ionicons name="search" size={14} color="gray" />
+                          <TextInput style={{ flex: 1, paddingVertical: 6, marginLeft: 6 }} placeholder="Search name, part no. or model" value={partSearch} onChangeText={setPartSearch} />
+                        </View>
+                        <ScrollView style={{ maxHeight: 220 }} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                          {sortAndFilterParts(sparePartsList, partSearch, myId, selectedCall.model).map((part: any) => (
+                            <TouchableOpacity key={part.id} style={styles.pickerItem} onPress={() => addClosePart(part)}>
+                              <View style={{ flex: 1, marginRight: 8 }}>
+                                <Text style={{ fontSize: 14, color: '#333', fontWeight: 'bold' }}>{part.partName}</Text>
+                                <Text style={{ fontSize: 11, color: 'gray' }}>PN: {part.partNo}</Text>
+                              </View>
+                              <Text style={{ fontSize: 11, color: 'green' }}>You: {part.stockHolders?.[myId] || 0} • Office: {part.officeStock || 0}</Text>
+                            </TouchableOpacity>
+                          ))}
+                          {sortAndFilterParts(sparePartsList, partSearch, myId, selectedCall.model).length === 0 && (
+                            <Text style={{ color: 'gray', textAlign: 'center', marginVertical: 12 }}>
+                              {sparePartsList.length === 0 ? 'No spare parts in Spare Part Book yet.' : 'No part matches your search.'}
+                            </Text>
+                          )}
+                        </ScrollView>
+                        <TouchableOpacity onPress={() => setShowPartPicker(false)} style={{ alignSelf: 'flex-end', marginTop: 6 }}>
+                          <Text style={{ color: 'gray', fontWeight: 'bold' }}>Cancel</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <TouchableOpacity style={styles.addPartLink} onPress={() => { refreshSpareParts(); setPartSearch(''); setShowPartPicker(true); }}>
+                        <Ionicons name="add-circle-outline" size={18} color="#1565c0" />
+                        <Text style={{ color: '#1565c0', fontWeight: 'bold', marginLeft: 6 }}>Add spare part</Text>
+                      </TouchableOpacity>
+                    )}
+                    <Text style={{ fontSize: 11, color: 'gray', marginBottom: 6 }}>Stock is reduced when you close — from your own stock first, then office stock.</Text>
+
                     <Text style={styles.sectionHeader}>ACTION TAKEN (TO CLOSE)</Text>
                     <TextInput
                       style={styles.actionInput}
@@ -742,12 +984,34 @@ export default function ServiceCallScreen() {
                   </View>
                 )}
 
-                {selectedCall.imageUri && (
-                  <View style={{ marginTop: 15 }}>
-                    <Text style={styles.sectionHeader}>PHOTO</Text>
-                    <Image source={{ uri: selectedCall.imageUri }} style={{ width: '100%', height: 200, borderRadius: 10, resizeMode: 'cover' }} />
-                  </View>
-                )}
+                <View style={{ marginTop: 15 }}>
+                  <Text style={styles.sectionHeader}>PHOTO</Text>
+                  {photoBusy ? (
+                    <View style={styles.photoBtn}>
+                      <ActivityIndicator color="#3b5998" />
+                      <Text style={styles.photoBtnText}>Please wait...</Text>
+                    </View>
+                  ) : selectedCall.imageUri ? (
+                    <>
+                      <Image source={{ uri: selectedCall.imageUri }} style={{ width: '100%', height: 200, borderRadius: 10, resizeMode: 'cover', backgroundColor: '#eee' }} />
+                      <View style={{ flexDirection: 'row', marginTop: 8 }}>
+                        <TouchableOpacity style={[styles.photoBtn, { flex: 1, marginRight: 5 }]} onPress={chooseCallPhoto}>
+                          <Ionicons name="swap-horizontal" size={18} color="#3b5998" />
+                          <Text style={styles.photoBtnText}>Replace</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.photoBtn, { flex: 1, marginLeft: 5, backgroundColor: '#ffebee', borderColor: '#ef9a9a' }]} onPress={removeCallPhoto}>
+                          <Ionicons name="trash-outline" size={18} color="#d32f2f" />
+                          <Text style={[styles.photoBtnText, { color: '#d32f2f' }]}>Delete</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  ) : (
+                    <TouchableOpacity style={styles.photoBtn} onPress={chooseCallPhoto}>
+                      <Ionicons name="camera-outline" size={18} color="#3b5998" />
+                      <Text style={styles.photoBtnText}>Add Photo</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
                 <View style={{ height: 30 }} />
               </ScrollView>
             )}
@@ -755,6 +1019,8 @@ export default function ServiceCallScreen() {
         </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {isAdmin && <EngineerStatsModal visible={showStats} onClose={() => setShowStats(false)} />}
 
       <Modal visible={showEmployeePicker} transparent animationType="fade">
         <TouchableOpacity style={styles.pickerOverlay} onPress={() => setShowEmployeePicker(false)}>
@@ -796,8 +1062,10 @@ const DetailRow = ({ label, value, icon, highlight }: any) => (
 );
 
 const styles = StyleSheet.create({
+  photoBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#e3f2fd', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#90caf9' },
+  photoBtnText: { marginLeft: 6, color: '#3b5998', fontWeight: 'bold' },
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { backgroundColor: 'white', paddingTop: 40, paddingBottom: 0, elevation: 0 },
+  header: { backgroundColor: 'white', paddingBottom: 0, elevation: 0 },
   headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 15, marginBottom: 10 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998', marginLeft: 10 },
   addBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#3b5998', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 },
@@ -809,16 +1077,19 @@ const styles = StyleSheet.create({
   activeTabAll: { backgroundColor: '#3b5998' },
   tabText: { fontSize: 13, fontWeight: 'bold', color: '#555' },
 
-  dateTabRow: { flexDirection: 'row', backgroundColor: '#e0e0e0', margin: 10, borderRadius: 8, padding: 3 },
-  dateTab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-  activeDateTab: { backgroundColor: 'white', elevation: 2 },
-  dateTabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-  activeDateTabText: { color: '#3b5998', fontWeight: 'bold' },
 
-  employeeFilterBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e8f5e9', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2e7d32' },
+  ageChip: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, marginTop: 4, marginBottom: 2 },
+  ageText: { fontSize: 11, fontWeight: 'bold', marginLeft: 4 },
+  myCallsChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: '#1565c0' },
+  myCallsChipActive: { backgroundColor: '#1565c0' },
+  myCallsText: { fontSize: 12, fontWeight: 'bold', color: '#1565c0', marginLeft: 4 },
+  closePartRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff3e0', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginBottom: 6 },
+  closePartQty: { borderWidth: 1, borderColor: '#ddd', borderRadius: 6, backgroundColor: 'white', width: 50, textAlign: 'center', paddingVertical: 2 },
+  addPartLink: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8 },
+  assignBtn: { backgroundColor: '#e3f2fd', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14 },
+  assignBtnText: { color: '#1565c0', fontWeight: 'bold', fontSize: 12 },
+  assignList: { backgroundColor: '#f5f9ff', borderRadius: 8, padding: 10, marginBottom: 10, borderWidth: 1, borderColor: '#bbdefb' },
 
-  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 4, marginHorizontal: 10, borderRadius: 8, marginBottom: 5, borderWidth: 1, borderColor: '#eee' },
-  monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
 
   searchRow: { flexDirection: 'row', paddingHorizontal: 10, marginBottom: 5 },
   searchBar: { flex: 1, backgroundColor: '#e0e0e0', paddingHorizontal: 10, borderRadius: 5, flexDirection: 'row', alignItems: 'center', height: 36 },

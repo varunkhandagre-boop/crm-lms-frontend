@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { saveAndShareFile } from '../../utils/saveFile';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
@@ -33,6 +34,7 @@ import {
     UsageAnalyticsResponse,
     UsageAnalyticsRow,
 } from '../../services/api/superadminCompanies';
+import { useHeaderTop } from '../../hooks/useHeaderTop';
 
 type MainTab = 'companies' | 'analytics';
 
@@ -57,6 +59,7 @@ const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
 const PAGE_LIMIT = 30;
 
 export default function SuperAdminDashboard() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
 
     const [companies, setCompanies] = useState<Company[]>([]);
@@ -186,13 +189,7 @@ export default function SuperAdminDashboard() {
                 automationOnly: automationOnly || undefined,
             });
             const fileName = `Companies_Export_${new Date().toISOString().slice(0, 10)}.csv`;
-            const fileUri = FileSystem.documentDirectory + fileName;
-            await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: FileSystem.EncodingType.UTF8 });
-            if (await Sharing.isAvailableAsync()) {
-                await Sharing.shareAsync(fileUri, { mimeType: 'text/csv', dialogTitle: 'Export Companies List', UTI: 'public.comma-separated-values-text' });
-            } else {
-                Alert.alert('Saved', `File saved at: ${fileUri}`);
-            }
+            await saveAndShareFile({ content: csvContent, fileName, mimeType: 'text/csv', dialogTitle: 'Export Companies List', UTI: 'public.comma-separated-values-text' });
         } catch (e: any) {
             Alert.alert('Error', e.message || 'Could not export companies list.');
         }
@@ -370,7 +367,7 @@ export default function SuperAdminDashboard() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <View style={styles.headerTop}>
                     <TouchableOpacity onPress={() => router.replace('/' as any)}>
                         <Ionicons name="arrow-back" size={24} color="white" />
@@ -662,7 +659,7 @@ export default function SuperAdminDashboard() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { backgroundColor: '#d32f2f', paddingHorizontal: 20, paddingTop: 50, paddingBottom: 0 },
+    header: { backgroundColor: '#d32f2f', paddingHorizontal: 20, paddingBottom: 0 },
     headerTop: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
     headerBottom: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
     headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold', flex: 1 },

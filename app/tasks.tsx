@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -18,29 +18,32 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (Firebase DB imports removed)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 
 // 🔥 Phase 8: tasks now come from Postgres via these adapters
-import { completeTask as completeTaskApi, fetchTasks } from '../services/api/tasks';
+import { completeTask as completeTaskApi, listTasksPage, TaskPageFilters } from '../services/api/tasks';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function TaskScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   // 🔥 1. Context se sirf current user nikala gaya hai
   const { currentUser } = useData();
 
   // 🔥 2. "users" still Firestore; tasks are Postgres now
-  const { isDbLoading } = useSaaSDB();
 
   // 🔥 3. Lazy Loaded States
-  // taskList now comes from useCachedList below (cache-first)
   // userList now comes from useCachedList below (cache-first, shared 'team_members' key)
-  const [refreshing, setRefreshing] = useState(false);
 
   // --- STATES ---
   const [taskViewMode, setTaskViewMode] = useState<'MyTasks' | 'Given'>('MyTasks');
@@ -64,34 +67,8 @@ export default function TaskScreen() {
   // LOADING STATE FOR COMPLETE BUTTON
   const [isCompleting, setIsCompleting] = useState(false);
 
-  // PAGINATION STATE
-  const [visibleCount, setVisibleCount] = useState(20);
-
-  // RESET PAGINATION ON FILTER CHANGE
-  useEffect(() => {
-      if (dateViewMode === 'Day' && activeStatus === 'Pending' && !searchText) {
-          setVisibleCount(500); 
-      } else {
-          setVisibleCount(20); 
-      }
-  }, [taskViewMode, activeStatus, searchText, priorityFilter, selectedEmployee, dateViewMode, currentDate]);
 
   const isAdminOrManager = ['Admin', 'Manager', 'SuperAdmin'].includes(currentUser?.role || '');
-
-  function getFetchRange(): { fromDate?: string; toDate?: string } {
-      const toIso = (d: Date) => d.toISOString().split('T')[0];
-      if (dateViewMode === 'All') return {};
-      if (dateViewMode === 'Day') return { fromDate: toIso(currentDate), toDate: toIso(currentDate) };
-      if (dateViewMode === 'Month') {
-          const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-          const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-          return { fromDate: toIso(start), toDate: toIso(end) };
-      }
-      const m = currentDate.getMonth();
-      const y = currentDate.getFullYear();
-      const fyStartYear = m >= 3 ? y : y - 1;
-      return { fromDate: toIso(new Date(fyStartYear, 3, 1)), toDate: toIso(new Date(fyStartYear + 1, 2, 31)) };
-  }
 
   // 🔥 4a. Users list — cache-first, shares the SAME 'team_members' cache
   // key as manage_team.tsx/employee_timeline.tsx.
@@ -101,12 +78,10 @@ export default function TaskScreen() {
       fetcher: fetchTeamMembers,
   });
 
-  // 🔥 TASKS — cache-first, parameterized by date-range + employee filter
-  // (same pattern as attendance.tsx/travel.tsx). Fetches both directions
-  // (received + given) and merges inside the fetcher, same as before —
-  // the hook only cares that the fetcher resolves to one array.
+  // 🔥 TASKS — 20 per page from the server: tab (My Tasks / Given), employee,
+  // status, priority, date and search all run there. The date is the completion
+  // day for done tasks, else the due day (created day when there is none).
   const usersReady = !(isAdminOrManager && selectedEmployee !== 'All' && userList.length === 0);
-  const { fromDate, toDate } = getFetchRange();
   const resolveTargetUserId = (): string | undefined => {
       if (isAdminOrManager && selectedEmployee !== 'All') {
           return userList.find((u: any) => u.name === selectedEmployee)?.id;
@@ -114,32 +89,40 @@ export default function TaskScreen() {
       return isAdminOrManager ? 'all' : undefined;
   };
   const targetUserId = resolveTargetUserId();
-  const tasksCacheKey = buildCacheKey(`tasks:${dateViewMode}:${fromDate || 'none'}:${toDate || 'none'}:${targetUserId || 'self'}`, currentUser?.companyId);
+  const debouncedSearch = useDebounced(searchText.trim());
+  const taskFilters = useMemo<TaskPageFilters>(() => ({
+      view: taskViewMode === 'Given' ? 'given' : 'received',
+      userId: targetUserId,
+      status: activeStatus === 'All' ? undefined : (activeStatus as TaskPageFilters['status']),
+      priority: priorityFilter === 'All' ? undefined : priorityFilter,
+      ...periodRange(dateViewMode, currentDate),
+      search: debouncedSearch || undefined,
+  }), [taskViewMode, targetUserId, activeStatus, priorityFilter, dateViewMode, currentDate, debouncedSearch]);
+  const [pendingCounts, setPendingCounts] = useState({ receivedPending: 0, givenPending: 0 });
+  const fetchTaskPage = useCallback(async (p: TaskPageFilters & { page: number; limit: number }) => {
+      const r = await listTasksPage(p);
+      if (r.counts) setPendingCounts(r.counts);
+      return r;
+  }, []);
+  const isDefaultView = taskViewMode === 'MyTasks' && activeStatus === 'Pending' && priorityFilter === 'All'
+      && selectedEmployee === 'All' && isCurrentFy(dateViewMode, currentDate) && !debouncedSearch;
   const {
-      data: taskList,
-      setData: setTaskList,
+      items: taskList,
+      setItems: setTaskList,
+      total: taskTotal,
       loading: tasksLoading,
-      refreshing: tasksRefreshing,
+      loadingMore: tasksLoadingMore,
+      hasMore: tasksHasMore,
+      loadMore: loadMoreTasks,
+      refreshing,
       refresh: refreshTasks,
-  } = useCachedList({
-      cacheKey: tasksCacheKey,
+      error: tasksError,
+  } = useServerPagedList<TaskPageFilters, any>({
+      fetchPage: fetchTaskPage,
+      filters: taskFilters,
       enabled: !!currentUser?.companyId && usersReady,
-      fetcher: async () => {
-          const [received, given] = await Promise.all([
-              fetchTasks({ direction: 'received', userId: targetUserId, fromDate, toDate, limit: 500 }),
-              fetchTasks({ direction: 'given', userId: targetUserId, fromDate, toDate, limit: 500 }),
-          ]);
-          const merged = new Map<string, any>();
-          [...received, ...given].forEach((t) => merged.set(t.id, t));
-          return Array.from(merged.values());
-      },
+      cacheKey: isDefaultView ? buildCacheKey('tasks_page1_v1', currentUser?.companyId) : null,
   });
-
-  const onRefresh = async () => {
-      setRefreshing(true);
-      await refreshTasks();
-      setRefreshing(false);
-  };
 
   // --- GENERATE EMPLOYEE LIST ---
   const employeeList = useMemo(() => {
@@ -147,33 +130,12 @@ export default function TaskScreen() {
       if (userList) userList.forEach((u: any) => {
           if(u.name) names.add(u.name);
       });
-      if (taskList) {
-          taskList.forEach((t: any) => {
-              if (t.to && t.to !== 'Self') names.add(t.to);
-              if (t.from) names.add(t.from);
-          });
-      }
       return Array.from(names).sort();
-  }, [taskList, userList]);
+  }, [userList]);
 
   // --- COUNTS ---
-  const myPendingCount = taskList.filter((t: any) => {
-      if (isAdminOrManager) {
-           const matchesUser = selectedEmployee === 'All' ? true : t.to === selectedEmployee;
-           return matchesUser && t.status === 'Pending';
-      }
-      return (t.to === 'Self' || t.to === currentUser?.name) && t.status === 'Pending';
-  }).length;
-
-  const givenPendingCount = taskList.filter((t: any) => {
-      if (isAdminOrManager) {
-          if (selectedEmployee !== 'All') {
-              return t.from === selectedEmployee && t.to !== 'Self' && t.status === 'Pending';
-          }
-          return t.from && t.from !== 'Self' && t.status === 'Pending';
-      }
-      return t.from === currentUser?.name && t.to !== 'Self' && t.to !== currentUser?.name && t.status === 'Pending';
-  }).length;
+  const myPendingCount = pendingCounts.receivedPending;
+  const givenPendingCount = pendingCounts.givenPending;
 
   // --- HELPER: DATE PARSER ---
   const parseDate = (dateStr: string) => {
@@ -234,73 +196,6 @@ export default function TaskScreen() {
   };
 
   // --- FILTER & SORT LOGIC ---
-  const getFilteredData = () => {
-      let data = taskList ? [...taskList] : [];
-
-      if (taskViewMode === 'MyTasks') {
-          if (isAdminOrManager) {
-              if (selectedEmployee !== 'All') data = data.filter((t: any) => t.to === selectedEmployee);
-          } else {
-              data = data.filter((t: any) => t.to === 'Self' || t.to === currentUser?.name);
-          }
-      } else {
-          if (isAdminOrManager) {
-              if (selectedEmployee !== 'All') {
-                  data = data.filter((t: any) => t.from === selectedEmployee && t.to !== 'Self');
-              } else {
-                  data = data.filter((t: any) => t.from && t.to !== 'Self'); 
-              }
-          } else {
-              data = data.filter((t: any) => t.from === currentUser?.name && t.to !== 'Self' && t.to !== currentUser?.name);
-          }
-      }
-
-      if (activeStatus !== 'All') data = data.filter((t: any) => t.status === activeStatus);
-      if (priorityFilter !== 'All') data = data.filter((t: any) => t.priority === priorityFilter);
-
-      if (searchText) {
-          const lowerText = searchText.toLowerCase();
-          data = data.filter((t: any) => {
-              const fullString = `${t.task || ''} ${t.from || ''} ${t.to || ''} ${t.priority || ''} ${t.remark || ''}`.toLowerCase();
-              return fullString.includes(lowerText);
-          });
-      }
-
-      if (dateViewMode !== 'All') {
-          const targetYear = currentDate.getFullYear();
-          const targetMonth = currentDate.getMonth();
-          const targetDay = currentDate.getDate();
-
-          const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-          const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-          const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
-
-          data = data.filter((item: any) => {
-              const dateField = item.status === 'Completed' ? item.completedAt : (item.dueDate || item.createdAt);
-              if(!dateField) return false;
-              const itemDate = parseDate(dateField);
-              const itemTime = itemDate.getTime();
-              
-              if (dateViewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-              if (dateViewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-              if (dateViewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-              return true;
-          });
-      }
-
-      data.sort((a: any, b: any) => {
-          if (a.status === 'Pending' && b.status === 'Completed') return -1;
-          if (a.status === 'Completed' && b.status === 'Pending') return 1;
-          const dateA = parseDate(a.dueDate || a.createdAt).getTime();
-          const dateB = parseDate(b.dueDate || b.createdAt).getTime();
-          return dateB - dateA;
-      });
-
-      return data;
-  };
-
-  const displayList = getFilteredData(); 
-  const renderedList = displayList.slice(0, visibleCount);
 
   const handleOpenTask = (task: any) => {
       setSelectedTask(task);
@@ -308,10 +203,7 @@ export default function TaskScreen() {
       setCompletionNote('');
   };
 
-  // 🔥 5. SAAS COMPLETE TASK LOGIC — Phase 8: PATCHes via completeTaskApi().
-  // (Old "notify assigner" push dropped here too, same reasoning as travel.tsx's
-  // settlement notification — re-add via addNotification once notifications move
-  // off Firestore in Phase 9 and the Postgres/Firestore user-id mapping is settled.)
+  // Complete task: the server notifies whoever assigned it.
   const handleCompleteTask = async () => {
       if (!completionNote.trim()) return Alert.alert("Note Required", "Please enter what action you took.");
       
@@ -321,6 +213,7 @@ export default function TaskScreen() {
 
           if (res.success) {
               setTaskList(prev => prev.map(t => t.id === selectedTask.id ? res.record : t));
+              refreshTasks(); // badges + Pending tab
               Alert.alert("Success", "Task marked as completed!");
               setTaskModalVisible(false);
           } else {
@@ -333,10 +226,23 @@ export default function TaskScreen() {
       }
   };
 
+  // Laptop: the same list as a table (tap a row → same task details popup).
+  const isDesktop = useIsDesktop();
+  const taskColumns: TableColumn<any>[] = [
+      { key: 'assigned', label: 'Assigned', width: 96, render: (t) => (t.date || t.createdAt) ? String(t.date || t.createdAt).split('T')[0] : '-' },
+      { key: 'task', label: 'Task', flex: 3, render: (t) => <TwoLine main={t.task} sub={t.remark || undefined} /> },
+      { key: 'priority', label: 'Priority', width: 110, render: (t) => { const c = getPriorityColor(t.priority); return <Pill text={t.priority || '-'} color={c} bg={c + '20'} />; } },
+      { key: 'from', label: 'From', width: 140, render: (t) => t.from || '-' },
+      { key: 'to', label: 'To', width: 140, render: (t) => t.to || '-' },
+      { key: 'due', label: 'Due', width: 100, render: (t) => t.dueDate || '-' },
+      { key: 'timing', label: 'Status', width: 160, render: (t) => { const tm = getTaskTiming(t); return <Pill text={tm.label} color={tm.color} bg={tm.bg} />; } },
+      { key: 'done', label: 'Done By', width: 140, render: (t) => t.status === 'Completed' ? <TwoLine main={t.completedBy || 'Unknown'} sub={t.completedAt ? String(t.completedAt).split('T')[0] : undefined} /> : '-' },
+  ];
+
   return (
     <View style={styles.container}>
       
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={styles.headerTop}>
              <View style={{flexDirection:'row', alignItems:'center'}}>
                  <TouchableOpacity onPress={() => router.back()} style={styles.backCircle}>
@@ -370,26 +276,17 @@ export default function TaskScreen() {
         </View>
       </View>
 
-      <View style={{backgroundColor:'white', paddingBottom:10, marginBottom:5}}>
-          <View style={styles.tabContainer}>
-              {['Day', 'Month', 'FY', 'All'].map((m) => (
-                  <TouchableOpacity key={m} style={[styles.dateTab, dateViewMode === m && styles.activeDateTab]} onPress={() => setDateViewMode(m as any)}>
-                      <Text style={[styles.dateTabText, dateViewMode === m && styles.activeDateTabText]}>{m}</Text>
-                  </TouchableOpacity>
-              ))}
-          </View>
-
-          {dateViewMode !== 'All' && (
-              <View style={styles.dateNav}>
-                  <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-                  <Text style={styles.monthText}>{getHeaderDate()}</Text>
-                  <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-              </View>
-          )}
+      <View style={{backgroundColor:'white', paddingBottom:6, marginBottom:4}}>
+          <PeriodTabs value={dateViewMode} onChange={setDateViewMode} />
+          <StaffPeriodRow
+              periodLabel={dateViewMode !== 'All' ? getHeaderDate() : undefined}
+              onPrev={() => changeDate(-1)}
+              onNext={() => changeDate(1)}
+          />
 
           <View style={styles.searchRow}>
               <View style={styles.searchBar}>
-                  {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" style={{marginRight: 5}}/> : <Ionicons name="search" size={20} color="gray" />}
+                  {tasksLoading ? <ActivityIndicator size="small" color="#3b5998" style={{marginRight: 5}}/> : <Ionicons name="search" size={20} color="gray" />}
                   <TextInput 
                       style={styles.input}
                       placeholder="Search tasks..."
@@ -425,28 +322,28 @@ export default function TaskScreen() {
               ))}
           </View>
           
-          <Text style={{textAlign:'right', fontSize:12, color:'gray', paddingRight:15, marginTop:5}}>
-              Total: <Text style={{fontWeight:'bold', color:'#3b5998'}}>{displayList.length}</Text>
-          </Text>
+          <TotalBar label="Total" count={taskTotal} />
       </View>
 
       <FlatList 
-        data={renderedList}
+        data={taskList}
         keyExtractor={(item, index) => (item.id || index.toString()) + index}
         contentContainerStyle={styles.listPadding}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshTasks} />}
         ListEmptyComponent={
             <View style={{alignItems:'center', marginTop:2}}>
                 {tasksLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
                     <>
                         <Ionicons name="checkbox-outline" size={60} color="#ccc" />
-                        <Text style={{color:'gray', marginTop:10}}>No Tasks Found</Text>
+                        <Text style={{color:'gray', marginTop:10}}>{tasksError ? 'Could not load tasks — pull down to retry.' : 'No Tasks Found'}</Text>
                         {priorityFilter !== 'All' && <Text style={{color:'#3b5998', marginTop:5}}>Filter: {priorityFilter}</Text>}
                     </>
                 )}
             </View>
         }
-        renderItem={({item}) => {
+        renderItem={isDesktop
+            ? ({ item, index }) => <TableRow columns={taskColumns} item={item} index={index} tint={getPriorityColor(item.priority)} onPress={() => handleOpenTask(item)} />
+            : ({item}) => {
             const pColor = getPriorityColor(item.priority);
             const timing = getTaskTiming(item); 
             return (
@@ -496,12 +393,15 @@ export default function TaskScreen() {
                 </TouchableOpacity>
             );
         }}
+        ListHeaderComponent={isDesktop && taskList.length > 0 ? <TableHeader columns={taskColumns} /> : null}
+        stickyHeaderIndices={isDesktop && taskList.length > 0 ? [0] : undefined}
         
         ListFooterComponent={
           <View style={{ paddingBottom: 80 }}>
-              {visibleCount < displayList.length ? (
+              {tasksHasMore ? (
                   <TouchableOpacity 
-                      onPress={() => setVisibleCount(prev => prev + 20)} 
+                      onPress={loadMoreTasks}
+                      disabled={tasksLoadingMore}
                       style={{
                           padding: 12, 
                           backgroundColor: '#fff', 
@@ -513,12 +413,12 @@ export default function TaskScreen() {
                           elevation: 1
                       }}
                   >
-                      <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                          👇 Load More Tasks ({displayList.length - visibleCount} remaining)
-                      </Text>
+                      {tasksLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                          <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Tasks ({taskTotal - taskList.length} remaining)</Text>
+                      )}
                   </TouchableOpacity>
               ) : (
-                  displayList.length > 0 ? (
+                  taskList.length > 0 ? (
                       <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
                           --- End of List ---
                       </Text>
@@ -661,47 +561,40 @@ export default function TaskScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8F9FA' },
-  header: { backgroundColor: 'white', padding: 15, paddingTop: 50, elevation: 0 },
+  header: { backgroundColor: 'white', padding: 15, elevation: 0, paddingBottom: 6 },
   headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   backCircle: { backgroundColor: '#F0F0F0', padding: 6, borderRadius: 20 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#1A237E', marginLeft: 10 },
   addBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#3B5998', borderRadius:8, paddingHorizontal:12, paddingVertical:8 },
   addBtnText: { color:'white', fontWeight:'bold', marginLeft:4, fontSize:13 },
   
-  toggleContainer: { flexDirection: 'row', backgroundColor: '#F1F3F4', borderRadius: 10, padding: 4, marginBottom: 5 },
-  toggleBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8, flexDirection:'row', justifyContent:'center' },
+  toggleContainer: { flexDirection: 'row', backgroundColor: '#F1F3F4', borderRadius: 10, padding: 3, marginBottom: 0},
+  toggleBtn: { flex: 1, paddingVertical: 7, alignItems: 'center', borderRadius: 8, flexDirection:'row', justifyContent:'center' },
   activeToggleBtn: { backgroundColor: 'white', elevation: 2 },
   toggleText: { color: '#777', fontWeight: '600', fontSize:12 },
   activeToggleText: { color: '#3B5998', fontWeight: 'bold' },
   badge: { backgroundColor: '#D32F2F', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1, marginLeft: 5, minWidth: 20, alignItems: 'center' },
   badgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
 
-  tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', margin: 2, borderRadius: 8, padding: 2, marginBottom: 5 },
-  dateTab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-  activeDateTab: { backgroundColor: 'white', elevation: 2 },
-  dateTabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-  activeDateTabText: { color: '#3b5998', fontWeight: 'bold' },
 
-  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 6, marginHorizontal: 15, borderRadius: 8, marginBottom: 5, borderWidth:1, borderColor:'#eee' },
-  monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
 
-  searchRow: { flexDirection: 'row', paddingHorizontal: 15, justifyContent: 'space-between', marginBottom:10 },
-  searchBar: { flex: 1, backgroundColor: '#f0f0f0', borderRadius: 10, flexDirection:'row', alignItems:'center', paddingHorizontal: 10, height: 42 },
+  searchRow: { flexDirection: 'row', paddingHorizontal: 12, justifyContent: 'space-between', marginBottom: 6, marginTop: 6 },
+  searchBar: { flex: 1, backgroundColor: '#f0f0f0', borderRadius: 8, flexDirection:'row', alignItems:'center', paddingHorizontal: 10, height: 36},
   input: { flex: 1, marginLeft: 8, fontSize: 14 },
   
-  adminFilterBtn: { height: 42, backgroundColor: '#E3F2FD', borderRadius: 10, marginLeft: 8, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', justifyContent:'space-between', borderWidth: 1, borderColor: '#90CAF9', minWidth: 80 },
+  adminFilterBtn: { height: 36, backgroundColor: '#E3F2FD', borderRadius: 8, marginLeft: 8, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', justifyContent:'space-between', borderWidth: 1, borderColor: '#90CAF9', minWidth: 80 },
   adminFilterText: { color: '#1565C0', fontWeight: 'bold', fontSize: 12, marginRight: 4, maxWidth: 70 },
   
-  filterBtn: { width: 42, height: 42, backgroundColor: 'white', borderRadius: 10, marginLeft: 8, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#DDD' },
+  filterBtn: { width: 36, height: 36, backgroundColor: 'white', borderRadius: 8, marginLeft: 8, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#DDD' },
 
-  statusTabContainer: { flexDirection: 'row', gap: 10, paddingHorizontal:15 },
-  statusTab: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 8, backgroundColor: '#F1F3F4' },
+  statusTabContainer: { flexDirection: 'row', gap: 10, paddingHorizontal: 12},
+  statusTab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 8, backgroundColor: '#F1F3F4' },
   activeStatusTab: { backgroundColor: '#3B5998' },
   statusTabText: { color: '#777', fontWeight: 'bold', fontSize: 12 },
   activeStatusTabText: { color: 'white' },
 
   listPadding: { padding: 15, paddingBottom: 100 },
-  card: { backgroundColor: 'white', borderRadius: 12, padding: 15, marginBottom: 12, elevation: 2, borderLeftWidth: 5 },
+  card: { backgroundColor: 'white', borderRadius: 12, padding: 11, marginBottom: 8, elevation: 2, borderLeftWidth: 5 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
   taskTitle: { fontWeight: 'bold', fontSize: 15, color: '#333', flex: 1 },
   priorityBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },

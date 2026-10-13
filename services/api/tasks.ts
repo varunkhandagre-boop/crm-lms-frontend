@@ -86,6 +86,26 @@ export async function fetchTasks(opts: {
   return (res.data ?? []).map(toLegacyTask);
 }
 
+export interface TaskPageFilters {
+  view: "received" | "given";
+  userId?: string; // omit = self; 'all' = everyone (managers only)
+  status?: "Pending" | "Completed";
+  priority?: string;
+  fromDate?: string; // YYYY-MM-DD
+  toDate?: string;
+  search?: string;
+}
+
+/** One page for the Tasks screen; page 1 also brings the Pending badges for both tabs. */
+export async function listTasksPage(
+  params: TaskPageFilters & { page: number; limit: number },
+): Promise<{ items: LegacyTask[]; total: number; totalPages: number; counts?: { receivedPending: number; givenPending: number } }> {
+  const res = await apiClient.get<ListResponse<any> & { counts?: { receivedPending: number; givenPending: number } }>(
+    `/tasks/page${buildQuery({ ...params, withCounts: params.page === 1 ? "true" : undefined })}`,
+  );
+  return { items: (res.data ?? []).map(toLegacyTask), total: res.meta.total, totalPages: res.meta.totalPages, counts: res.counts };
+}
+
 export async function createTask(payload: {
   title: string;
   assignedToId: string;

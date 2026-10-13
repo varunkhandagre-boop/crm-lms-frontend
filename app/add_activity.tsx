@@ -1,5 +1,7 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
@@ -19,20 +21,22 @@ import {
 
 // 🔥 SAAS IMPORTS (organizations still Firestore)
 import * as Location from 'expo-location';
-import { useSaaSDB } from '../hooks/useSaaSDB';
+import { getCurrentLocation as getGpsFix, locationErrorMessage } from '../utils/getLocation';
 import { useData } from './context/DataContext';
 // 🔥 Phase 5: activity plans now via new backend API
 import { createActivityPlan } from '../services/api/activityPlans';
+import { useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddActivityScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
-  const { currentUser, addNotification } = useData();
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+  const { currentUser } = useData();
 
   // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
 
@@ -73,6 +77,8 @@ export default function AddActivityScreen() {
       enabled: !!currentUser?.companyId,
       fetcher: () => fetchOrganizations({ limit: 500 }),
   });
+  // Beyond the first 500: search the server while the organization picker is open.
+  useOrgServerSearch(modalVisible && currentModalType === 'Organization', searchText, setFilteredData);
 
   const formatDate = (rawDate: Date) => {
     let day = rawDate.getDate().toString().padStart(2, '0');
@@ -88,14 +94,14 @@ export default function AddActivityScreen() {
               Alert.alert('Permission Denied', 'Location access is required to save entry.');
               return null;
           }
-          let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          let location = await getGpsFix();
           return {
               lat: location.coords.latitude,
               lng: location.coords.longitude,
               timestamp: new Date().toISOString()
           };
       } catch (error) {
-          Alert.alert("GPS Required", "Please turn on your GPS Location to submit.");
+          Alert.alert("GPS Required", locationErrorMessage(error));
           return null;
       }
   };
@@ -192,15 +198,6 @@ export default function AddActivityScreen() {
               location: { latitude: locationData.lat, longitude: locationData.lng },
           });
 
-          if (addNotification) {
-              await addNotification({
-                  title: "New Activity Planned 📅",
-                  message: `${currentUser?.name} planned a ${selectedActivity} at ${organization}.`,
-                  to: "Admin",
-                  route: "/activity_plan",
-                  type: "info"
-              });
-          }
           Alert.alert("Success", "Activity Planned & Admin Notified!");
           router.back();
       } catch (error: any) {
@@ -212,8 +209,8 @@ export default function AddActivityScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
+        <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="white" /></TouchableOpacity>
         <Text style={styles.headerTitle}>New Activity Plan</Text>
         <View style={{width:24}} />
       </View>
@@ -237,7 +234,7 @@ export default function AddActivityScreen() {
                     {showDatePicker && (
                         <DateTimePicker 
                             value={date} mode="date" minimumDate={new Date()}
-                            onChange={(e, d) => { setShowDatePicker(false); if(d) setDate(d); }} 
+                            {...pickerHandlers((e, d) => { setShowDatePicker(false); if(d) setDate(d); })} 
                         />
                     )}
                 </View>
@@ -255,7 +252,7 @@ export default function AddActivityScreen() {
             <Text style={styles.label}>Organization Name *</Text>
             <TouchableOpacity style={styles.inputBox} onPress={() => openModal('Organization')}>
                 <Text style={{flex:1, color: organization ? 'black' : 'gray'}}>{organization || 'Select Organization'}</Text>
-                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+                {<Ionicons name="search" size={20} color="gray" />}
             </TouchableOpacity>
 
             <Text style={styles.label}>Address</Text>
@@ -366,9 +363,9 @@ export default function AddActivityScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 4 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 4 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   contentContainer: { padding: 20 },
   sectionHeader: { fontSize: 16, fontWeight: 'bold', color: '#3b5998', marginTop: 20, marginBottom: 5, borderBottomWidth: 1, borderBottomColor: '#ddd', paddingBottom: 5 },
@@ -390,4 +387,4 @@ const styles = StyleSheet.create({
   modalItem: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#eee' },
   modalText: { fontSize: 16, color: '#333' },
   closeBtn: { marginTop: 15, alignItems:'center', padding: 10 }
-});
+}), FORM_ACCENT.activity);

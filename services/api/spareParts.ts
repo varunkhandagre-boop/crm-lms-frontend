@@ -9,6 +9,7 @@ export interface ApiSparePart {
   compatibleModels: string | null;
   officeStock: number;
   stockHolders: Record<string, number>;
+  minStock?: number;
   createdById: string;
   createdAt: string;
   updatedAt: string;
@@ -23,9 +24,7 @@ interface OneResponse {
 }
 
 // Maps an ApiSparePart back to the old Firestore `spare_parts` doc shape.
-// `office_machines` (a separate, unrelated internal-equipment list this
-// screen also used to manage) is intentionally NOT covered here — still
-// Firestore-only for now.
+// Office Stock machines are a separate list: see officeMachines.ts.
 export function toLegacySparePart(p: ApiSparePart): any {
   return {
     id: p.id,
@@ -36,6 +35,9 @@ export function toLegacySparePart(p: ApiSparePart): any {
     compatibleModels: p.compatibleModels || '',
     officeStock: p.officeStock,
     stockHolders: p.stockHolders || {},
+    minStock: p.minStock ?? 0,
+    // office + everything issued to engineers
+    totalStock: p.officeStock + Object.values(p.stockHolders || {}).reduce((n, q) => n + (Number(q) || 0), 0),
     createdAt: p.createdAt,
   };
 }
@@ -64,6 +66,7 @@ export interface CreateSparePartPayload {
   price: number;
   compatibleModels?: string;
   officeStock?: number;
+  minStock?: number; // low-stock alert level, 0 = off
 }
 
 export async function createSparePart(payload: CreateSparePartPayload): Promise<any> {

@@ -9,6 +9,8 @@ export interface PublicBillingSettings {
     upiId: string | null;
     upiPayeeName: string | null;
     automationAddonPrice: number;
+    /** GST % added on top (0 = none). Decimal may arrive as a string. */
+    gstPercent?: number | string;
 }
 
 export interface PublicGatewayConfig {

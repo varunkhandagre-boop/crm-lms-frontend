@@ -27,6 +27,9 @@ export interface LegacyCourier {
   senderId: string;
   senderName: string;
   createdAt: string;
+  /** From the linked organization (list endpoint) — address for the challan. */
+  orgAddress?: string;
+  orgCity?: string;
 }
 
 interface ListResponse<T> { data: T[]; meta: { page: number; limit: number; total: number; totalPages: number }; }
@@ -69,7 +72,28 @@ export function toLegacyCourier(c: any): LegacyCourier {
     senderId: c.createdById,
     senderName: c.createdBy?.name ?? "",
     createdAt: c.createdAt,
+    ...(c.organization
+      ? { orgAddress: [c.organization.address1, c.organization.address2].filter(Boolean).join(", "), orgCity: c.organization.city ?? "" }
+      : {}),
   };
+}
+
+export interface CourierPageFilters {
+  type?: "Inward" | "Outward";
+  status?: "Pending" | "Received" | "Delivered";
+  fromDate?: string;
+  toDate?: string;
+  search?: string;
+}
+
+/** One page, newest entry first; page 1 also brings the Pending badge counts for the date range. */
+export async function listCouriersPage(
+  params: CourierPageFilters & { page: number; limit: number },
+): Promise<{ items: LegacyCourier[]; total: number; totalPages: number; counts?: { inwardPending: number; outwardPending: number } }> {
+  const res = await apiClient.get<ListResponse<any> & { counts?: { inwardPending: number; outwardPending: number } }>(
+    `/couriers${buildQuery({ ...params, newestFirst: "true", withCounts: params.page === 1 ? "true" : undefined })}`,
+  );
+  return { items: (res.data ?? []).map(toLegacyCourier), total: res.meta.total, totalPages: res.meta.totalPages, counts: res.counts };
 }
 
 export async function fetchCouriers(opts: {

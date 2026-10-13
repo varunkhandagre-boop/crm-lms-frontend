@@ -1,5 +1,7 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -18,20 +20,21 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (organizations still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: payment dues now via new backend API
+import { useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { createPaymentDue } from '../services/api/paymentDues';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddPaymentDueScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     
-    const { currentUser, addNotification } = useData();
-    const { fetchSaaSData } = useSaaSDB();
+    const { currentUser } = useData();
 
     // orgList now comes from useCachedList below (cache-first, shared 'organizations' key)
 
@@ -59,6 +62,8 @@ export default function AddPaymentDueScreen() {
         enabled: !!currentUser?.companyId,
         fetcher: () => fetchOrganizations({ limit: 500 }),
     });
+    // Beyond the first 500: search the server while the organization picker is open.
+    useOrgServerSearch(modalVisible, searchText, setFilteredOrgs);
     useEffect(() => {
         setFilteredOrgs(orgList);
     }, [orgList]);
@@ -103,15 +108,6 @@ export default function AddPaymentDueScreen() {
                 notes,
             });
 
-            if (addNotification) {
-                await addNotification({
-                    title: "Manual Due Added 📝",
-                    message: `₹${amount} due added for ${saved.orgName} by ${currentUser?.name}.`,
-                    to: "Accountant",
-                    route: "/payment_duelist",
-                    type: "warning"
-                });
-            }
             Alert.alert("Success", `New Due Added Successfully! ID: ${saved.orderId}`);
             router.back();
         } catch (error: any) {
@@ -123,9 +119,9 @@ export default function AddPaymentDueScreen() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-                    <Ionicons name="arrow-back" size={24} color="#333" />
+                    <Ionicons name="arrow-back" size={24} color="white" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Add Manual Due</Text>
                 <View style={{ width: 24 }} />
@@ -163,10 +159,10 @@ export default function AddPaymentDueScreen() {
                             value={billDate}
                             mode="date"
                             display="default"
-                            onChange={(event, selectedDate) => {
+                            {...pickerHandlers((event, selectedDate) => {
                                 setShowBillDatePicker(false);
                                 if (selectedDate) setBillDate(selectedDate);
-                            }}
+                            })}
                         />
                     )}
 
@@ -189,10 +185,10 @@ export default function AddPaymentDueScreen() {
                             value={dueDate}
                             mode="date"
                             display="default"
-                            onChange={(event, selectedDate) => {
+                            {...pickerHandlers((event, selectedDate) => {
                                 setShowDatePicker(false);
                                 if (selectedDate) setDueDate(selectedDate);
-                            }}
+                            })}
                         />
                     )}
 
@@ -224,7 +220,7 @@ export default function AddPaymentDueScreen() {
             </KeyboardAvoidingView>
 
             <Modal visible={modalVisible} animationType="slide">
-                <View style={styles.modalContainer}>
+                <View style={[styles.modalContainer, { paddingTop: headerTop }]}>
                     <View style={styles.modalHeader}>
                         <TouchableOpacity onPress={() => setModalVisible(false)}>
                             <Ionicons name="arrow-back" size={24} color="#333" />
@@ -269,9 +265,9 @@ export default function AddPaymentDueScreen() {
     );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 4, alignItems:'center' },
+    header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, backgroundColor: 'white', elevation: 4, alignItems:'center' },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
     backBtn: { paddingRight: 10 },
     
@@ -289,11 +285,11 @@ const styles = StyleSheet.create({
     submitBtn: { backgroundColor: '#d32f2f', padding: 15, borderRadius: 10, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 30, elevation: 3 },
     submitBtnText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
 
-    modalContainer: { flex: 1, backgroundColor: 'white', paddingTop: 40 },
+    modalContainer: { flex: 1, backgroundColor: 'white' },
     modalHeader: { flexDirection: 'row', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#eee', backgroundColor:'#f9f9f9' },
     searchInput: { flex: 1, marginLeft: 10, fontSize: 16, backgroundColor: '#fff', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#ddd' },
     orgItem: { flexDirection: 'row', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
     orgIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#e3f2fd', justifyContent: 'center', alignItems: 'center', marginRight: 15 },
     orgName: { fontSize: 16, fontWeight: 'bold', color: '#333' },
     orgCity: { fontSize: 12, color: 'gray', marginTop: 2 }
-});
+}), FORM_ACCENT.paymentDue);

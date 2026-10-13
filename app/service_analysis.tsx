@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     FlatList,
@@ -14,21 +14,21 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (kept for isDbLoading UX only — everything else, including
-// team members, is on Postgres now)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: this screen is now FULLY migrated — all four data sources
 // (service calls, PMS, demos, installations) come from the new backend API.
 // demos was already migrated in Phase 2; the other three complete in Phase 4.
-import { listServiceCalls } from '../services/api/serviceCalls';
-import { listPmsReports } from '../services/api/pmsReports';
-import { listDemos } from '../services/api/demos';
+import { listServiceAnalysisPage, ServiceAnalysisFilters, ServiceReportType } from '../services/api/serviceAnalysis';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
 import { fetchTeamMembers } from '../services/api/users';
-import { listInstallations } from '../services/api/installations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { PeriodTabs, StaffPeriodRow } from '../components/compact';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
+import { useIsDesktop } from '../hooks/useIsDesktop';
 
 const parseDateOnly = (dateStr: any) => {
     if (!dateStr) return 0;
@@ -53,23 +53,20 @@ const parseDateOnly = (dateStr: any) => {
 };
 
 export default function AnalysisScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
     
     const { currentUser } = useData(); 
-    const { isDbLoading } = useSaaSDB();
 
-    // serviceList/pmsList/demoList/installationList now come from useCachedList
     // below, sharing cache keys with service_call.tsx / pms_schedule.tsx /
     // demo.tsx / installation.tsx respectively.
     const [employees, setEmployees] = useState<{id: string, name: string}[]>([]);
-    const [refreshing, setRefreshing] = useState(false);
 
     const [reportType, setReportType] = useState('All'); 
     const [viewMode, setViewMode] = useState<'Day' | 'Month' | 'FY' | 'All'>('FY'); 
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [searchText, setSearchText] = useState('');
 
-    const [filteredData, setFilteredData] = useState<any[]>([]);
     const [selectedItem, setSelectedItem] = useState<any>(null);
     const [detailModalVisible, setDetailModalVisible] = useState(false);
 
@@ -77,58 +74,37 @@ export default function AnalysisScreen() {
     const [selectedEmployeeName, setSelectedEmployeeName] = useState('All Staff');
     const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-    const [visibleCount, setVisibleCount] = useState(20);
 
     const userRole = currentUser?.role ? currentUser.role.toLowerCase() : 'unknown';
     const isAdmin = ['admin', 'manager', 'account', 'superadmin'].includes(userRole);
 
-    useEffect(() => {
-        if (viewMode === 'Day') setVisibleCount(500);
-        else setVisibleCount(20);
-    }, [reportType, viewMode, selectedDate, searchText, selectedEmployee]);
 
-    // 🔥 SERVICE CALLS + PMS + DEMOS + INSTALLATIONS — cache-first, each
-    // deliberately sharing the SAME cache key as its primary screen
-    // (service_call.tsx / pms_schedule.tsx / demo.tsx / installation.tsx),
-    // so visiting any of those warms this screen's cache too (and vice
-    // versa). See hooks/useCachedList.ts.
+    // 🔥 INSTALLATIONS + PMS + BREAKDOWNS + DEMOS — merged, filtered and paged on
+    // the server (20 at a time), with the engineer's name on each record.
+    const debouncedSearch = useDebounced(searchText.trim());
+    const analysisFilters = useMemo<ServiceAnalysisFilters>(() => ({
+        type: reportType as ServiceReportType,
+        ...periodRange(viewMode, selectedDate),
+        userId: isAdmin && selectedEmployee !== 'All' ? selectedEmployee : undefined,
+        search: debouncedSearch || undefined,
+    }), [reportType, viewMode, selectedDate, isAdmin, selectedEmployee, debouncedSearch]);
+    const isDefaultView = reportType === 'All' && isCurrentFy(viewMode, selectedDate) && selectedEmployee === 'All' && !debouncedSearch;
     const {
-        data: serviceList,
-        loading: serviceLoading,
-        refresh: refreshService,
-    } = useCachedList({
-        cacheKey: buildCacheKey('service_calls', currentUser?.companyId),
+        items: filteredData,
+        total: analysisTotal,
+        loading: isAnalysisLoading,
+        loadingMore: analysisLoadingMore,
+        hasMore: analysisHasMore,
+        loadMore: loadMoreAnalysis,
+        refreshing,
+        refresh: onRefresh,
+        error: analysisError,
+    } = useServerPagedList<ServiceAnalysisFilters, any>({
+        fetchPage: listServiceAnalysisPage,
+        filters: analysisFilters,
         enabled: !!currentUser?.companyId,
-        fetcher: listServiceCalls,
+        cacheKey: isDefaultView ? buildCacheKey('service_analysis_page1_v1', currentUser?.companyId) : null,
     });
-    const {
-        data: pmsList,
-        loading: pmsLoading,
-        refresh: refreshPms,
-    } = useCachedList({
-        cacheKey: buildCacheKey('pms_reports', currentUser?.companyId),
-        enabled: !!currentUser?.companyId,
-        fetcher: listPmsReports,
-    });
-    const {
-        data: demoList,
-        loading: demosLoading,
-        refresh: refreshDemos,
-    } = useCachedList({
-        cacheKey: buildCacheKey('demos', currentUser?.companyId),
-        enabled: !!currentUser?.companyId,
-        fetcher: listDemos,
-    });
-    const {
-        data: installationList,
-        loading: installsLoading,
-        refresh: refreshInstalls,
-    } = useCachedList({
-        cacheKey: buildCacheKey('installations', currentUser?.companyId),
-        enabled: !!currentUser?.companyId,
-        fetcher: listInstallations,
-    });
-    const isAnalysisLoading = serviceLoading || pmsLoading || demosLoading || installsLoading;
 
     // 🔥 Team members — cache-first, shares the SAME 'team_members' cache
     // key as manage_team.tsx/employee_timeline.tsx. Was previously calling
@@ -150,143 +126,6 @@ export default function AnalysisScreen() {
         }
     }, [teamMembersForServiceAnalysis, isAdmin]);
 
-    const onRefresh = async () => {
-        setRefreshing(true);
-        await Promise.all([refreshService(), refreshPms(), refreshDemos(), refreshInstalls()]);
-        setRefreshing(false);
-    };
-
-    useEffect(() => {
-        let allData: any[] = [];
-
-        if (Array.isArray(installationList)) {
-            allData = [...allData, ...installationList.map((i:any) => ({
-                ...i,
-                reportType: 'Installation',
-                displayDate: i.dateIso || i.date || i.installationDate || i.createdAt,
-                hospital: i.hospital || i.orgName || i.hospitalName || "Unknown Client",
-                orgId: i.orgId || '', 
-                engineer: i.engineer || i.senderName || i.userName || "Admin",
-                engineerId: i.senderId || i.userId || i.uid, 
-                details: `Model: ${i.model || '-'} (${i.product || '-'})`,
-                machineDisplay: i.productName || i.product || i.model || '-',
-                serialDisplay: i.serialNo || '-',
-                status: i.status || 'Installed'
-            }))];
-        }
-
-        if (Array.isArray(pmsList)) {
-            allData = [...allData, ...pmsList.map((i:any) => ({
-                ...i,
-                reportType: 'PMS',
-                displayDate: i.status === 'Done' || i.status === 'Completed' ? (i.dateIso || i.date || i.createdAt) : (i.nextServiceDate || i.scheduledDate || i.dueDate || i.computedDueDate),
-                hospital: i.hospitalName || i.hospital || "Unknown", 
-                orgId: i.orgId || '', 
-                engineer: i.userName || i.engineer || "Admin",
-                engineerId: i.userId || i.engineerId || i.uid || i.senderId, 
-                details: `Cycle: ${i.currentPmsNumber || '-'}/${i.totalPms || '-'}`,
-                machineDisplay: i.machineName || i.machine || '-',
-                serialDisplay: i.serialNo || '-',
-                status: i.status || 'Pending'
-            }))];
-        }
-
-        if (Array.isArray(serviceList)) {
-            allData = [...allData, ...serviceList.map((i:any) => ({
-                ...i,
-                reportType: 'Breakdown',
-                displayDate: i.dateIso || i.date || i.ticketDate || i.createdAt,
-                hospital: i.hospitalName || i.customerName || "Unknown",
-                orgId: i.orgId || '', 
-                engineer: i.resolvedBy || i.userName || i.assignedTo || "Admin",
-                engineerId: i.resolvedById || i.userId || i.assignedToId || i.senderId, 
-                details: i.remark || i.complaint || i.issue || "No Issue Listed", 
-                status: i.status || 'Pending',
-                machineDisplay: i.machine || i.product || '-',
-                serialDisplay: i.serialNo || '-'
-            }))];
-        }
-
-        if (Array.isArray(demoList)) {
-            allData = [...allData, ...demoList.map((i:any) => ({
-                ...i,
-                reportType: 'Demo',
-                displayDate: i.dateIso || i.demoDate || i.date || i.createdAt,
-                hospital: i.hospitalName || i.doctorName || i.hospital || "Unknown",
-                orgId: i.orgId || '', 
-                engineer: i.demonstrator || i.userName || i.senderName || "Admin",
-                engineerId: i.demonstratorId || i.userId || i.senderId || i.uid, 
-                details: `Result: ${i.result || 'Pending'}`,
-                machineDisplay: i.product || i.machineName || i.machine || '-',
-                serialDisplay: '-',
-                status: i.status || 'Pending'
-            }))];
-        }
-
-        if (isAdmin && selectedEmployee !== 'All') {
-            const targetName = selectedEmployeeName.toLowerCase().trim();
-            allData = allData.filter(i => 
-                (i.engineerId === selectedEmployee) || 
-                (i.senderId === selectedEmployee) ||
-                ((i.engineer || '').toLowerCase().trim() === targetName) || 
-                ((i.senderName || '').toLowerCase().trim() === targetName)
-            );
-        } else if (!isAdmin) {
-            const myId = currentUser?.id || currentUser?.uid;
-            allData = allData.filter(i => 
-                i.engineerId === myId || 
-                i.senderId === myId ||
-                ((i.engineer || '').toLowerCase() === (currentUser?.name || '').toLowerCase())
-            ); 
-        }
-
-        if (reportType !== 'All') {
-            allData = allData.filter(i => i.reportType === reportType);
-        }
-
-        if (searchText) {
-            const lower = searchText.toLowerCase();
-            allData = allData.filter(i => {
-                const dateStr = (i.displayDate || '').toLowerCase();
-                const row = `${dateStr} ${i.hospital || ''} ${i.engineer || ''} ${i.status || ''} ${i.reportType || ''} ${i.details || ''} ${i.serialDisplay || ''} ${i.machineDisplay || ''}`.toLowerCase();
-                return row.includes(lower);
-            });
-        }
-
-        if (viewMode !== 'All') {
-            const targetYear = selectedDate.getFullYear();
-            const targetMonth = selectedDate.getMonth();
-            const targetDay = selectedDate.getDate();
-
-            const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-            let fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-            const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime(); 
-
-            const APP_LAUNCH_DATE = new Date(2026, 0, 1).getTime();
-            if (fyStartDate < APP_LAUNCH_DATE) {
-                fyStartDate = APP_LAUNCH_DATE;
-            }
-
-            allData = allData.filter(item => {
-                const ts = parseDateOnly(item.displayDate);
-                if (!ts) return false; 
-
-                const d = new Date(ts);
-                const itemTime = d.getTime();
-                
-                if (viewMode === 'Month') return d.getFullYear() === targetYear && d.getMonth() === targetMonth;
-                if (viewMode === 'Day') return d.getFullYear() === targetYear && d.getMonth() === targetMonth && d.getDate() === targetDay;
-                if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-                
-                return true;
-            });
-        }
-
-        allData.sort((a, b) => parseDateOnly(b.displayDate) - parseDateOnly(a.displayDate));
-        
-        setFilteredData(allData);
-
-    }, [serviceList, installationList, pmsList, demoList, searchText, viewMode, selectedDate, reportType, selectedEmployee]);
 
 
     const changeDate = (dir: number) => {
@@ -331,7 +170,20 @@ export default function AnalysisScreen() {
         setDetailModalVisible(true);
     };
 
-    const renderedList = filteredData.slice(0, visibleCount);
+
+    const isDesktop = useIsDesktop();
+    const DONE = ['Done', 'Completed', 'Closed', 'Installed', 'Successful', 'Resolved'];
+    const columns: TableColumn<any>[] = [
+        { key: 'date', label: 'Date', width: 110, render: (i) => formatDate(i.displayDate) },
+        { key: 'type', label: 'Type', width: 130, render: (i) => <Pill text={i.reportType || '-'} color="#fff" bg={getColor(i.reportType)} /> },
+        { key: 'party', label: 'Hospital / Client', flex: 2, render: (i) => i.hospital || '-' },
+        { key: 'machine', label: 'Machine / Serial', flex: 2, render: (i) => <TwoLine main={i.machineDisplay || '-'} sub={i.serialDisplay && i.serialDisplay !== '-' ? i.serialDisplay : undefined} /> },
+        { key: 'details', label: 'Details', flex: 2, render: (i) => i.details || '-' },
+        { key: 'engineer', label: 'Engineer', flex: 1, render: (i) => i.engineer || '-' },
+        { key: 'status', label: 'Status', width: 120, render: (i) => DONE.includes(i.status)
+            ? <Pill text={i.status} color="#2e7d32" bg="#e8f5e9" />
+            : <Pill text={i.status || '-'} color="#e65100" bg="#fff3e0" /> },
+    ];
 
     const renderItem = ({ item }: any) => {
         const isDone = ['Done', 'Completed', 'Closed', 'Installed', 'Successful', 'Resolved'].includes(item.status);
@@ -371,7 +223,7 @@ export default function AnalysisScreen() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="white" /></TouchableOpacity>
                 <Text style={styles.headerTitle}>Master Reports</Text>
                 <View style={{width:24}} /> 
@@ -394,37 +246,20 @@ export default function AnalysisScreen() {
                 </View>
 
                 <View style={styles.controlsContainer}>
-                    <View style={styles.toggleRow}>
-                        {['Day', 'Month', 'FY', 'All'].map((m) => (
-                            <TouchableOpacity key={m} style={[styles.toggleBtn, viewMode === m && styles.activeToggle]} onPress={() => setViewMode(m as any)}>
-                                <Text style={[styles.toggleText, viewMode === m && {color:'#333', fontWeight:'bold'}]}>{m}</Text>
-                            </TouchableOpacity>
-                        ))}
+                    <PeriodTabs value={viewMode} onChange={setViewMode} style={{ marginHorizontal: 0, marginTop: 0 }} />
+                    <View style={{ marginHorizontal: -12 }}>
+                        <StaffPeriodRow
+                            showStaff={isAdmin}
+                            staffLabel={selectedEmployee === 'All' ? 'All Staff' : selectedEmployeeName}
+                            onStaffPress={() => setShowEmployeePicker(true)}
+                            periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+                            onPrev={() => changeDate(-1)}
+                            onNext={() => changeDate(1)}
+                        />
                     </View>
 
-                    {isAdmin && (
-                        <TouchableOpacity 
-                            style={styles.employeeFilterBtn} 
-                            onPress={() => setShowEmployeePicker(true)}
-                        >
-                            <Ionicons name="people" size={18} color="#2e7d32" />
-                            <Text style={{fontSize:13, marginLeft:8, color:'#2e7d32', fontWeight:'600'}}>
-                                {selectedEmployee === 'All' ? 'View All Staff' : selectedEmployeeName}
-                            </Text>
-                            <Ionicons name="chevron-down" size={16} color="#2e7d32" style={{marginLeft:'auto'}}/>
-                        </TouchableOpacity>
-                    )}
-
-                    {viewMode !== 'All' && (
-                        <View style={styles.dateNav}>
-                            <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={20} color="#555" /></TouchableOpacity>
-                            <Text style={styles.dateNavText}>{getHeaderDate()}</Text>
-                            <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={20} color="#555" /></TouchableOpacity>
-                        </View>
-                    )}
-
                     <View style={styles.searchBox}>
-                        {isDbLoading ? <ActivityIndicator size="small" color="#1565c0" /> : <Ionicons name="search" size={18} color="gray" />}
+                        {isAnalysisLoading ? <ActivityIndicator size="small" color="#1565c0" /> : <Ionicons name="search" size={18} color="gray" />}
                         <TextInput 
                             style={styles.input} 
                             placeholder="Search Hospital, Serial..." 
@@ -436,37 +271,42 @@ export default function AnalysisScreen() {
                 </View>
 
                 <View style={styles.countStrip}>
-                    <Text style={{color:'gray', fontSize:12}}>Total Records: <Text style={{fontWeight:'bold', color:'#333'}}>{filteredData.length}</Text></Text>
+                    <Text style={{color:'gray', fontSize:12}}>Total Records: <Text style={{fontWeight:'bold', color:'#333'}}>{analysisTotal}</Text></Text>
                 </View>
 
                 <FlatList 
-                    data={renderedList}
-                    keyExtractor={(item, index) => item.id || index.toString()}
+                    data={filteredData}
+                    keyExtractor={(item, index) => item.rowKey || item.id || index.toString()}
                     contentContainerStyle={{ padding: 15, paddingBottom: 100 }}
-                    renderItem={renderItem}
+                    renderItem={isDesktop
+                        ? ({ item, index }) => <TableRow columns={columns} item={item} index={index} tint={getColor(item.reportType)} onPress={() => handleItemClick(item)} />
+                        : renderItem}
+                    ListHeaderComponent={isDesktop && filteredData.length > 0 ? <TableHeader columns={columns} /> : null}
+                    stickyHeaderIndices={isDesktop && filteredData.length > 0 ? [0] : undefined}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                     ListEmptyComponent={
                         <View style={{ alignItems: 'center', marginTop: 50 }}>
                             {isAnalysisLoading ? <ActivityIndicator size="large" color="#3b5998" /> : (
                                 <>
                                     <Ionicons name="folder-open-outline" size={40} color="#ccc" />
-                                    <Text style={{ color: 'gray', marginTop: 10 }}>No reports found.</Text>
+                                    <Text style={{ color: 'gray', marginTop: 10 }}>{analysisError ? 'Could not load reports — pull down to retry.' : 'No reports found.'}</Text>
                                 </>
                             )}
                         </View>
                     }
                     ListFooterComponent={
                         <View style={{ paddingBottom: 80 }}>
-                            {visibleCount < filteredData.length ? (
-                                <TouchableOpacity 
-                                    onPress={() => setVisibleCount(prev => prev + 20)} 
+                            {analysisHasMore ? (
+                                <TouchableOpacity
+                                    onPress={loadMoreAnalysis}
+                                    disabled={analysisLoadingMore}
                                     style={{
                                         padding: 12, backgroundColor: '#fff', alignItems: 'center', marginVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ddd', elevation: 1
                                     }}
                                 >
-                                    <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                                        👇 Load More Records ({filteredData.length - visibleCount} remaining)
-                                    </Text>
+                                    {analysisLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({analysisTotal - filteredData.length} remaining)</Text>
+                        )}
                                 </TouchableOpacity>
                             ) : (
                                 filteredData.length > 0 ? (
@@ -590,23 +430,16 @@ const DetailRow = ({label, value}: any) => (
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f5f5f5' },
-    header: { backgroundColor: '#3b5998', paddingTop: 50, padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    header: { backgroundColor: '#3b5998', padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     headerTitle: { color: 'white', fontSize: 20, fontWeight: 'bold' },
 
     filterContainer: { backgroundColor: 'white', paddingVertical: 12, paddingHorizontal: 10, elevation: 2 },
     typeBtn: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20, backgroundColor: '#f0f0f0', marginRight: 8, borderWidth:1, borderColor:'#eee' },
     typeBtnText: { fontWeight: 'bold', fontSize: 13, color: '#555' },
 
-    controlsContainer: { padding: 15, backgroundColor: 'white' },
-    toggleRow: { flexDirection: 'row', backgroundColor: '#e0e0e0', borderRadius: 8, padding: 3, marginBottom: 10 },
-    toggleBtn: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-    activeToggle: { backgroundColor: 'white', elevation: 2 },
-    toggleText: { color: 'gray', fontSize: 12, fontWeight: '600' },
+    controlsContainer: { padding: 12, backgroundColor: 'white' },
 
-    employeeFilterBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#e8f5e9', paddingHorizontal:12, paddingVertical:10, borderRadius:8, borderWidth:1, borderColor:'#2e7d32', marginBottom:10 },
 
-    dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'white', padding: 8, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#ddd' },
-    dateNavText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
 
     searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', borderRadius: 8, paddingHorizontal: 10, height: 40, borderWidth:1, borderColor:'#ddd' },
     input: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },

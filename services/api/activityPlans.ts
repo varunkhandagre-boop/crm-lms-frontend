@@ -22,7 +22,7 @@ export interface ApiActivityPlan {
   updatedAt: string;
 }
 
-function toLegacyActivityPlan(a: ApiActivityPlan): any {
+export function toLegacyActivityPlan(a: ApiActivityPlan): any {
   const d = a.date ? new Date(a.date) : null;
   const formattedDate = d ? `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}` : '';
   return {
@@ -56,6 +56,18 @@ function toQueryString(params: Record<string, any>) {
   });
   const s = q.toString();
   return s ? `?${s}` : '';
+}
+
+export type ActivityPlanView = 'today' | 'upcoming' | 'completed' | 'all';
+
+/** One page for the Activity Plan screen tab (newest plan date first); own plans for field staff (server). */
+export async function listActivityPlansPage(
+  params: { view: ActivityPlanView; page: number; limit: number },
+): Promise<{ items: any[]; total: number; totalPages: number }> {
+  const res = await apiClient.get<{ data: ApiActivityPlan[]; meta: { total: number; totalPages: number } }>(
+    `/activity-plans${toQueryString({ ...params, newestFirst: 'true' })}`,
+  );
+  return { items: res.data.map(toLegacyActivityPlan), total: res.meta.total, totalPages: res.meta.totalPages };
 }
 
 export async function listActivityPlans(params: { status?: string } = {}): Promise<any[]> {

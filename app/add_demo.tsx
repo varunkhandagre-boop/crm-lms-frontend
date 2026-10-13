@@ -1,6 +1,9 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as Location from 'expo-location';
+import { getCurrentLocation as getGpsFix, locationErrorMessage } from '../utils/getLocation';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -20,12 +23,12 @@ import {
 import { urlToBase64Image } from '../utils/pdfImageHelper';
 
 // 🔥 SAAS IMPORTS (organizations/products still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: demos now go through the new backend API
 import { completeActivityPlan } from '../services/api/activityPlans';
-import { createDemo, listDemos, updateDemo } from '../services/api/demos';
+import { countDemos, createDemo, updateDemo } from '../services/api/demos';
 import { recordLocationLog } from '../services/api/locationLogs';
+import { findOrgByName, useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -36,8 +39,11 @@ import { buildCacheKey } from '../utils/listCache';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddDemoScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   const params = useLocalSearchParams(); 
   // 🔥 Edit mode: demo.tsx passes editId + the existing field values via
@@ -45,10 +51,8 @@ export default function AddDemoScreen() {
   const editId = params.editId as string | undefined;
   const isEditMode = !!editId;
 
-  const { currentUser, companyProfile, addNotification } = useData();
+  const { currentUser, companyProfile } = useData();
 
-  // 🔥 SaaS Engine kept for organizations/products
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
   // orgList/demoList now come from useCachedList below (cache-first, shared keys)
   const [productList, setProductList] = useState<any[]>([]);
@@ -93,11 +97,8 @@ export default function AddDemoScreen() {
       enabled: !!currentUser?.companyId,
       fetcher: () => fetchOrganizations({ limit: 500 }),
   });
-  const { data: demoList } = useCachedList({
-      cacheKey: buildCacheKey('demos', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: listDemos, // was: fetchSaaSData("demos")
-  });
+  // Beyond the first 500: search the server while the organization picker is open.
+  useOrgServerSearch(modalVisible && currentModalType === 'Hospital', searchText, setFilteredData);
 
   // 🔥 Products — unchanged plain fetch-on-mount (out of scope for this pass).
   useEffect(() => {
@@ -150,10 +151,10 @@ export default function AddDemoScreen() {
   }, []);
 
   useEffect(() => {
-      if (!isEditMode && params.hospital && orgList.length > 0) {
+      if (!isEditMode && params.hospital) {
           setHospital(params.hospital as string);
-          const found = orgList.find((o:any) => (o.orgName === params.hospital || o.name === params.hospital));
-          if(found) selectOrganization(found);
+          // Also finds organizations beyond the first 500 (one server search).
+          findOrgByName(params.hospital as string, orgList).then((found) => { if (found) selectOrganization(found); });
       }
   }, [params, orgList]);
 
@@ -165,7 +166,7 @@ export default function AddDemoScreen() {
   };
 
   // 🔥 SMART FY DEMO ID GENERATOR (still client-side, cosmetic reference number)
-  const generateDemoId = () => {
+  const generateDemoId = async () => {
       const targetMonth = demoDate.getMonth(); 
       const targetYear = demoDate.getFullYear();
       
@@ -174,11 +175,8 @@ export default function AddDemoScreen() {
       const fyStartDateStr = `${fyStartYear}-04-01`;
       const fyEndDateStr = `${fyStartYear + 1}-03-31`;
 
-      const count = demoList ? demoList.filter((d: any) => {
-          const dDate = d.dateIso || d.date;
-          if (!dDate) return false;
-          return dDate >= fyStartDateStr && dDate <= fyEndDateStr;
-      }).length + 1 : 1;
+      // Count on the server (was: every demo downloaded and counted here).
+      const count = (await countDemos(fyStartDateStr, fyEndDateStr).catch(() => 0)) + 1;
 
       const prefix = companyProfile?.shortName ? companyProfile.shortName.toUpperCase() : 'LMS';
       return `${prefix}-DEMO-${fyString}-${String(count).padStart(3, '0')}`;
@@ -359,17 +357,8 @@ export default function AddDemoScreen() {
           </body>
         </html>`;
 
-        const { uri } = await Print.printToFileAsync({ html: htmlContent });
         const cleanName = `${demoData.demoId}_${demoData.hospital.replace(/ /g, '_')}.pdf`;
-        // @ts-ignore
-        const newPath = `${FileSystem.cacheDirectory}${cleanName}`;
-
-        try {
-            await FileSystem.copyAsync({ from: uri, to: newPath });
-            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Demo Report` });
-        } catch (error) {
-            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-        }
+        await sharePdfFromHtml(htmlContent, cleanName, `Share Demo Report`);
     } catch (error) {
         Alert.alert("Error", "Could not generate PDF");
     }
@@ -382,14 +371,14 @@ export default function AddDemoScreen() {
               Alert.alert('Permission Denied', 'Location access is required to save entry.');
               return null;
           }
-          let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          let location = await getGpsFix();
           return {
               lat: location.coords.latitude,
               lng: location.coords.longitude,
               timestamp: new Date().toISOString()
           };
       } catch (error) {
-          Alert.alert("GPS Required", "Please turn on your GPS Location to submit.");
+          Alert.alert("GPS Required", locationErrorMessage(error));
           return null;
       }
   };
@@ -510,7 +499,7 @@ export default function AddDemoScreen() {
           type: 'Demo',
       }).catch(() => {});
 
-      const newDemoId = generateDemoId();
+      const newDemoId = await generateDemoId();
 
       const createdDemo = await createDemo({
           demoRef: newDemoId,
@@ -531,15 +520,6 @@ export default function AddDemoScreen() {
           notes: notes,
       });
 
-      if (addNotification) {
-          await addNotification({
-              title: "New Demo Report 📋",
-              message: `${currentUser?.name} submitted a demo report (${newDemoId}) for ${finalProduct} at ${hospital}.`,
-              to: "Admin",
-              route: "/demo",
-              type: "info"
-          });
-      }
       
       if (params.activityId) {
           await completeActivityPlan(params.activityId as string);
@@ -584,7 +564,7 @@ export default function AddDemoScreen() {
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <View style={styles.container}>
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: headerTop }]}>
             <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="white" />
             </TouchableOpacity>
@@ -599,7 +579,7 @@ export default function AddDemoScreen() {
                 <Text style={styles.label}>Organization / Hospital *</Text>
                 <TouchableOpacity style={styles.selector} onPress={() => openModal('Hospital', orgList)}>
                     <Text style={{color: hospital ? '#333' : '#999', flex:1}}>{hospital || 'Select Organization'}</Text>
-                    {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+                    {<Ionicons name="search" size={20} color="gray" />}
                 </TouchableOpacity>
 
                 <View style={styles.row}>
@@ -621,7 +601,7 @@ export default function AddDemoScreen() {
                     <Text style={{color: '#333'}}>{formatDate(demoDate)}</Text>
                     <Ionicons name="calendar-outline" size={20} color="gray" />
                 </TouchableOpacity>
-                {showDatePicker && <DateTimePicker value={demoDate} mode="date" onChange={(e, d) => { setShowDatePicker(false); if(d) setDemoDate(d); }} />}
+                {showDatePicker && <DateTimePicker value={demoDate} mode="date" {...pickerHandlers((e, d) => { setShowDatePicker(false); if(d) setDemoDate(d); })} />}
             </View>
 
             <Text style={styles.sectionHeader}>👤 Contact Person</Text>
@@ -649,7 +629,7 @@ export default function AddDemoScreen() {
                 <Text style={styles.label}>Product Name *</Text>
                 <TouchableOpacity style={styles.selector} onPress={() => openModal('Product', getUniqueProductNames())}>
                     <Text style={{color: product ? '#333' : '#999', flex:1}}>{product || 'Select Product'}</Text>
-                    {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="cube-outline" size={20} color="gray" />}
+                    {<Ionicons name="cube-outline" size={20} color="gray" />}
                 </TouchableOpacity>
 
                 {product === 'Other' && <TextInput key="stable-demo-product" style={[styles.input, {marginTop:5, borderColor:'#3b5998'}]} placeholder="Type Product Name..." value={customProduct} onChangeText={setCustomProduct} />}
@@ -749,9 +729,9 @@ export default function AddDemoScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { backgroundColor: '#3b5998', paddingTop: 50, padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation:4 },
+  header: { backgroundColor: '#3b5998', padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation:4 },
   headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },
   content: { padding: 15, paddingBottom: 50 },
   sectionHeader: { fontSize: 14, fontWeight: 'bold', color: '#555', marginBottom: 8, marginTop: 15, textTransform:'uppercase' },
@@ -774,4 +754,4 @@ const styles = StyleSheet.create({
   iconBox: { width: 35, height: 35, borderRadius: 8, justifyContent:'center', alignItems:'center', backgroundColor:'#e3f2fd' },
   modalMainText: { fontWeight: 'bold', fontSize: 15, color: '#333' },
   modalSubText: { fontSize: 12, color: 'gray' }
-});
+}), FORM_ACCENT.demo);

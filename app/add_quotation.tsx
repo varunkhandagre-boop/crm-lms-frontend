@@ -1,20 +1,22 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // 🔥 SAAS IMPORTS (organizations/products still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 2: quotations now go through the new backend API
+import { mergeOrgs, useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { listProducts } from '../services/api/products';
-import { createQuotation, listQuotations, updateQuotation } from '../services/api/quotations';
+import { createQuotation, getQuotation, updateQuotation } from '../services/api/quotations';
 import { buildCacheKey } from '../utils/listCache';
 
 export default function AddQuotationScreen() {
@@ -22,8 +24,7 @@ export default function AddQuotationScreen() {
     const insets = useSafeAreaInsets(); 
     
     const { id, mode, leadId, leadOrg, leadPerson, leadMobile, leadCity, leadAddress, leadProduct } = useLocalSearchParams(); 
-    const { companyProfile, currentUser, sendDynamicEmail, sendSystemWhatsApp } = useData();
-    const { fetchSaaSData, isDbLoading } = useSaaSDB();
+    const { companyProfile, currentUser } = useData();
 
     // orgList/quotationList now come from useCachedList below (cache-first, shared keys)
     const [productList, setProductList] = useState<any[]>([]);
@@ -54,11 +55,15 @@ export default function AddQuotationScreen() {
         enabled: !!currentUser?.companyId,
         fetcher: () => fetchOrganizations({ limit: 500 }),
     });
-    const { data: quotationList } = useCachedList({
-        cacheKey: buildCacheKey('quotations', currentUser?.companyId),
-        enabled: !!currentUser?.companyId,
-        fetcher: listQuotations, // was: fetchSaaSData("quotations")
-    });
+    // Beyond the first 500: search the server while the organization picker is open.
+    const [orgServerHits, setOrgServerHits] = useState<any[]>([]);
+    useOrgServerSearch(showOrgModal, orgSearch, setOrgServerHits);
+    // Edit / duplicate: only that one quotation (was: every quotation downloaded).
+    const [sourceQuote, setSourceQuote] = useState<any>(null);
+    useEffect(() => {
+        if (!id || mode === 'from_lead') return;
+        getQuotation(String(id)).then(setSourceQuote).catch(() => Alert.alert('Error', 'Could not load this quotation.'));
+    }, [id, mode]);
 
     // 🔥 Products — unchanged plain fetch-on-mount (out of scope for this pass).
     useEffect(() => {
@@ -97,8 +102,8 @@ export default function AddQuotationScreen() {
             }
             setTerms(defaultTC);
         } 
-        else if (id && quotationList.length > 0) {
-            const data = quotationList.find((q:any) => q.id === id);
+        else if (id && sourceQuote) {
+            const data = sourceQuote;
             if (data) {
                 setItems(data.items || []);
                 setTerms(data.termsAndConditions || defaultTC);
@@ -115,7 +120,7 @@ export default function AddQuotationScreen() {
         } else {
             setTerms(defaultTC);
         }
-    }, [id, mode, leadOrg, leadPerson, leadMobile, leadCity, leadAddress, leadProduct, orgList, quotationList, companyProfile]);
+    }, [id, mode, leadOrg, leadPerson, leadMobile, leadCity, leadAddress, leadProduct, orgList, sourceQuote, companyProfile]);
 
     const numberToWords = (num: number) => {
         const a = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen '];
@@ -154,7 +159,10 @@ export default function AddQuotationScreen() {
     }
 }, [selectedOrg, companyProfile]);
 
-    const filteredOrgs = orgList.filter((o: any) => (o.name || o.orgName || '').toLowerCase().includes(orgSearch.toLowerCase()));
+    const filteredOrgs = mergeOrgs(
+        orgList.filter((o: any) => (o.name || o.orgName || '').toLowerCase().includes(orgSearch.toLowerCase())),
+        orgSearch.trim().length >= 2 ? orgServerHits : [],
+    );
     
     const searchTxt = prodSearch.toLowerCase();
     const baseFilteredProds = productList.filter((p: any) => (p.name || p.model || '').toLowerCase().includes(searchTxt));
@@ -470,9 +478,9 @@ export default function AddQuotationScreen() {
 
         try {
             const htmlContent = getQuotationHTML(estimateNo);
-            const { uri } = await Print.printToFileAsync({ html: htmlContent });
-            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+            await sharePdfFromHtml(htmlContent, `Quotation_${estimateNo}`);
         } catch (error) {
+            console.log("PDF Error:", error);
             Alert.alert("Error", "Could not generate PDF");
         }
     };
@@ -493,7 +501,8 @@ export default function AddQuotationScreen() {
                 docTitle: docTitle,
                 orgName: selectedOrg.name || selectedOrg.orgName || 'Unknown',
                 orgAddress: selectedOrg.address || selectedOrg.city || '',
-                orgPhone: selectedOrg.phone || selectedOrg.mobile || '',
+                // Mobile first: the backend sends the quotation WhatsApp to this number.
+                orgPhone: selectedOrg.mobile || selectedOrg.phone || '',
                 items: items.map(item => ({
                     name: item.name || '', model: item.model || '',
                     specifications: item.specifications || '', qty: item.qty || 0,
@@ -524,20 +533,9 @@ export default function AddQuotationScreen() {
                 Alert.alert("Success", `Estimate ${finalEstimateNo} Created Successfully!`);
             }
 
-            try {
-                const custMobile = selectedOrg.mobile || selectedOrg.phone || "";
-                if (custMobile) {
-                    sendSystemWhatsApp(custMobile, 'quotation_sent', {
-                        customer_name: selectedOrg.name || selectedOrg.orgName || "Customer",
-                        quote_no: finalEstimateNo,
-                        amount: grandTotal.toLocaleString(),
-                        company_name: companyProfile?.companyName || "Our Company"
-                    });
-                }
-            } catch (autoErr) {
-                console.log("Auto-Message Error:", autoErr);
-            }
-            
+            // The "quotation_sent" WhatsApp (and email, if the organization
+            // has one) is sent by the backend when the quotation is created —
+            // same as orders, service calls and leads. Edits don't resend.
             router.back(); 
         } catch (e: any) {
             console.error("Save Error:", e); 
@@ -550,7 +548,7 @@ export default function AddQuotationScreen() {
     return (
         <View style={styles.container}>
             <View style={[styles.header, {paddingTop: insets.top + 10}]}>
-                <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={28} color="#333" /></TouchableOpacity>
+                <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={28} color="white" /></TouchableOpacity>
                 <Text style={styles.headerTitle}>
                     {mode === 'edit' ? 'Edit Estimate' : mode === 'from_lead' ? 'Quote for Lead' : 'Create Estimate'}
                 </Text>
@@ -570,7 +568,7 @@ export default function AddQuotationScreen() {
                                 </Text>
                             </View>
                         </View>
-                        {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="chevron-down" size={20} color="gray" />}
+                        {<Ionicons name="chevron-down" size={20} color="gray" />}
                     </TouchableOpacity>
 
                     <View style={styles.divider} />
@@ -788,7 +786,7 @@ export default function AddQuotationScreen() {
     );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f5f5f5' },
     header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, backgroundColor: 'white', elevation: 2, alignItems:'center' },
     headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
@@ -830,4 +828,4 @@ const styles = StyleSheet.create({
     searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', margin: 15, paddingHorizontal: 15, borderRadius: 10, height: 45, borderWidth: 1, borderColor: '#ddd' },
     searchInput: { flex: 1, marginLeft: 10, fontSize: 15 },
     modalListItem: { backgroundColor: 'white', padding: 15, borderBottomWidth: 1, borderColor: '#eee', flexDirection: 'row', alignItems: 'center' }
-});
+}), FORM_ACCENT.quotation);

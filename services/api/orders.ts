@@ -12,6 +12,8 @@ export interface ApiOrder {
   mobile: string | null;
   email: string | null;
   poNumber: string;
+  poFileUrl?: string | null;
+  poFileName?: string | null;
   amount: string | number;
   advanceAmount: string | number;
   balance: string | number;
@@ -46,8 +48,7 @@ interface OneResponse {
 // Maps an ApiOrder back to the old Firestore `orders` doc shape.
 // Note: senderName/bookedBy aren't stored server-side (only IDs) — the
 // employee-name display/filter falls back gracefully, same known gap as
-// quotations/demos. PO file upload also isn't wired yet (needs Supabase
-// Storage) — poFileUri/poFileName always come back empty.
+// quotations/demos. poFileUri is the uploaded PO (Supabase Storage URL).
 export function toLegacyOrder(o: ApiOrder): any {
   const dateOnly = o.date ? o.date.split('T')[0] : undefined;
   return {
@@ -85,9 +86,9 @@ export function toLegacyOrder(o: ApiOrder): any {
     userId: o.assignedToId || o.createdById,
     createdById: o.createdById,
     bookedBy: undefined,
-    poFileName: '',
-    poFileUri: '',
-    poFileType: '',
+    poFileName: o.poFileName || '',
+    poFileUri: o.poFileUrl || '',
+    poFileType: o.poFileUrl ? (/\.pdf(\?|$)/i.test(o.poFileUrl) ? 'pdf' : 'image') : '',
     createdAt: o.createdAt,
   };
 }
@@ -97,6 +98,9 @@ export interface ListOrdersParams {
   saleType?: string;
   assignedToId?: string;
   search?: string;
+  // One client's orders (Collect Payment): same org id, or the same name.
+  forOrgId?: string;
+  forOrgName?: string;
 }
 
 function toQueryString(params: Record<string, any>) {
@@ -123,6 +127,94 @@ export async function listOrders(params: ListOrdersParams = {}): Promise<any[]> 
   return all.map(toLegacyOrder);
 }
 
+export interface OrderPageFilters {
+  status?: string;          // undefined / 'All' = every status
+  assignedToId?: string;
+  search?: string;
+  fromDate?: string;        // YYYY-MM-DD (local day)
+  toDate?: string;
+}
+
+/** One server page for Order Bookings: Pending / Approved first, then newest PO date. */
+export async function listOrdersPage(
+  params: OrderPageFilters & { page: number; limit: number }
+): Promise<{ items: any[]; total: number; totalPages: number }> {
+  const { status, ...rest } = params;
+  const res = await apiClient.get<ListResponse>(
+    `/orders${toQueryString({ ...rest, status: status && status !== 'All' ? status : undefined, prioritySort: 'true' })}`
+  );
+  return { items: res.data.map(toLegacyOrder), total: res.meta.total, totalPages: res.meta.totalPages };
+}
+
+// ── Sales Dashboard / Sales Calculation ─────────────────────────────────────
+// "Sold" = Approved / Dispatched / Billed / Completed. Credit = anything not Cash.
+
+export interface SalesFilters {
+  fromDate?: string; // YYYY-MM-DD
+  toDate?: string;
+  createdById?: string; // office roles only; others always get their own
+  search?: string;
+}
+
+/** One page of sold orders, newest PO date first. */
+export async function listSoldOrdersPage(
+  params: SalesFilters & { saleType?: 'Cash' | 'Credit'; page: number; limit: number },
+): Promise<{ items: any[]; total: number; totalPages: number }> {
+  const { saleType, ...rest } = params;
+  const res = await apiClient.get<ListResponse>(
+    `/orders${toQueryString({
+      ...rest,
+      soldOnly: 'true',
+      saleType: saleType === 'Cash' ? 'Cash' : undefined,
+      notCash: saleType === 'Credit' ? 'true' : undefined,
+      sortBy: 'date',
+      sortOrder: 'desc',
+    })}`,
+  );
+  return { items: res.data.map(toLegacyOrder), total: res.meta.total, totalPages: res.meta.totalPages };
+}
+
+export interface SalesSummary {
+  totalSales: number;
+  cashSales: number;
+  creditSales: number;
+  orderCount: number;
+  totalCollection: number;
+  collectionCount: number;
+  oldestDate: string | null;
+  byDay: { date: string; amount: number }[];
+  byMonth: { month: string; amount: number }[]; // YYYY-MM
+  topProducts: { label: string; value: number }[];
+}
+
+export async function getSalesSummary(filters: SalesFilters): Promise<SalesSummary> {
+  const res = await apiClient.get<{ data: SalesSummary }>(`/orders/sales-summary${toQueryString(filters)}`);
+  return res.data;
+}
+
+export interface StaffSales { userId: string; orderCount: number; totalSales: number; cashSales: number; collectionCount: number; totalCollected: number }
+
+export async function getSalesByStaff(fromDate: string, toDate: string): Promise<StaffSales[]> {
+  const res = await apiClient.get<{ data: StaffSales[] }>(`/orders/sales-by-staff${toQueryString({ fromDate, toDate })}`);
+  return res.data;
+}
+
+export async function getSalesMonthly(fyStartYear: number, userId: string): Promise<{ month: string; sales: number; cash: number; credit: number; collection: number }[]> {
+  const res = await apiClient.get<{ data: any[] }>(`/orders/sales-monthly${toQueryString({ fyStartYear, userId })}`);
+  return res.data;
+}
+
+export interface OrderCounts {
+  all: { count: number; amount: number };
+  byStatus: Record<string, { count: number; amount: number }>;
+}
+
+/** Status-chip numbers for the same filters (status ignored). */
+export async function getOrderCounts(filters: Omit<OrderPageFilters, 'status'>): Promise<OrderCounts> {
+  const res = await apiClient.get<{ data: OrderCounts }>(`/orders/counts${toQueryString(filters)}`);
+  return res.data;
+}
+
 export interface CreateOrderPayload {
   orgId?: string;
   orgName: string;
@@ -143,6 +235,7 @@ export interface CreateOrderPayload {
   location?: { latitude: number; longitude: number } | null;
   leadId?: string;
   assignedToId?: string;
+  advancePayment?: { mode: 'Cash' | 'Cheque' | 'NEFT' | 'UPI' | 'RTGS'; bankName?: string; refNumber?: string; pdcDate?: string };
 }
 
 export async function createOrder(payload: CreateOrderPayload): Promise<any> {
@@ -150,7 +243,7 @@ export async function createOrder(payload: CreateOrderPayload): Promise<any> {
   return toLegacyOrder(res.data);
 }
 
-export async function updateOrder(id: string, payload: Partial<CreateOrderPayload>): Promise<any> {
+export async function updateOrder(id: string, payload: Partial<Omit<CreateOrderPayload, 'advancePayment'>>): Promise<any> {
   const res = await apiClient.patch<OneResponse>(`/orders/${id}`, payload);
   return toLegacyOrder(res.data);
 }
@@ -175,5 +268,17 @@ export async function deleteOrder(id: string): Promise<void> {
 // Phase 6: WhatsApp payment-reminder tracking (records intent only).
 export async function remindOrder(id: string): Promise<any> {
   const res = await apiClient.post<OneResponse>(`/orders/${id}/remind`, {});
+  return toLegacyOrder(res.data);
+}
+
+// PO photo/PDF as a base64 data URI; replaces any earlier PO file.
+export async function uploadOrderPoFile(id: string, dataUri: string, fileName?: string): Promise<any> {
+  const res = await apiClient.put<OneResponse>(`/orders/${id}/po-file`, { dataUri, fileName });
+  return toLegacyOrder(res.data);
+}
+
+// Also deletes the file from storage.
+export async function deleteOrderPoFile(id: string): Promise<any> {
+  const res = await apiClient.delete<OneResponse>(`/orders/${id}/po-file`);
   return toLegacyOrder(res.data);
 }

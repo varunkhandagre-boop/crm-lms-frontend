@@ -10,56 +10,34 @@ import {
     Modal,
     Platform,
     ScrollView,
-    StatusBar,
     StyleSheet,
     Text,
     TouchableOpacity,
-    UIManager,
     View
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { MENU_TAG_BUCKET } from '../constants/modules';
+import { ACTIVITY_ITEMS, HR_ITEMS, SALES_ITEMS, SIDEBAR_ITEMS } from '../constants/menuItems';
+import { canSeeModule } from '../utils/menuAccess';
+import { useIsDesktop } from '../hooks/useIsDesktop';
 import { fetchCompanyProfile } from '../services/api/companies';
 import { fetchHomeSummary } from '../services/api/homeSummary';
 import { useData } from './context/DataContext';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
-// Sensible starting permissions per role, used ONLY for a role Admin has
-// never touched in Manage Team → Permissions (i.e. no key for it exists yet
-// in the saved permissions blob at all — see canSee() below). The moment
-// Admin saves any change for a role, that role's real saved settings take
-// over completely and these defaults never apply to it again. Without this,
-// a brand-new company's non-Admin employees see a completely empty menu
-// until Admin manually configures every single toggle for every role.
-const COMMON_DEFAULTS = ['dashboard', 'calendar', 'attendance', 'leave', 'travel', 'payroll', 'advance', 'expenses'];
-const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
-    'Sales Executive': [...COMMON_DEFAULTS, 'leads', 'quotations', 'orders', 'visits', 'demos', 'sales_analysis', 'catalogs', 'sales_team_report', 'map_view', 'courier', 'asset_history', 'payment_due', 'payment_coll'],
-    'Service Engineer': [...COMMON_DEFAULTS, 'tickets', 'service_reports', 'pms', 'installation', 'amc_cmc', 'spares', 'map_view', 'courier', 'asset_history'],
-    'Accountant': [...COMMON_DEFAULTS, 'payment_due', 'payment_coll', 'orders'],
-    'Store Keeper': [...COMMON_DEFAULTS, 'spares', 'courier', 'asset_history', 'installation'],
-    'Hr': [...COMMON_DEFAULTS],
-    'Manager': [...COMMON_DEFAULTS, 'leads', 'quotations', 'orders', 'visits', 'demos', 'sales_analysis', 'catalogs', 'sales_team_report', 'map_view', 'tickets', 'service_reports', 'pms', 'installation', 'amc_cmc', 'spares', 'courier', 'organizations', 'asset_history', 'company_profile', 'payment_due', 'payment_coll'],
-};
 // 🔥 Cache-first dashboard summary (see hooks/useCachedObject.ts)
 import { useCachedObject } from '../hooks/useCachedObject';
 import { buildCacheKey } from '../utils/listCache';
 
 // NOTIFICATION IMPORTS
 import * as Device from 'expo-device';
-import * as Notifications from 'expo-notifications';
-import { doc, setDoc } from 'firebase/firestore';
+import { Notifications } from '../utils/notificationsModule';
 import { fetchNotifications } from '../services/api/notifications';
 import { savePushTokenToBackend } from '../services/api/users';
-import { auth, db } from './../firebaseConfig';
-
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-      shouldShowAlert: true,
       shouldPlaySound: true,
       shouldSetBadge: false,
       shouldShowBanner: true,
@@ -68,6 +46,7 @@ Notifications.setNotificationHandler({
 });
 
 export default function HomeScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   const { 
@@ -96,6 +75,10 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
         const loadData = async () => {
+            // Logged out (this re-runs when currentUser becomes null while
+            // Home is still mounted) — no token, so don't call the API.
+            if (!currentUser?.companyId) return;
+
             // Dashboard summary — cache already shows the last-known
             // snapshot instantly; this just triggers a background refresh
             // whenever the home screen regains focus.
@@ -210,7 +193,8 @@ const [branding, setBranding] = useState({
 
   useEffect(() => {
       const checkOnboarding = async () => {
-          if (currentUser) { setCheckedOnboarding(true); return; }
+          // The intro slides are for the phone app; the web version goes straight to login.
+          if (currentUser || Platform.OS === 'web') { setCheckedOnboarding(true); return; }
           try {
               const seen = await AsyncStorage.getItem('hasSeenOnboarding');
               if (seen !== 'true') {
@@ -248,17 +232,6 @@ const saveTokenToDatabase = async (token: string) => {
           console.log("❌ Error saving token to backend:", e);
       }
 
-      // Best-effort: also keep the Firestore copy in sync for legacy
-      // Firebase-linked users, since some not-yet-migrated features may
-      // still read pushToken from there. Silently skipped for Postgres-only
-      // sessions (no Firebase auth to write with — would always fail).
-      if (!auth.currentUser) return;
-      try {
-          const userRef = doc(db, "users", currentUser.id);
-          await setDoc(userRef, { pushToken: token }, { merge: true });
-      } catch (e) { 
-          console.log("❌ Error saving token to Firestore:", e); 
-      }
 };
 
   async function registerForPushNotificationsAsync() {
@@ -285,6 +258,8 @@ const saveTokenToDatabase = async (token: string) => {
       return token;
   }
   
+  const isDesktop = useIsDesktop();
+
   const handleSidebarNavigate = (route: string) => {
       setShouldOpenSidebar(true); setSidebarVisible(false); router.push(route as any);
   };
@@ -300,109 +275,22 @@ const saveTokenToDatabase = async (token: string) => {
       Alert.alert("Logout", "Are you sure?", [{ text: "Cancel" }, { text: "Logout", onPress: () => { setSidebarVisible(false); logout(); router.replace('/login' as any); }}]);
   };
 
-  const canSee = (moduleKey: string) => {
-    if (!currentUser?.role) return false; 
-    
-    if (moduleKey === 'common') return true;
+  const canSee = (moduleKey: string) => canSeeModule(moduleKey, { currentUser, companyProfile, appPermissions });
 
-    const myRole = currentUser.role.toLowerCase().trim();
-
-    // Company-level gate — checked BEFORE role-based permissions below, and
-    // applies even to Admin (but not SuperAdmin, who isn't tied to a single
-    // company's plan). Role permissions below only control who *within* a
-    // company sees a feature the company actually has; this controls
-    // whether the company has it at all (a construction/factory company
-    // with only the HR module shouldn't see Sales/Service no matter their role).
-    const bucket = MENU_TAG_BUCKET[moduleKey];
-    if (bucket && myRole !== 'superadmin' && !(companyProfile?.enabledModules || []).includes(bucket)) return false;
-
-    // Personal Notes is a private per-employee scratchpad, not a shared
-    // CRM/ops feature — every employee gets it as long as their company has
-    // HR at all (the company-level check above), no per-role toggle needed.
-    if (moduleKey === 'personal_notes') return true;
-
-    if (myRole === 'admin' || myRole === 'superadmin') return true;
-    
-    let userRoleKey = 'Sales Executive'; 
-    if (myRole.includes('sales')) userRoleKey = 'Sales Executive';
-    else if (myRole.includes('engineer') || myRole.includes('service')) userRoleKey = 'Service Engineer';
-    else if (myRole.includes('account')) userRoleKey = 'Accountant';
-    else if (myRole.includes('store') || myRole.includes('back office')) userRoleKey = 'Store Keeper';
-    else if (myRole.includes('hr')) userRoleKey = 'Hr';
-    else if (myRole.includes('manager')) userRoleKey = 'Manager';
-    else userRoleKey = currentUser.role;
-
-    const roleNeverConfigured = appPermissions?.[userRoleKey] === undefined;
-    const rolePerms = appPermissions?.[userRoleKey] || {};
-    const userSpecificPerms = appPermissions?.[currentUser.id] || appPermissions?.[currentUser.email] || {};
-
-    if (userSpecificPerms[moduleKey] !== undefined) {
-        return userSpecificPerms[moduleKey] === true; 
-    }
-
-    // Admin has never saved anything for this role at all (not even once) —
-    // use the sensible starting defaults instead of leaving every screen
-    // hidden. The instant Admin saves ANY change for this role, this branch
-    // stops applying and their real settings are used exactly as saved.
-    if (roleNeverConfigured) {
-        return (DEFAULT_ROLE_PERMISSIONS[userRoleKey] || []).includes(moduleKey);
-    }
-    
-    return rolePerms[moduleKey] === true; 
+  // Badge counts by screen; the items themselves live in constants/menuItems.ts.
+  const countByRoute: Record<string, number> = {
+      '/advance': pendingAdvanceCount, '/expense': pendingExpenseCount, '/leave': pendingLeaveCount,
+      '/visiting_card': pendingCardCount, '/courier': pendingCourierCount, '/tasks': pendingTaskCount,
+      '/sales': salesFollowUpCount, '/installation': todayInstallCount, '/demo': todayDemoCount,
+      '/service_call': pendingServiceCount, '/pms_schedule': pmsDueCount,
+      '/orders': pendingOrderCount, '/payment_collection': todayPaymentCount, '/payment_duelist': pendingDueCount,
   };
-  
-  const sidebarItems = [
-      { id: '999', title: 'Super Admin Panel', icon: 'globe', route: '/superadmin/super_admin', module: 'superadmin_only' },      
-      { id: '1', title: 'Serial Number', icon: 'pricetag', route: '/serial_number', module: 'asset_history' }, 
-      { id: '7', title: 'Attendance Report', icon: 'person', route: '/attendance', module: 'attendance' },
-      { id: '5', title: 'Spare Part Book', icon: 'book', route: '/spare_parts', module: 'spares' },
-      { id: '100', title: 'Product Master', icon: 'cube', route: '/product_master', module: 'catalogs' },
-      { id: '96', title: 'Personal Notes', icon: 'journal', route: '/personal_notes', module: 'personal_notes' },
-      { id: '99', title: 'Sales Calculation', icon: 'calculator', route: '/sales_team_report', module: 'sales_team_report' },
-      { id: '93', title: 'Activity Timeline', icon: 'time', route: '/employee_timeline', module: 'users' },
-      { id: '103', title: 'Messaging Center', icon: 'chatbubbles', route: '/messaging_center', module: 'company_profile' },
-      { id: '91', title: 'Payroll', icon: 'cash', route: '/payroll', module: 'payroll' },
-      { id: '92', title: 'Admin Control', icon: 'settings', route: '/manage_team', module: 'users' },
-      { id: '101', title: 'Automation Settings', icon: 'chatbubbles', route: '/automation_settings', module: 'company_profile' },
-      { id: '90', title: 'Company Profile', icon: 'business', route: '/company_profile', module: 'company_profile' },
-      { id: '102', title: 'Help & Support', icon: 'help-circle', route: '/help_support', module: 'common' },       
-  ];
-
-  const allHrItems = [
-      { title: "Attendance", icon: "finger-print", color: "#4caf50", route: '/dayin', module: 'attendance' },
-      { title: "Travel Log", icon: "bicycle", color: "#ff9800", route: '/travel', module: 'travel' },
-      { title: "Advance", icon: "wallet", color: "#9c27b0", route: '/advance', count: pendingAdvanceCount, module: 'advance' },
-      { title: "Expenses", icon: "receipt", color: "#f44336", route: '/expense', count: pendingExpenseCount, module: 'expenses' },
-      { title: "Leaves", icon: "calendar", color: "#2196f3", route: '/leave', module: 'leave', count: pendingLeaveCount },
-      { title: "Cards", icon: "card", color: "#795548", route: '/visiting_card', module: 'common', count: pendingCardCount }, 
-      { title: "Courier", icon: "cube", color: "#e67e22", route: '/courier', count: pendingCourierCount, module: 'courier' },
-      { title: "Task List", icon: "checkbox", color: "#e91e63", route: '/tasks', count: pendingTaskCount, module: 'dashboard' }, 
-  ];
-
-  const allActivityItems = [
-      { title: "Visits DSR", icon: "briefcase", color: "#3b5998", route: '/sales', count: salesFollowUpCount, module: 'visits' },
-      { title: "Installation", icon: "construct", color: "#795548", route: '/installation', count: todayInstallCount, module: 'installation' },
-      { title: "Demo Report", icon: "play-circle", color: "#00bcd4", route: '/demo', count: todayDemoCount, module: 'demos' },
-      { title: "Service Call", icon: "settings", color: "#607d8b", route: '/service_call', count: pendingServiceCount, module: 'tickets' }, 
-      { title: "PMS Report", icon: "shield-checkmark", color: "#4caf50", route: '/pms_schedule', count: pmsDueCount, module: 'pms' },
-      { title: "Service Analysis", icon: "pie-chart", color: "#673ab7", route: '/service_analysis', module: 'service_reports' },
-      { title: "Quotations", icon: "document-text", color: "#1565c0", route: '/quotations', module: 'quotations' },
-      { title: "Project Report", icon: "business", color: "#607d8b", route: '/projects', module: 'organizations' } 
-  ];
-  
-  const allSalesItems = [
-      { title: "Order Booking", icon: "cart", color: "#ff9800", route: '/orders', count: pendingOrderCount, module: 'orders' },
-      { title: "Dashboard", icon: "stats-chart", color: "#4caf50", route: '/sales_analysis', module: 'sales_analysis' },
-      { title: "Collect Payment", icon: "cash", color: "#27ae60", route: '/payment_collection', count: todayPaymentCount, module: 'payment_coll' },
-      { title: "Pending Dues", icon: "time", color: "#c0392b", route: '/payment_duelist', count: pendingDueCount, module: 'payment_due' },
-  ];
-
-  const filterItems = (items: any[]) => {
-    return items.filter(i => {
-        if (i.module === 'superadmin_only') return currentUser?.role === 'SuperAdmin';
-        return canSee(i.module);
-    });
-  };
+  const withCounts = (items: typeof HR_ITEMS) => items.map((i) => ({ ...i, count: countByRoute[i.route] }));
+  const allHrItems = withCounts(HR_ITEMS);
+  const allActivityItems = withCounts(ACTIVITY_ITEMS);
+  const allSalesItems = withCounts(SALES_ITEMS);
+  const sidebarItems = SIDEBAR_ITEMS.map((i) => ({ ...i, id: i.id || i.route }));
+  const filterItems = (items: any[]) => items.filter((i) => canSee(i.module));
 
   const visibleHR = filterItems(allHrItems);
   const visibleActivity = filterItems(allActivityItems);
@@ -411,8 +299,10 @@ const saveTokenToDatabase = async (token: string) => {
 
   return (
       <View style={styles.container}>
-          <View style={styles.header}>
-              <TouchableOpacity onPress={() => setSidebarVisible(true)}><Ionicons name="menu" size={28} color="#333" /></TouchableOpacity>
+          <View style={[styles.header, { paddingTop: headerTop }]}>
+              {isDesktop
+                  ? <View style={{ width: 28 }} /> /* desktop: the menu is always on the left */
+                  : <TouchableOpacity onPress={() => setSidebarVisible(true)}><Ionicons name="menu" size={28} color="#333" /></TouchableOpacity>}
               <View style={{flexDirection:'row', alignItems:'center'}}>
                   {branding.logo ? (
                       <Image source={{ uri: branding.logo }} style={{width: 40, height: 40, resizeMode:'contain', marginRight: 10}} />
@@ -475,9 +365,9 @@ const saveTokenToDatabase = async (token: string) => {
                           </View>
                           <Ionicons name={activeSection === 'HR' ? "chevron-up" : "chevron-down"} size={20} color={activeSection === 'HR' ? "white" : "gray"} />
                       </TouchableOpacity>
-                      {activeSection === 'HR' && (
-                          <View style={styles.gridContainer}>
-                              {visibleHR.map((item, index) => <MenuItem key={index} {...item} onPress={() => router.push(item.route as any)} />)}
+                      {(isDesktop || activeSection === 'HR') && (
+                          <View style={[styles.gridContainer, isDesktop && styles.gridContainerDesktop]}>
+                              {visibleHR.map((item, index) => <MenuItem key={index} {...item} desktop={isDesktop} onPress={() => router.push(item.route as any)} />)}
                           </View>
                       )}
                   </>
@@ -492,9 +382,9 @@ const saveTokenToDatabase = async (token: string) => {
                           </View>
                           <Ionicons name={activeSection === 'Activity' ? "chevron-up" : "chevron-down"} size={20} color={activeSection === 'Activity' ? "white" : "gray"} />
                       </TouchableOpacity>
-                      {activeSection === 'Activity' && (
-                          <View style={styles.gridContainer}>
-                              {visibleActivity.map((item, index) => <MenuItem key={index} {...item} onPress={() => router.push(item.route as any)} />)}
+                      {(isDesktop || activeSection === 'Activity') && (
+                          <View style={[styles.gridContainer, isDesktop && styles.gridContainerDesktop]}>
+                              {visibleActivity.map((item, index) => <MenuItem key={index} {...item} desktop={isDesktop} onPress={() => router.push(item.route as any)} />)}
                           </View>
                       )}
                   </>
@@ -505,13 +395,13 @@ const saveTokenToDatabase = async (token: string) => {
                       <TouchableOpacity style={[styles.accordionHeader, activeSection === 'Sales' && styles.activeHeader]} onPress={() => toggleSection('Sales')}>
                           <View style={{flexDirection:'row', alignItems:'center'}}>
                               <Ionicons name="bar-chart" size={24} color={activeSection === 'Sales' ? "white" : "#333"} />
-                              <Text style={[styles.sectionTitle, activeSection === 'Sales' && {color:'white'}]}> Sales Analysis</Text>
+                              <Text style={[styles.sectionTitle, activeSection === 'Sales' && {color:'white'}]}> Sales</Text>
                           </View>
                           <Ionicons name={activeSection === 'Sales' ? "chevron-up" : "chevron-down"} size={20} color={activeSection === 'Sales' ? "white" : "gray"} />
                       </TouchableOpacity>
-                      {activeSection === 'Sales' && (
-                          <View style={styles.gridContainer}>
-                              {visibleSales.map((item, index) => <MenuItem key={index} {...item} onPress={() => router.push(item.route as any)} />)}
+                      {(isDesktop || activeSection === 'Sales') && (
+                          <View style={[styles.gridContainer, isDesktop && styles.gridContainerDesktop]}>
+                              {visibleSales.map((item, index) => <MenuItem key={index} {...item} desktop={isDesktop} onPress={() => router.push(item.route as any)} />)}
                           </View>
                       )}
                   </>
@@ -520,7 +410,7 @@ const saveTokenToDatabase = async (token: string) => {
 
           <Modal visible={sidebarVisible} transparent={true} animationType="slide">
               <View style={styles.modalOverlay}>
-                  <View style={styles.sidebarContainer}>
+                  <View style={[styles.sidebarContainer, { paddingTop: headerTop }]}>
                       <View style={styles.sidebarHeader}>
                           <TouchableOpacity onPress={() => { setSidebarVisible(false); router.push('/profile'); }}>
                               <View style={styles.sidebarAvatar}>
@@ -581,8 +471,8 @@ const saveTokenToDatabase = async (token: string) => {
   );
 }
 
-const MenuItem = ({ title, icon, color, onPress, count }: any) => (
-  <TouchableOpacity style={styles.menuItem} onPress={onPress}>
+const MenuItem = ({ title, icon, color, onPress, count, desktop }: any) => (
+  <TouchableOpacity style={[styles.menuItem, desktop && styles.menuItemDesktop]} onPress={onPress}>
       <View style={[styles.iconCircle, {backgroundColor: color}]}>
           <Ionicons name={icon} size={24} color="white" />
           {count > 0 && <View style={styles.menuBadge}><Text style={styles.menuBadgeText}>{count}</Text></View>}
@@ -593,7 +483,7 @@ const MenuItem = ({ title, icon, color, onPress, count }: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 15 : 50, backgroundColor: 'white', elevation: 4 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, paddingBottom: 12, backgroundColor: 'white', elevation: 4 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
   headerAvatar: { width: 35, height: 35, borderRadius: 20, backgroundColor:'#3b5998', justifyContent:'center', alignItems:'center', overflow:'hidden' },
   bellBtn: { marginRight: 15, position: 'relative' },
@@ -610,16 +500,19 @@ const styles = StyleSheet.create({
       paddingHorizontal: 4 
   },
   badgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
-  scrollContent: { padding: 15, paddingBottom: 150, flexGrow: 1 }, 
-  dashboardBanner: { backgroundColor: '#3b5998', borderRadius: 12, padding: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, elevation: 4 },
+  scrollContent: { padding: 12, paddingBottom: 150, flexGrow: 1, paddingTop: 10 }, 
+  dashboardBanner: { backgroundColor: '#3b5998', borderRadius: 12, padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2, elevation: 4 },
   bannerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },
   bannerSub: { color: '#e3f2fd', fontSize: 12, marginTop: 4 },
-  accordionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'white', padding: 15, borderRadius: 10, marginTop: 10, elevation: 2 },
+  accordionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'white', padding: 13, borderRadius: 10, marginTop: 8, elevation: 2 },
   activeHeader: { backgroundColor: '#3b5998' }, 
   sectionTitle: { fontSize: 16, fontWeight: 'bold', marginLeft: 10, color: '#333' },
-  gridContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-start', backgroundColor:'#f9f9f9', padding: 10, borderBottomLeftRadius:10, borderBottomRightRadius:10, marginBottom:0 },
-  menuItem: { width: '31%', alignItems: 'center', marginBottom: 5, marginRight: '2%' },
-  iconCircle: { width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center', marginBottom: 8, elevation: 2, position:'relative' },
+  // Phone: 3 tiles per row; a short last row is centred so 4, 7 or 8 tiles still look even.
+  gridContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', backgroundColor:'#f9f9f9', padding: 10, borderBottomLeftRadius:10, borderBottomRightRadius:10, marginBottom:0, paddingTop: 10, paddingBottom: 2 },
+  menuItem: { width: '31%', alignItems: 'center', marginBottom: 4, marginHorizontal: '1%' },
+  gridContainerDesktop: { justifyContent: 'flex-start' },
+  menuItemDesktop: { width: 100, marginHorizontal: 0, marginRight: 8, marginBottom: 10 },
+  iconCircle: { width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center', marginBottom: 6, elevation: 2, position:'relative' },
   menuText: { fontSize: 11, color: '#333', textAlign: 'center', fontWeight:'600', height: 30 },
   menuBadge: { 
       position: 'absolute', 
@@ -637,7 +530,7 @@ const styles = StyleSheet.create({
   },
   menuBadgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
   modalOverlay: { flex: 1, flexDirection: 'row' },
-  sidebarContainer: { width: '75%', backgroundColor: 'white', padding: 20, paddingTop: 50, elevation: 5, justifyContent: 'space-between' },
+  sidebarContainer: { width: '75%', backgroundColor: 'white', padding: 20, elevation: 5, justifyContent: 'space-between' },
   modalTransparent: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
   sidebarHeader: { alignItems: 'center', marginBottom: 20, borderBottomWidth: 1, borderBottomColor: '#eee', paddingBottom: 20 },
   sidebarAvatar: { width: 70, height: 70, borderRadius: 35, backgroundColor:'#3b5998', justifyContent:'center', alignItems:'center', marginBottom: 10, overflow:'hidden' },

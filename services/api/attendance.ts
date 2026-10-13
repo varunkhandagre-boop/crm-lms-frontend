@@ -161,3 +161,9 @@ export async function dayOut(
   const res = await apiClient.patch<OneResponse<any>>(`/attendance/${attendanceId}`, payload);
   return { success: true, record: toLegacyAttendance(res.data) };
 }
+
+// Weekly off + shift: company default and each visible employee's resolved schedule.
+export async function fetchWorkSchedules(): Promise<{ company: import('../../utils/workSchedule').WorkSchedule; byUser: Record<string, import('../../utils/workSchedule').WorkSchedule> }> {
+  const res = await apiClient.get<{ data: any }>('/attendance/schedules');
+  return res.data;
+}

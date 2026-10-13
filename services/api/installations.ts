@@ -17,11 +17,14 @@ export interface ApiInstallation {
   serialNo: string;
   warrantyExpiry: string | null;
   note: string | null;
+  photoUrl?: string | null;
   status: string;
   date: string;
   location: { latitude: number; longitude: number } | null;
   createdById: string;
   createdAt: string;
+  /** List endpoint only. */
+  createdBy?: { name: string } | null;
   updatedAt: string;
 }
 
@@ -58,13 +61,15 @@ export function toLegacyInstallation(i: ApiInstallation): any {
     serialNo: i.serialNo,
     warrantyExpiry: i.warrantyExpiry ? i.warrantyExpiry.split('T')[0] : '',
     note: i.note || '',
+    photoUrl: i.photoUrl || null,
     status: i.status,
     date: dateOnly,
     displayDate: dateOnly,
     dateIso: dateOnly,
     location: i.location,
     senderId: i.createdById,
-    senderName: undefined,
+    // Only the list sends the name; leave the key out otherwise so a merge keeps the old one.
+    ...(i.createdBy ? { senderName: i.createdBy.name } : {}),
     createdAt: i.createdAt,
   };
 }
@@ -79,6 +84,22 @@ function toQueryString(params: Record<string, any>) {
 }
 
 const INSTALLATIONS_PAGE_SIZE = 200;
+
+export interface InstallationPageFilters { fromDate?: string; toDate?: string; createdById?: string; search?: string }
+
+/** One page for the Installation screen (newest first); every filter runs on the server. */
+export async function listInstallationsPage(
+  params: InstallationPageFilters & { page: number; limit: number },
+): Promise<{ items: any[]; total: number; totalPages: number }> {
+  const res = await apiClient.get<ListResponse>(`/installations${toQueryString({ ...params, sortBy: 'createdAt', sortOrder: 'desc' })}`);
+  return { items: res.data.map(toLegacyInstallation), total: res.meta.total, totalPages: res.meta.totalPages };
+}
+
+/** Serial Number screen: search any machine of the company (every role). */
+export async function searchMachines(search: string, limit = 20): Promise<any[]> {
+  const res = await apiClient.get<ListResponse>(`/installations/machine-search${toQueryString({ search, limit, page: 1, sortBy: 'createdAt', sortOrder: 'desc' })}`);
+  return res.data.map(toLegacyInstallation);
+}
 
 export async function listInstallations(params: { search?: string } = {}): Promise<any[]> {
   const all: any[] = [];
@@ -134,4 +155,16 @@ export async function sendAmcReminder(id: string): Promise<any> {
 
 export async function deleteInstallation(id: string): Promise<void> {
   await apiClient.delete(`/installations/${id}`);
+}
+
+// applyToBatch: put the same photo on every machine of that installation report.
+export async function uploadInstallationPhoto(id: string, dataUri: string, applyToBatch = false): Promise<any> {
+  const res = await apiClient.put<OneResponse>(`/installations/${id}/photo`, { dataUri, applyToBatch });
+  return toLegacyInstallation(res.data);
+}
+
+// Removes the photo from this machine; the file is deleted once no machine uses it.
+export async function deleteInstallationPhoto(id: string): Promise<any> {
+  const res = await apiClient.delete<OneResponse>(`/installations/${id}/photo`);
+  return toLegacyInstallation(res.data);
 }

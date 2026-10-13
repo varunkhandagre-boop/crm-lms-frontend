@@ -1,5 +1,7 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
@@ -15,15 +17,16 @@ import {
     View
 } from 'react-native';
 
-// 🔥 SAAS IMPORTS (kept for parity, not used for writes anymore)
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: advances now via new backend API
 import { createAdvance } from '../services/api/advances';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddAdvanceScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
-  const { currentUser, addNotification } = useData();
+  const { currentUser } = useData();
 
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
@@ -54,15 +57,6 @@ export default function AddAdvanceScreen() {
               date: date.toISOString(),
           });
 
-          if (addNotification) {
-              await addNotification({
-                  title: "New Advance Request 💰",
-                  message: `${currentUser?.name} requested ₹${amount} advance.`,
-                  to: "Accountant",
-                  route: "/advance", 
-                  type: "warning"
-              });
-          }
 
           Alert.alert("Success", "Advance Request Sent & Admin Notified!");
           router.back();
@@ -75,9 +69,9 @@ export default function AddAdvanceScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#333" />
+            <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Request Advance</Text>
         <View style={{width:24}} /> 
@@ -103,7 +97,7 @@ export default function AddAdvanceScreen() {
                 <DateTimePicker 
                     value={date} 
                     mode="date" 
-                    onChange={(e, d) => { setShowDatePicker(false); if(d) setDate(d); }} 
+                    {...pickerHandlers((e, d) => { setShowDatePicker(false); if(d) setDate(d); })} 
                 />
             )}
 
@@ -139,13 +133,13 @@ export default function AddAdvanceScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   contentContainer: { padding: 20 },
   label: { marginBottom: 5, color:'#555', fontWeight:'600', fontSize:13, marginTop:15 },
   inputBox: { flexDirection:'row', alignItems:'center', backgroundColor: '#f9f9f9', borderWidth:1, borderColor:'#ddd', borderRadius: 8, padding: 12, fontSize:16 },
   saveBtn: { backgroundColor: '#3b5998', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 30 },
   saveBtnText: { color: 'white', fontWeight: 'bold', fontSize: 18 },
-});
+}), FORM_ACCENT.advance);

@@ -12,7 +12,7 @@ export interface ApiAdvance {
   createdAt: string;
 }
 
-function toLegacyAdvance(a: ApiAdvance): any {
+export function toLegacyAdvance(a: ApiAdvance): any {
   const dateOnly = a.date ? a.date.split('T')[0] : undefined;
   return {
     id: a.id,
@@ -68,4 +68,35 @@ export async function updateAdvanceStatus(id: string, status: 'Approved' | 'Reje
 export async function settleAdvancesForEmployee(employeeId: string): Promise<{ settledCount: number }> {
   const res = await apiClient.post<{ data: { settledCount: number } }>(`/advances/settle/${employeeId}`, {});
   return res.data;
+}
+
+export interface ClaimPageFilters {
+  createdById?: string;
+  search?: string;
+  fromDate?: string; // YYYY-MM-DD
+  toDate?: string;
+}
+
+/** One server page (newest first) + the screen's two totals for the whole filter (page 1 only). */
+export async function listAdvancesPage(
+  params: ClaimPageFilters & { page: number; limit: number },
+): Promise<{ items: any[]; total: number; totalPages: number; outstanding: number; totalAmount: number }> {
+  const res = await apiClient.get<{
+    data: ApiAdvance[];
+    meta: { total: number; totalPages: number };
+    totals?: { outstanding: number; total: number };
+  }>(`/advances${toQueryString({ ...params, newestFirst: 'true', withTotals: params.page === 1 ? 'true' : undefined })}`);
+  return {
+    items: res.data.map(toLegacyAdvance),
+    total: res.meta.total,
+    totalPages: res.meta.totalPages,
+    outstanding: res.totals?.outstanding ?? 0,
+    totalAmount: res.totals?.total ?? 0,
+  };
+}
+
+/** One record by id — for opening it from a notification when it isn't on the loaded page. */
+export async function getAdvance(id: string): Promise<any> {
+  const res = await apiClient.get<{ data: ApiAdvance }>(`/advances/${id}`);
+  return toLegacyAdvance(res.data);
 }

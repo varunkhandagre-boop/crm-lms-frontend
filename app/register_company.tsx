@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
     ActivityIndicator,
@@ -16,26 +15,24 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { auth } from '../firebaseConfig';
 
 // 🔥 SAAS IMPORTS
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 // 🔥 INDIAN STATES & DISTRICTS DATA
 import { districtPincodes, indianStatesAndDistricts } from '../constants/indianStatesData';
 
-// 🆕 PHASE 11 — Postgres backend registration (additive, non-blocking —
-// see registerCompanyOnBackend()'s comment in services/api/registration.ts)
 import { registerCompanyOnBackend } from '../services/api/registration';
 
 export default function RegisterCompanyScreen() {
     const router = useRouter();
+    // "Buy now" on the landing page opens /register_company?plan=<id>&team=<n>;
+    // both are handed to the plan screen so that plan is already selected.
+    const { plan: wantedPlan, team: wantedTeam } = useLocalSearchParams<{ plan?: string; team?: string }>();
+    const isBuying = typeof wantedPlan === 'string' && wantedPlan.length > 0;
+    const teamFromLink = typeof wantedTeam === 'string' && /^\d{1,4}$/.test(wantedTeam) && Number(wantedTeam) > 0 ? wantedTeam : '';
     const { login } = useData();
     const [loading, setLoading] = useState(false);
-
-    // 🔥 Naya SaaS Engine
-    const { addSaaSData } = useSaaSDB();
 
     // Form State
     const [stateSearchQuery, setStateSearchQuery] = useState('');
@@ -51,7 +48,7 @@ export default function RegisterCompanyScreen() {
     const [city, setCity] = useState(''); 
     const [pinCode, setPinCode] = useState('');
     const [gstNumber, setGstNumber] = useState('');
-    const [employeesCount, setEmployeesCount] = useState('10'); 
+    const [employeesCount, setEmployeesCount] = useState(teamFromLink || '10'); 
 
     // Dropdown Modal States
     const [stateModalVisible, setStateModalVisible] = useState(false);
@@ -66,137 +63,54 @@ export default function RegisterCompanyScreen() {
             return;
         }
 
+        if (password.length < 8) {
+            Alert.alert("Weak Password", "Password must be at least 8 characters.");
+            return;
+        }
+
         setLoading(true);
         try {
             const cleanEmail = email.trim().toLowerCase();
             const cleanEmpCount = employeesCount ? Number(employeesCount) : 10;
 
-            // 1. Create Auth User
-            await createUserWithEmailAndPassword(auth, cleanEmail, password);
-
-            const companyId = `COMP-${Date.now()}`;
-            
-            // 🔥 SMART 7-DAY FREE TRIAL LOGIC
-            const startDate = new Date();
-            const expiryDate = new Date();
-            expiryDate.setDate(startDate.getDate() + 7); // Aaj se exactly 7 din baad ka time
-
-            // 2. Create COMPANY Document 
-            const companyData = {
-                id: companyId, 
-                companyId: companyId, 
-                companyName: companyName,
-                ownerName: ownerName,
-                ownerEmail: cleanEmail,
-                ownerMobile: mobile,
-                address: address || "",
-                city: city,
-                pinCode: pinCode, 
-                state: state,
-                gstNumber: gstNumber || "",
-                maxEmployees: cleanEmpCount,
-                
-                // 🔥 Auto-Approve & Set Trial
-                isActive: true, // Turant chaloo ho jayega
-                plan: 'Free Trial', // Plan ka naam
-                
-                startDate: startDate.toISOString(),
-                expiryDate: expiryDate.toISOString(), // 7 din baad app band ho jayegi
-                
-                createdAt: new Date().toISOString(),
-                senderId: cleanEmail, 
-                senderName: ownerName 
-            };
-            
-            const companyRes = await addSaaSData("companies", companyData, true);
-            if (!companyRes.success) throw new Error(companyRes.error);
-
-            // 3. Create USER Document 
-            const userData = {
-                id: cleanEmail, 
-                name: ownerName,
+            // One call creates the company (7-day free trial) and its Admin user.
+            const { company } = await registerCompanyOnBackend({
+                companyName: companyName.trim(),
+                ownerName: ownerName.trim(),
                 email: cleanEmail,
-                mobile: mobile,
-                role: 'Admin', 
-                companyId: companyId, 
-                companyName: companyName,
-                createdAt: new Date().toISOString(),
-                status: 'Active',
-                senderId: cleanEmail,
-                senderName: ownerName
-            };
-            
-            const userRes = await addSaaSData("users", userData, true);
-            if (!userRes.success) throw new Error(userRes.error);
+                password,
+                mobile: mobile.trim(),
+                address: address || undefined,
+                state,
+                city,
+                pincode: pinCode || undefined,
+                gstNumber: gstNumber || undefined,
+                employeeLimit: cleanEmpCount,
+            });
+            const companyId = company.id;
 
-            // 4. CREATE DEFAULT COMPANY PROFILE 
-            const profileData = {
-                companyId: companyId,
-                companyName: companyName,
-                shortName: companyName, 
-                ownerName: ownerName,
-                email: cleanEmail,
-                mobile: mobile,
-                address: address || "",
-                city: city,
-                pinCode: pinCode,
-                state: state,
-                gstNumber: gstNumber || "",
-                createdAt: new Date().toISOString(),
-                senderId: cleanEmail,
-                senderName: ownerName
-            };
-            await addSaaSData("company_profile", profileData, true);
-
-            // 🆕 5. PHASE 11 — mirror this signup into the Postgres backend too,
-            // so SuperAdmin's panel sees the company and this login can later
-            // bridge over. Non-blocking: a failure here must NOT stop the
-            // person's actual (Firestore) registration from succeeding.
-            try {
-                await registerCompanyOnBackend({
-                    companyName,
-                    ownerName,
-                    email: cleanEmail,
-                    password,
-                    mobile,
-                    address: address || undefined,
-                    state,
-                    city,
-                    pincode: pinCode || undefined,
-                    gstNumber: gstNumber || undefined,
-                    employeeLimit: cleanEmpCount,
-                });
-            } catch (backendErr) {
-                console.warn('Backend registration failed (Firestore signup still succeeded):', backendErr);
-            }
-
-            // Establish a proper Postgres session (JWT) so SubscriptionScreen's
-            // API calls (plans list, gateway config) are authenticated — the
-            // Firestore signup alone doesn't give apiClient a token to use.
-            // Awaited BEFORE the alert below (not fired alongside it) so
-            // currentUser is guaranteed set by the time the person can tap
-            // through to SubscriptionScreen — otherwise that screen's own
-            // `currentUser ? '/' : '/login'` check could still see a stale
-            // null and bounce them to the login screen instead.
-            try {
-                await login(email, password);
-            } catch (loginErr) {
-                console.warn('Post-registration auto-login failed:', loginErr);
-            }
+            // Signed in before the alert, so the plan screen's API calls have a token.
+            await login(cleanEmail, password);
 
             // 6. Success aur direct login option
             // 🔥 LINKED TO SUBSCRIPTION: User register hote hi direct Subscription page par jayega data lekar
             Alert.alert(
-                "Registration Successful ✅", 
-                "Your organization is registered. Please select your subscription plan to proceed.", 
+                isBuying ? "Account Created ✅" : "Registration Successful ✅",
+                isBuying
+                    ? "Your company account is ready. Next, pay for your plan."
+                    : "Your organization is registered. Please select your subscription plan to proceed.",
                 [
                     { 
-                        text: "Choose Plan", 
+                        text: isBuying ? "Continue to Payment" : "Choose Plan",
                         onPress: () => {
                             // Isse companyId automatic naye screen par send ho jayegi
                             router.replace({
                                 pathname: '/SubscriptionScreen' as any,
-                                params: { companyId: companyId }
+                                params: {
+                                    companyId: companyId,
+                                    ...(typeof wantedPlan === 'string' && wantedPlan ? { planId: wantedPlan } : {}),
+                                    ...(typeof wantedTeam === 'string' && wantedTeam ? { team: wantedTeam } : {}),
+                                }
                             });
                         } 
                     }
@@ -205,9 +119,7 @@ export default function RegisterCompanyScreen() {
             );
 
         } catch (error: any) {
-            let msg = error.message;
-            if (msg.includes("email-already-in-use")) msg = "Email already registered.";
-            Alert.alert("Registration Failed", msg);
+            Alert.alert("Registration Failed", error?.message || "Could not register. Please try again.");
         }
         setLoading(false);
     };
@@ -223,8 +135,15 @@ export default function RegisterCompanyScreen() {
                     <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
                         <Ionicons name="arrow-back" size={24} color="#333" />
                     </TouchableOpacity>
-                    <Text style={styles.title}>Register Organization</Text>
+                    <Text style={styles.title}>{isBuying ? 'Create Your Account' : 'Register Organization'}</Text>
                 </View>
+
+                {isBuying && (
+                    <View style={styles.buyNote}>
+                        <Text style={styles.buyNoteTitle}>Step 1 of 2: create your company account</Text>
+                        <Text style={styles.buyNoteText}>Step 2 is payment for the plan you chose. You can start using the app right away while we confirm your payment.</Text>
+                    </View>
+                )}
 
                 <View style={styles.form}>
                     <Text style={styles.sectionHeader}>Basic Info</Text>
@@ -285,7 +204,7 @@ export default function RegisterCompanyScreen() {
                     <TextInput style={styles.input} placeholder="Max Employees (Default: 10)" keyboardType="numeric" value={employeesCount} onChangeText={setEmployeesCount} />
 
                     <TouchableOpacity style={styles.btn} onPress={handleRegister} disabled={loading}>
-                        {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Start 7-Day Free Trial</Text>}
+                        {loading ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>{isBuying ? 'Continue to Payment' : 'Start 7-Day Free Trial'}</Text>}
                     </TouchableOpacity>
                 </View>
                 <View style={{height: 50}} />
@@ -396,5 +315,8 @@ const styles = StyleSheet.create({
     modalListItem: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#f5f5f5' },
     modalListText: { fontSize: 16, color: '#333' },
     btn: { backgroundColor: '#3b5998', padding: 18, borderRadius: 10, alignItems: 'center', marginTop: 20, elevation: 2 },
-    btnText: { color: 'white', fontSize: 18, fontWeight: 'bold' }
+    btnText: { color: 'white', fontSize: 18, fontWeight: 'bold' },
+    buyNote: { backgroundColor: '#EEF3FB', borderColor: '#C9D6EE', borderWidth: 1, borderRadius: 10, padding: 14, marginBottom: 16 },
+    buyNoteTitle: { fontSize: 15, fontWeight: 'bold', color: '#3b5998' },
+    buyNoteText: { fontSize: 14, color: '#555', marginTop: 4, lineHeight: 20 }
 });

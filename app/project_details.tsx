@@ -1,5 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
+import { saveAndShareFile } from '../utils/saveFile';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -19,8 +21,6 @@ import {
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
-// 🔥 SAAS IMPORTS (kept for isDbLoading UX only)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 5: projects + expenses/payments/items now via new backend API
 import {
@@ -37,6 +37,7 @@ import {
     listProjectPayments,
     updateProject,
 } from '../services/api/projects';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 const CloseButton = ({onPress}: any) => (
     <TouchableOpacity onPress={onPress}>
@@ -52,6 +53,7 @@ const DetailRow = ({label, value}:any) => (
 );
 
 export default function ProjectDetailsScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   const params = useLocalSearchParams();
   
@@ -59,7 +61,6 @@ export default function ProjectDetailsScreen() {
   const id = Array.isArray(rawId) ? rawId[0] : rawId; 
 
   const { currentUser } = useData();
-  const { isDbLoading } = useSaaSDB();
 
   const [project, setProject] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<'Overview' | 'Expenses' | 'Order'>('Overview'); 
@@ -166,11 +167,7 @@ export default function ProjectDetailsScreen() {
           });
 
           const fileName = `${project.name.replace(/\s+/g, '_')}_Report.csv`;
-          const dir = (FileSystem as any).cacheDirectory;
-          const fileUri = dir + fileName;
-
-          await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: 'utf8' });
-          if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(fileUri);
+          await saveAndShareFile({ content: csvContent, fileName, mimeType: 'text/csv' });
       } catch (error: any) {
           Alert.alert("Note", "File generated but sharing failed.");
       }
@@ -398,7 +395,7 @@ export default function ProjectDetailsScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={{flexDirection:'row', alignItems:'center'}}>
             <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="white" /></TouchableOpacity>
             <View style={{marginLeft:15}}>
@@ -415,7 +412,7 @@ export default function ProjectDetailsScreen() {
       </View>
 
       <View style={styles.searchBar}>
-          {isDbLoading ? <ActivityIndicator size="small" color="#1565c0" /> : <Ionicons name="search" size={20} color="gray" />}
+          {<Ionicons name="search" size={20} color="gray" />}
           <TextInput style={{flex:1, marginLeft:10}} placeholder="Search..." value={searchText} onChangeText={setSearchText} />
           {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={18} color="gray" /></TouchableOpacity>}
       </View>
@@ -475,7 +472,7 @@ export default function ProjectDetailsScreen() {
                   <View style={{flexDirection:'row', justifyContent:'space-between'}}><Text style={styles.modalTitle}>Mark Delivered</Text><CloseButton onPress={()=>setDeliveryModalVisible(false)}/></View>
                   <TextInput style={styles.input} placeholder="Delivery Mode (Courier/Hand)" value={deliveryMode} onChangeText={setDeliveryMode} />
                   <TouchableOpacity style={styles.input} onPress={()=>setShowDatePicker(true)}><Text>{deliveryDate.toLocaleDateString()}</Text></TouchableOpacity>
-                  {showDatePicker && <DateTimePicker value={deliveryDate} mode="date" onChange={(e,d)=>{setShowDatePicker(false);if(d)setDeliveryDate(d)}} />}
+                  {showDatePicker && <DateTimePicker value={deliveryDate} mode="date" {...pickerHandlers((e,d)=>{setShowDatePicker(false);if(d)setDeliveryDate(d)})} />}
                   <TouchableOpacity onPress={confirmDelivery} style={[styles.saveBtn, {backgroundColor:'#4caf50'}]} disabled={isSaving}><Text style={{color:'white'}}>Confirm</Text></TouchableOpacity>
               </View>
           </View>
@@ -550,7 +547,7 @@ export default function ProjectDetailsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   center: { flex:1, justifyContent:'center', alignItems:'center' },
-  header: { flexDirection: 'row', alignItems: 'center', padding: 15, backgroundColor: '#1565c0', paddingTop: 50, elevation: 4 },
+  header: { flexDirection: 'row', alignItems: 'center', padding: 15, backgroundColor: '#1565c0', elevation: 4 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: 'white' },
   headerSub: { fontSize: 12, color: '#bbdefb' },
   headerContact: { fontSize: 11, color: '#bbdefb', fontWeight: 'bold' },

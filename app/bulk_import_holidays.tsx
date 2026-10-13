@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
+import { saveAndShareFile } from '../utils/saveFile';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import { readFileBase64 } from '../utils/readFileBase64';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import React, { useState } from 'react';
@@ -17,6 +19,8 @@ import {
 import * as XLSX from 'xlsx';
 
 import { BulkHolidayPreviewItem, BulkHolidayRow, commitBulkHolidayImport, previewBulkHolidayImport } from '../services/api/holidays';
+import { cellDate } from '../utils/excelImport';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 const TEMPLATE_COLUMNS = ['Holiday Name', 'Date'];
 
@@ -27,6 +31,7 @@ const SAMPLE_ROWS = [
 ];
 
 export default function BulkImportHolidaysScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
 
   const [step, setStep] = useState<'start' | 'preview' | 'done'>('start');
@@ -41,13 +46,7 @@ export default function BulkImportHolidaysScreen() {
       XLSX.utils.book_append_sheet(wb, ws, 'Holidays');
 
       const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-      const uri = FileSystem.cacheDirectory + 'Holiday_Import_Template.xlsx';
-      await FileSystem.writeAsStringAsync(uri, wbout, { encoding: FileSystem.EncodingType.Base64 });
-
-      await Sharing.shareAsync(uri, {
-        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        dialogTitle: 'Download Holiday Import Template',
-      });
+      await saveAndShareFile({ content: wbout, base64: true, fileName: 'Holiday_Import_Template.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle: 'Download Holiday Import Template' });
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Could not generate template.');
     }
@@ -67,7 +66,7 @@ export default function BulkImportHolidaysScreen() {
 
       setLoading(true);
       const fileUri = result.assets[0].uri;
-      const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
+      const base64 = await readFileBase64(fileUri);
       const wb = XLSX.read(base64, { type: 'base64' });
       const sheetName = wb.SheetNames[0];
       const rawRows: any[] = XLSX.utils.sheet_to_json(wb.Sheets[sheetName]);
@@ -80,17 +79,8 @@ export default function BulkImportHolidaysScreen() {
 
       const rows: BulkHolidayRow[] = rawRows
         .filter((r) => r['Holiday Name'] && r['Date'])
-        .map((r) => {
-          let dateStr = r['Date'];
-          // Excel sometimes gives a JS Date object or a serial number for
-          // date cells depending on formatting — normalize to YYYY-MM-DD.
-          if (dateStr instanceof Date) {
-            dateStr = dateStr.toISOString().split('T')[0];
-          } else {
-            dateStr = String(dateStr).trim();
-          }
-          return { name: String(r['Holiday Name']).trim(), date: dateStr };
-        });
+        // Excel date cells arrive as day numbers; typed dates as 26/01/2027 etc. — all become YYYY-MM-DD.
+        .map((r) => ({ name: String(r['Holiday Name']).trim(), date: cellDate(r['Date']) || String(r['Date']).trim() }));
 
       if (rows.length === 0) {
         Alert.alert('No Valid Rows', 'Every row is missing a Holiday Name or Date — nothing to import.');
@@ -127,7 +117,7 @@ export default function BulkImportHolidaysScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
@@ -228,7 +218,7 @@ export default function BulkImportHolidaysScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { backgroundColor: '#3b5998', paddingTop: 50, padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 4 },
+  header: { backgroundColor: '#3b5998', padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 4 },
   headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },
   content: { padding: 20 },
   loadingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255,255,255,0.7)', justifyContent: 'center', alignItems: 'center', zIndex: 10 },

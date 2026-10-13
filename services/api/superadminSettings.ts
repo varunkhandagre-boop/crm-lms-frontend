@@ -34,7 +34,7 @@ export interface GatewaySettings {
     isTestMode: boolean;
     provider?: string;
     keyId: string;
-    keySecret: string;      // masked ("••••••••") when read back from GET
+    keySecret?: string;     // masked ("••••••••") when read back from GET; omit on save to keep the saved one
     webhookSecret?: string; // masked when read back from GET, may be empty
     currency: string;
     companyName: string;

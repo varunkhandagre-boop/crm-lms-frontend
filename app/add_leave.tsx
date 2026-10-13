@@ -1,5 +1,7 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -20,13 +22,18 @@ import {
 import { useData } from './context/DataContext';
 
 // 🔥 Phase 7: leaves now go to Postgres via this adapter instead of addSaaSData("leaves", ...)
-import { applyLeave } from '../services/api/leaves';
+import { applyLeave, fetchLeaves, fetchLeaveSummary, leaveBucket } from '../services/api/leaves';
+import { useWorkSchedules } from '../hooks/useWorkSchedules';
+import { isOffDay, localYmd } from '../utils/workSchedule';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddLeaveScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   // 🔥 1. Context se Current User aur Notification Engine nikala
-  const { currentUser, addNotification } = useData();
+  const { currentUser } = useData();
+  const { forUser: scheduleFor } = useWorkSchedules(currentUser?.companyId, currentUser?.id);
 
   // States
   const [fromDate, setFromDate] = useState(new Date());
@@ -42,6 +49,40 @@ export default function AddLeaveScreen() {
 
   // Modal
   const [modalVisible, setModalVisible] = useState(false);
+
+  // Leave balance for this FY (server-computed) and days already waiting for approval
+  const [balanceInfo, setBalanceInfo] = useState<Awaited<ReturnType<typeof fetchLeaveSummary>> | null>(null);
+  const [pendingDays, setPendingDays] = useState(0);
+  const [pendingList, setPendingList] = useState<any[]>([]);
+  const [halfDay, setHalfDay] = useState(false);
+  const policy = balanceInfo?.policy;
+  useEffect(() => {
+      let cancelled = false;
+      Promise.all([fetchLeaveSummary(), fetchLeaves({ status: 'Pending' })])
+          .then(([summary, pending]) => {
+              if (cancelled) return;
+              setBalanceInfo(summary);
+              setPendingDays(pending.reduce((n, l) => n + (parseFloat(l.days) || 0), 0));
+              setPendingList(pending);
+          })
+          .catch(() => {}); // the form still works without the balance
+      return () => { cancelled = true; };
+  }, []);
+
+  const requested = parseFloat(days) || 0;
+  // Leave Policy on: the balance of the selected type (CL / SL / EL / Comp Off);
+  // LWP and "paid, no balance" types never warn.
+  const bucket = policy?.enabled && type !== 'Select Leave Type' ? leaveBucket(type, policy.otherTypesMode) : null;
+  const typedBalance = bucket ? balanceInfo?.balances?.find((b) => b.type === bucket) : undefined;
+  const pendingSameBucket = bucket && policy
+      ? pendingList.filter((l) => leaveBucket(l.type, policy.otherTypesMode) === bucket).reduce((n, l) => n + (parseFloat(l.days) || 0), 0)
+      : 0;
+  const available = policy?.enabled
+      ? (typedBalance ? Math.max(0, typedBalance.balance - pendingSameBucket) : null)
+      : balanceInfo ? Math.max(0, balanceInfo.balance - pendingDays) : null;
+  const overBy = available !== null && type !== 'Leave Without Pay' ? Math.max(0, requested - available) : 0;
+  const sameDay = localYmd(fromDate) === localYmd(toDate);
+  const canHalfDay = !!policy?.halfDayAllowed && sameDay;
   
   const leaveTypes = [
       "Compensatory Off", "Leave Without Pay", "Sick Leave", 
@@ -66,15 +107,20 @@ export default function AddLeaveScreen() {
         const diffTime = end.getTime() - start.getTime();
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
         
-        const total = diffDays + 1; // Include start date
-
-        if(total > 0) {
-            setDays(total.toString());
-        } else {
-            setDays('Invalid'); // End date before Start date
+        let total = diffDays + 1; // Include start date
+        if (total > 0 && policy && !policy.countOffDays) {
+            // Weekly offs don't count (holidays are also left out when saved)
+            const sched = scheduleFor(currentUser?.id);
+            total = 0;
+            for (let t = new Date(start); t <= end; t.setDate(t.getDate() + 1)) {
+                if (!isOffDay(localYmd(t), sched)) total++;
+            }
         }
+        if (diffDays + 1 <= 0) setDays('Invalid'); // End date before Start date
+        else if (halfDay && canHalfDay) setDays(total > 0 ? '0.5' : '0');
+        else setDays(total.toString());
     }
-  }, [fromDate, toDate]);
+  }, [fromDate, toDate, halfDay, canHalfDay, policy, scheduleFor, currentUser?.id]);
 
   // 🔥 3. SAAS SAVE LOGIC (Phase 7: now calls the Postgres API adapter directly)
   const handleSave = async () => {
@@ -82,9 +128,23 @@ export default function AddLeaveScreen() {
           Alert.alert("Missing Fields", "Please select Type and enter Reason.");
           return;
       }
-      if (days === 'Invalid' || parseInt(days) <= 0) {
+      if (days === 'Invalid' || requested <= 0) {
           Alert.alert("Invalid Dates", "To Date must be same or after From Date.");
           return;
+      }
+      if (overBy > 0) {
+          const ok = await new Promise<boolean>((resolve) =>
+              Alert.alert(
+                  "More than your balance",
+                  `You have ${available} day(s) available but are applying for ${requested}. The extra ${overBy} day(s) may be treated as Leave Without Pay.`,
+                  [
+                      { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+                      { text: "Apply anyway", onPress: () => resolve(true) },
+                  ],
+                  { cancelable: true, onDismiss: () => resolve(false) }
+              )
+          );
+          if (!ok) return;
       }
 
       setLoading(true);
@@ -93,23 +153,16 @@ export default function AddLeaveScreen() {
           // user_id and role from the authenticated request; it also recalculates `days`
           // server-side, so this is treated as a display-only echo of the local calc.
           const result = await applyLeave({
-              fromDate: fromDate.toISOString().split('T')[0],
-              toDate: toDate.toISOString().split('T')[0],
+              // Local calendar date — toISOString() is UTC and gave the previous
+              // day for leaves applied between midnight and 5:30 AM IST.
+              fromDate: localYmd(fromDate),
+              toDate: localYmd(toDate),
               type: type,
               reason: reason,
+              halfDay: halfDay && canHalfDay,
           });
           
           if (result.success) {
-              // 🔥 5. REAL PUSH NOTIFICATION
-              if (addNotification) {
-                  await addNotification({
-                      title: "New Leave Application 📅",
-                      message: `${currentUser?.name} applied for ${days} day(s) leave (${type}).`,
-                      to: "Admin", // Manager ya HR ko bhi set kar sakte hain future me
-                      route: "/leave",
-                      type: "alert" // High priority
-                  });
-              }
 
               Alert.alert("Success", `Applied for ${days} Day(s) Leave & Admin Notified!`);
               router.back();
@@ -126,9 +179,9 @@ export default function AddLeaveScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <TouchableOpacity onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#333" />
+            <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>New Leave Application</Text>
         <View style={{width:24}} /> 
@@ -140,6 +193,36 @@ export default function AddLeaveScreen() {
       >
         <ScrollView contentContainerStyle={{padding: 20, paddingBottom: 100}} keyboardShouldPersistTaps="handled">
             
+            {/* Leave balance */}
+            {balanceInfo && (
+                <View style={styles.balanceCard}>
+                    {policy?.enabled && balanceInfo.balances ? (
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.balanceLabel}>Leave balance ({balanceInfo.fyLabel})</Text>
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                                {balanceInfo.balances.map((b) => (
+                                    <View key={b.type} style={[styles.typeChip, bucket === b.type && styles.typeChipOn]}>
+                                        <Text style={[styles.typeChipText, bucket === b.type && { color: '#fff' }]}>{b.type === 'COMP' ? 'Comp Off' : b.type} {b.balance}</Text>
+                                    </View>
+                                ))}
+                            </View>
+                            {available !== null && <Text style={styles.balanceSub}>{type}: {available} day(s) available{pendingSameBucket ? ` (${pendingSameBucket} pending)` : ''}</Text>}
+                        </View>
+                    ) : (
+                    <>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.balanceLabel}>Leave balance ({balanceInfo.fyLabel})</Text>
+                        <Text style={styles.balanceValue}>{available} <Text style={{ fontSize: 13, fontWeight: 'normal' }}>day(s) available</Text></Text>
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={styles.balanceSub}>Used: {balanceInfo.used}</Text>
+                        {pendingDays > 0 && <Text style={styles.balanceSub}>Pending approval: {pendingDays}</Text>}
+                    </View>
+                    </>
+                    )}
+                </View>
+            )}
+
             {/* Type Dropdown */}
             <Text style={styles.label}>Leave Type <Text style={{color:'red'}}>*</Text></Text>
             <TouchableOpacity style={styles.inputBox} onPress={() => setModalVisible(true)}>
@@ -158,7 +241,7 @@ export default function AddLeaveScreen() {
                     {showFromPicker && (
                         <DateTimePicker 
                             value={fromDate} mode="date" 
-                            onChange={(e, d) => { setShowFromPicker(false); if(d) setFromDate(d); }} 
+                            {...pickerHandlers((e, d) => { setShowFromPicker(false); if(d) setFromDate(d); })} 
                         />
                     )}
                 </View>
@@ -171,7 +254,7 @@ export default function AddLeaveScreen() {
                     {showToPicker && (
                         <DateTimePicker 
                             value={toDate} mode="date" minimumDate={fromDate}
-                            onChange={(e, d) => { setShowToPicker(false); if(d) setToDate(d); }} 
+                            {...pickerHandlers((e, d) => { setShowToPicker(false); if(d) setToDate(d); })} 
                         />
                     )}
                 </View>
@@ -185,6 +268,21 @@ export default function AddLeaveScreen() {
                 </Text>
                 <Text style={{fontSize:12, color:'gray'}}>Days</Text>
             </View>
+            {canHalfDay && (
+                <TouchableOpacity style={styles.halfRow} onPress={() => setHalfDay(!halfDay)}>
+                    <Ionicons name={halfDay ? 'checkbox' : 'square-outline'} size={22} color="#3b5998" />
+                    <Text style={{ marginLeft: 8, color: '#333', fontWeight: '600' }}>Half day (0.5)</Text>
+                </TouchableOpacity>
+            )}
+            {policy && !policy.countOffDays && <Text style={{ fontSize: 11, color: 'gray', marginTop: -6, marginBottom: 8 }}>Weekly offs and holidays inside the leave are not counted.</Text>}
+            {overBy > 0 && (
+                <View style={styles.overBox}>
+                    <Ionicons name="warning" size={16} color="#c62828" />
+                    <Text style={styles.overText}>
+                        {overBy} day(s) more than your balance — the extra may be Leave Without Pay.
+                    </Text>
+                </View>
+            )}
 
             {/* Reason */}
             <Text style={styles.label}>Reason <Text style={{color:'red'}}>*</Text></Text>
@@ -234,9 +332,19 @@ export default function AddLeaveScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
+  typeChip: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, backgroundColor: '#e8f5e9' },
+  typeChipOn: { backgroundColor: '#2e7d32' },
+  typeChipText: { fontSize: 12, fontWeight: 'bold', color: '#2e7d32' },
+  halfRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  balanceCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e3f2fd', borderRadius: 10, padding: 14, marginBottom: 10 },
+  balanceLabel: { fontSize: 12, color: '#1565c0', fontWeight: '600' },
+  balanceValue: { fontSize: 22, color: '#0d47a1', fontWeight: 'bold', marginTop: 2 },
+  balanceSub: { fontSize: 11, color: '#555' },
+  overBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ffebee', borderRadius: 8, padding: 10, marginTop: 8 },
+  overText: { color: '#c62828', fontSize: 12, fontWeight: 'bold', marginLeft: 6, flex: 1 },
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   contentContainer: { padding: 20 },
   label: { marginBottom: 5, color:'#555', fontWeight:'600', fontSize:13, marginTop:15 },
@@ -252,4 +360,4 @@ const styles = StyleSheet.create({
   modalItem: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#eee', flexDirection:'row', justifyContent:'space-between' },
   modalItemText: { fontSize: 16, color: '#333' },
   closeBtn: { marginTop:15, alignItems:'center', padding:10 }
-});
+}), FORM_ACCENT.leave);

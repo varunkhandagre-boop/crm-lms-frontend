@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -16,21 +16,25 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (users still Firestore, needed for employee names)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { fetchTeamMembers } from '../services/api/users';
 import { useData } from './context/DataContext';
 // 🔥 Phase 6: advances now via new backend API
-import { listAdvances, settleAdvancesForEmployee, updateAdvanceStatus } from '../services/api/advances';
+import { ClaimPageFilters, getAdvance, listAdvancesPage, settleAdvancesForEmployee, updateAdvanceStatus } from '../services/api/advances';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useServerPagedList } from '../hooks/useServerPagedList';
+import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
+import { PeriodTabs, StaffPeriodRow } from '../components/compact';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { inr, Pill, TableColumn, TableHeader, TableRow } from '../components/DesktopTable';
 
 export default function EmployeeAdvanceScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
-  const { currentUser, addNotification } = useData();
-  // 🔥 SaaS Engine kept only for isDbLoading (search-icon spinner); advances no longer go through this
-  const { isDbLoading } = useSaaSDB();
+  const { currentUser } = useData();
 
   // advanceList now comes from useCachedList below (cache-first, raw — senderName enrichment happens at filter time)
   // usersList now comes from useCachedList too (see the team-members hook further below)
@@ -51,29 +55,42 @@ export default function EmployeeAdvanceScreen() {
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('All'); 
   const [showEmployeePicker, setShowEmployeePicker] = useState(false);
 
-  const [visibleCount, setVisibleCount] = useState(20); 
 
   const canManage = ['Admin', 'Manager', 'Account', 'Accountant' ,'Hr', 'SuperAdmin'].includes(currentUser?.role || '');
 
-  useEffect(() => {
-      if (viewMode === 'Day') setVisibleCount(100); 
-      else setVisibleCount(20); 
-  }, [viewMode, currentDate, selectedEmployeeName, searchText]);
 
-  // 🔥 ADVANCES — cache-first (instant from AsyncStorage, then background
-  // refresh from the API). Cached raw — senderName enrichment happens at
-  // filter time from senderNameMap below, same pattern as expense.tsx.
-  const advancesCacheKey = buildCacheKey('advances', currentUser?.companyId);
+  // 🔥 20 per page from the server: date range, employee (own records only for
+  // field staff — enforced by the server), search, and both totals for the filter.
+  const debouncedSearch = useDebounced(searchText.trim());
+  const claimFilters = useMemo<ClaimPageFilters>(() => ({
+      ...periodRange(viewMode, currentDate),
+      createdById: canManage && selectedEmployeeId !== 'All' ? selectedEmployeeId : undefined,
+      search: debouncedSearch || undefined,
+  }), [viewMode, currentDate, canManage, selectedEmployeeId, debouncedSearch]);
+  const [outstandingAmount, setOutstandingAmount] = useState(0);
+  const [totalHistoryAmount, setTotalHistoryAmount] = useState(0);
+  const fetchClaimsPage = useCallback(async (p: ClaimPageFilters & { page: number; limit: number }) => {
+      const r = await listAdvancesPage(p);
+      if (p.page === 1) { setOutstandingAmount(r.outstanding); setTotalHistoryAmount(r.totalAmount); }
+      return r;
+  }, []);
+  const isDefaultView = (viewMode === 'All' || isCurrentFy(viewMode, currentDate)) && selectedEmployeeId === 'All' && !debouncedSearch;
   const {
-      data: advanceList,
-      setData: setAdvanceList,
+      items: advanceList,
+      setItems: setAdvanceList,
+      total: listTotal,
       loading: advancesLoading,
+      loadingMore: listLoadingMore,
+      hasMore: listHasMore,
+      loadMore: loadMoreList,
       refreshing: advancesRefreshing,
       refresh: refreshAdvances,
-  } = useCachedList({
-      cacheKey: advancesCacheKey,
+      error: listError,
+  } = useServerPagedList<ClaimPageFilters, any>({
+      fetchPage: fetchClaimsPage,
+      filters: claimFilters,
       enabled: !!currentUser?.companyId,
-      fetcher: listAdvances, // was: fetchSaaSData("advances")
+      cacheKey: isDefaultView ? buildCacheKey(`advances_page1_v2:${viewMode}`, currentUser?.companyId) : null,
   });
 
   // 🔥 TEAM MEMBERS — cache-first, shares the SAME 'team_members' cache key
@@ -97,17 +114,6 @@ export default function EmployeeAdvanceScreen() {
       }
   }, [usersList, canManage]);
 
-  const parseDate = (dateStr: any) => {
-      if (!dateStr) return new Date();
-      if (dateStr instanceof Date) return dateStr;
-      if (typeof dateStr === 'string' && dateStr.includes('/')) {
-          const parts = dateStr.split('/');
-          if (parts.length === 3) {
-              return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-          }
-      }
-      return new Date(dateStr);
-  };
 
   const changeDate = (dir: number) => {
       const d = new Date(currentDate);
@@ -129,65 +135,11 @@ export default function EmployeeAdvanceScreen() {
       return "All Time";
   };
 
-  // --- FILTER LOGIC — filters by senderId now, not senderName ---
-  const getFilteredData = () => {
-    let data = Array.isArray(advanceList)
-        ? advanceList.map((a: any) => ({ ...a, senderName: senderNameMap.get(a.senderId) || 'Unknown' }))
-        : [];
-
-    if (canManage) {
-        if(selectedEmployeeId !== 'All') {
-            data = data.filter((item: any) => item.senderId === selectedEmployeeId);
-        }
-    } else {
-        if(currentUser?.id) {
-            data = data.filter((item: any) => item.senderId === currentUser.id);
-        }
-    }
-
-    if (viewMode !== 'All') {
-        const targetYear = currentDate.getFullYear();
-        const targetMonth = currentDate.getMonth();
-        const targetDay = currentDate.getDate();
-
-        const fyStartYear = targetMonth >= 3 ? targetYear : targetYear - 1;
-        const fyStartDate = new Date(fyStartYear, 3, 1).getTime(); 
-        const fyEndDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999).getTime();
-
-        data = data.filter(item => {
-            if(!item.date) return false;
-            const itemDate = parseDate(item.date);
-            const itemTime = itemDate.getTime();
-            
-            if (viewMode === 'Month') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth;
-            if (viewMode === 'Day') return itemDate.getFullYear() === targetYear && itemDate.getMonth() === targetMonth && itemDate.getDate() === targetDay;
-            if (viewMode === 'FY') return itemTime >= fyStartDate && itemTime <= fyEndDate;
-            return true;
-        });
-    }
-
-    if (searchText) {
-        const term = searchText.toLowerCase();
-        data = data.filter((item: any) => {
-            const row = `${item.date} ${item.amount} ${item.reason} ${item.senderName} ${item.status}`.toLowerCase();
-            return row.includes(term);
-        });
-    }
-
-    data.sort((a: any, b: any) => parseDate(b.date).getTime() - parseDate(a.date).getTime());
-    return data;
-  };
-
-  const fullFilteredList = getFilteredData(); 
-  const renderedList = fullFilteredList.slice(0, visibleCount);
-
-  const outstandingAmount = fullFilteredList
-      .filter((item: any) => item.status === 'Approved')
-      .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
-
-  const totalHistoryAmount = fullFilteredList
-      .filter((item: any) => item.status === 'Approved' || item.status === 'Settled')
-      .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+  // Names come from the team list (the API only returns the employee id).
+  const fullFilteredList = useMemo(
+      () => advanceList.map((e: any) => ({ ...e, senderName: senderNameMap.get(e.senderId) || 'Unknown' })),
+      [advanceList, senderNameMap],
+  );
 
   // 🔥 SETTLEMENT — via new backend API bulk-settle endpoint
   const handleSettlement = async () => {
@@ -229,6 +181,21 @@ export default function EmployeeAdvanceScreen() {
       setModalVisible(true);
   };
 
+  // Opened from a notification: /advance?id=<request id> → show that request.
+  const linkParams = useLocalSearchParams<{ id?: string }>();
+  const openedFromLink = useRef<string | null>(null);
+  useEffect(() => {
+      const id = typeof linkParams.id === 'string' ? linkParams.id : undefined;
+      if (!id || openedFromLink.current === id) return;
+      openedFromLink.current = id;
+      const item = fullFilteredList.find((x: any) => x.id === id);
+      if (item) { openDetails(item); return; }
+      // Not on the loaded page (older / other filter) — fetch just that one.
+      getAdvance(id)
+          .then((rec) => openDetails({ ...rec, senderName: senderNameMap.get(rec.senderId) || 'Unknown' }))
+          .catch(() => {});
+  }, [linkParams.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [installmentAmount, setInstallmentAmount] = useState('');
 
   // 🔥 STATUS UPDATE — via new backend API
@@ -238,19 +205,10 @@ export default function EmployeeAdvanceScreen() {
           const monthlyDeductionAmount = status === 'Approved' && installmentAmount ? Number(installmentAmount) : undefined;
           await updateAdvanceStatus(selectedItem.id, status as 'Approved' | 'Rejected', monthlyDeductionAmount);
           
-          const targetUserId = selectedItem.senderId;
-          if (addNotification && targetUserId && targetUserId !== currentUser?.id) {
-              await addNotification({
-                  title: `Advance ${status}`, 
-                  message: `Your advance request of ₹${selectedItem.amount} has been ${status}.`,
-                  type: status === 'Approved' ? 'success' : 'alert',
-                  userId: targetUserId, 
-                  to: selectedItem.senderName,
-                  route: '/advance'
-              });
-          }
 
           setAdvanceList(prev => prev.map(item => item.id === selectedItem.id ? { ...item, status: status } : item));
+
+          refreshAdvances(); // totals change with the status
           setModalVisible(false);
           Alert.alert("Updated", `Request marked as ${status}`);
       } catch (error) {
@@ -259,6 +217,22 @@ export default function EmployeeAdvanceScreen() {
           setUpdatingStatus(null); 
       }
   };
+
+  // Laptop: the same list as a table (tap a row → same details popup).
+  const isDesktop = useIsDesktop();
+  const advanceStatusPill = (st: string) => {
+    if (st === 'Approved') return <Pill text={st} color="#2e7d32" bg="#e8f5e9" />;
+    if (st === 'Rejected') return <Pill text={st} color="#c62828" bg="#ffebee" />;
+    if (st === 'Settled') return <Pill text={st} color="#1565c0" bg="#e3f2fd" />;
+    return <Pill text={st || 'Pending'} color="#ef6c00" bg="#fff3e0" />;
+  };
+  const advanceColumns: TableColumn<any>[] = [
+      { key: 'date', label: 'Date', width: 100, render: (i) => i.date || '-' },
+      ...(canManage ? [{ key: 'staff', label: 'Staff', width: 170, render: (i: any) => i.senderName || '-' }] : []),
+      { key: 'amount', label: 'Amount', width: 120, align: 'right', render: (i) => inr(i.amount) },
+      { key: 'reason', label: 'Reason', flex: 3, render: (i) => i.reason || '-' },
+      { key: 'status', label: 'Status', width: 110, render: (i) => advanceStatusPill(i.status) },
+  ];
 
   const renderItem = ({ item }: any) => {
     let statusColor = '#fff3e0'; 
@@ -289,7 +263,7 @@ export default function EmployeeAdvanceScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={{flexDirection:'row', alignItems:'center'}}>
             <TouchableOpacity onPress={() => router.back()}>
                 <Ionicons name="arrow-back" size={24} color="#333" />
@@ -333,36 +307,19 @@ export default function EmployeeAdvanceScreen() {
           </View>
       </View>
 
-      <View style={{backgroundColor:'white', paddingBottom:10}}>
-          <View style={styles.tabContainer}>
-              {['Day', 'Month', 'FY', 'All'].map((m) => (
-                  <TouchableOpacity key={m} style={[styles.tab, viewMode === m && styles.activeTab]} onPress={() => setViewMode(m as any)}>
-                      <Text style={[styles.tabText, viewMode === m && styles.activeTabText]}>{m}</Text>
-                  </TouchableOpacity>
-              ))}
-          </View>
-
-          {canManage && (
-              <TouchableOpacity style={styles.employeeFilterBtn} onPress={() => setShowEmployeePicker(true)}>
-                  <Ionicons name="people" size={18} color="#2e7d32" />
-                  <Text style={{fontSize:13, marginLeft:8, color:'#2e7d32', fontWeight:'600'}}>
-                      {selectedEmployeeId === 'All' ? 'View All Staff' : selectedEmployeeName}
-                  </Text>
-                  <Ionicons name="chevron-down" size={16} color="#2e7d32" style={{marginLeft:'auto'}}/>
-              </TouchableOpacity>
-          )}
-
-          {viewMode !== 'All' && (
-              <View style={styles.dateNav}>
-                  <TouchableOpacity onPress={() => changeDate(-1)}><Ionicons name="chevron-back" size={24} color="#555" /></TouchableOpacity>
-                  <Text style={styles.monthText}>{getHeaderDate()}</Text>
-                  <TouchableOpacity onPress={() => changeDate(1)}><Ionicons name="chevron-forward" size={24} color="#555" /></TouchableOpacity>
-              </View>
-          )}
-
-          <View style={{paddingHorizontal:15}}>
+      <View style={{backgroundColor:'white', paddingBottom:6}}>
+          <PeriodTabs value={viewMode} onChange={setViewMode} />
+          <StaffPeriodRow
+              showStaff={canManage}
+              staffLabel={selectedEmployeeId === 'All' ? 'All Staff' : selectedEmployeeName}
+              onStaffPress={() => setShowEmployeePicker(true)}
+              periodLabel={viewMode !== 'All' ? getHeaderDate() : undefined}
+              onPrev={() => changeDate(-1)}
+              onNext={() => changeDate(1)}
+          />
+          <View style={{paddingHorizontal:12, marginTop:6}}>
               <View style={styles.searchBar}>
-                  {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
+                  {advancesLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={20} color="gray" />}
                   <TextInput 
                       style={styles.searchInput}
                       placeholder={canManage ? "Search Name, Amount..." : "Search Amount, Date..."}
@@ -375,21 +332,26 @@ export default function EmployeeAdvanceScreen() {
       </View>
 
       <FlatList 
-        data={renderedList}
+        data={fullFilteredList}
         keyExtractor={item => item.id}
-        renderItem={renderItem}
-        contentContainerStyle={{padding: 15, paddingBottom: 50}} 
+        renderItem={isDesktop
+            ? ({ item, index }) => <TableRow columns={advanceColumns} item={item} index={index} onPress={() => openDetails(item)} />
+            : renderItem}
+        ListHeaderComponent={isDesktop && fullFilteredList.length > 0 ? <TableHeader columns={advanceColumns} /> : null}
+        stickyHeaderIndices={isDesktop && fullFilteredList.length > 0 ? [0] : undefined}
+        contentContainerStyle={{padding: 12, paddingBottom: 50}} 
         refreshControl={
             <RefreshControl refreshing={advancesRefreshing} onRefresh={refreshAdvances} colors={['#3b5998']} tintColor="#3b5998" />
         }
         ListEmptyComponent={
-            <Text style={{textAlign:'center', marginTop:50, color:'gray'}}>{advancesLoading ? 'Loading data...' : 'No advance records found.'}</Text>
+            <Text style={{textAlign:'center', marginTop:50, color:'gray'}}>{advancesLoading ? 'Loading advances...' : listError ? 'Could not load advances — pull down to retry.' : 'No advance records found.'}</Text>
         }
         ListFooterComponent={
             <View style={{ paddingBottom: 80 }}>
-                {visibleCount < fullFilteredList.length ? (
+                {listHasMore ? (
                     <TouchableOpacity 
-                        onPress={() => setVisibleCount(prev => prev + 20)} 
+                        onPress={loadMoreList}
+                        disabled={listLoadingMore}
                         style={{
                             padding: 12, 
                             backgroundColor: '#fff', 
@@ -400,9 +362,9 @@ export default function EmployeeAdvanceScreen() {
                             borderColor: '#ddd'
                         }}
                     >
-                        <Text style={{fontWeight:'bold', color:'#3b5998'}}>
-                            👇 Load More Records ({fullFilteredList.length - visibleCount} remaining)
-                        </Text>
+                        {listLoadingMore ? <ActivityIndicator color="#3b5998" /> : (
+                            <Text style={{fontWeight:'bold', color:'#3b5998'}}>👇 Load More Records ({listTotal - fullFilteredList.length} remaining)</Text>
+                        )}
                     </TouchableOpacity>
                 ) : (
                     fullFilteredList.length > 0 ? (
@@ -512,7 +474,7 @@ const DetailRow = ({label, value, icon, highlight}: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 4 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, backgroundColor: 'white', elevation: 4 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 10 },
   addBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#3b5998', borderRadius:20, paddingHorizontal:12, paddingVertical:6 },
   
@@ -523,17 +485,9 @@ const styles = StyleSheet.create({
   settleBtn: { backgroundColor: '#2e7d32', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, marginLeft: 'auto' },
   settleText: { color: 'white', fontSize: 12, fontWeight: 'bold' },
 
-  tabContainer: { flexDirection: 'row', backgroundColor: '#e0e0e0', margin: 15, borderRadius: 8, padding: 3, marginBottom: 10 },
-  tab: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 6 },
-  activeTab: { backgroundColor: 'white', elevation: 2 },
-  tabText: { color: 'gray', fontWeight: '600', fontSize: 12 },
-  activeTabText: { color: '#3b5998', fontWeight: 'bold' },
-  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: 10, marginHorizontal: 15, borderRadius: 8, marginBottom: 10, borderWidth:1, borderColor:'#eee' },
-  monthText: { fontWeight: 'bold', color: '#3b5998', fontSize: 14 },
-  employeeFilterBtn: { flexDirection:'row', alignItems:'center', backgroundColor:'#e8f5e9', paddingHorizontal:12, paddingVertical:10, marginHorizontal:15, borderRadius:8, borderWidth:1, borderColor:'#2e7d32', marginBottom:10 },
-  searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', paddingHorizontal: 10, borderRadius: 8, alignItems: 'center', height: 40 },
+  searchBar: { flexDirection: 'row', backgroundColor: '#f0f0f0', paddingHorizontal: 10, borderRadius: 8, alignItems: 'center', height: 36 },
   searchInput: { flex: 1, marginLeft: 10, fontSize: 14, color: '#333' },
-  card: { backgroundColor: 'white', borderRadius: 10, padding: 15, marginBottom: 15, elevation: 2 },
+  card: { backgroundColor: 'white', borderRadius: 10, padding: 11, marginBottom: 8, elevation: 2 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom:5 },
   date: { fontWeight:'bold', color:'gray', fontSize:13 },
   statusBadge: { paddingHorizontal:8, paddingVertical:4, borderRadius:4 },
@@ -543,7 +497,7 @@ const styles = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
   modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 25, elevation: 5, maxHeight: '80%' },
   modalTitle: { fontSize: 20, fontWeight: 'bold', color:'#3b5998' },
-  divider: { height:1, backgroundColor:'#eee', marginVertical:10 },
+  divider: { height:1, backgroundColor:'#eee', marginVertical:7 },
   noteBox: { backgroundColor: '#f9f9f9', padding: 10, borderRadius: 5, marginTop: 2, borderLeftWidth: 3, borderLeftColor: '#3b5998' },
   actionContainer: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 25 },
   rejectBtn: { flex:1, backgroundColor: '#d32f2f', flexDirection:'row', alignItems:'center', justifyContent:'center', padding: 12, borderRadius: 8, marginRight: 10 },

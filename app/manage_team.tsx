@@ -1,5 +1,8 @@
+import { DEFAULT_ON_TABS } from '../constants/modules';
+import { DEFAULT_ROLE_PERMISSIONS } from '../constants/menuItems';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
@@ -19,11 +22,13 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { bulkSetTeamMemberStatus } from '../services/api/users';
 
 // 🔥 SAAS IMPORTS (Tracking tab still Firestore — its own turn later)
 import { useData } from './context/DataContext';
+import WorkScheduleEditor, { scheduleHasErrors } from '../components/WorkScheduleEditor';
+import { useWorkSchedules } from '../hooks/useWorkSchedules';
+import { describeSchedule, WorkSchedule } from '../utils/workSchedule';
 
 // 🔥 Phase 10: team members now live in Postgres via these adapters
 import { createTeamMember, fetchTeamMembers, LegacyTeamMember, setTeamMemberStatus, updateTeamMember } from '../services/api/users';
@@ -32,21 +37,30 @@ import { addHoliday as addHolidayApi, deleteHoliday as deleteHolidayApi, fetchHo
 // 🔥 Permissions tab — new Postgres adapter, replaces Firestore settings_permissions
 import { fetchPermissions, PermissionsBlob, savePermissions } from '../services/api/permissions';
 // 🔥 Tracking tab — new Postgres adapter, replaces Firestore location_logs
-import { fetchLocationLogs } from '../services/api/locationLogs';
+import DayRouteMap from '../components/DayRouteMap';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { useCachedObject } from '../hooks/useCachedObject';
 import { buildCacheKey } from '../utils/listCache';
+import AlertSettingsTab from '../components/AlertSettingsTab';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { permissionRoleKey, planIncludes } from '../utils/menuAccess';
+import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 export default function ManageTeamScreen() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
-    const [activeTab, setActiveTab] = useState<'Users' | 'Permissions' | 'Holidays' | 'Tracking' | 'History'>('Users'); 
+    const { currentUser } = useData();
+    const [activeTab, setActiveTab] = useState<'Users' | 'Permissions' | 'Holidays' | 'Tracking' | 'History' | 'Alerts' | 'Setup'>('Users'); 
+    // Alert settings are Admin-only (the API enforces it too).
+    const tabs = ['Users', 'Permissions', 'Holidays', 'Tracking', 'History', ...(['Admin', 'SuperAdmin'].includes(currentUser?.role || '') ? ['Alerts'] : []), 'Setup'];
     
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" backgroundColor="#2c3e50" />
             
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity 
                     onPress={() => {
                         if (router.canGoBack()) router.back();
@@ -56,14 +70,14 @@ export default function ManageTeamScreen() {
                 >
                     <Ionicons name="arrow-back" size={24} color="white" />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Admin Control</Text>
+                <Text style={styles.headerTitle}>Team & Settings</Text>
                 <View style={{width:30}}/>
             </View>
 
             <View>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{flexGrow: 1}}>
                     <View style={styles.tabContainer}>
-                        {['Users', 'Permissions', 'Holidays', 'Tracking', 'History'].map((tab) => (
+                        {tabs.map((tab) => (
                             <TouchableOpacity 
                                 key={tab} 
                                 style={[styles.tabBtn, activeTab === tab && styles.activeTabBtn]} 
@@ -84,10 +98,15 @@ export default function ManageTeamScreen() {
                 {activeTab === 'Holidays' && <HolidaysTab />}
                 {activeTab === 'Tracking' && <TrackingTab />}
                 {activeTab === 'History' && <HistoryTab />}
+                {activeTab === 'Alerts' && <AlertSettingsTab />}
+                {activeTab === 'Setup' && <SetupTab />}
             </View>
         </View>
     );
 }
+
+// Field users' designation — also decides which screens they get (sales vs service).
+const JOB_TITLES = ['Sales Executive', 'Service Engineer'];
 
 const ROLE_OPTIONS = [
     { label: "Admin", value: "ADMIN" },
@@ -101,6 +120,8 @@ const ROLE_OPTIONS = [
 const UsersTab = () => {
     const router = useRouter();
     const { currentUser } = useData();
+    // Company weekly off / shift — shown when an employee uses the default
+    const { company: companySchedule } = useWorkSchedules(currentUser?.companyId, currentUser?.id);
     const [selectedForBulk, setSelectedForBulk] = useState<Set<string>>(new Set());
     const [bulkMode, setBulkMode] = useState(false);
     
@@ -112,8 +133,10 @@ const UsersTab = () => {
     const [visibleCount, setVisibleCount] = useState(15);
 
     const [formData, setFormData] = useState({
-        name: "", email: "", mobile: "", role: "FIELD_USER",
+        name: "", email: "", mobile: "", role: "FIELD_USER", jobTitle: "Sales Executive",
         empId: "", joiningDate: "", monthlyTarget: "0", baseSalary: "0", yearlyLeaves: "18",
+        dailyVisitTarget: "", monthlyVisitTarget: "",
+        workSchedule: null as WorkSchedule | null,
         password: "",
         personalEmail: "", personalMobile: "", bloodGroup: "",
         address: "", city: "", state: "", permanentAddress: "",
@@ -143,6 +166,10 @@ const UsersTab = () => {
     const renderedUsers = users.slice(0, visibleCount);
 
     const handleSave = async () => {
+        if (formData.workSchedule && scheduleHasErrors(formData.workSchedule)) {
+            Alert.alert('Check shift time', 'Shift times must be 24-hour HH:MM, e.g. 09:30 or 18:30.');
+            return;
+        }
         if(!formData.email || !formData.name) return Alert.alert("Missing Info", "Name & Email required");
         if(!editData && !formData.password) return Alert.alert("Missing Info", "Password required for new user");
 
@@ -152,10 +179,15 @@ const UsersTab = () => {
                 const res = await updateTeamMember(editData.id, {
                     name: formData.name,
                     role: formData.role,
+                    jobTitle: formData.role === 'FIELD_USER' ? formData.jobTitle : undefined,
                     mobile: formData.mobile,
                     empId: formData.empId,
                     joiningDate: formData.joiningDate || undefined,
                     monthlyTarget: Number(formData.monthlyTarget) || undefined,
+                    // empty / 0 = no visit target (null clears it)
+                    dailyVisitTarget: Number(formData.dailyVisitTarget) || null,
+                    workSchedule: formData.workSchedule, // null = company default
+                    monthlyVisitTarget: Number(formData.monthlyVisitTarget) || null,
                     baseSalary: Number(formData.baseSalary) || undefined,
                     yearlyLeaves: Number(formData.yearlyLeaves) || undefined,
                     personalEmail: formData.personalEmail,
@@ -190,9 +222,14 @@ const UsersTab = () => {
                     password: formData.password,
                     mobile: formData.mobile,
                     role: formData.role,
+                    jobTitle: formData.role === 'FIELD_USER' ? formData.jobTitle : undefined,
                     empId: formData.empId,
                     joiningDate: formData.joiningDate || undefined,
                     monthlyTarget: Number(formData.monthlyTarget) || undefined,
+                    // empty / 0 = no visit target (null clears it)
+                    dailyVisitTarget: Number(formData.dailyVisitTarget) || null,
+                    workSchedule: formData.workSchedule, // null = company default
+                    monthlyVisitTarget: Number(formData.monthlyVisitTarget) || null,
                     baseSalary: Number(formData.baseSalary) || undefined,
                     yearlyLeaves: Number(formData.yearlyLeaves) || undefined,
                     personalEmail: formData.personalEmail,
@@ -250,8 +287,12 @@ const UsersTab = () => {
         setEditData(user);
         setFormData({
             ...user,
+            jobTitle: user.jobTitle || "Sales Executive",
             password: "",
             monthlyTarget: String(user.monthlyTarget || 0),
+            dailyVisitTarget: user.dailyVisitTarget || "",
+            workSchedule: user.workSchedule ?? null,
+            monthlyVisitTarget: user.monthlyVisitTarget || "",
             baseSalary: String(user.baseSalary || 0),
             yearlyLeaves: String(user.yearlyLeaves || 18)
         });
@@ -292,13 +333,45 @@ const handleBulkDeactivate = () => {
         setEditData(null);
         const randomId = `EMP-${new Date().getFullYear()}-${Math.floor(Math.random()*1000)}`;
         setFormData({
-            name: "", email: "", mobile: "", role: "FIELD_USER", empId: randomId, joiningDate: new Date().toISOString().split('T')[0],
+            name: "", email: "", mobile: "", role: "FIELD_USER", jobTitle: "Sales Executive", empId: randomId, joiningDate: new Date().toISOString().split('T')[0],
             password: "", city: "", monthlyTarget: "0", baseSalary: "0", yearlyLeaves: "18",
+            dailyVisitTarget: "", monthlyVisitTarget: "",
+        workSchedule: null as WorkSchedule | null,
             personalEmail: "", personalMobile: "", bloodGroup: "", address: "", state: "", permanentAddress: "",
             bankName: "", accountNo: "", ifscCode: "", aadhar: "", pan: "", assetNotes: ""
         });
         setModalVisible(true);
     };
+
+    // Laptop: the same employee list as a table (tap a row → same as the card).
+    const isDesktop = useIsDesktop();
+    const userColumns: TableColumn<any>[] = [
+        ...(bulkMode ? [{ key: 'sel', label: '', width: 36, align: 'center' as const, render: (u: any) => (
+            <Ionicons name={selectedForBulk.has(u.id) ? 'checkbox' : 'square-outline'} size={20} color="#3b5998" />
+        ) }] : []),
+        { key: 'name', label: 'Employee', flex: 2, render: (u) => <TwoLine main={u.name + (u.status === 'Disabled' ? ' (Disabled)' : '')} sub={u.empId} /> },
+        { key: 'role', label: 'Role / Title', width: 150, render: (u) => <Pill text={u.role === 'FIELD_USER' ? (u.jobTitle || 'Sales Executive') : u.role} color="#3b5998" bg="#e8eef9" /> },
+        { key: 'contact', label: 'Mobile / Email', flex: 2, render: (u) => <TwoLine main={u.mobile || '-'} sub={u.email} /> },
+        { key: 'city', label: 'City', width: 120, render: (u) => u.city || '-' },
+        { key: 'join', label: 'Joining', width: 100, render: (u) => u.joiningDate || '-' },
+        { key: 'status', label: 'Status', width: 90, render: (u) => u.status === 'Disabled'
+            ? <Pill text="Disabled" color="#c62828" bg="#ffebee" />
+            : <Pill text="Active" color="#2e7d32" bg="#e8f5e9" /> },
+        ...(!bulkMode ? [{ key: 'act', label: '', width: 110, align: 'center' as const, render: (u: any) => (
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <TouchableOpacity
+                    onPress={() => router.push({ pathname: '/employee_360', params: { id: u.id } } as any)}
+                    style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#ede7f6', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, marginRight: 10 }}
+                >
+                    <Ionicons name="analytics" size={14} color="#6a1b9a" />
+                    <Text style={{ color: '#6a1b9a', fontWeight: 'bold', fontSize: 11, marginLeft: 3 }}>360</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => handleDisable(u)}>
+                    <Ionicons name={u.status === 'Disabled' ? 'refresh-circle' : 'ban'} size={20} color={u.status === 'Disabled' ? 'green' : '#e74c3c'} />
+                </TouchableOpacity>
+            </View>
+        ) }] : []),
+    ];
 
     if(loading) return <ActivityIndicator size="large" color="#2c3e50" style={{marginTop: 50}} />;
 
@@ -322,7 +395,11 @@ const handleBulkDeactivate = () => {
                 refreshControl={
                     <RefreshControl refreshing={usersRefreshing} onRefresh={refreshUsers} colors={['#2c3e50']} tintColor="#2c3e50" />
                 }
-                renderItem={({item}) => {
+                ListHeaderComponent={isDesktop && renderedUsers.length > 0 ? <TableHeader columns={userColumns} /> : null}
+                stickyHeaderIndices={isDesktop && renderedUsers.length > 0 ? [0] : undefined}
+                renderItem={isDesktop
+                    ? ({ item, index }) => <TableRow columns={userColumns} item={item} index={index} onPress={() => bulkMode ? toggleBulkSelect(item.id) : openEdit(item)} />
+                    : ({item}) => {
                     const isDisabled = item.status === 'Disabled';
                     return (
                         <TouchableOpacity 
@@ -343,10 +420,23 @@ const handleBulkDeactivate = () => {
                                         <Text style={[styles.cardTitle, isDisabled && {color: 'gray', textDecorationLine: 'line-through'}]}>
                                             {item.name} {isDisabled && "(Disabled)"}
                                         </Text>
-                                        <Text style={styles.cardSubtitle}>{item.role} • {item.empId}</Text>
+                                        <Text style={styles.cardSubtitle}>{item.role === 'FIELD_USER' ? (item.jobTitle || 'Sales Executive') : item.role} • {item.empId}</Text>
                                     </View>
                                 </View>
-                                {!bulkMode && <Ionicons name="create-outline" size={20} color="#3b5998" />}
+                                {!bulkMode && (
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                        {/* Employee 360 — everything about this person on one screen */}
+                                        <TouchableOpacity
+                                            onPress={() => router.push({ pathname: '/employee_360', params: { id: item.id } } as any)}
+                                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 6 }}
+                                            style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#ede7f6', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, marginRight: 10 }}
+                                        >
+                                            <Ionicons name="analytics" size={15} color="#6a1b9a" />
+                                            <Text style={{ color: '#6a1b9a', fontWeight: 'bold', fontSize: 12, marginLeft: 3 }}>360</Text>
+                                        </TouchableOpacity>
+                                        <Ionicons name="create-outline" size={20} color="#3b5998" />
+                                    </View>
+                                )}
                             </View>
                             <View style={{marginTop:8, flexDirection:'row', justifyContent:'space-between', alignItems:'center'}}>
                                 <Text style={{fontSize:12, color:'#555'}}>{item.mobile} | {item.city}</Text>
@@ -426,6 +516,18 @@ const handleBulkDeactivate = () => {
                                     </TouchableOpacity>
                                 ))}
                             </View>
+                            {formData.role === 'FIELD_USER' && (
+                                <>
+                                    <Text style={styles.label}>Designation</Text>
+                                    <View style={styles.pickerRow}>
+                                        {JOB_TITLES.map(t => (
+                                            <TouchableOpacity key={t} onPress={() => setFormData({...formData, jobTitle: t})} style={[styles.roleChip, formData.jobTitle === t && styles.activeRoleChip]}>
+                                                <Text style={{fontSize:10, color: formData.jobTitle === t ? 'white' : '#333'}}>{t}</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                </>
+                            )}
 
                             <View style={styles.inputRow}>
                                 <View style={{flex:1}}><Text style={styles.label}>Emp ID</Text><TextInput style={[styles.input, {backgroundColor:'#eee'}]} value={formData.empId} editable={false} /></View>
@@ -447,6 +549,32 @@ const handleBulkDeactivate = () => {
                             <View style={styles.inputRow}>
                                 <View style={{flex:1}}><Text style={styles.label}>Target</Text><TextInput style={styles.input} value={String(formData.monthlyTarget)} onChangeText={t=>setFormData({...formData, monthlyTarget:t})} keyboardType="numeric" /></View>
                                 <View style={{flex:1}}><Text style={styles.label}>Base Salary</Text><TextInput style={styles.input} value={String(formData.baseSalary)} onChangeText={t=>setFormData({...formData, baseSalary:t})} keyboardType="numeric" /></View>
+                            </View>
+                            <View style={styles.inputRow}>
+                                <View style={{flex:1}}><Text style={styles.label}>Visits / day</Text><TextInput style={styles.input} value={String(formData.dailyVisitTarget ?? '')} onChangeText={t=>setFormData({...formData, dailyVisitTarget:t.replace(/[^0-9]/g, '')})} keyboardType="numeric" placeholder="No target" /></View>
+                                <View style={{flex:1}}><Text style={styles.label}>Visits / month</Text><TextInput style={styles.input} value={String(formData.monthlyVisitTarget ?? '')} onChangeText={t=>setFormData({...formData, monthlyVisitTarget:t.replace(/[^0-9]/g, '')})} keyboardType="numeric" placeholder="No target" /></View>
+                            </View>
+                            <View style={{ marginTop: 6, marginBottom: 10 }}>
+                                <Text style={styles.label}>Weekly off & shift</Text>
+                                <View style={{ flexDirection: 'row', gap: 8 }}>
+                                    {[{ k: 'default', t: 'Company default' }, { k: 'own', t: 'Own schedule' }].map((o) => {
+                                        const on = o.k === 'own' ? !!formData.workSchedule : !formData.workSchedule;
+                                        return (
+                                            <TouchableOpacity
+                                                key={o.k}
+                                                onPress={() => setFormData({ ...formData, workSchedule: o.k === 'own' ? (formData.workSchedule || { ...companySchedule }) : null })}
+                                                style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 14, borderWidth: 1, borderColor: on ? '#3b5998' : '#ccc', backgroundColor: on ? '#3b5998' : '#fff' }}
+                                            >
+                                                <Text style={{ color: on ? '#fff' : '#3b5998', fontWeight: '600', fontSize: 12 }}>{o.t}</Text>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </View>
+                                {formData.workSchedule ? (
+                                    <WorkScheduleEditor value={formData.workSchedule} onChange={(ws) => setFormData({ ...formData, workSchedule: ws })} />
+                                ) : (
+                                    <Text style={{ fontSize: 12, color: 'gray', marginTop: 6 }}>{describeSchedule(companySchedule)} (Payroll → Salary Rules)</Text>
+                                )}
                             </View>
                             <View style={styles.inputRow}>
                                 <View style={{flex:1}}><Text style={styles.label}>Leaves</Text><TextInput style={styles.input} value={String(formData.yearlyLeaves)} onChangeText={t=>setFormData({...formData, yearlyLeaves:t})} keyboardType="numeric" /></View>
@@ -503,7 +631,7 @@ const handleBulkDeactivate = () => {
 // 2️⃣ PERMISSIONS TAB — migrated to Postgres via permissions.ts adapter
 // ====================================================================
 const PermissionsTab = () => {
-    const { currentUser } = useData();
+    const { currentUser, companyProfile } = useData();
 
     // loading/users/permissions now come from the hooks below (cache-first for users)
     const [editMode, setEditMode] = useState<'Role' | 'User'>('Role');
@@ -512,13 +640,13 @@ const PermissionsTab = () => {
     const [selectedTarget, setSelectedTarget] = useState("Sales Executive"); 
     
     const allModules = [
-        { category: "📊 DASHBOARD & BASICS", items: [{ key: "dashboard", label: "Main Dashboard" }, { key: "calendar", label: "Calendar" }, { key: "map_view", label: "Live Map" }] },
-        { category: "📞 SALES & LEADS", items: [{ key: "leads", label: "Leads Master" }, { key: "quotations", label: "Quotations / Estimates" }, { key: "orders", label: "Order Booking" }, { key: "visits", label: "Visits" }, { key: "demos", label: "Demos" }, { key: "sales_analysis", label: "Analysis" }, { key: "catalogs", label: "Catalogs" }, { key: "sales_team_report", label: "Sales Calc" }] },
+        { category: "📊 DASHBOARD & BASICS", items: [{ key: "dashboard", label: "Main Dashboard" }, { key: "activity", label: "Activity Plan (bottom bar)" }, { key: "tasks", label: "Task List (bottom bar)" }, { key: "calendar", label: "Calendar" }, { key: "map_view", label: "Live Map" }] },
+        { category: "📞 SALES & LEADS", items: [{ key: "leads", label: "Leads & Leads Board" }, { key: "quotations", label: "Quotations / Estimates" }, { key: "orders", label: "Order Booking" }, { key: "visits", label: "Visits" }, { key: "demos", label: "Demos" }, { key: "sales_analysis", label: "Sales Trends" }, { key: "catalogs", label: "Catalogs" }, { key: "sales_team_report", label: "Team Performance" }] },
         { category: "🛠️ SERVICE & SUPPORT", items: [{ key: "tickets", label: "Service Tickets" }, { key: "service_reports", label: "Service Analysis" }, { key: "pms", label: "PMS Schedule" }, { key: "installation", label: "Installation" }, { key: "amc_cmc", label: "AMC / CMC" }, { key: "spares", label: "Spare Parts" }] },
-        { category: "📦 OPERATIONS", items: [{ key: "courier", label: "Courier" }, { key: "organizations", label: "Projects" }, { key: "asset_history", label: "Machine/OrgName Details" }, { key: "company_profile", label: "Company Profile" }] },
+        { category: "📦 OPERATIONS", items: [{ key: "courier", label: "Courier" }, { key: "organizations", label: "Projects & Organizations" }, { key: "asset_history", label: "Machine/OrgName Details" }, { key: "company_profile", label: "Company Profile, WhatsApp & Email" }] },
         { category: "💰 FINANCE", items: [{ key: "payment_due", label: "Payment Dues" }, { key: "payment_coll", label: "Collections" }, { key: "expenses", label: "Expense Claims" }, { key: "advance", label: "Advance" }, { key: "payroll", label: "Payroll" }] },
         { category: "📝 HR & TEAM", items: [{ key: "attendance", label: "Attendance" }, { key: "leave", label: "Leaves" }, { key: "travel", label: "Travel Logs" }] },
-        { category: "⚙️ ADMIN CONTROL", items: [{ key: "users", label: "Manage Users" }, { key: "settings", label: "App Settings" }] }
+        { category: "⚙️ TEAM & SETTINGS", items: [{ key: "users", label: "Team & Settings, Activity Timeline" }, { key: "settings", label: "App Settings" }] }
     ];
 
     // 🔥 TEAM MEMBERS — shares the SAME 'team_members' cache key as
@@ -559,9 +687,16 @@ const PermissionsTab = () => {
     const loading = usersLoading || permissionsLoading;
     const onRefresh = () => Promise.all([refreshUsersForPermissions(), refreshPermissions()]);
 
+    // Undefined means "never set": Activity Plan / Tasks default to ON, everything else OFF.
+    // A role Admin never saved still runs on its starting defaults — show those.
+    const roleOn = (roleKey: string, key: string) => {
+        const saved = permissions[roleKey];
+        if (saved === undefined) return DEFAULT_ON_TABS.includes(key) || (DEFAULT_ROLE_PERMISSIONS[roleKey] || []).includes(key);
+        return saved[key] === undefined ? DEFAULT_ON_TABS.includes(key) : saved[key] === true;
+    };
     const getSwitchValue = (key: string) => {
         if (editMode === 'Role') {
-            return permissions[selectedTarget]?.[key] === true;
+            return roleOn(selectedTarget, key);
         } else {
             const userSpecific = permissions[selectedTarget]?.[key];
             if (userSpecific !== undefined) {
@@ -570,9 +705,9 @@ const PermissionsTab = () => {
             const currentUserObj = users.find(u => u.id === selectedTarget || u.email === selectedTarget);
             const userRole = currentUserObj ? currentUserObj.role : null;
             if (userRole) {
-                return permissions[userRole]?.[key] === true;
+                return roleOn(permissionRoleKey(userRole), key);
             }
-            return false;
+            return DEFAULT_ON_TABS.includes(key);
         }
     };
 
@@ -581,7 +716,11 @@ const PermissionsTab = () => {
         setPermissions((prev) => {
             const newPerms = { ...prev };
             if (!newPerms[selectedTarget]) {
+                // First change for a role: save its current defaults too, or they would all switch off.
                 newPerms[selectedTarget] = {};
+                if (editMode === 'Role') {
+                    allModules.forEach((g) => g.items.forEach((m) => { newPerms[selectedTarget][m.key] = roleOn(selectedTarget, m.key); }));
+                }
             }
             newPerms[selectedTarget][key] = !currentValue;
             return newPerms;
@@ -656,7 +795,10 @@ const PermissionsTab = () => {
                     </Text>
                 )}
 
-                {allModules.map((group, index) => (
+                {allModules
+                    .map((group) => ({ ...group, items: group.items.filter((m) => planIncludes(m.key, { currentUser, companyProfile, appPermissions: null })) }))
+                    .filter((group) => group.items.length > 0)
+                    .map((group, index) => (
                     <View key={index} style={{marginBottom: 20}}>
                         <Text style={{backgroundColor: '#f0f4ff', padding: 8, fontWeight: 'bold', color: '#3b5998', borderRadius: 5, marginBottom: 5, fontSize: 13}}>{group.category}</Text>
                         {group.items.map((mod) => (
@@ -689,6 +831,41 @@ const PermissionsTab = () => {
 // ====================================================================
 // 3️⃣ HOLIDAYS TAB — unchanged, already migrated
 // ====================================================================
+// =========================================================================
+// SETUP — every Excel template / upload in one place (new company: fill all at once)
+// =========================================================================
+const SETUP_ITEMS = [
+    { title: 'Company Profile', desc: 'Name, address, GST, contact, UPI and bank details', icon: 'business-outline', route: '/bulk_import_company' },
+    { title: 'Employees', desc: 'All HR details — role, salary, targets, bank, Aadhaar, PAN, address', icon: 'people-outline', route: '/bulk_import_users' },
+    { title: 'Products / Price List', desc: 'Product, model, price, GST, catalogue link', icon: 'cube-outline', route: '/bulk_import_products' },
+    { title: 'Holidays', desc: 'Company holiday list for the year', icon: 'calendar-outline', route: '/bulk_import_holidays' },
+];
+
+const SetupTab = () => {
+    const router = useRouter();
+    return (
+        <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+            <View style={styles.setupIntro}>
+                <Ionicons name="document-text-outline" size={22} color="#2e7d32" />
+                <Text style={styles.setupIntroText}>
+                    Fill your data in Excel and upload it. Each one has a template (or your current list) to download, and shows a preview before saving.
+                </Text>
+            </View>
+            {SETUP_ITEMS.map((x, i) => (
+                <TouchableOpacity key={x.route} style={styles.setupCard} onPress={() => router.push(x.route as any)}>
+                    <View style={styles.setupNum}><Text style={{ color: 'white', fontWeight: 'bold' }}>{i + 1}</Text></View>
+                    <Ionicons name={x.icon as any} size={24} color="#3b5998" />
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                        <Text style={styles.setupTitle}>{x.title}</Text>
+                        <Text style={styles.setupDesc}>{x.desc}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color="#999" />
+                </TouchableOpacity>
+            ))}
+        </ScrollView>
+    );
+};
+
 const HolidaysTab = () => {
     const router = useRouter();
     const { currentUser } = useData();
@@ -778,7 +955,7 @@ const HolidaysTab = () => {
                         <TouchableOpacity onPress={() => setShowPicker(true)} style={[styles.input, {justifyContent:'center'}]}>
                             <Text style={{color:'#333'}}>{newHoliday.date.toDateString()}</Text>
                         </TouchableOpacity>
-                        {showPicker && <DateTimePicker value={newHoliday.date} mode="date" display="default" onChange={onDateChange} />}
+                        {showPicker && <DateTimePicker value={newHoliday.date} mode="date" display="default" {...pickerHandlers(onDateChange)} />}
                         <TextInput style={styles.input} placeholder="Occasion Name" value={newHoliday.name} onChangeText={t=>setNewHoliday({...newHoliday, name:t})} />
                         <View style={styles.pickerRow}>
                             {["Holiday", "Optional", "Event"].map(type => (
@@ -822,24 +999,10 @@ const TrackingTab = () => {
         fetcher: fetchTeamMembers,
     });
 
-    // 🔥 LOCATION LOGS — cache-first, parameterized by date + selected user
-    // (same pattern as attendance.tsx/travel.tsx). Note: for *today's* date
-    // this is live-ish tracking data that keeps changing through the day —
-    // cache still shows the last-known snapshot instantly, then refreshes
-    // in the background, same as everywhere else; the explicit refresh
-    // button below remains for an immediate manual re-check.
+    // Employee Day Map (components/DayRouteMap.tsx) loads its own data for this date + person.
     const dateQuery = `${mapDate.getFullYear()}-${String(mapDate.getMonth() + 1).padStart(2, '0')}-${String(mapDate.getDate()).padStart(2, '0')}`;
-    const locationsCacheKey = buildCacheKey(`location_logs:${dateQuery}:${selectedUserId}`, currentUser?.companyId);
-    const {
-        data: locations,
-        loading,
-        refresh: refreshLocations,
-    } = useCachedList({
-        cacheKey: locationsCacheKey,
-        enabled: !!currentUser?.companyId,
-        fetcher: () => fetchLocationLogs(dateQuery, selectedUserId),
-    });
-
+    const [refreshKey, setRefreshKey] = useState(0);
+    const refreshLocations = () => setRefreshKey((k) => k + 1);
     const onDateChange = (event: any, selectedDate?: Date) => {
         setShowDatePicker(Platform.OS === 'ios');
         if (selectedDate) setMapDate(selectedDate);
@@ -867,7 +1030,7 @@ const TrackingTab = () => {
                 </View>
 
                 {showDatePicker && (
-                    <DateTimePicker value={mapDate} mode="date" display="default" onChange={onDateChange} />
+                    <DateTimePicker value={mapDate} mode="date" display="default" {...pickerHandlers(onDateChange)} />
                 )}
 
                 <Text style={{fontSize: 10, color: 'gray', fontWeight:'bold', marginBottom:5}}>SELECT EMPLOYEE</Text>
@@ -883,74 +1046,7 @@ const TrackingTab = () => {
                 </ScrollView>
             </View>
 
-            <View style={{flex: 1}}>
-                {loading && <ActivityIndicator size="large" color="#3b5998" style={{position:'absolute', top: 20, alignSelf:'center', zIndex:10}} />}
-                
-                <MapView
-                    style={{flex: 1}}
-                    provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined} 
-                    initialRegion={{
-                        latitude: 20.5937, 
-                        longitude: 78.9629,
-                        latitudeDelta: 15,
-                        longitudeDelta: 15,
-                    }}
-                    region={locations.length > 0 ? {
-                        latitude: locations[locations.length-1].latitude,
-                        longitude: locations[locations.length-1].longitude,
-                        latitudeDelta: 0.05,
-                        longitudeDelta: 0.05,
-                    } : undefined}
-                >
-                    {locations.length > 1 && (
-                        <Polyline
-                            coordinates={locations.map(l => ({ latitude: l.latitude, longitude: l.longitude }))}
-                            strokeColor="#3498db" 
-                            strokeWidth={4}
-                        />
-                    )}
-
-                    {locations.map((loc, index) => {
-                        if (!loc.latitude || !loc.longitude) return null;
-
-                        let pinColor = 'cyan'; 
-                        let title = "Path";
-                        let zIndex = 1;
-
-                        if (index === 0) { 
-                            pinColor = 'green'; title = "Start"; zIndex = 10;
-                        } else if (index === locations.length - 1) {
-                            pinColor = 'red'; title = "Current/End"; zIndex = 10;
-                        } else if (['Order','Lead','Visit'].includes(loc.type)) {
-                            pinColor = 'orange'; title = loc.type; zIndex = 5;
-                        }
-
-                        return (
-                            <Marker
-                                key={loc.id || index}
-                                coordinate={{ latitude: loc.latitude, longitude: loc.longitude }}
-                                title={`${title}: ${loc.userName}`}
-                                description={new Date(loc.timestamp).toLocaleTimeString()}
-                                pinColor={pinColor}
-                                zIndex={zIndex}
-                            />
-                        );
-                    })}
-                </MapView>
-                
-                {locations.length === 0 && !loading && (
-                     <View style={{position:'absolute', bottom: 20, alignSelf:'center', backgroundColor:'rgba(255,255,255,0.9)', padding:10, borderRadius:8}}>
-                         <Text style={{color:'gray', fontSize:12}}>No logs found for this date.</Text>
-                     </View>
-                )}
-            </View>
-
-            <View style={{backgroundColor: 'white', padding: 8, flexDirection: 'row', justifyContent: 'space-around', borderTopWidth: 1, borderColor: '#eee'}}>
-                <Text style={{fontSize: 10, color: 'green', fontWeight:'bold'}}>● START</Text>
-                <Text style={{fontSize: 10, color: 'cyan', fontWeight:'bold'}}>● PATH</Text>
-                <Text style={{fontSize: 10, color: 'red', fontWeight:'bold'}}>● END</Text>
-                                <Text style={{fontSize: 10, color: 'orange', fontWeight:'bold'}}>● VISITS</Text>
-            </View>
+            <DayRouteMap userId={selectedUserId} date={dateQuery} refreshKey={refreshKey} />
         </View>
     );
 };
@@ -1013,8 +1109,14 @@ const HistoryTab = () => {
 };
 
 const styles = StyleSheet.create({
+    setupIntro: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#e8f5e9", borderRadius: 10, padding: 12, marginBottom: 12 },
+    setupIntroText: { flex: 1, fontSize: 12, color: "#2e7d32" },
+    setupCard: { flexDirection: "row", alignItems: "center", backgroundColor: "white", borderRadius: 10, padding: 14, marginBottom: 10, elevation: 1, gap: 8 },
+    setupNum: { width: 22, height: 22, borderRadius: 11, backgroundColor: "#3b5998", alignItems: "center", justifyContent: "center" },
+    setupTitle: { fontSize: 15, fontWeight: "bold", color: "#333" },
+    setupDesc: { fontSize: 12, color: "gray", marginTop: 2 },
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { backgroundColor: '#2c3e50', padding: 15, paddingTop: 50, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    header: { backgroundColor: '#2c3e50', padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },
     
     tabContainer: { flexDirection: 'row', backgroundColor: 'white', elevation: 2 },

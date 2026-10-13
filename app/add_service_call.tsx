@@ -1,5 +1,7 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -22,32 +24,37 @@ import { urlToBase64Image } from '../utils/pdfImageHelper';
 
 // 🔥 SAAS IMPORTS (organizations still Firestore)
 import * as Location from 'expo-location';
-import { useSaaSDB } from '../hooks/useSaaSDB';
+import { getCurrentLocation as getGpsFix, locationErrorMessage } from '../utils/getLocation';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: service calls, installations, spare parts now via new backend API
 import { completeActivityPlan } from '../services/api/activityPlans';
-import { listInstallations } from '../services/api/installations';
+import { searchMachines } from '../services/api/installations';
+import { useOrgMachines } from '../hooks/useOrgMachines';
+import { findOrgByName, useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
-import { createServiceCall } from '../services/api/serviceCalls';
+import { createServiceCall, uploadServiceCallPhoto } from '../services/api/serviceCalls';
+import { compressPhoto } from '../utils/attachments';
 import { listSpareParts } from '../services/api/spareParts';
+import { sortAndFilterParts } from '../utils/sparePartSearch';
 import { buildCacheKey } from '../utils/listCache';
 
 // 🔥 PDF IMPORTS
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
 import { recordLocationLog } from '../services/api/locationLogs';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddServiceCallScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   const params = useLocalSearchParams();
   
-  const { currentUser, companyProfile, addNotification } = useData();
+  const { currentUser, companyProfile } = useData();
   
-  // 🔥 SaaS Engine kept for organizations only
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
 
   // orgList/installList/sparePartsList now come from useCachedList below (cache-first, shared keys)
 
@@ -66,7 +73,9 @@ export default function AddServiceCallScreen() {
   const [installDate, setInstallDate] = useState('');
 
   const [remark, setRemark] = useState('');
-  const [image, setImage] = useState<string | null>(null);
+  // Preview path + compressed data, ready to upload right after the call is created.
+  const [image, setImage] = useState<{ uri: string; dataUri: string; kb: number } | null>(null);
+  const [preparingImage, setPreparingImage] = useState(false);
   const [callDate, setCallDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
 
@@ -97,12 +106,12 @@ export default function AddServiceCallScreen() {
       enabled: !!currentUser?.companyId,
       fetcher: () => fetchOrganizations({ limit: 500 }),
   });
-  const { data: installList } = useCachedList({
-      cacheKey: buildCacheKey('installations', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: listInstallations, // was: fetchSaaSData("installations")
-  });
-  const { data: sparePartsList } = useCachedList({
+  // Beyond the first 500: search the server while the organization picker is open.
+  useOrgServerSearch(modalVisible && currentSelection === 'Org', searchText, setFilteredData);
+  // Machines of the chosen hospital (+ the one from params) — not every installation.
+  const installList = useOrgMachines(org, (params.serial as string) || serialNo);
+  const [partSearch, setPartSearch] = useState('');
+  const { data: sparePartsList, refresh: refreshSpareParts } = useCachedList({
       cacheKey: buildCacheKey('spare_parts', currentUser?.companyId),
       enabled: !!currentUser?.companyId,
       fetcher: listSpareParts, // was: fetchSaaSData("spare_parts")
@@ -111,10 +120,8 @@ export default function AddServiceCallScreen() {
   useEffect(() => {
       if (params.org && org !== params.org) {
           setOrg(params.org as string);
-          if(orgList.length > 0) {
-              const foundOrg = orgList.find((o:any) => (o.orgName === params.org || o.name === params.org));
-              if(foundOrg) selectOrganization(foundOrg);
-          }
+          // Also finds organizations beyond the first 500 (one server search).
+          findOrgByName(params.org as string, orgList).then((foundOrg) => { if (foundOrg) selectOrganization(foundOrg); });
       }
       if (params.serial && serialNo !== params.serial) {
           const serial = params.serial as string;
@@ -139,6 +146,22 @@ export default function AddServiceCallScreen() {
     return `${day}/${month}/${year}`;
   };
 
+  // The machine from params arrives from the server a moment later — fill its details once.
+  const filledFromParams = React.useRef(false);
+  useEffect(() => {
+      const serial = params.serial as string | undefined;
+      if (!serial || filledFromParams.current) return;
+      const m = installList.find((x: any) => x.serialNo === serial);
+      if (m) {
+          filledFromParams.current = true;
+          setMachineName(m.productName || m.machineName || '');
+          setModelName(m.model || '');
+          setDepartment(m.department || '');
+              setInstallDate(m.date || '');
+          if (m.orgId) setOrgId(m.orgId);
+      }
+  }, [params.serial, installList]);
+
   const getMachinesForOrg = () => {
       if (!org || installList.length === 0) return [];
       const target = org.toLowerCase().trim();
@@ -155,14 +178,14 @@ export default function AddServiceCallScreen() {
               Alert.alert('Permission Denied', 'Location access is required to save entry.');
               return null;
           }
-          let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          let location = await getGpsFix();
           return {
               lat: location.coords.latitude,
               lng: location.coords.longitude,
               timestamp: new Date().toISOString()
           };
       } catch (error) {
-          Alert.alert("GPS Required", "Please turn on your GPS Location to submit.");
+          Alert.alert("GPS Required", locationErrorMessage(error));
           return null;
       }
   };
@@ -172,10 +195,12 @@ export default function AddServiceCallScreen() {
         // Warranty isn't stored on ServiceCall — looked up by matching
         // serialNo against the Installation record.
         let warrantyHTML = '';
-        const matchedInstall = installList.find((i: any) => 
-            i.serialNo && ticketData.serialNo && 
-            String(i.serialNo).trim().toLowerCase() === String(ticketData.serialNo).trim().toLowerCase()
-        );
+        const sameSerial = (i: any) => i.serialNo && ticketData.serialNo &&
+            String(i.serialNo).trim().toLowerCase() === String(ticketData.serialNo).trim().toLowerCase();
+        let matchedInstall = installList.find(sameSerial);
+        if (!matchedInstall && ticketData.serialNo) {
+            matchedInstall = (await searchMachines(String(ticketData.serialNo).trim(), 10).catch(() => [])).find(sameSerial);
+        }
         if (matchedInstall?.warrantyExpiry) {
             const expiryDate = new Date(matchedInstall.warrantyExpiry);
             const today = new Date();
@@ -378,18 +403,8 @@ export default function AddServiceCallScreen() {
           </body>
         </html>`;
 
-        const { uri } = await Print.printToFileAsync({ html: htmlContent });
         const cleanName = `Service_${ticketData.scrId}.pdf`;
-        // @ts-ignore
-        const newPath = `${FileSystem.cacheDirectory}${cleanName}`;
-
-        try {
-            await FileSystem.copyAsync({ from: uri, to: newPath });
-            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share Report` });
-
-        } catch (error) {
-            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-        }
+        await sharePdfFromHtml(htmlContent, cleanName, `Share Report`);
     } catch (error) {
         Alert.alert("Error", "Could not generate PDF");
     }
@@ -466,6 +481,7 @@ export default function AddServiceCallScreen() {
 
   // 🔥 SAVE LOGIC — via new backend API (server auto-generates ticket ID)
   const handleSave = async () => {
+      if (preparingImage) return Alert.alert("Please wait", "The photo is still being prepared.");
       if (!org || !serialNo || !remark) {
           Alert.alert("Error", "Organization, Serial No, and Problem are required.");
           return;
@@ -501,7 +517,6 @@ recordLocationLog({
           status: (status === 'Closed' ? 'Resolved' : 'Open') as 'Open' | 'Resolved',
           resolutionNote: status === 'Closed' ? resolutionNote : '',
           remark: remark,
-          imageUri: image || undefined,
           partsUsed: usedParts, 
           partsText: partsSummary,
           location: locationData ? { latitude: locationData.lat, longitude: locationData.lng } : null,
@@ -510,15 +525,16 @@ recordLocationLog({
       try {
           const saved = await createServiceCall(payload as any);
 
-          if (addNotification) {
-              await addNotification({
-                  title: `Service Ticket #${saved.scrId} 🛠️`,
-                  message: `${currentUser?.name} created a service call for ${org} (${status}).`,
-                  to: "Admin",
-                  route: "/service_call",
-                  type: "alert"
-              });
+          let photoFailed = false;
+          if (image) {
+              try {
+                  await uploadServiceCallPhoto(saved.id, image.dataUri);
+              } catch (e) {
+                  console.log("Service photo upload failed:", e);
+                  photoFailed = true;
+              }
           }
+
 
           if (params.activityId) {
               await completeActivityPlan(params.activityId as string);
@@ -528,7 +544,9 @@ recordLocationLog({
           
           Alert.alert(
               "Success ✅", 
-              `Ticket #${saved.scrId} Created!\nShare PDF?`,
+              `Ticket #${saved.scrId} Created!` +
+                  (photoFailed ? `\n\n⚠️ The photo could not be uploaded. Open the call in Service Calls and tap "Add Photo".` : '') +
+                  `\nShare PDF?`,
               [
                   { text: "No", onPress: () => router.back(), style: 'cancel' },
                   { text: "Yes, Share PDF", onPress: async () => { 
@@ -554,8 +572,17 @@ recordLocationLog({
   const pickImage = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') return Alert.alert("Permission Denied");
-    let result = await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: false, quality: 0.5 });
-    if (!result.canceled) setImage(result.assets[0].uri);
+    let result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], allowsEditing: false, quality: 0.8 });
+    if (result.canceled) return;
+    setPreparingImage(true);
+    try {
+        const photo = await compressPhoto(result.assets[0]);
+        setImage({ uri: photo.previewUri, dataUri: photo.dataUri, kb: photo.kb });
+    } catch {
+        Alert.alert("Photo", "Could not prepare this photo. Please try again.");
+    } finally {
+        setPreparingImage(false);
+    }
   };
 
   return (
@@ -564,8 +591,8 @@ recordLocationLog({
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
+        <View style={[styles.header, { paddingTop: headerTop }]}>
+          <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="white" /></TouchableOpacity>
           <Text style={styles.headerTitle}>New Service Call</Text>
           <View style={{width:24}} /> 
         </View>
@@ -585,12 +612,12 @@ recordLocationLog({
                 <Text style={{color: '#333'}}>{formatDate(callDate)}</Text>
                 <Ionicons name="calendar-outline" size={18} color="gray" />
             </TouchableOpacity>
-            {showDatePicker && <DateTimePicker value={callDate} mode="date" onChange={(e, d) => { setShowDatePicker(false); if(d) setCallDate(d); }} />}
+            {showDatePicker && <DateTimePicker value={callDate} mode="date" {...pickerHandlers((e, d) => { setShowDatePicker(false); if(d) setCallDate(d); })} />}
 
             <Text style={styles.label}>Organization *</Text>
             <TouchableOpacity style={[styles.dropdown, errors.org && styles.errorBorder]} onPress={() => openModal('Org')}>
                 <Text style={{color: org ? 'black' : 'gray'}}>{org || 'Select Organization'}</Text>
-                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={18} color="gray" />}
+                {<Ionicons name="search" size={18} color="gray" />}
             </TouchableOpacity>
 
             <Text style={styles.label}>Machine Serial No *</Text>
@@ -648,22 +675,27 @@ recordLocationLog({
 
             <Text style={styles.label}>Upload Photo</Text>
             <View style={styles.cameraContainer}>
-                <TouchableOpacity style={styles.cameraBtn} onPress={pickImage}>
-                    <Ionicons name="camera" size={24} color="#3b5998" />
-                    <Text style={{color:'#3b5998', marginLeft:10}}>Take Photo</Text>
+                <TouchableOpacity style={styles.cameraBtn} onPress={pickImage} disabled={preparingImage}>
+                    {preparingImage ? <ActivityIndicator color="#3b5998" /> : <Ionicons name="camera" size={24} color="#3b5998" />}
+                    <Text style={{color:'#3b5998', marginLeft:10}}>{preparingImage ? 'Preparing photo...' : image ? 'Retake Photo' : 'Take Photo'}</Text>
                 </TouchableOpacity>
-                {image && <Image source={{ uri: image }} style={styles.previewImage} />}
+                {image && <Image source={{ uri: image.uri }} style={styles.previewImage} />}
+                {image && (
+                    <View style={{flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginTop: 6}}>
+                        <Text style={{fontSize: 11, color: 'gray'}}>{image.kb} KB • uploads when you save</Text>
+                        <TouchableOpacity onPress={() => setImage(null)} style={{flexDirection:'row', alignItems:'center', padding: 4}}>
+                            <Ionicons name="trash-outline" size={16} color="#d32f2f" />
+                            <Text style={{color:'#d32f2f', marginLeft: 4, fontSize: 12}}>Remove</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
             </View>
-            {image && (
-                <Text style={{fontSize: 10, color: '#e65100', marginTop: -5, marginBottom: 10}}>
-                    ⚠️ Photo upload isn't wired to the server yet — this image won't be saved with the ticket.
-                </Text>
-            )}
 
             <Text style={styles.label}>Problem Reported *</Text>
             <TextInput style={[styles.inputGray, {height: 60}, errors.remark && styles.errorBorder]} multiline placeholder="Describe issue..." value={remark} onChangeText={setRemark} />
 
             <Text style={styles.sectionHeader}>Spare Parts</Text>
+            <Text style={{ fontSize: 11, color: 'gray', marginTop: -4, marginBottom: 6 }}>Stock is reduced automatically when you save — from your own stock first, then office stock.</Text>
             <View style={styles.partsContainer}>
                 {usedParts.map((part, index) => (
                     <View key={index} style={styles.partRow}>
@@ -672,7 +704,7 @@ recordLocationLog({
                         <TouchableOpacity onPress={() => removePart(part.id)}><Ionicons name="trash-outline" size={20} color="red" /></TouchableOpacity>
                     </View>
                 ))}
-                <TouchableOpacity style={styles.addPartBtn} onPress={() => setPartsModalVisible(true)}>
+                <TouchableOpacity style={styles.addPartBtn} onPress={() => { refreshSpareParts(); setPartSearch(''); setPartsModalVisible(true); }}>
                     <Ionicons name="add-circle-outline" size={20} color="#3b5998" />
                     <Text style={{color:'#3b5998', fontWeight:'bold', marginLeft:5}}>+ Add Spare Part</Text>
                 </TouchableOpacity>
@@ -784,16 +816,26 @@ recordLocationLog({
           <View style={styles.modalOverlay}>
               <View style={styles.modalContent}>
                   <Text style={styles.modalTitle}>Select Spare Part</Text>
-                  <FlatList 
-                      data={sparePartsList}
-                      keyExtractor={item => item.id}
-                      renderItem={({item}) => (
-                          <TouchableOpacity style={styles.partItem} onPress={() => handleAddPart(item)}>
-                              <View><Text style={{fontWeight:'bold'}}>{item.partName}</Text><Text style={{fontSize:12, color:'gray'}}>PN: {item.partNo}</Text></View>
-                              <View style={{backgroundColor:'#e8f5e9', padding:5, borderRadius:4}}><Text style={{fontSize:11, color:'green'}}>Avail: {item.officeStock || 0}</Text></View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 10, marginBottom: 8 }}>
+                      <Ionicons name="search" size={16} color="gray" />
+                      <TextInput style={{ flex: 1, paddingVertical: 8, marginLeft: 6 }} placeholder="Search name, part no. or model" value={partSearch} onChangeText={setPartSearch} />
+                      {partSearch ? <TouchableOpacity onPress={() => setPartSearch('')}><Ionicons name="close-circle" size={16} color="gray" /></TouchableOpacity> : null}
+                  </View>
+                  <Text style={{ fontSize: 11, color: 'gray', marginBottom: 4 }}>Parts you carry are shown first, then parts for this model.</Text>
+                  {/* Plain ScrollView with a fixed max height: a FlatList in this auto-sized modal collapsed to zero height on the new React Native, so the list looked empty. */}
+                  <ScrollView style={{ maxHeight: 420 }} keyboardShouldPersistTaps="handled">
+                      {sortAndFilterParts(sparePartsList, partSearch, currentUser?.uid || currentUser?.id, modelName).map((item: any) => (
+                          <TouchableOpacity key={item.id} style={styles.partItem} onPress={() => handleAddPart(item)}>
+                              <View style={{ flex: 1, marginRight: 8 }}><Text style={{fontWeight:'bold'}}>{item.partName}</Text><Text style={{fontSize:12, color:'gray'}}>PN: {item.partNo}</Text></View>
+                              <View style={{backgroundColor:'#e8f5e9', padding:5, borderRadius:4}}><Text style={{fontSize:11, color:'green'}}>You: {item.stockHolders?.[currentUser?.uid || currentUser?.id] || 0} • Office: {item.officeStock || 0}</Text></View>
                           </TouchableOpacity>
+                      ))}
+                      {sortAndFilterParts(sparePartsList, partSearch, currentUser?.uid || currentUser?.id, modelName).length === 0 && (
+                          <Text style={{ textAlign: 'center', color: 'gray', marginVertical: 20 }}>
+                              {sparePartsList.length === 0 ? 'No spare parts found. Add them in Spare Part Book first.' : 'No part matches your search.'}
+                          </Text>
                       )}
-                  />
+                  </ScrollView>
                   <TouchableOpacity style={styles.closeBtn} onPress={() => setPartsModalVisible(false)}><Text style={{color:'red'}}>Close</Text></TouchableOpacity>
               </View>
           </View>
@@ -804,9 +846,9 @@ recordLocationLog({
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   label: { marginBottom: 5, color:'#333', fontWeight:'600', fontSize:13, marginTop:10 },
   sectionHeader: { fontSize: 16, fontWeight: 'bold', color: '#3b5998', marginTop: 25, marginBottom: 5 },
@@ -839,4 +881,4 @@ const styles = StyleSheet.create({
   iconBox: { width: 35, height: 35, borderRadius: 8, justifyContent:'center', alignItems:'center', backgroundColor:'#e3f2fd' },
   modalMainText: { fontWeight: 'bold', fontSize: 15, color: '#333' },
   modalSubText: { fontSize: 12, color: 'gray' }
-});
+}), FORM_ACCENT.serviceCall);

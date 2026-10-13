@@ -1,3 +1,4 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -22,27 +23,27 @@ import { useData } from './context/DataContext';
 // 🔥 Phase 10: organizations now go to Postgres via these adapters — the
 // cascading rename (into orders/leads/service_calls/etc.) happens server-side
 // inside the PATCH transaction now, so the old Firestore writeBatch code is gone.
-import { fetchOrganizations, createOrganization, updateOrganization } from '../services/api/organizations';
-// 🔥 Cache-first list loading (see hooks/useCachedList.ts)
-import { useCachedList } from '../hooks/useCachedList';
-import { buildCacheKey } from '../utils/listCache';
+import { getOrganization, createOrganization, updateOrganization } from '../services/api/organizations';
 
 // 🔥 OCR & CAMERA IMPORT
 import * as ImagePicker from 'expo-image-picker';
 
 // 🔥 DATE PICKER IMPORT
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+import { scanTextFromImage } from '../services/api/ocr';
 
 export default function AddOrganizationScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   const params = useLocalSearchParams(); 
   const isEditMode = params.editId ? true : false;
   
   // 🔥 1. Context se sirf User & Notification
-  const { currentUser, addNotification } = useData();
+  const { currentUser } = useData();
 
   // 🔥 2. Local loading state (no more useSaaSDB here)
-  // isDbLoading/orgList now come from useCachedList below (cache-first, shared 'organizations' key)
 
   // 🔥 3. Lazy Loaded Organization List (For Edit Mode Auto-fill)
   const [isSaving, setIsSaving] = useState(false);
@@ -152,18 +153,17 @@ export default function AddOrganizationScreen() {
   ];
   const territoryOptions = ["North", "South", "East", "West", "Central"];
 
-  // 🔥 4. Organizations — cache-first, shares the SAME 'organizations'
-  // cache key as organization.tsx/messaging_center.tsx (needed for Edit
-  // Mode's duplicate-check against existing orgs).
-  const { data: orgList, loading: isDbLoading } = useCachedList({
-      cacheKey: buildCacheKey('organizations', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: fetchOrganizations,
-  });
+  // Edit mode loads just this organization (was: every organization of the company).
+  const [orgToEdit, setOrgToEdit] = useState<any>(null);
+  useEffect(() => {
+      if (!isEditMode || !params.editId) return;
+      getOrganization(String(params.editId))
+          .then(setOrgToEdit)
+          .catch(() => Alert.alert('Error', 'Could not load this organization. Go back and try again.'));
+  }, [isEditMode, params.editId]);
 
   useEffect(() => {
-      if (isEditMode && orgList.length > 0) {
-          const orgToEdit = orgList.find((o: any) => o.id === params.editId);
+      if (isEditMode) {
           if (orgToEdit) {
               setOrgName(orgToEdit.name); setCustomerGroup(orgToEdit.type); setBeds(orgToEdit.beds || 'Select');
               setCity(orgToEdit.city); setAddress1(orgToEdit.address1 || ''); setAddress2(orgToEdit.address2 || '');
@@ -183,7 +183,7 @@ export default function AddOrganizationScreen() {
               if (orgToEdit.anniversary) setAnniversary(new Date(orgToEdit.anniversary));
           }
       }
-  }, [isEditMode, orgList]);
+  }, [isEditMode, orgToEdit]);
 
   const formatDate = (rawDate: Date) => {
       let day = rawDate.getDate().toString().padStart(2, '0');
@@ -204,42 +204,22 @@ export default function AddOrganizationScreen() {
           }
 
           const result = await ImagePicker.launchCameraAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              mediaTypes: ['images'],
               quality: 0.2,
               base64: true,
           });
 
           if (!result.canceled && result.assets[0].base64) {
               setIsScanning(true);
-              const base64Image = `data:image/jpeg;base64,${result.assets[0].base64}`;
-
-              const formData = new FormData();
-              formData.append('base64Image', base64Image);
-              formData.append('language', 'eng');
-              formData.append('isOverlayRequired', 'false');
-
-              const response = await fetch('https://api.ocr.space/parse/image', {
-                  method: 'POST',
-                  headers: { 'apikey': 'helloworld' },
-                  body: formData,
-              });
-
-              const data = await response.json();
-
-              if (data.IsErroredOnProcessing) {
-                  Alert.alert('API Error', data.ErrorMessage?.[0] || 'Image size might be too large.');
-                  return;
-              }
-
-              if (data.ParsedResults && data.ParsedResults.length > 0) {
-                  const extractedText = data.ParsedResults[0].ParsedText;
+              const extractedText = await scanTextFromImage(result.assets[0].base64);
+              if (extractedText) {
                   processOCRText(extractedText);
               } else {
                   Alert.alert('Scan Failed', 'Could not read text clearly. Please hold the phone steady and try again.');
               }
           }
-      } catch (error) {
-          Alert.alert('Error', 'Failed to scan the card. Check your internet connection.');
+      } catch (error: any) {
+          Alert.alert('Scan Failed', error?.message || 'Failed to scan the card. Check your internet connection.');
       } finally {
           setIsScanning(false);
       }
@@ -439,15 +419,6 @@ export default function AddOrganizationScreen() {
           } else {
               const res = await createOrganization(orgData);
               if (res.success) {
-                  if (addNotification) {
-                      await addNotification({
-                          title: "New Organization 🏥",
-                          message: `New Hospital Added: ${orgName}`,
-                          type: "info",        
-                          to: "Admin",         
-                          route: "/organization" 
-                      });
-                  }
                   Alert.alert("Success", "Organization Added!");
               } else {
                   Alert.alert("Error", "Could not add organization.");
@@ -468,9 +439,9 @@ export default function AddOrganizationScreen() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 20}
     >
       <View style={styles.container}>
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: headerTop }]}>
           <TouchableOpacity onPress={() => router.back()}>
-              <Ionicons name="arrow-back" size={24} color="#333" />
+              <Ionicons name="arrow-back" size={24} color="white" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{isEditMode ? 'Edit Organization' : 'New Organization'}</Text>
           <View style={{width:24}} /> 
@@ -637,7 +608,7 @@ export default function AddOrganizationScreen() {
                     {showDobPicker && (
                         <DateTimePicker 
                             value={dob || new Date()} mode="date" maximumDate={new Date()} 
-                            onChange={(e, d) => { setShowDobPicker(false); if(d) setDob(d); }} 
+                            {...pickerHandlers((e, d) => { setShowDobPicker(false); if(d) setDob(d); })} 
                         />
                     )}
                 </View>
@@ -650,7 +621,7 @@ export default function AddOrganizationScreen() {
                     {showAnniversaryPicker && (
                         <DateTimePicker 
                             value={anniversary || new Date()} mode="date" maximumDate={new Date()} 
-                            onChange={(e, d) => { setShowAnniversaryPicker(false); if(d) setAnniversary(d); }} 
+                            {...pickerHandlers((e, d) => { setShowAnniversaryPicker(false); if(d) setAnniversary(d); })} 
                         />
                     )}
                 </View>
@@ -724,9 +695,9 @@ export default function AddOrganizationScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white' },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   scrollContent: { padding: 20, paddingBottom: 10 }, 
   scannerBtn: { flexDirection: 'row', backgroundColor: '#e65100', padding: 15, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, elevation: 3 },
@@ -747,4 +718,4 @@ const styles = StyleSheet.create({
   modalSearchBox: { flexDirection:'row', alignItems:'center', backgroundColor:'#f0f0f0', borderRadius:8, padding:10, marginBottom:10 },
   modalItem: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#eee' },
   modalItemText: { fontSize: 16, color: '#333' }
-});
+}), FORM_ACCENT.organization);

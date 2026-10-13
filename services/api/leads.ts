@@ -95,6 +95,7 @@ export function toLegacyLead(l: ApiLead): any {
     lostReasonNote: l.lostReasonNote || '',
     lostAt: l.lostAt,
     dealValue: l.dealValue === null || l.dealValue === undefined ? null : Number(l.dealValue),
+    source: l.source || '',
   };
 }
 
@@ -141,6 +142,10 @@ export interface LeadPageParams extends ListLeadsParams {
   limit?: number;
   outcome?: 'open' | 'won' | 'lost';
   quick?: 'overdue' | 'today' | 'hot';
+  sourceGroup?: 'website'; // only leads that came from the company website form
+  // Default (when omitted) is follow-up date, oldest first — the work-list order.
+  sortBy?: 'nextDate' | 'createdAt';
+  sortOrder?: 'asc' | 'desc';
   from?: string; // YYYY-MM-DD
   to?: string;
 }
@@ -257,6 +262,7 @@ export interface PipelineCard {
   city: string | null;
   status: string;
   stage: string | null;
+  stageChangedAt?: string; // when it entered this stage (set by the server)
   isHot: boolean;
   type: 'HOT' | 'WARM' | 'COLD';
   nextDate: string | null;
@@ -331,4 +337,34 @@ export async function closeStaleLeads(payload: {
 }): Promise<number> {
   const res = await apiClient.post<{ data: { count: number } }>('/leads/close-stale', payload);
   return res.data.count;
+}
+
+// ── Nearby Leads (open leads near a point, or in one city) ──────────────────
+export interface NearbyLead {
+  id: string;
+  orgName: string;
+  contactPerson: string | null;
+  mobile: string | null;
+  city: string | null;
+  stage: string | null;
+  nextDate: string | null;
+  isHot: boolean;
+  assignedToName: string;
+  latitude: number | null;
+  longitude: number | null;
+  distanceKm: number | null;
+}
+
+export type NearbyParams =
+  | { lat: number; lng: number; radiusKm: number }
+  | { city: string };
+
+export async function getNearbyLeadsPage(params: NearbyParams & { page: number; limit: number }): Promise<{ items: NearbyLead[]; total: number; totalPages: number }> {
+  const res = await apiClient.get<{ data: NearbyLead[]; meta: { total: number; totalPages: number } }>(`/leads/nearby${toQueryString(params as any)}`);
+  return { items: res.data, total: res.meta.total, totalPages: res.meta.totalPages };
+}
+
+export async function getNearbyCities(): Promise<{ cities: { city: string; count: number }[]; leadsWithLocation: number }> {
+  const res = await apiClient.get<{ data: { cities: { city: string; count: number }[]; leadsWithLocation: number } }>('/leads/nearby/cities');
+  return res.data;
 }

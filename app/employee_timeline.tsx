@@ -1,30 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
+import { saveAndShareFile } from '../utils/saveFile';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Modal, RefreshControl, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import * as XLSX from 'xlsx';
 
-import { listAdvances } from '../services/api/advances';
-import { fetchCouriers } from '../services/api/couriers';
-import { listDemos } from '../services/api/demos';
-import { listExpenses } from '../services/api/expenses';
-import { listInstallations } from '../services/api/installations';
-import { listLeads } from '../services/api/leads';
-import { listOrders } from '../services/api/orders';
 import { fetchOrganizations } from '../services/api/organizations';
-import { listPaymentCollections } from '../services/api/paymentCollections';
-import { listPaymentDues } from '../services/api/paymentDues';
-import { listPmsReports } from '../services/api/pmsReports';
 import { listProjects } from '../services/api/projects';
 import { listQuotations } from '../services/api/quotations';
-import { listSalesVisits } from '../services/api/salesVisits';
-import { listServiceCalls } from '../services/api/serviceCalls';
-import { fetchTasks } from '../services/api/tasks';
-import { fetchTravelNotes } from '../services/api/travelNotes';
 import { fetchTeamMembers } from '../services/api/users';
+import { ActivityLists, ActivityModule, fetchActivity } from '../services/api/activity';
+import { localYmd } from '../utils/periodRange';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
@@ -35,14 +25,28 @@ import { buildCacheKey } from '../utils/listCache';
 // travel_notes/organizations) already calls the Postgres backend, same as
 // attendance/leaves. Kept fetchSaaSData only for one export-flow fallback
 // further down (a module type outside MODULE_FETCHERS).
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 
 // 🔥 Phase 7: attendance/leaves now come from Postgres via these adapters
 import { fetchAttendance } from '../services/api/attendance';
 import { fetchLeaves } from '../services/api/leaves';
+import { useHeaderTop } from '../hooks/useHeaderTop';
+
+/** Address text if we have one, else "lat, lng", else the fallback. Locations can arrive as plain text or as {address, latitude, longitude}. */
+function locationText(text: unknown, loc: unknown, fallback = 'Unknown'): string {
+  // Day Out saves "Unknown" when reverse-geocoding fails; coordinates are more useful then.
+  if (typeof text === 'string' && text.trim() && text.trim() !== 'Unknown') return text;
+  const l = (loc && typeof loc === 'object' ? loc : null) as { address?: string; latitude?: number; longitude?: number } | null;
+  if (l?.address) return l.address;
+  if (typeof l?.latitude === 'number' && typeof l?.longitude === 'number') return `${l.latitude.toFixed(5)}, ${l.longitude.toFixed(5)}`;
+  return fallback;
+}
+
+// Stable empty list: the timeline effects depend on these arrays, so a fresh [] each render would loop.
+const NO_ROWS: any[] = [];
 
 export default function CombinedActivityScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   
   const [activeTab, setActiveTab] = useState<'timeline' | 'employee' | 'download'>('timeline');
@@ -51,7 +55,6 @@ export default function CombinedActivityScreen() {
   const { currentUser, companyProfile } = useData();
 
   // 🔥 2. SaaS Engine connect kiya
-  const { fetchSaaSData } = useSaaSDB();
 
   // 🔥 3. Lazy Loaded Master States — now come from useCachedList below
   // (cache-first). Read-only screen (confirmed no optimistic mutations
@@ -64,6 +67,8 @@ const defaultFYStartYear = currentMonthForFY >= 3 ? currentYearForFY : currentYe
 const [selectedMonth, setSelectedMonth] = useState(-1);
 const [selectedYear, setSelectedYear] = useState(defaultFYStartYear); 
 const [selectedDate, setSelectedDate] = useState(new Date());
+  // Employee 360 person (declared up here: it decides what the server is asked for).
+  const [empUser, setEmpUser] = useState<any>(null);
 
   // 🔥 The 16 modules below are cache-first, each sharing the SAME cache key
   // as its primary/owning screen where the fetch params match exactly
@@ -81,34 +86,52 @@ const [selectedDate, setSelectedDate] = useState(new Date());
   const resolveName = (item: any): string | undefined =>
       item?.senderName || item?.userName ||
       userIdToName.get(item?.senderId || item?.userId || item?.assignedTo || item?.addedBy || item?.createdBy);
-  const { data: courierList, loading: l2, refresh: r2 } = useCachedList({ cacheKey: cuKey('all_couriers'), enabled: !!currentUser?.companyId, fetcher: () => fetchCouriers({ limit: 1000 }) });
-  const { data: serviceCallList, loading: l3, refresh: r3 } = useCachedList({ cacheKey: cuKey('service_calls'), enabled: !!currentUser?.companyId, fetcher: listServiceCalls });
-  const { data: orderList, loading: l4, refresh: r4 } = useCachedList({ cacheKey: cuKey('orders'), enabled: !!currentUser?.companyId, fetcher: listOrders });
-  const { data: demoList, loading: l5, refresh: r5 } = useCachedList({ cacheKey: cuKey('demos'), enabled: !!currentUser?.companyId, fetcher: listDemos });
-  const { data: installList, loading: l6, refresh: r6 } = useCachedList({ cacheKey: cuKey('installations'), enabled: !!currentUser?.companyId, fetcher: listInstallations });
-  const { data: paymentList, loading: l7, refresh: r7 } = useCachedList({ cacheKey: cuKey('payment_collections'), enabled: !!currentUser?.companyId, fetcher: listPaymentCollections });
-  const { data: dueList, loading: l8, refresh: r8 } = useCachedList({ cacheKey: cuKey('payment_dues'), enabled: !!currentUser?.companyId, fetcher: listPaymentDues });
-  const { data: taskList, loading: l9, refresh: r9 } = useCachedList({
-      cacheKey: cuKey('all_tasks_merged'), enabled: !!currentUser?.companyId,
-      fetcher: async () => {
-          // Tasks needs both directions merged — matches employee_timeline's
-          // intent of showing everything a person touched, not just one side.
-          const [given, received] = await Promise.all([
-              fetchTasks({ direction: 'given', userId: 'all', limit: 1000 }),
-              fetchTasks({ direction: 'received', userId: 'all', limit: 1000 }),
-          ]);
-          return Array.from(new Map([...given, ...received].map((t: any) => [t.id, t])).values());
-      },
-  });
-  const { data: pmsList, loading: l10, refresh: r10 } = useCachedList({ cacheKey: cuKey('pms_reports'), enabled: !!currentUser?.companyId, fetcher: listPmsReports });
-  const { data: salesVisitList, loading: l11, refresh: r11 } = useCachedList({ cacheKey: cuKey('sales_visits'), enabled: !!currentUser?.companyId, fetcher: listSalesVisits });
-  const { data: leadsList, loading: l12, refresh: r12 } = useCachedList({ cacheKey: cuKey('leads'), enabled: !!currentUser?.companyId, fetcher: listLeads });
-  const { data: expenseList, loading: l13, refresh: r13 } = useCachedList({ cacheKey: cuKey('expenses'), enabled: !!currentUser?.companyId, fetcher: listExpenses });
-  const { data: advanceList, loading: l14, refresh: r14 } = useCachedList({ cacheKey: cuKey('advances'), enabled: !!currentUser?.companyId, fetcher: listAdvances });
-  const { data: travelList, loading: l15, refresh: r15 } = useCachedList({ cacheKey: cuKey('all_travel_notes'), enabled: !!currentUser?.companyId, fetcher: () => fetchTravelNotes({ userId: 'all', limit: 1000 }) });
-  const { data: orgList, loading: l16, refresh: r16 } = useCachedList({ cacheKey: cuKey('organizations'), enabled: !!currentUser?.companyId, fetcher: () => fetchOrganizations({ limit: 500 }) });
-  const isModulesLoading = l1 || l2 || l3 || l4 || l5 || l6 || l7 || l8 || l9 || l10 || l11 || l12 || l13 || l14 || l15 || l16;
-  const refreshAllModules = () => Promise.all([r1(), r2(), r3(), r4(), r5(), r6(), r7(), r8(), r9(), r10(), r11(), r12(), r13(), r14(), r15(), r16()]);
+  // 🔥 Every module's records for just the range on screen — the Daily Timeline's
+  // day, or Employee 360's financial year for the chosen person — fetched in one
+  // call. (Was: 15 full lists of the whole company on every open.)
+  const fyRange = (fyStartYear: number) => {
+      const fyEnd = new Date(fyStartYear + 1, 2, 31);
+      return { fromDate: `${fyStartYear}-04-01`, toDate: localYmd(fyEnd < new Date() ? fyEnd : new Date()) };
+  };
+  const activityRange = activeTab === 'timeline'
+      ? { fromDate: localYmd(selectedDate), toDate: localYmd(selectedDate), userId: undefined as string | undefined }
+      : activeTab === 'employee' && empUser
+      ? { ...fyRange(selectedYear), userId: empUser.id as string | undefined }
+      : null;
+  const activityKey = activityRange ? `${activityRange.fromDate}|${activityRange.toDate}|${activityRange.userId || ''}` : '';
+  const [activity, setActivity] = useState<ActivityLists | null>(null);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const activityReq = useRef(0);
+  const loadActivity = useCallback(async () => {
+      if (!activityKey || !currentUser?.companyId) return;
+      const [fromDate, toDate, userId] = activityKey.split('|');
+      const id = ++activityReq.current;
+      setActivityLoading(true);
+      try {
+          const res = await fetchActivity({ fromDate, toDate, userId: userId || undefined });
+          if (id === activityReq.current) setActivity(res);
+      } catch (e: any) {
+          if (id === activityReq.current) Alert.alert('Error', e?.message || 'Could not load the timeline. Pull down to retry.');
+      } finally {
+          if (id === activityReq.current) setActivityLoading(false);
+      }
+  }, [activityKey, currentUser?.companyId]);
+  useEffect(() => { loadActivity(); }, [loadActivity]);
+  const courierList = activity?.couriers ?? NO_ROWS;
+  const serviceCallList = activity?.serviceCalls ?? NO_ROWS;
+  const orderList = activity?.orders ?? NO_ROWS;
+  const demoList = activity?.demos ?? NO_ROWS;
+  const installList = activity?.installations ?? NO_ROWS;
+  const paymentList = activity?.payments ?? NO_ROWS;
+  const taskList = activity?.tasks ?? NO_ROWS;
+  const pmsList = activity?.pms ?? NO_ROWS;
+  const salesVisitList = activity?.salesVisits ?? NO_ROWS;
+  const leadsList = activity?.leads ?? NO_ROWS;
+  const expenseList = activity?.expenses ?? NO_ROWS;
+  const advanceList = activity?.advances ?? NO_ROWS;
+  const travelList = activity?.travelNotes ?? NO_ROWS;
+  const isModulesLoading = l1 || activityLoading;
+  const refreshAllModules = () => Promise.all([r1(), loadActivity()]);
 
   const userRole = (currentUser?.role || '').toLowerCase().trim();
   const isFinanceRole = ['admin', 'manager', 'account', 'accountant', 'superadmin'].includes(userRole);
@@ -165,17 +188,18 @@ const [selectedDate, setSelectedDate] = useState(new Date());
       };
   };
   const { fromDate: attFromDate, toDate: attToDate } = getTimelineFromTo();
-  const attLeaveCacheKey = buildCacheKey(`timeline_attendance_leaves:${activeTab}:${attFromDate}:${attToDate}`, currentUser?.companyId);
+  const attUserKey = activeTab === 'employee' && empUser ? empUser.id : 'all';
+  const attLeaveCacheKey = buildCacheKey(`timeline_attendance_leaves:${activeTab}:${attFromDate}:${attToDate}:${attUserKey}`, currentUser?.companyId);
   const { data: attendanceList, loading: l17, refresh: r17 } = useCachedList({
       cacheKey: attLeaveCacheKey,
       enabled: !!currentUser?.companyId,
-      fetcher: () => fetchAttendance({ userId: 'all', fromDate: attFromDate, toDate: attToDate, limit: 1000 }),
+      fetcher: () => fetchAttendance({ userId: activeTab === 'employee' && empUser ? empUser.id : 'all', fromDate: attFromDate, toDate: attToDate, limit: 2000 }),
   });
-  const attLeaveCacheKey2 = buildCacheKey(`timeline_leaves:${activeTab}:${attFromDate}:${attToDate}`, currentUser?.companyId);
+  const attLeaveCacheKey2 = buildCacheKey(`timeline_leaves:${activeTab}:${attFromDate}:${attToDate}:${attUserKey}`, currentUser?.companyId);
   const { data: leaveList, loading: l18, refresh: r18 } = useCachedList({
       cacheKey: attLeaveCacheKey2,
       enabled: !!currentUser?.companyId,
-      fetcher: () => fetchLeaves({ userId: 'all', limit: 500 }),
+      fetcher: () => fetchLeaves({ userId: attUserKey, fromDate: attFromDate, toDate: attToDate, limit: 2000 }),
   });
   const isAnalysisLoading = isModulesLoading || l17 || l18;
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -274,9 +298,9 @@ const [selectedDate, setSelectedDate] = useState(new Date());
           if (getStandardDate(a.date) === targetDate && checkUser(a.userId, a.userName)) {
               if(!processedAtt.has(a.userId)) {
                   processedAtt.add(a.userId);
-                  events.push({ id: `in_${a.id}`, time: a.inTime || '09:00 AM', title: `${a.userName} Logged In`, desc: `Location: ${a.inLocation || a.location?.address || 'Unknown'}`, icon: 'log-in', color: '#4caf50', rawData: a, type: 'Attendance' });
+                  events.push({ id: `in_${a.id}`, time: a.inTime || '09:00 AM', title: `${a.userName} Logged In`, desc: `Location: ${locationText(a.inLocation, a.location)}`, icon: 'log-in', color: '#4caf50', rawData: a, type: 'Attendance' });
                   if (a.outTime && a.outTime !== '--') {
-                      events.push({ id: `out_${a.id}`, time: a.outTime, title: `${a.userName} Logged Out`, desc: `Location: ${a.outLocation || a.outAddress || 'Unknown'}`, icon: 'log-out', color: '#f44336', rawData: a, type: 'Attendance' });
+                      events.push({ id: `out_${a.id}`, time: a.outTime, title: `${a.userName} Logged Out`, desc: `Location: ${locationText(a.outAddress, a.outLocation)}`, icon: 'log-out', color: '#f44336', rawData: a, type: 'Attendance' });
                   }
               }
           }
@@ -336,7 +360,6 @@ const [selectedDate, setSelectedDate] = useState(new Date());
   // ==========================================
   // 🔥 VIEW 2: EMPLOYEE 360 (KUNDALI)
   // ==========================================
-  const [empUser, setEmpUser] = useState<any>(null);
   const [empTimeline, setEmpTimeline] = useState<any[]>([]);
   const [empVisibleCount, setEmpVisibleCount] = useState(20);
   const [activeEmpFilter, setActiveEmpFilter] = useState('All');
@@ -512,12 +535,7 @@ const [selectedDate, setSelectedDate] = useState(new Date());
           });
           const safeName = (empUser?.name || 'Employee').replace(/[^a-z0-9]/gi, '_').toLowerCase();
           const fileName = `${safeName}_360_Report_${Date.now()}.csv`;
-          const fs = FileSystem as any;
-          const fileUri = `${fs.cacheDirectory}${fileName}`;
-          await FileSystem.writeAsStringAsync(fileUri, csvString, { encoding: 'utf8' });
-          if (await Sharing.isAvailableAsync()) {
-              await Sharing.shareAsync(fileUri, { mimeType: 'text/csv', dialogTitle: `Export ${safeName} Data`, UTI: 'public.comma-separated-values-text' });
-          } else Alert.alert("Error", "Sharing is not supported.");
+          await saveAndShareFile({ content: csvString, fileName, mimeType: 'text/csv', dialogTitle: `Export ${safeName} Data`, UTI: 'public.comma-separated-values-text' });
       } catch (error: any) { Alert.alert("Report Error", "Could not generate report."); }
   };
 
@@ -533,7 +551,8 @@ const [selectedDate, setSelectedDate] = useState(new Date());
       installations: false, pms: false, service: false, demos: false, couriers: false,
       tasks: false, advances: false, travel: false, leaves: false, projects: false, organizations: false,
       // 🔥 NEW EXPORT MODULES
-      dues: false, quotations: false, employees: false 
+      dues: false, quotations: false, employees: false,
+      visits: false, activity: false,
   });
 
   const filterDataForExport = (data: any[], dateField: string, userField: string, isOrg: boolean = false) => {
@@ -562,29 +581,35 @@ const [selectedDate, setSelectedDate] = useState(new Date());
       });
   };
 
+  // Export range: the chosen month, else the whole financial year.
+  const exportRange = () => {
+      if (selectedMonth === -1) return fyRange(selectedYear);
+      const m = (selectedMonth + 3) % 12;
+      const y = m >= 3 ? selectedYear : selectedYear + 1;
+      return { fromDate: localYmd(new Date(y, m, 1)), toDate: localYmd(new Date(y, m + 1, 0)) };
+  };
+  // Dated modules: only the export range comes from the server, one module per call.
+  const viaActivity = (m: ActivityModule) => async () => (await fetchActivity({ ...exportRange(), modules: [m] }))[m];
   const MODULE_FETCHERS: Record<string, () => Promise<any[]>> = {
-    orders: () => listOrders(),
-    payment_collections: () => listPaymentCollections(),
-    payment_dues: () => listPaymentDues(),
-    expenses: () => listExpenses(),
-    leads: () => listLeads(),
-    installations: () => listInstallations(),
-    pms_reports: () => listPmsReports(),
-    service_calls: () => listServiceCalls(),
-    demos: () => listDemos(),
-    couriers: () => fetchCouriers({ limit: 1000 }),
-    tasks: async () => {
-        const [given, received] = await Promise.all([
-            fetchTasks({ direction: 'given', userId: 'all', limit: 1000 }),
-            fetchTasks({ direction: 'received', userId: 'all', limit: 1000 }),
-        ]);
-        return Array.from(new Map([...given, ...received].map((t: any) => [t.id, t])).values());
-    },
-    advances: () => listAdvances(),
-    travel_notes: () => fetchTravelNotes({ userId: 'all', limit: 1000 }),
+    orders: viaActivity('orders'),
+    payment_collections: viaActivity('payments'),
+    payment_dues: viaActivity('dues'),
+    expenses: viaActivity('expenses'),
+    leads: viaActivity('leads'),
+    installations: viaActivity('installations'),
+    pms_reports: viaActivity('pms'),
+    service_calls: viaActivity('serviceCalls'),
+    demos: viaActivity('demos'),
+    couriers: viaActivity('couriers'),
+    tasks: viaActivity('tasks'),
+    advances: viaActivity('advances'),
+    travel_notes: viaActivity('travelNotes'),
+    sales_visits: viaActivity('salesVisits'),
+    activity_plans: viaActivity('activityPlans'),
     projects: () => listProjects(),
     quotations: () => listQuotations(),
-    organizations: () => fetchOrganizations({ limit: 500 }),
+    // Export only (user taps Download): every organization, page by page.
+    organizations: () => fetchOrganizations(),
     users: () => fetchTeamMembers(),
 };
 
@@ -593,19 +618,15 @@ const [selectedDate, setSelectedDate] = useState(new Date());
       if (!modules[sheetName.toLowerCase() as keyof typeof modules] && !modules[colName as keyof typeof modules]) return false;
       setProgress(`Fetching ${sheetName}...`);
       try {
-          // 🔥 Phase 7: attendance/leaves come from Postgres now — the whole selected
-          // FY, since export can target any past year (not bounded to the small window
-          // the on-screen tabs fetch above).
-          const fyStart = getStandardDate(new Date(selectedYear, 3, 1));
-          const fyEndDate = new Date(selectedYear + 1, 2, 31);
-          const fyEnd = getStandardDate(fyEndDate < new Date() ? fyEndDate : new Date());
+          // Only the chosen month (or financial year) is fetched for export.
+          const range = exportRange();
           const rawData = colName === "attendance"
-            ? await fetchAttendance({ userId: 'all', fromDate: fyStart, toDate: fyEnd, limit: 1000 })
+            ? await fetchAttendance({ userId: 'all', fromDate: range.fromDate, toDate: range.toDate, limit: 2000 })
             : colName === "leaves"
-            ? await fetchLeaves({ userId: 'all', limit: 2000 })
+            ? await fetchLeaves({ userId: 'all', fromDate: range.fromDate, toDate: range.toDate, limit: 2000 })
             : MODULE_FETCHERS[colName]
             ? await MODULE_FETCHERS[colName]()
-            : await fetchSaaSData(colName);
+            : [];
           const cleanRawData = rawData.map((d: any) => {
               const { location, items, history, ...cleanData } = d; 
               return cleanData;
@@ -628,7 +649,6 @@ const [selectedDate, setSelectedDate] = useState(new Date());
           
           if(await fetchAndAddSheet(wb, "orders", "Orders", "dateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "payment_collections", "Collections", "dateIso", "senderId")) hasData = true;
-          if(await fetchAndAddSheet(wb, "payment_dues", "Dues", "dateIso", "addedBy")) hasData = true;
           if(await fetchAndAddSheet(wb, "expenses", "Expenses", "dateIso", "userId")) hasData = true;
           if(await fetchAndAddSheet(wb, "leads", "Leads", "dateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "attendance", "Attendance", "dateIso", "senderId")) hasData = true;
@@ -640,6 +660,8 @@ const [selectedDate, setSelectedDate] = useState(new Date());
           if(await fetchAndAddSheet(wb, "tasks", "Tasks", "dateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "advances", "Advances", "dateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "travel_notes", "Travel", "dateIso", "senderId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "sales_visits", "Visits", "dateIso", "senderId")) hasData = true;
+          if(await fetchAndAddSheet(wb, "activity_plans", "Activity", "dateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "leaves", "Leaves", "fromDateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "projects", "Projects", "dateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "organizations", "Organizations", "dateIso", "addedBy", true)) hasData = true;
@@ -658,10 +680,7 @@ const [selectedDate, setSelectedDate] = useState(new Date());
           const fyLabel = `FY${selectedYear.toString().slice(-2)}-${(selectedYear+1).toString().slice(-2)}`;
           const fileName = `Report_${selectedUserName}_${timeLabel}_${fyLabel}.xlsx`;
           const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-          const uri = (FileSystem as any).cacheDirectory + fileName;
-
-          await FileSystem.writeAsStringAsync(uri, wbout, { encoding: 'base64' });
-          await Sharing.shareAsync(uri, { mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle: 'Download Report Data' });
+          await saveAndShareFile({ content: wbout, base64: true, fileName, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle: 'Download Report Data' });
       } catch (error: any) { Alert.alert("Error", error.message); } 
       finally { setLoading(false); setProgress(''); }
   };
@@ -675,12 +694,12 @@ const [selectedDate, setSelectedDate] = useState(new Date());
 
   return (
     <View style={{flex:1, backgroundColor:'#f4f6f8'}}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTop }]}>
         <View style={{flexDirection: 'row', alignItems: 'center'}}>
             <TouchableOpacity onPress={() => router.back()} style={{marginRight: 10}}>
                 <Ionicons name="arrow-back" size={24} color="#333" />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>Activity & Reports</Text>
+            <Text style={styles.headerTitle}>Activity Timeline</Text>
         </View>
       </View>
 
@@ -709,12 +728,22 @@ const [selectedDate, setSelectedDate] = useState(new Date());
                     <Ionicons name="calendar" size={18} color="#3b5998" />
                     <Text style={styles.filterText}>{selectedDate.toLocaleDateString('en-GB')}</Text>
                 </TouchableOpacity>
-                {showDatePicker && <DateTimePicker value={selectedDate} mode="date" onChange={(e, d) => { setShowDatePicker(false); if(d) setSelectedDate(d); }} />}
+                {showDatePicker && <DateTimePicker value={selectedDate} mode="date" {...pickerHandlers((e, d) => { setShowDatePicker(false); if(d) setSelectedDate(d); })} />}
 
                 <TouchableOpacity style={styles.filterBox} onPress={() => setUserModalVisible(true)}>
                     <Ionicons name="person" size={18} color="#3b5998" />
                     <Text style={styles.filterText} numberOfLines={1}>{selectedUser ? selectedUser.name : 'All Employees'}</Text>
                 </TouchableOpacity>
+                {/* Employee 360 for the selected person */}
+                {selectedUser?.id && (
+                    <TouchableOpacity
+                        onPress={() => router.push({ pathname: '/employee_360', params: { id: selectedUser.id } } as any)}
+                        style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#ede7f6', paddingHorizontal: 10, borderRadius: 8, marginLeft: 8 }}
+                    >
+                        <Ionicons name="analytics" size={16} color="#6a1b9a" />
+                        <Text style={{ color: '#6a1b9a', fontWeight: 'bold', marginLeft: 4 }}>360</Text>
+                    </TouchableOpacity>
+                )}
             </View>
 
             <FlatList 
@@ -934,7 +963,11 @@ const [selectedDate, setSelectedDate] = useState(new Date());
                       </View>
                       <View style={styles.grid}>
                           <View style={styles.col}>
+                              <ToggleRow label="Visits (DSR)" field="visits" />
                               <ToggleRow label="Employees List" field="employees" />
+                          </View>
+                          <View style={styles.col}>
+                              <ToggleRow label="Activity Plans" field="activity" />
                           </View>
                       </View>
                   </View>
@@ -1011,7 +1044,10 @@ const [selectedDate, setSelectedDate] = useState(new Date());
                                   <DetailRow label="Out Time" value={selectedEvent.rawData.outTime || 'N/A'} />
                                   <DetailRow label="Total Hrs" value={selectedEvent.rawData.workHrs || 'N/A'} />
                                   <DetailRow label="Day Expense" value={`₹ ${Number(selectedEvent.rawData.expenses?.totalAmount || selectedEvent.rawData.dayExpense || selectedEvent.rawData.expense || 0).toLocaleString()}`} />
-                                  <View style={styles.infoBox}><Text style={styles.infoLabel}>Login Location:</Text><Text style={styles.infoValue}>{selectedEvent.rawData.inLocation || selectedEvent.rawData.location?.address || '-'}</Text></View>
+                                  <View style={styles.infoBox}><Text style={styles.infoLabel}>Login Location:</Text><Text style={styles.infoValue}>{locationText(selectedEvent.rawData.inLocation, selectedEvent.rawData.location, '-')}</Text></View>
+                                  {selectedEvent.rawData.outTime && selectedEvent.rawData.outTime !== '--' ? (
+                                      <View style={styles.infoBox}><Text style={styles.infoLabel}>Logout Location:</Text><Text style={styles.infoValue}>{locationText(selectedEvent.rawData.outAddress, selectedEvent.rawData.outLocation, '-')}</Text></View>
+                                  ) : null}
                               </>
                           )}
 
@@ -1142,18 +1178,18 @@ const DetailRow = ({label, value}: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { padding: 15, paddingTop: 50, backgroundColor: 'white', elevation: 2 },
+  header: { padding: 15, backgroundColor: 'white', elevation: 0, paddingBottom: 6 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginLeft: 10 },
   
   // Tabs
-  tabContainer: { flexDirection: 'row', padding: 10, backgroundColor: 'white', paddingBottom: 15 },
-  tabButton: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingVertical: 8, borderRadius: 25, backgroundColor: '#f0f0f0', marginHorizontal: 5 },
+  tabContainer: { flexDirection: 'row', padding: 7, backgroundColor: 'white', paddingBottom: 8, paddingTop: 2 },
+  tabButton: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingVertical: 7, borderRadius: 25, backgroundColor: '#f0f0f0', marginHorizontal: 5 },
   activeTab: { backgroundColor: '#3b5998' },
   tabText: { marginLeft: 5, fontWeight: 'bold', color: '#666', fontSize: 13 },
 
   // Timeline UI
-  filterContainer: { flexDirection: 'row', padding: 15, backgroundColor: 'white', borderBottomWidth: 1, borderColor: '#eee' },
-  filterBox: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#e3f2fd', padding: 10, borderRadius: 8, marginHorizontal: 5, justifyContent: 'center' },
+  filterContainer: { flexDirection: 'row', padding: 10, backgroundColor: 'white', borderBottomWidth: 1, borderColor: '#eee', paddingTop: 4 },
+  filterBox: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#e3f2fd', padding: 8, borderRadius: 8, marginHorizontal: 5, justifyContent: 'center' },
   filterText: { marginLeft: 8, color: '#1565c0', fontWeight: 'bold', fontSize: 13 },
   timelineRow: { flexDirection: 'row', width: '100%' },
   timeBox: { width: 75, alignItems: 'flex-end', paddingRight: 10, paddingTop: 15 },

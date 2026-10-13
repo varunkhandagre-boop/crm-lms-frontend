@@ -1,6 +1,9 @@
+import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pickerHandlers } from '../utils/datePickerHandlers';
 import * as Location from 'expo-location';
+import { getCurrentLocation as getGpsFix, locationErrorMessage } from '../utils/getLocation';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -19,12 +22,12 @@ import {
 } from 'react-native';
 
 // 🔥 SAAS IMPORTS (organizations still Firestore)
-import { useSaaSDB } from '../hooks/useSaaSDB';
 import { useData } from './context/DataContext';
 // 🔥 Phase 4: PMS reports & installations now via new backend API
 import { completeActivityPlan } from '../services/api/activityPlans';
-import { listInstallations } from '../services/api/installations';
+import { useOrgMachines } from '../hooks/useOrgMachines';
 import { recordLocationLog } from '../services/api/locationLogs';
+import { findOrgByName, useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
@@ -36,13 +39,15 @@ import { urlToBase64Image } from '../utils/pdfImageHelper';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sharePdfFromHtml } from '../utils/sharePdf';
+import { useHeaderTop } from '../hooks/useHeaderTop';
 
 export default function AddPMSScreen() {
+  const headerTop = useHeaderTop();
   const router = useRouter();
   const params = useLocalSearchParams();
   
-  const { currentUser, companyProfile, addNotification } = useData();
-  const { fetchSaaSData, isDbLoading } = useSaaSDB();
+  const { currentUser, companyProfile } = useData();
 
   // orgList/installList now come from useCachedList below (cache-first, shared keys)
 
@@ -80,11 +85,10 @@ export default function AddPMSScreen() {
       enabled: !!currentUser?.companyId,
       fetcher: () => fetchOrganizations({ limit: 500 }),
   });
-  const { data: installList } = useCachedList({
-      cacheKey: buildCacheKey('installations', currentUser?.companyId),
-      enabled: !!currentUser?.companyId,
-      fetcher: listInstallations, // was: fetchSaaSData("installations")
-  });
+  // Beyond the first 500: search the server while the organization picker is open.
+  useOrgServerSearch(modalVisible && currentSelection === 'Org', searchText, setFilteredData);
+  // Machines of the chosen hospital (+ the one from params) — not every installation.
+  const installList = useOrgMachines(org, (params.serial as string) || serialNo);
 
   const formatDate = (rawDate: Date) => {
     let day = rawDate.getDate().toString().padStart(2, '0');
@@ -102,14 +106,14 @@ export default function AddPMSScreen() {
   useEffect(() => {
       if (params.org && org !== params.org) {
           setOrg(params.org as string);
-          if(orgList.length > 0) {
-             const found = orgList.find((o:any) => o.orgName === params.org);
-             if(found) { 
-                 setCity(found.city || ''); 
-                 setAddress(found.address || found.address1 || ''); 
-                 setOrgId(found.id || ''); 
-             }
-          }
+          // Also finds organizations beyond the first 500 (one server search).
+          findOrgByName(params.org as string, orgList).then((found) => {
+              if (found) {
+                  setCity(found.city || '');
+                  setAddress(found.address || found.address1 || '');
+                  setOrgId(found.id || '');
+              }
+          });
       }
       if (params.serial && serialNo !== params.serial) {
           const serial = params.serial as string;
@@ -127,6 +131,21 @@ export default function AddPMSScreen() {
       }
   }, [params, installList, orgList]); 
 
+  // The machine from params arrives from the server a moment later — fill its details once.
+  const filledFromParams = React.useRef(false);
+  useEffect(() => {
+      const serial = params.serial as string | undefined;
+      if (!serial || filledFromParams.current) return;
+      const m = installList.find((x: any) => x.serialNo === serial);
+      if (m) {
+          filledFromParams.current = true;
+          setMachineName(m.productName || m.machineName || '');
+          setModelName(m.model || '');
+          setDepartment(m.department || '');
+          if (m.orgId) setOrgId(m.orgId);
+      }
+  }, [params.serial, installList]);
+
   const getMachinesForOrg = () => {
       if (!org || installList.length === 0) return [];
       const target = org.toLowerCase().trim();
@@ -143,14 +162,14 @@ export default function AddPMSScreen() {
               Alert.alert('Permission Denied', 'Location access is required to save entry.');
               return null;
           }
-          let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          let location = await getGpsFix();
           return {
               lat: location.coords.latitude,
               lng: location.coords.longitude,
               timestamp: new Date().toISOString()
           };
       } catch (error) {
-          Alert.alert("GPS Required", "Please turn on your GPS Location to submit.");
+          Alert.alert("GPS Required", locationErrorMessage(error));
           return null;
       }
   };
@@ -313,17 +332,8 @@ export default function AddPMSScreen() {
           </body>
         </html>`;
 
-        const { uri } = await Print.printToFileAsync({ html: htmlContent });
         const cleanName = `${pmsData.pmsId}_${(pmsData.hospitalName || 'Client').replace(/ /g, '_')}.pdf`;
-        // @ts-ignore
-        const newPath = `${FileSystem.cacheDirectory}${cleanName}`;
-
-        try {
-            await FileSystem.copyAsync({ from: uri, to: newPath });
-            await Sharing.shareAsync(newPath, { UTI: '.pdf', mimeType: 'application/pdf', dialogTitle: `Share PMS Report` });
-        } catch (error) {
-            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-        }
+        await sharePdfFromHtml(htmlContent, cleanName, `Share PMS Report`);
     } catch (error) {
         Alert.alert("Error", "Could not generate PDF");
     }
@@ -413,15 +423,6 @@ recordLocationLog({
               location: locationData ? { latitude: locationData.lat, longitude: locationData.lng } : null,
           });
 
-          if (addNotification) {
-              await addNotification({
-                  title: "PMS Report Submitted ⚙️",
-                  message: `${currentUser?.name} submitted ${pmsType} report (${saved.pmsId}) for ${machineName} at ${org}.`,
-                  to: "Admin",
-                  route: "/pms_schedule",
-                  type: "info"
-              });
-          }
 
           if (params.activityId) {
               await completeActivityPlan(params.activityId as string);
@@ -452,8 +453,8 @@ recordLocationLog({
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
+        <View style={[styles.header, { paddingTop: headerTop }]}>
+          <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="white" /></TouchableOpacity>
           <Text style={styles.headerTitle}>New PMS Report</Text>
           <View style={{width:24}} /> 
         </View>
@@ -467,7 +468,7 @@ recordLocationLog({
                         <Text style={{color: '#333', fontSize:13}}>{formatDate(pmsDate)}</Text>
                         <Ionicons name="calendar-outline" size={16} color="gray" />
                     </TouchableOpacity>
-                    {showPmsDatePicker && <DateTimePicker value={pmsDate} mode="date" onChange={(e, d) => { setShowPmsDatePicker(false); if(d) setPmsDate(d); }} />}
+                    {showPmsDatePicker && <DateTimePicker value={pmsDate} mode="date" {...pickerHandlers((e, d) => { setShowPmsDatePicker(false); if(d) setPmsDate(d); })} />}
                 </View>
 
                 <View style={styles.col}>
@@ -476,14 +477,14 @@ recordLocationLog({
                         <Text style={{color: '#d32f2f', fontWeight:'bold', fontSize:13}}>{formatDate(dueDate)}</Text>
                         <Ionicons name="calendar" size={16} color="#d32f2f" />
                     </TouchableOpacity>
-                    {showDueDatePicker && <DateTimePicker value={dueDate} mode="date" onChange={(e, d) => { setShowDueDatePicker(false); if(d) setDueDate(d); }} />}
+                    {showDueDatePicker && <DateTimePicker value={dueDate} mode="date" {...pickerHandlers((e, d) => { setShowDueDatePicker(false); if(d) setDueDate(d); })} />}
                 </View>
             </View>
 
             <Text style={styles.label}>Organization / Hospital *</Text>
             <TouchableOpacity style={styles.dropdown} onPress={() => openModal('Org')}>
                 <Text style={{color: org ? 'black' : 'gray'}}>{org || 'Select Organization'}</Text>
-                {isDbLoading ? <ActivityIndicator size="small" color="#3b5998" /> : <Ionicons name="search" size={18} color="gray" />}
+                {<Ionicons name="search" size={18} color="gray" />}
             </TouchableOpacity>
 
             <Text style={styles.label}>Machine Serial No *</Text>
@@ -612,9 +613,9 @@ recordLocationLog({
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedForm(StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', paddingTop: 50, elevation: 2 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, alignItems: 'center', backgroundColor: 'white', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   label: { marginBottom: 5, color:'#333', fontWeight:'600', fontSize:13, marginTop:10 },
   dropdown: { backgroundColor: '#f9f9f9', borderWidth:1, borderColor:'#ddd', borderRadius: 8, padding: 15, marginBottom: 5, flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
@@ -642,4 +643,4 @@ const styles = StyleSheet.create({
   iconBox: { width: 35, height: 35, borderRadius: 8, justifyContent:'center', alignItems:'center', backgroundColor:'#e3f2fd' },
   modalMainText: { fontWeight: 'bold', fontSize: 15, color: '#333' },
   modalSubText: { fontSize: 12, color: 'gray' }
-});
+}), FORM_ACCENT.pms);

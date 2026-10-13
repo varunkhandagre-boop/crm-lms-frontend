@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { saveAndShareFile } from '../../utils/saveFile';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
@@ -21,6 +22,7 @@ import {
     rejectSubscriptionRequest,
     SubscriptionRequest,
 } from '../../services/api/subscriptionRequests';
+import { useHeaderTop } from '../../hooks/useHeaderTop';
 
 type TabKey = 'PENDING' | 'APPROVED' | 'ALL';
 
@@ -38,6 +40,7 @@ function formatModules(modules?: string[]): string {
 }
 
 export default function SuperAdminPayments() {
+    const headerTop = useHeaderTop();
     const router = useRouter();
 
     const [requests, setRequests] = useState<SubscriptionRequest[]>([]);
@@ -125,13 +128,7 @@ export default function SuperAdminPayments() {
             });
             const csvContent = [headers.map(escapeCSV).join(','), ...rows].join('\n');
             const fileName = `Payment_History_${new Date().toISOString().slice(0, 10)}.csv`;
-            const fileUri = FileSystem.documentDirectory + fileName;
-            await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: FileSystem.EncodingType.UTF8 });
-            if (await Sharing.isAvailableAsync()) {
-                await Sharing.shareAsync(fileUri, { mimeType: 'text/csv', dialogTitle: 'Export Payment History', UTI: 'public.comma-separated-values-text' });
-            } else {
-                Alert.alert('Saved', `File saved at: ${fileUri}`);
-            }
+            await saveAndShareFile({ content: csvContent, fileName, mimeType: 'text/csv', dialogTitle: 'Export Payment History', UTI: 'public.comma-separated-values-text' });
         } catch (e) {
             Alert.alert('Error', 'Could not export.');
         }
@@ -142,7 +139,7 @@ export default function SuperAdminPayments() {
         const automationLine = item.automationRequested ? `\nAutomation Add-on: Yes (+₹${item.automationAmount || 3000})` : '';
         Alert.alert(
             'Approve Payment',
-            `Payment received confirm karo?\n\nCompany: ${companyLabel}\nPlan: ${item.planLabelSnapshot}\nModules: ${formatModules(item.modulesSnapshot)}\nAmount: ₹${item.amountPaid}\nEmployees: ${item.employeesRequested}${automationLine}\n\nApprove karte hi company ko EXACTLY ye modules milenge — isse zyada nahi. Alag chahiye ho to Approve ke baad Companies tab se badal sakte ho.`,
+            `Confirm that this payment was received?\n\nCompany: ${companyLabel}\nPlan: ${item.planLabelSnapshot}\nModules: ${formatModules(item.modulesSnapshot)}\nAmount: ₹${item.amountPaid}\nEmployees: ${item.employeesRequested}${automationLine}\n\nOn approval the company gets exactly these modules. To change them later, use the Companies tab.`,
             [
                 { text: 'Cancel', style: 'cancel' },
                 {
@@ -169,7 +166,7 @@ export default function SuperAdminPayments() {
     const handleNotReceived = async (item: SubscriptionRequest) => {
         Alert.alert(
             'Mark as Not Received',
-            "Payment 'Not Received' mark karo? Record safe rahega.",
+            "Mark this payment as 'Not Received'? The record is kept.",
             [
                 { text: 'Cancel', style: 'cancel' },
                 {
@@ -193,7 +190,7 @@ export default function SuperAdminPayments() {
     const handleDelete = async (item: SubscriptionRequest) => {
         Alert.alert(
             'Delete Request',
-            'Permanently delete karo? Ye recover nahi hoga.',
+            'Delete permanently? This cannot be undone.',
             [
                 { text: 'Cancel', style: 'cancel' },
                 {
@@ -299,7 +296,7 @@ export default function SuperAdminPayments() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}>
                     <Ionicons name="arrow-back" size={24} color="white" />
                 </TouchableOpacity>
@@ -366,7 +363,7 @@ export default function SuperAdminPayments() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
-    header: { backgroundColor: '#2e7d32', padding: 20, paddingTop: 50, flexDirection: 'row', alignItems: 'center', gap: 12 },
+    header: { backgroundColor: '#2e7d32', padding: 20, flexDirection: 'row', alignItems: 'center', gap: 12 },
     headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold', flex: 1 },
     iconBtn: { backgroundColor: 'rgba(255,255,255,0.2)', padding: 8, borderRadius: 8 },
     tabRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 15, paddingVertical: 12, backgroundColor: 'white', elevation: 2 },
