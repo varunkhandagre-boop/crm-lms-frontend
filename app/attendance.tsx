@@ -469,7 +469,7 @@ export default function AttendanceScreen() {
   // Download Report
   const downloadReport = async () => {
       try {
-            let csvHeader = "Date,Employee,Status,Location,In Time,Out Time,Work Hrs,Total Expense,Note\n";
+            let csvHeader = "Date,Employee,Status,Shift,Location,In Time,Out Time,Work Hrs,Total Expense,Auto Closed,Note\n";
             let csvRows = "";
             
             finalData.forEach((item: any) => {
@@ -482,7 +482,9 @@ export default function AttendanceScreen() {
                 const hrs = item.workHrs || '-';
                 const expense = item.expenses?.totalAmount || '0';
               const note = item.location === 'On Leave' ? 'Leave' : (/ Off$/.test(item.outTime || '') ? 'Weekly Off' : '-');
-              csvRows += `${date},${name},${status},${location},${inTime},${outTime},${hrs},${expense},${note}\n`;
+              const shift = item.shiftLabel || '-';
+              const autoClosed = item.autoClosed ? 'Yes (Day Out forgotten)' : '-';
+              csvRows += `${date},${name},${status},${shift},${location},${inTime},${outTime},${hrs},${expense},${autoClosed},${note}\n`;
           });
 
           await saveAndShareFile({ content: csvHeader + csvRows, fileName: `Attendance_${targetName || 'Report'}.csv`, mimeType: 'text/csv' });

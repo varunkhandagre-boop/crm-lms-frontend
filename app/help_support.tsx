@@ -196,6 +196,9 @@ const GUIDE_SECTIONS: GuideSection[] = [
             'Your attendance status (Logged In / Logged Out / Not Marked) is visible directly on the home screen banner — no need to open the attendance screen to check.',
             'After Day In, the app shows a one-time explanation and then a notification "LMS — on duty". While it is shown, your location is shared every 30 minutes so your manager can see field visits. It stops by itself at Day Out.',
             'If the app cannot get your location it tells you what to do (turn on Location, allow permission, or turn on "Google Location Accuracy" and step near a window). Day Out still saves even without GPS.',
+            'While Day In / Day Out is saving, the screen shows the step ("Getting your location…", "Saving Day In…"). If the network drops, the app tries once more by itself. If it still fails, the message says why: no internet, server slow, login expired or plan expired.',
+            'Night shift (e.g. 22:00 – 06:00): Day In at night, Day Out the next morning on the same screen — the entry stays open past midnight. A Day In after midnight (e.g. 00:30) is counted in last night\'s shift and marked late.',
+            'Forgot Day Out? The entry closes by itself a few hours after your shift ends, with Day Out = shift end, and is marked "Auto closed".',
         ],
     },
     {
@@ -625,6 +628,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
             'Tap "Pay Online" (Card / UPI / Net Banking / Wallet), or scan the UPI QR code and tap "I Have Paid".',
             'Your plan activates once the payment is verified (usually within 1 hour).',
             'When 30 days or less are left, a "Plan: N days left" badge shows on the Home screen and under your name in the sidebar. Tap it to go straight to renewal.',
+            'If the plan / trial ends, the app becomes view only: everyone can still log in and see old data, but nothing new can be added, edited or deleted. A red "Plan expired — view only" bar shows at the bottom; Admin can tap it to renew. Everything works again as soon as the plan is renewed.',
         ],
     },
 
@@ -706,6 +710,24 @@ const GUIDE_SECTIONS: GuideSection[] = [
             'Company default: Payroll → Salary Rules → "Weekly Off & Shift". Choose the weekly off days (e.g. Sun, or Sat + Sun), extra Saturdays off (e.g. 2nd & 4th), shift start / end (24-hour, e.g. 09:30 – 18:30) and "Late after (min)" grace.',
             'For one employee: Team & Settings → edit the employee → "Weekly off & shift" → "Own schedule". Choose "Company default" to go back.',
             'This schedule is used everywhere: Day In list ("Monday Off", "2nd Saturday Off"), Attendance Report, leave balance, the 11 AM Day-In alert, phone reminders (they follow the shift time) and late marks in payroll.',
+            'A normal company (e.g. 10:00 – 18:00, Sunday off) needs nothing else. For different shifts, night shifts or a changing duty plan, use the Shift Roster (see "Shift Roster — Shifts, Night Shift & Monthly Plan").',
+        ],
+    },
+    {
+        icon: 'calendar-number',
+        color: '#303f9f',
+        cat: 'attendance',
+        title: 'Shift Roster — Shifts, Night Shift & Monthly Plan',
+        steps: [
+            'Open: Sidebar → "Shift Roster", or the calendar button at the top of the Attendance screen. Admin, HR and Manager see everyone; other staff see "My Shifts" (their own next 2 weeks).',
+            'Step 1 — Shifts tab → "Add": name, start, end and "Late after (min)", e.g. General 09:00 – 18:00, Night 22:00 – 06:00. An end time before the start = night shift that ends next day (🌙). A shift can be at most 12 hours.',
+            'Step 2 (optional) — Default shift: Team & Settings → edit the employee → "Default shift". It applies on every day that has no roster entry.',
+            'Step 3 — Roster tab: tap any employee\'s day and choose a shift, "Off", or "Clear (use default)". Tick "Also till …" to fill the rest of the week / month.',
+            '"Assign dates": pick several employees and a From – To range (up to 62 days) and set them all at once — e.g. "5 to 11 Oct → Night".',
+            'Week / Month: switch at the top. Laptop opens the month view; phone opens the week view. Use the arrows to move; tap the date title to come back to today.',
+            'Off in the roster replaces the weekly off for that date; a shift on a weekly off day makes it a working day. Company holidays (Holidays list) show automatically for everyone.',
+            'Each employee gets a notification when their roster changes. Late marks, absent days, overtime and reminders follow each day\'s shift.',
+            'Download: the green Excel button saves the roster on screen (week or month). For any month or the whole year: Activity Timeline → Export → "Shift Roster".',
         ],
     },
     {
@@ -855,12 +877,12 @@ const FAQS: FaqItem[] = [
     {
         cat: 'attendance',
         q: 'Problem with Day In — attendance is not marking',
-        a: `Follow these steps in order:\n\n1. Make sure your internet is ON (mobile data or Wi-Fi).\n2. Fully close the app and reopen it (don't just minimise).\n3. Wait 5–10 seconds after the app loads, then try Day In again.\n4. Make sure Location / GPS is turned ON — attendance requires your location.\n5. If it still fails, go to Settings → Apps → [App Name] → Clear Cache, then restart the app.`,
+        a: `First read the message the app shows — it says why:\n• "Could not reach the server" / "took too long" → internet problem (see below).\n• "Your login has expired" → log out and log in again.\n• "Plan has expired" → ask your Admin to renew; old data stays visible.\n• "Location needed" → turn on GPS (see the location FAQ).\n\nFor an internet problem, follow these steps in order:\n\n1. Make sure your internet is ON (mobile data or Wi-Fi).\n2. Fully close the app and reopen it (don't just minimise).\n3. Wait 5–10 seconds after the app loads, then try Day In again.\n4. Make sure Location / GPS is turned ON — attendance requires your location.\n5. If it still fails, go to Settings → Apps → [App Name] → Clear Cache, then restart the app.`,
     },
     {
         cat: 'attendance',
         q: 'Problem with Day Out — button not responding or showing error',
-        a: `Follow these steps:\n\n1. Check internet — if you are in a low-coverage area, move to a spot with better signal.\n2. Turn on GPS/Location if it is off (Settings → Location → Turn On).\n3. Close the app completely and restart it.\n4. Try Day Out again.\n\nTip: If you are in a basement or underground area, step outside briefly to get a GPS fix, then mark Day Out.`,
+        a: `Read the message the app shows (internet, login expired or plan expired — same as Day In). If nothing happens, close and reopen the Attendance screen: the app loads today's entry again and Day Out works.\n\nFor an internet problem:\n\n1. Check internet — if you are in a low-coverage area, move to a spot with better signal.\n2. Turn on GPS/Location if it is off (Settings → Location → Turn On).\n3. Close the app completely and restart it.\n4. Try Day Out again.\n\nTip: If you are in a basement or underground area, step outside briefly to get a GPS fix, then mark Day Out.`,
     },
     {
         cat: 'attendance',
@@ -886,6 +908,36 @@ const FAQS: FaqItem[] = [
         cat: 'attendance',
         q: 'My attendance is showing "Not Marked" on the home screen even after marking',
         a: `1. Pull down on the home screen to refresh the data.\n2. Close the app fully and reopen it.\n3. Check if your internet was ON when you marked attendance — if it was off, the entry may not have saved.\n4. Go to the Attendance screen and check if today's entry appears in the list.\n\nIf the entry is missing, contact your Admin to manually record it.`,
+    },
+    {
+        cat: 'attendance',
+        q: 'How do I set up a night shift (e.g. 22:00 to 06:00)?',
+        a: `1. Sidebar → Shift Roster → Shifts tab → Add → Name "Night", Start 22:00, End 06:00 → Save. (End before start = ends next day, shown with 🌙.)\n2. Roster tab → tap the employee's day → choose Night. Use "Assign dates" for many days or many employees.\n\nThe employee does Day In at night and Day Out next morning on the same entry. Late marks, reminders and payroll follow the night shift.`,
+    },
+    {
+        cat: 'attendance',
+        q: 'Do we have to fill the Shift Roster for everyone, every month?',
+        a: `No. If your company works one fixed time (e.g. 10:00 – 18:00, Sunday off), set it once in Payroll → Salary Rules → "Weekly Off & Shift" — that applies to everyone, every year.\n\nUse the roster only for exceptions: night shifts, rotating duty, or someone's special day off. Days without a roster entry use the employee's default shift / weekly off.`,
+    },
+    {
+        cat: 'attendance',
+        q: 'Who can see and change the Shift Roster?',
+        a: `• Admin, HR and Manager: see everyone and can change any day.\n• Other staff: see only their own shifts ("My Shifts", next 2 weeks) and cannot change them.\n\nWhen a day is changed, the employee gets a notification.`,
+    },
+    {
+        cat: 'attendance',
+        q: 'How do I download the roster in Excel?',
+        a: `• Shift Roster → the green Excel button: downloads the week or month on screen.\n• Activity Timeline → Export → turn on "Shift Roster" → choose the month (or the whole year) → Generate Excel.\n\nThe file has two sheets: "Roster" (employees × dates, like the screen) and "Roster List" (one row per employee per day — easy to filter).`,
+    },
+    {
+        cat: 'attendance',
+        q: 'Why does my attendance say "Auto closed"?',
+        a: `Day Out was not marked, so the system closed the entry a few hours after the shift ended, with Day Out = shift end time (or 11:59 PM if no shift is set).\n\nAlways mark Day Out yourself. If the time is wrong, inform your Admin / HR.`,
+    },
+    {
+        cat: 'start',
+        q: 'The app says "Session expired — please log in again"',
+        a: `Your login is renewed automatically every time you open the app, so this only happens if the app was not opened for about a month, or your password / account was changed.\n\nJust log in again with your email and password.`,
     },
     {
         cat: 'start',
@@ -994,8 +1046,8 @@ const FAQS: FaqItem[] = [
     },
     {
         cat: 'admin',
-        q: 'I am getting a "Plan Expired" message on login',
-        a: `Your subscription has expired. You cannot login until it is renewed.\n\n1. Contact the Super Admin or support team immediately.\n2. Share your company name and registered email.\n3. Once renewed by the admin, you can login normally.\n\nAll your data is safe — nothing is deleted on expiry.`,
+        q: 'My plan has expired — can we still use the app?',
+        a: `Yes, in view only mode. Everyone can still log in and see all old data (attendance, leads, orders, reports…), but nothing new can be added, edited or deleted until the plan is renewed. A red "Plan expired — view only" bar shows at the bottom of the app.\n\n1. Admin: tap the red bar (or Sidebar → Plan & Renewal) and renew.\n2. Staff: ask your company Admin to renew.\n3. Everything works again as soon as the renewal is verified.\n\nAll your data is safe — nothing is deleted on expiry. ("Account suspended" is different: contact support.)`,
     },
     {
         cat: 'admin',

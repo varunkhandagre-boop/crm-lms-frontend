@@ -30,6 +30,7 @@ import { useData } from './context/DataContext';
 // 🔥 Phase 7: attendance/leaves now come from Postgres via these adapters
 import { fetchAttendance } from '../services/api/attendance';
 import { fetchLeaves } from '../services/api/leaves';
+import { addRosterSheets, fetchRosterRange } from '../utils/rosterExport';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 
 /** Address text if we have one, else "lat, lng", else the fallback. Locations can arrive as plain text or as {address, latitude, longitude}. */
@@ -552,7 +553,7 @@ const [selectedDate, setSelectedDate] = useState(new Date());
       tasks: false, advances: false, travel: false, leaves: false, projects: false, organizations: false,
       // 🔥 NEW EXPORT MODULES
       dues: false, quotations: false, employees: false,
-      visits: false, activity: false,
+      visits: false, activity: false, roster: false,
   });
 
   const filterDataForExport = (data: any[], dateField: string, userField: string, isOrg: boolean = false) => {
@@ -652,6 +653,15 @@ const [selectedDate, setSelectedDate] = useState(new Date());
           if(await fetchAndAddSheet(wb, "expenses", "Expenses", "dateIso", "userId")) hasData = true;
           if(await fetchAndAddSheet(wb, "leads", "Leads", "dateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "attendance", "Attendance", "dateIso", "senderId")) hasData = true;
+          // Shift Roster: who works which shift / is Off on each date (two sheets).
+          if (modules.roster) {
+              setProgress("Fetching Shift Roster...");
+              try {
+                  const range = exportRange();
+                  const roster = await fetchRosterRange(range.fromDate, range.toDate);
+                  if (addRosterSheets(wb, roster, selectedUserName)) hasData = true;
+              } catch (e) { console.log("Error in Shift Roster:", e); }
+          }
           if(await fetchAndAddSheet(wb, "installations", "Installations", "dateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "pms_reports", "PMS", "dateIso", "senderId")) hasData = true;
           if(await fetchAndAddSheet(wb, "service_calls", "ServiceCalls", "dateIso", "senderId")) hasData = true;
@@ -968,6 +978,7 @@ const [selectedDate, setSelectedDate] = useState(new Date());
                           </View>
                           <View style={styles.col}>
                               <ToggleRow label="Activity Plans" field="activity" />
+                              <ToggleRow label="Shift Roster" field="roster" />
                           </View>
                       </View>
                   </View>

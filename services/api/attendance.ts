@@ -28,6 +28,8 @@ export interface LegacyAttendance {
   userId: string;
   role: string;
   createdAt: string;
+  shiftLabel: string;   // "Night 22:00-06:00" — the shift that applied that day, "" if none
+  autoClosed: boolean;  // Day Out forgotten — closed by the system
 }
 
 interface ListResponse<T> {
@@ -97,6 +99,8 @@ export function toLegacyAttendance(a: any): LegacyAttendance {
     userId: a.userId,
     role: a.roleSnapshot ?? "",
     createdAt: a.checkInAt,
+    shiftLabel: a.shiftSnapshot?.start ? `${a.shiftSnapshot.name ?? "Shift"} ${a.shiftSnapshot.start}-${a.shiftSnapshot.end}` : "",
+    autoClosed: !!a.autoClosed,
   };
 }
 
