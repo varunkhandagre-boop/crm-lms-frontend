@@ -57,17 +57,45 @@ export class ApiRequestError extends Error {
   }
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+// Session / plan problems any screen can hit — DataContext logs out on an
+// expired session and shows the "Plan expired" screen for a locked company.
+export type AuthProblem = 'SESSION_EXPIRED' | 'SUBSCRIPTION_EXPIRED' | 'COMPANY_SUSPENDED';
+let authProblemListener: ((problem: AuthProblem, message: string) => void) | null = null;
+export function onAuthProblem(listener: (problem: AuthProblem, message: string) => void): () => void {
+  authProblemListener = listener;
+  return () => { if (authProblemListener === listener) authProblemListener = null; };
+}
+
+// Generous by default (uploads, exports, OCR); Day In / Day Out pass a shorter one.
+const DEFAULT_TIMEOUT_MS = 60_000;
+
+export interface RequestOpts { timeoutMs?: number }
+
+async function request<T>(path: string, options: RequestInit = {}, opts: RequestOpts = {}): Promise<T> {
   const token = await getToken();
 
-  const res = await fetch(`${API_BASE_URL}/api/v1${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers || {}),
-    },
-  });
+  // Without a timeout a weak network kept the spinner going for minutes.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}/api/v1${path}`, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(options.headers || {}),
+      },
+    });
+  } catch {
+    // status 0 = never reached the server (no internet / timed out)
+    throw controller.signal.aborted
+      ? new ApiRequestError(0, { message: 'The server took too long to answer. Check your internet and try again.', code: 'TIMEOUT' })
+      : new ApiRequestError(0, { message: 'Could not reach the server. Check your internet and try again.', code: 'NETWORK' });
+  } finally {
+    clearTimeout(timer);
+  }
 
   // 204 No Content (DELETE) has no body to parse
   const body = res.status === 204 ? {} : await res.json().catch(() => ({}));
@@ -76,19 +104,25 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     // Log the full error (incl. fieldErrors) to Metro so it's visible during
     // development, even where the calling screen only shows err.message.
     console.log(`[API ${options.method || 'GET'} ${path}] ${res.status}`, body.error || body);
-    throw new ApiRequestError(res.status, body.error || { message: 'Request failed' });
+    const error: ApiErrorBody = body.error || { message: 'Request failed' };
+    if (res.status === 401 && token && !path.startsWith('/auth/login')) {
+      authProblemListener?.('SESSION_EXPIRED', error.message);
+    } else if (res.status === 403 && (error.code === 'SUBSCRIPTION_EXPIRED' || error.code === 'COMPANY_SUSPENDED')) {
+      authProblemListener?.(error.code, error.message);
+    }
+    throw new ApiRequestError(res.status, error);
   }
 
   return body as T;
 }
 
 export const apiClient = {
-  get: <T>(path: string) => request<T>(path, { method: 'GET' }),
-  post: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }),
-  patch: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'PATCH', body: body ? JSON.stringify(body) : undefined }),
-  put: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined }),
-  delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  get: <T>(path: string, opts?: RequestOpts) => request<T>(path, { method: 'GET' }, opts),
+  post: <T>(path: string, body?: unknown, opts?: RequestOpts) =>
+    request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }, opts),
+  patch: <T>(path: string, body?: unknown, opts?: RequestOpts) =>
+    request<T>(path, { method: 'PATCH', body: body ? JSON.stringify(body) : undefined }, opts),
+  put: <T>(path: string, body?: unknown, opts?: RequestOpts) =>
+    request<T>(path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined }, opts),
+  delete: <T>(path: string, opts?: RequestOpts) => request<T>(path, { method: 'DELETE' }, opts),
 };
