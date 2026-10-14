@@ -15,6 +15,8 @@ import {
 } from 'react-native';
 import { useData } from './context/DataContext';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+import { downloadRosterExcel } from '../utils/rosterExport';
 import { isValidHhmm, localYmd } from '../utils/workSchedule';
 import {
     createShift,
@@ -137,8 +139,22 @@ function MyShifts() {
 
 // ───────────── Office roles: week grid ─────────────
 
+const FULL_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const monthStartOf = (ymd: string) => `${ymd.slice(0, 7)}-01`;
+const addMonths = (ymd: string, n: number) => {
+    const d = new Date(`${ymd}T00:00:00.000Z`);
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() + n);
+    return d.toISOString().slice(0, 10);
+};
+const daysInMonth = (ymd: string) => new Date(Date.UTC(Number(ymd.slice(0, 4)), Number(ymd.slice(5, 7)), 0)).getUTCDate();
+
 function RosterGrid() {
-    const [weekStart, setWeekStart] = useState(() => mondayOf(localYmd(new Date())));
+    const isDesktop = useIsDesktop();
+    // Week on a phone, the whole month on a laptop (switchable either way).
+    const [view, setView] = useState<'week' | 'month'>(isDesktop ? 'month' : 'week');
+    const [anchor, setAnchor] = useState(() => localYmd(new Date())); // any date in the period shown
+    const [downloading, setDownloading] = useState(false);
     const [roster, setRoster] = useState<Roster | null>(null);
     const [shifts, setShifts] = useState<Shift[]>([]);
     const [loading, setLoading] = useState(true);
@@ -147,13 +163,34 @@ function RosterGrid() {
     const [cell, setCell] = useState<{ userId: string; name: string; ymd: string } | null>(null);
     const [bulkOpen, setBulkOpen] = useState(false);
 
-    const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
+    const days = useMemo(() => {
+        const first = view === 'week' ? mondayOf(anchor) : monthStartOf(anchor);
+        const count = view === 'week' ? 7 : daysInMonth(anchor);
+        return Array.from({ length: count }, (_, i) => addDays(first, i));
+    }, [view, anchor]);
+    const lastDay = days[days.length - 1];
     const today = localYmd(new Date());
+    const step = (dir: 1 | -1) => setAnchor(view === 'week' ? addDays(anchor, 7 * dir) : addMonths(anchor, dir));
+    const periodLabel = view === 'week'
+        ? `${dayLabel(days[0])} – ${dayLabel(lastDay)}`
+        : `${FULL_MONTHS[Number(anchor.slice(5, 7)) - 1]} ${anchor.slice(0, 4)}`;
+
+    const download = async () => {
+        setDownloading(true);
+        try {
+            const ok = await downloadRosterExcel(days[0], lastDay);
+            if (!ok) Alert.alert('Nothing to download', 'No employees found.');
+        } catch (e: any) {
+            Alert.alert('Could not download', e?.message || 'Please try again');
+        } finally {
+            setDownloading(false);
+        }
+    };
 
     const load = useCallback(async () => {
         setLoading(true);
         try {
-            const [r, s] = await Promise.all([fetchRoster(weekStart, addDays(weekStart, 6), 'all'), fetchShifts()]);
+            const [r, s] = await Promise.all([fetchRoster(days[0], lastDay, 'all'), fetchShifts()]);
             setRoster(r);
             setShifts(s);
         } catch (e: any) {
@@ -161,7 +198,7 @@ function RosterGrid() {
         } finally {
             setLoading(false);
         }
-    }, [weekStart]);
+    }, [days, lastDay]);
     useEffect(() => { load(); }, [load]);
 
     const apply = async (changes: RosterChange[]) => {
@@ -185,15 +222,22 @@ function RosterGrid() {
     return (
         <View style={{ flex: 1 }}>
             <View style={styles.weekBar}>
-                <TouchableOpacity onPress={() => setWeekStart(addDays(weekStart, -7))} style={styles.weekBtn} accessibilityLabel="Previous week">
+                <TouchableOpacity onPress={() => step(-1)} style={styles.weekBtn} accessibilityLabel={`Previous ${view}`}>
                     <Ionicons name="chevron-back" size={20} color="#3b5998" />
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => setWeekStart(mondayOf(today))}>
-                    <Text style={styles.weekText}>{dayLabel(days[0])} – {dayLabel(days[6])}</Text>
+                <TouchableOpacity onPress={() => setAnchor(today)} accessibilityLabel="Go to today">
+                    <Text style={styles.weekText}>{periodLabel}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => setWeekStart(addDays(weekStart, 7))} style={styles.weekBtn} accessibilityLabel="Next week">
+                <TouchableOpacity onPress={() => step(1)} style={styles.weekBtn} accessibilityLabel={`Next ${view}`}>
                     <Ionicons name="chevron-forward" size={20} color="#3b5998" />
                 </TouchableOpacity>
+                <View style={styles.viewToggle}>
+                    {(['week', 'month'] as const).map((v) => (
+                        <TouchableOpacity key={v} style={[styles.viewBtn, view === v && styles.viewBtnOn]} onPress={() => setView(v)}>
+                            <Text style={[styles.viewBtnText, view === v && styles.viewBtnTextOn]}>{v === 'week' ? 'Week' : 'Month'}</Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
             </View>
 
             <View style={styles.toolbar}>
@@ -201,6 +245,10 @@ function RosterGrid() {
                 <TouchableOpacity style={[styles.primaryBtn, { marginLeft: 8 }]} onPress={() => setBulkOpen(true)} disabled={shifts.length === 0 && !roster}>
                     <Ionicons name="calendar-outline" size={16} color="white" />
                     <Text style={styles.primaryBtnText}> Assign dates</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.secondaryBtn, { marginLeft: 8 }]} onPress={download} disabled={downloading} accessibilityLabel="Download roster as Excel">
+                    {downloading ? <ActivityIndicator size="small" color="#2e7d32" /> : <Ionicons name="download-outline" size={18} color="#2e7d32" />}
+                    {isDesktop && <Text style={styles.secondaryBtnText}> Excel</Text>}
                 </TouchableOpacity>
             </View>
 
@@ -217,7 +265,7 @@ function RosterGrid() {
                             <View style={styles.gridRow}>
                                 <View style={[styles.nameCell, styles.headCell]}><Text style={styles.headText}>Employee</Text></View>
                                 {days.map((d) => (
-                                    <View key={d} style={[styles.dayCell, styles.headCell, d === today && styles.todayHead]}>
+                                    <View key={d} style={[styles.dayCell, view === 'month' && styles.dayCellCompact, styles.headCell, d === today && styles.todayHead]}>
                                         <Text style={styles.headText}>{DAY_SHORT[dowOf(d)]}</Text>
                                         <Text style={styles.headSub}>{Number(d.slice(8, 10))} {MONTHS[Number(d.slice(5, 7)) - 1]}</Text>
                                     </View>
@@ -232,7 +280,7 @@ function RosterGrid() {
                                         return (
                                             <TouchableOpacity
                                                 key={d}
-                                                style={[styles.dayCell, toneBg[c.tone], rostered && styles.rosteredCell]}
+                                                style={[styles.dayCell, view === 'month' && styles.dayCellCompact, toneBg[c.tone], rostered && styles.rosteredCell]}
                                                 onPress={() => setCell({ userId: u.id, name: u.name, ymd: d })}
                                                 accessibilityLabel={`${u.name} ${dayLabel(d)}: ${c.top}`}
                                             >
@@ -258,8 +306,8 @@ function RosterGrid() {
                 shifts={shifts}
                 saving={saving}
                 onClose={() => setCell(null)}
-                onPick={(shift, toWeekEnd) => cell && apply([{ userIds: [cell.userId], fromDate: cell.ymd, toDate: toWeekEnd ? days[6] : cell.ymd, shift }])}
-                lastDay={days[6]}
+                onPick={(shift, toWeekEnd) => cell && apply([{ userIds: [cell.userId], fromDate: cell.ymd, toDate: toWeekEnd ? lastDay : cell.ymd, shift }])}
+                lastDay={lastDay}
             />
             <BulkModal
                 key={bulkOpen ? 'bulk-open' : 'bulk-closed'}
@@ -268,7 +316,7 @@ function RosterGrid() {
                 shifts={shifts}
                 saving={saving}
                 defaultFrom={days[0]}
-                defaultTo={days[6]}
+                defaultTo={lastDay}
                 onClose={() => setBulkOpen(false)}
                 onSave={(c) => apply([c])}
             />
@@ -567,6 +615,14 @@ const styles = StyleSheet.create({
     nameText: { fontSize: 12, fontWeight: '600', color: '#333' },
     dayCell: { width: 84, minHeight: 50, padding: 5, borderRightWidth: 1, borderBottomWidth: 1, borderColor: '#e3e3e3', justifyContent: 'center' },
     rosteredCell: { borderWidth: 2, borderColor: '#3b5998' },
+    dayCellCompact: { width: 70, padding: 4 },
+    viewToggle: { flexDirection: 'row', marginLeft: 10, borderWidth: 1, borderColor: '#3b5998', borderRadius: 6, overflow: 'hidden' },
+    viewBtn: { paddingHorizontal: 10, paddingVertical: 5 },
+    viewBtnOn: { backgroundColor: '#3b5998' },
+    viewBtnText: { fontSize: 12, fontWeight: '600', color: '#3b5998' },
+    viewBtnTextOn: { color: 'white' },
+    secondaryBtn: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#2e7d32', backgroundColor: '#e8f5e9', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8 },
+    secondaryBtnText: { color: '#2e7d32', fontWeight: 'bold' },
     cellTop: { fontSize: 11, fontWeight: 'bold' },
     cellBottom: { fontSize: 10, color: '#666', marginTop: 2 },
     myRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', borderRadius: 8, padding: 12, marginTop: 8 },
