@@ -10,11 +10,12 @@ export type TableColumn<T> = {
     label: string;
     flex?: number;          // share of the free width (default 1)
     width?: number;         // fixed width in px instead of flex
+    minWidth?: number;      // flex columns: narrowest width (default 140)
     align?: 'left' | 'right' | 'center';
     render: (item: T) => React.ReactNode;
 };
 
-const cellBox = (c: TableColumn<any>) => (c.width ? { width: c.width } : { flex: c.flex ?? 1, minWidth: 140 });
+const cellBox = (c: TableColumn<any>) => (c.width ? { width: c.width } : { flex: c.flex ?? 1, minWidth: c.minWidth ?? 140 });
 const alignText = (c: TableColumn<any>) => ({ textAlign: c.align || 'left' } as const);
 
 export function TableHeader<T>({ columns }: { columns: TableColumn<T>[] }) {
@@ -68,7 +69,7 @@ export function Pill({ text, color, bg }: { text: string; color: string; bg: str
 /** Two-line cell: bold main text + small grey second line. */
 export function TwoLine({ main, sub }: { main: string; sub?: string }) {
     return (
-        <View>
+        <View style={styles.twoLine}>
             <Text style={styles.mainText} numberOfLines={1}>{main || '-'}</Text>
             {!!sub && <Text style={styles.subText} numberOfLines={1}>{sub}</Text>}
         </View>
@@ -86,7 +87,8 @@ const styles = StyleSheet.create({
     row: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', paddingVertical: 8, paddingHorizontal: 8, marginHorizontal: 8, borderBottomWidth: 1, borderBottomColor: '#eef0f4', borderLeftWidth: 3, borderLeftColor: 'transparent' },
     rowAlt: { backgroundColor: '#fafbfd' },
     rowHover: { backgroundColor: '#eef3ff' },
-    cell: { paddingHorizontal: 6, justifyContent: 'center' },
+    cell: { paddingHorizontal: 6, justifyContent: 'center', overflow: 'hidden' },
+    twoLine: { alignSelf: 'stretch', minWidth: 0 },
     cellText: { fontSize: 13, color: '#2d3748' },
     mainText: { fontSize: 13, fontWeight: '600', color: '#2d3748' },
     subText: { fontSize: 11, color: '#8a93a6', marginTop: 1 },

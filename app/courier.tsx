@@ -527,33 +527,41 @@ export default function CourierScreen() {
   // Laptop: the same list as a table (tap a row → same details popup).
   const isDesktop = useIsDesktop();
   const courierColumns: TableColumn<any>[] = [
-      { key: 'date', label: 'Date', width: 96, render: (c) => c.date || '-' },
-      { key: 'type', label: 'Type', width: 90, render: (c) => c.type === 'Inward'
+      { key: 'date', label: 'Date', width: 88, render: (c) => c.date || '-' },
+      { key: 'type', label: 'Type', width: 88, render: (c) => c.type === 'Inward'
           ? <Pill text="INWARD" color="#2e7d32" bg="#e8f5e9" />
           : <Pill text={(c.type || '-').toUpperCase()} color="#c62828" bg="#ffebee" /> },
       { key: 'courier', label: 'Courier / Docket', width: 170, render: (c) => (
-          <TouchableOpacity onPress={() => copyDocket(c.docketNo)} hitSlop={8}>
-              <TwoLine main={c.courierName || '-'} sub={c.docketNo ? `#${c.docketNo}` : undefined} />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch' }}>
+              <TouchableOpacity onPress={() => copyDocket(c.docketNo)} hitSlop={8} style={{ flex: 1, minWidth: 0 }}>
+                  <TwoLine main={c.courierName || '-'} sub={c.docketNo ? `#${c.docketNo}` : undefined} />
+              </TouchableOpacity>
+              {!!c.docketNo && (
+                  <TouchableOpacity style={styles.trackIconBtn} onPress={() => trackCourier(c.courierName, c.docketNo)} hitSlop={6} accessibilityLabel="Track">
+                      <Ionicons name="locate" size={15} color="white" />
+                  </TouchableOpacity>
+              )}
+          </View>
       ) },
-      { key: 'track', label: '', width: 70, align: 'center' as const, render: (c) => c.docketNo ? (
-          <TouchableOpacity style={styles.trackBtn} onPress={() => trackCourier(c.courierName, c.docketNo)}>
-              <Ionicons name="locate" size={13} color="white" /><Text style={styles.trackBtnText}>Track</Text>
-          </TouchableOpacity>
-      ) : null },
-      { key: 'from', label: 'From', flex: 2, render: (c) => c.sender || '-' },
-      { key: 'to', label: 'To', flex: 2, render: (c) => <TwoLine main={c.receiver || '-'} sub={c.toCity || c.orgCity || undefined} /> },
-      { key: 'material', label: 'Material', flex: 2, render: (c) => <TwoLine main={c.material || c.materialSummary || 'No Details'} sub={c.dcNo ? `DC ${c.dcNo}` : undefined} /> },
-      { key: 'status', label: 'Status', width: 100, render: (c) => { const st = getStatusColor(c.status); return <Pill text={c.status || '-'} color={st.text} bg={st.bg} />; } },
-      ...(canManage ? [{ key: 'by', label: 'By', width: 120, render: (c: any) => c.senderName || 'Unknown' }] : []),
-      { key: 'shared', label: 'For', width: 130, render: (c: any) => canManage ? (
-          <TouchableOpacity onPress={() => setShareFor(c)} hitSlop={6}>
-              <Text style={{ fontSize: 12, color: c.sharedWith?.length ? '#333' : '#e67e22', fontWeight: c.sharedWith?.length ? '500' : 'bold' }} numberOfLines={2}>
-                  {c.sharedWith?.length ? sharedNames(c) : '+ Share'}
-              </Text>
-          </TouchableOpacity>
-      ) : <Text style={{ fontSize: 12 }} numberOfLines={2}>{isSharedWithMe(c) ? 'You' : (sharedNames(c) || '-')}</Text> },
-      ...(isStrictAdmin ? [{ key: 'act', label: '', width: 44, align: 'center' as const, render: (c: any) => (
+      { key: 'from', label: 'From', flex: 2, minWidth: 120, render: (c) => c.sender || '-' },
+      { key: 'to', label: 'To', flex: 2, minWidth: 120, render: (c) => <TwoLine main={c.receiver || '-'} sub={c.toCity || c.orgCity || undefined} /> },
+      { key: 'material', label: 'Material', flex: 2, minWidth: 120, render: (c) => <TwoLine main={c.material || c.materialSummary || 'No Details'} sub={c.dcNo ? `DC ${c.dcNo}` : undefined} /> },
+      { key: 'status', label: 'Status', width: 86, render: (c) => { const st = getStatusColor(c.status); return <Pill text={c.status || '-'} color={st.text} bg={st.bg} />; } },
+      // By (who logged it) and For (employees it is shared with) in one column.
+      { key: 'byfor', label: canManage ? 'By / For' : 'For', width: 130, render: (c: any) => {
+          const forText = c.sharedWith?.length ? `For: ${isSharedWithMe(c) && !canManage ? 'You' : sharedNames(c)}` : '';
+          return (
+              <View style={{ alignSelf: 'stretch' }}>
+                  {canManage && <Text style={{ fontSize: 13, color: '#2d3748' }} numberOfLines={1}>{c.senderName || 'Unknown'}</Text>}
+                  {canManage ? (
+                      <TouchableOpacity onPress={() => setShareFor(c)} hitSlop={6}>
+                          <Text style={{ fontSize: 11, color: '#e67e22', fontWeight: forText ? '600' : 'bold', marginTop: 1 }} numberOfLines={1}>{forText || '+ Share'}</Text>
+                      </TouchableOpacity>
+                  ) : <Text style={{ fontSize: 12, color: '#e67e22', fontWeight: '600' }} numberOfLines={1}>{forText || '-'}</Text>}
+              </View>
+          );
+      } },
+      ...(isStrictAdmin ? [{ key: 'act', label: '', width: 40, align: 'center' as const, render: (c: any) => (
           <TouchableOpacity onPress={() => openEditModal(c)}><Ionicons name="create" size={18} color="#d32f2f" /></TouchableOpacity>
       ) }] : []),
   ];
@@ -1013,6 +1021,7 @@ const styles = StyleSheet.create({
   addrValue: { fontSize:13, fontWeight:'bold', color:'#333', flex: 1 },
   divider: { height:1, backgroundColor:'#eee', marginVertical:5 },
   footer: { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginTop:5 },
+  trackIconBtn: { backgroundColor:'#e67e22', width:28, height:28, borderRadius:14, alignItems:'center', justifyContent:'center', marginLeft:6 },
   shareRow: { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginTop:8, paddingTop:8, borderTopWidth:1, borderTopColor:'#f0f0f0' },
   shareChip: { flexDirection:'row', alignItems:'center', backgroundColor:'#fff3e0', borderRadius:12, paddingHorizontal:8, paddingVertical:3, flexShrink:1, marginRight:8 },
   shareChipText: { fontSize:11, color:'#e65100', fontWeight:'bold', marginLeft:4, flexShrink:1 },
