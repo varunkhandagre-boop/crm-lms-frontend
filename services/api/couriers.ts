@@ -30,6 +30,8 @@ export interface LegacyCourier {
   /** From the linked organization (list endpoint) — address for the challan. */
   orgAddress?: string;
   orgCity?: string;
+  /** Employees this courier concerns — they see it in their list and can mark it done. */
+  sharedWith: { id: string; name: string }[];
 }
 
 interface ListResponse<T> { data: T[]; meta: { page: number; limit: number; total: number; totalPages: number }; }
@@ -72,6 +74,7 @@ export function toLegacyCourier(c: any): LegacyCourier {
     senderId: c.createdById,
     senderName: c.createdBy?.name ?? "",
     createdAt: c.createdAt,
+    sharedWith: Array.isArray(c.sharedWith) ? c.sharedWith : [],
     ...(c.organization
       ? { orgAddress: [c.organization.address1, c.organization.address2].filter(Boolean).join(", "), orgCity: c.organization.city ?? "" }
       : {}),
@@ -135,6 +138,7 @@ export async function createCourier(payload: {
   items: LegacyCourierItem[];
   notes?: string;
   dcPrefix?: string; // company short name, e.g. "LMS" — server appends -DC-FY-seq
+  sharedWithIds?: string[]; // office roles: employees this courier concerns
 }) {
   const res = await apiClient.post<OneResponse<any>>(`/couriers`, payload);
   return { success: true, id: res.data?.id, record: toLegacyCourier(res.data) };
@@ -150,6 +154,12 @@ export async function updateCourier(id: string, payload: Partial<{
 
 export async function updateCourierStatus(id: string, status: "Pending" | "Received" | "Delivered", notes?: string) {
   const res = await apiClient.patch<OneResponse<any>>(`/couriers/${id}/status`, { status, notes });
+  return { success: true, record: toLegacyCourier(res.data) };
+}
+
+/** Office roles: set the full list of employees this courier is shared with ([] = nobody). */
+export async function shareCourier(id: string, userIds: string[]) {
+  const res = await apiClient.put<OneResponse<any>>(`/couriers/${id}/share`, { userIds });
   return { success: true, record: toLegacyCourier(res.data) };
 }
 

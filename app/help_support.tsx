@@ -544,6 +544,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
             'Track the status until it is marked delivered.',
             'Tap the orange "Track" button: the courier company\'s tracking page opens (Blue Dart, Delhivery, DHL, FedEx, Xpressbees, Ecom, Ekart open with the number filled in; for DTDC, India Post and others the number is copied — just paste it). Then mark the entry Received / Delivered.',
             'Every morning Admin and Store get a summary of pending inward / outward couriers, and at 8 PM what was delivered and received today (Team & Settings → Alerts to change the time or switch off).',
+            'Parcel for an employee: when logging a courier, pick "Related Employees", or tap "Share" on any entry in the list. Those employees see it in their own Courier list, can mark it Received / Delivered, get a notification at once and a morning reminder while it is pending.',
         ],
     },
     {

@@ -30,6 +30,8 @@ import { fetchOrganizations } from '../services/api/organizations';
 import { useCachedList } from '../hooks/useCachedList';
 import { listProducts } from '../services/api/products';
 import { buildCacheKey } from '../utils/listCache';
+import { fetchTeamMembers } from '../services/api/users';
+import EmployeeMultiPicker from '../components/EmployeeMultiPicker';
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
@@ -69,6 +71,18 @@ export default function AddCourierScreen() {
 
   const [items, setItems] = useState([{ description: '', qty: '' }]);
   const [loading, setLoading] = useState(false);
+
+  // Office roles: tag the employees this parcel concerns so it shows in their Courier list.
+  const role = currentUser?.role || '';
+  const canShare = ['Admin', 'Manager', 'Account', 'Accountant', 'Hr', 'Store', 'Store Keeper', 'SuperAdmin'].includes(role);
+  const { data: teamList } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId && canShare,
+      fetcher: fetchTeamMembers,
+  });
+  const [sharedWithIds, setSharedWithIds] = useState<string[]>([]);
+  const [showSharePicker, setShowSharePicker] = useState(false);
+  const sharedNames = (teamList || []).filter((u: any) => sharedWithIds.includes(u.id)).map((u: any) => u.name).join(', ');
 
   const [showProductModal, setShowProductModal] = useState(false);
   const [activeRowIndex, setActiveRowIndex] = useState(-1);
@@ -410,6 +424,7 @@ export default function AddCourierScreen() {
               toCity,
               items,
               dcPrefix: prefix,
+              ...(canShare && sharedWithIds.length ? { sharedWithIds } : {}),
           });
           
           if (res.success) {
@@ -594,6 +609,19 @@ export default function AddCourierScreen() {
                 <Text style={{color:'#3b5998'}}>+ Add Another Item</Text>
             </TouchableOpacity>
 
+            {canShare && (
+                <View style={{marginTop: 18}}>
+                    <Text style={styles.label}>Related Employees (optional)</Text>
+                    <TouchableOpacity style={styles.selector} onPress={() => setShowSharePicker(true)}>
+                        <Text style={{color: sharedWithIds.length ? '#333' : '#999', fontWeight: sharedWithIds.length ? 'bold' : 'normal', flex: 1}} numberOfLines={2}>
+                            {sharedWithIds.length ? sharedNames : 'Select who this parcel is for'}
+                        </Text>
+                        <Ionicons name="people" size={20} color="#3b5998" />
+                    </TouchableOpacity>
+                    <Text style={{fontSize: 12, color: 'gray', marginTop: 4}}>They see this courier in their list and get a notification.</Text>
+                </View>
+            )}
+
             <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={loading}>
                 {loading ? <ActivityIndicator color="white"/> : <Text style={styles.saveText}>{type === 'Outward' ? 'Save & Generate DC' : 'Save Entry'}</Text>}
             </TouchableOpacity>
@@ -602,6 +630,17 @@ export default function AddCourierScreen() {
 
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <EmployeeMultiPicker
+          visible={showSharePicker}
+          title="Related employees"
+          hint="Pick the employees this parcel concerns."
+          employees={teamList || []}
+          selected={sharedWithIds}
+          saveLabel="Done"
+          onClose={() => setShowSharePicker(false)}
+          onSave={(ids) => { setSharedWithIds(ids); setShowSharePicker(false); }}
+      />
 
       <Modal visible={showOrgModal} animationType="slide">
         <View style={[styles.modalContainer, { paddingTop: headerTop }]}>

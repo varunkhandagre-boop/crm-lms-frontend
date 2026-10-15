@@ -24,7 +24,10 @@ import { trackCourier } from '../utils/courierTracking';
 import { useData } from './context/DataContext';
 
 // 🔥 Phase 8: couriers now come from Postgres via these adapters
-import { CourierPageFilters, deleteCourier, listCouriersPage, updateCourier, updateCourierStatus } from '../services/api/couriers';
+import { CourierPageFilters, deleteCourier, listCouriersPage, shareCourier, updateCourier, updateCourierStatus } from '../services/api/couriers';
+import { fetchTeamMembers } from '../services/api/users';
+import { useCachedList } from '../hooks/useCachedList';
+import EmployeeMultiPicker from '../components/EmployeeMultiPicker';
 import { useServerPagedList } from '../hooks/useServerPagedList';
 import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
 import { buildCacheKey } from '../utils/listCache';
@@ -120,6 +123,30 @@ export default function CourierScreen() {
       role === 'Store' || role === 'Store Keeper' || role === 'SuperAdmin';    
 
   const isStrictAdmin = role === 'Admin' || role === 'Manager' || role === 'SuperAdmin';
+
+  // Office roles can share an entry with the employees it concerns.
+  const { data: teamList } = useCachedList({
+      cacheKey: buildCacheKey('team_members', currentUser?.companyId),
+      enabled: !!currentUser?.companyId && canManage,
+      fetcher: fetchTeamMembers,
+  });
+  const [shareFor, setShareFor] = useState<any>(null);
+  const [savingShare, setSavingShare] = useState(false);
+  const sharedNames = (c: any) => (c?.sharedWith || []).map((u: any) => u.name).join(', ');
+  const isSharedWithMe = (c: any) => !!currentUser?.id && (c?.sharedWith || []).some((u: any) => u.id === currentUser.id);
+  const saveShare = async (ids: string[]) => {
+      if (!shareFor) return;
+      setSavingShare(true);
+      try {
+          const res = await shareCourier(shareFor.id, ids);
+          setCourierList(prev => prev.map(item => item.id === shareFor.id ? mergeRecord(item, res.record) : item));
+          if (selectedCourier?.id === shareFor.id) setSelectedCourier((c: any) => mergeRecord(c, res.record));
+          setShareFor(null);
+          Alert.alert('Shared', ids.length ? `Now visible to ${res.record.sharedWith.map((u) => u.name).join(', ')}. They got a notification.` : 'Removed from all employees.');
+      } catch (e: any) {
+          Alert.alert('Error', e?.message || 'Could not share this courier.');
+      } finally { setSavingShare(false); }
+  };
 
   const copyDocket = async (docketNo?: string) => {
       if (!docketNo) return;
@@ -519,6 +546,13 @@ export default function CourierScreen() {
       { key: 'material', label: 'Material', flex: 2, render: (c) => <TwoLine main={c.material || c.materialSummary || 'No Details'} sub={c.dcNo ? `DC ${c.dcNo}` : undefined} /> },
       { key: 'status', label: 'Status', width: 100, render: (c) => { const st = getStatusColor(c.status); return <Pill text={c.status || '-'} color={st.text} bg={st.bg} />; } },
       ...(canManage ? [{ key: 'by', label: 'By', width: 120, render: (c: any) => c.senderName || 'Unknown' }] : []),
+      { key: 'shared', label: 'For', width: 130, render: (c: any) => canManage ? (
+          <TouchableOpacity onPress={() => setShareFor(c)} hitSlop={6}>
+              <Text style={{ fontSize: 12, color: c.sharedWith?.length ? '#333' : '#e67e22', fontWeight: c.sharedWith?.length ? '500' : 'bold' }} numberOfLines={2}>
+                  {c.sharedWith?.length ? sharedNames(c) : '+ Share'}
+              </Text>
+          </TouchableOpacity>
+      ) : <Text style={{ fontSize: 12 }} numberOfLines={2}>{isSharedWithMe(c) ? 'You' : (sharedNames(c) || '-')}</Text> },
       ...(isStrictAdmin ? [{ key: 'act', label: '', width: 44, align: 'center' as const, render: (c: any) => (
           <TouchableOpacity onPress={() => openEditModal(c)}><Ionicons name="create" size={18} color="#d32f2f" /></TouchableOpacity>
       ) }] : []),
@@ -581,12 +615,30 @@ export default function CourierScreen() {
                 <Text style={styles.materialText} numberOfLines={1}>📦 {materialText}</Text>
                 {canManage && <Text style={{fontSize:10, color:'#3b5998', fontWeight:'bold'}}>By: {item.senderName || 'Unknown'}</Text>}
             </View>
+            {(item.sharedWith?.length > 0 || canManage) && (
+                <View style={styles.shareRow}>
+                    {item.sharedWith?.length > 0 ? (
+                        <View style={styles.shareChip}>
+                            <Ionicons name="people" size={13} color="#e67e22" />
+                            <Text style={styles.shareChipText} numberOfLines={1}>
+                                {isSharedWithMe(item) && !canManage ? 'Shared with you' : `For: ${sharedNames(item)}`}
+                            </Text>
+                        </View>
+                    ) : <View />}
+                    {canManage && (
+                        <TouchableOpacity style={styles.shareBtn} onPress={() => setShareFor(item)} hitSlop={6}>
+                            <Ionicons name="person-add-outline" size={14} color="#e67e22" />
+                            <Text style={styles.shareBtnText}>{item.sharedWith?.length ? 'Edit' : 'Share'}</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
+            )}
         </TouchableOpacity>
     );
   };
 
   const isReceiver = selectedCourier && currentUser?.name && selectedCourier.receiver ? selectedCourier.receiver.toLowerCase().includes(currentUser.name.toLowerCase()) : false;
-  const canUpdate = canManage || isReceiver;
+  const canUpdate = canManage || isReceiver || isSharedWithMe(selectedCourier);
 
   const renderMaterialList = (item: any) => {
       if (item.items && Array.isArray(item.items)) {
@@ -806,6 +858,21 @@ export default function CourierScreen() {
                               <Text style={{fontWeight:'bold', color:'#333'}}>{selectedCourier.receiver}</Text>
                           </View>
                           
+                          {(selectedCourier.sharedWith?.length > 0 || canManage) && (
+                              <View style={styles.shareBox}>
+                                  <View style={{flex: 1}}>
+                                      <Text style={{fontSize: 11, color: 'gray', marginBottom: 2}}>SHARED WITH EMPLOYEES:</Text>
+                                      <Text style={{fontWeight: 'bold', color: '#333'}}>{sharedNames(selectedCourier) || 'Nobody yet'}</Text>
+                                  </View>
+                                  {canManage && (
+                                      <TouchableOpacity style={styles.shareBtn} onPress={() => setShareFor(selectedCourier)}>
+                                          <Ionicons name="person-add-outline" size={16} color="#e67e22" />
+                                          <Text style={styles.shareBtnText}>{selectedCourier.sharedWith?.length ? 'Change' : 'Share'}</Text>
+                                      </TouchableOpacity>
+                                  )}
+                              </View>
+                          )}
+
                           <View style={styles.materialBox}>
                               <Text style={{fontWeight:'bold', color:'#333', marginBottom: 5}}>Material Details:</Text>
                               {renderMaterialList(selectedCourier)}
@@ -883,6 +950,17 @@ export default function CourierScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+      <EmployeeMultiPicker
+          visible={!!shareFor}
+          title="Share courier with employees"
+          hint={shareFor ? `${shareFor.type} ${shareFor.type === 'Outward' ? 'to ' + (shareFor.receiver || '-') : 'from ' + (shareFor.sender || '-')}. Selected employees see it in their Courier list, can mark it ${shareFor.type === 'Inward' ? 'Received' : 'Delivered'}, and get a notification.` : undefined}
+          employees={teamList || []}
+          selected={(shareFor?.sharedWith || []).map((u: any) => u.id)}
+          saveLabel="Share"
+          saving={savingShare}
+          onClose={() => setShareFor(null)}
+          onSave={saveShare}
+      />
     </View>
   );
 }
@@ -935,6 +1013,12 @@ const styles = StyleSheet.create({
   addrValue: { fontSize:13, fontWeight:'bold', color:'#333', flex: 1 },
   divider: { height:1, backgroundColor:'#eee', marginVertical:5 },
   footer: { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginTop:5 },
+  shareRow: { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginTop:8, paddingTop:8, borderTopWidth:1, borderTopColor:'#f0f0f0' },
+  shareChip: { flexDirection:'row', alignItems:'center', backgroundColor:'#fff3e0', borderRadius:12, paddingHorizontal:8, paddingVertical:3, flexShrink:1, marginRight:8 },
+  shareChipText: { fontSize:11, color:'#e65100', fontWeight:'bold', marginLeft:4, flexShrink:1 },
+  shareBtn: { flexDirection:'row', alignItems:'center', borderWidth:1, borderColor:'#e67e22', borderRadius:14, paddingHorizontal:10, paddingVertical:4 },
+  shareBtnText: { color:'#e67e22', fontWeight:'bold', fontSize:12, marginLeft:4 },
+  shareBox: { flexDirection:'row', alignItems:'center', backgroundColor:'#fff8f0', borderWidth:1, borderColor:'#ffe0b2', padding:10, borderRadius:8, marginBottom:10 },
   materialText: { fontSize:12, color:'#555', fontStyle:'italic' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end', padding: 10 },
   modalContent: { width: '100%', backgroundColor: 'white', borderRadius: 15, padding: 25, elevation: 5, maxHeight: '90%' },
