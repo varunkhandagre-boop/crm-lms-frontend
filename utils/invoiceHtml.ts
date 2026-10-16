@@ -76,7 +76,6 @@ export function invoiceHtml(inv: Invoice): string {
   <div class="top">
     <div class="seller">
       <b>${esc(s.tradeName || s.legalName)}</b><br>
-      ${s.tradeName ? `<span class="muted">${esc(s.legalName)} (Proprietor)</span><br>` : ''}
       ${esc(s.address)}<br>
       GSTIN: <b>${esc(s.gstin)}</b> &nbsp; State: ${esc(s.stateName)} (${esc(s.stateCode)})
       ${s.phone || s.email ? `<br>${[s.phone, s.email].filter(Boolean).map(esc).join(' • ')}` : ''}
