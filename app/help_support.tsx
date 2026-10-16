@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Linking,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
@@ -49,8 +50,9 @@ const CATEGORIES: { key: CatKey; label: string; icon: any; module: HelpModule; k
 ];
 const CAT_BY_KEY = Object.fromEntries(CATEGORIES.map((c) => [c.key, c])) as Record<CatKey, (typeof CATEGORIES)[number]>;
 
-type GuideSection = { cat: CatKey; module?: HelpModule; icon: string; color: string; title: string; steps: string[] };
-type FaqItem = { cat: CatKey; module?: HelpModule; q: string; a: string };
+// notIos: buying a plan is not offered in the iPhone app (App Store rule), so its help is hidden there.
+type GuideSection = { cat: CatKey; module?: HelpModule; icon: string; color: string; title: string; steps: string[]; notIos?: boolean };
+type FaqItem = { cat: CatKey; module?: HelpModule; q: string; a: string; notIos?: boolean };
 
 // =========================================================
 // 📋 USER GUIDE SECTIONS
@@ -544,7 +546,9 @@ const GUIDE_SECTIONS: GuideSection[] = [
             'Track the status until it is marked delivered.',
             'Tap the orange "Track" button: the courier company\'s tracking page opens (Blue Dart, Delhivery, DHL, FedEx, Xpressbees, Ecom, Ekart open with the number filled in; for DTDC, India Post and others the number is copied — just paste it). Then mark the entry Received / Delivered.',
             'Every morning Admin and Store get a summary of pending inward / outward couriers, and at 8 PM what was delivered and received today (Team & Settings → Alerts to change the time or switch off).',
-            'Parcel for an employee: when logging a courier, pick "Related Employees", or tap "Share" on any entry in the list. Those employees see it in their own Courier list, can mark it Received / Delivered, get a notification at once and a morning reminder while it is pending.',
+            'Parcel for an employee (e.g. dispatched from office to a customer that a sales or service person handles): while logging the courier pick "Related Employees", or later tap "Share" on the entry in the Courier list (laptop: "+ Share" in the "By / For" column). Admin, Manager, Account, HR and Store can share.',
+            'Shared employees get a notification at once, see the entry in their own Courier list marked "Shared with you", and can mark it Received / Delivered. While it is pending they also get a morning reminder ("Pending for you: 1 outward to follow up").',
+            'To change or remove: tap "Edit" (or the names under "For") and tick / untick employees, then Share.',
         ],
     },
     {
@@ -622,6 +626,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         icon: 'card',
         color: '#1565c0',
         cat: 'admin',
+        notIos: true,
         title: 'Plan & Renewal',
         steps: [
             'Sidebar → "Plan & Renewal" (Admin). The card at the top shows your current plan, valid-till date, days left and employees used.',
@@ -1041,7 +1046,13 @@ const FAQS: FaqItem[] = [
         a: `1. Make sure the client's mobile number field is left blank — messages are only sent if a number is present.\n2. Alternatively, ask your Admin to temporarily turn off automation from WhatsApp & Email → ⚙️, add the entry, then turn it back on.`,
     },
     {
+        cat: 'start',
+        q: 'How do I delete my account?',
+        a: `Open My Profile (tap your name / photo) → scroll down → "Delete my account" → confirm.\n\n• Employee: your login is closed at once and your personal details are removed within 30 days. Work records you created (attendance, leads, orders…) stay with your company. Your Admin is informed.\n• Admin: deleting the admin account deletes the whole company's data, so it is sent as a request — our team contacts you to confirm and completes it within 30 days.\n\nYou can also request deletion at lifelinem.com/account-deletion.html.`,
+    },
+    {
         cat: 'admin',
+        notIos: true,
         q: 'My plan is expiring soon — how do I renew?',
         a: `1. Admin: Sidebar → "Plan & Renewal" (or tap the "Plan: N days left" badge on Home).\n2. Choose the plan and number of employees, then tap "Pay Online" — or scan the UPI QR code and tap "I Have Paid".\n3. Your plan is activated after the payment is verified (usually within 1 hour).\n\nDo not wait until the last day — renew at least 2–3 days before expiry.`,
     },
@@ -1052,6 +1063,7 @@ const FAQS: FaqItem[] = [
     },
     {
         cat: 'admin',
+        notIos: true,
         q: 'I made a payment but the plan is still not activated',
         a: `1. Paid by UPI QR? Make sure you tapped "I Have Paid" — this sends the request for verification. Paid online? Keep the Razorpay payment ID from the SMS / email.\n2. Share your payment screenshot on WhatsApp with the support team.\n3. Activation usually happens within 1 hour during business hours.\n4. If it has been more than 2 hours, contact support directly.`,
     },
@@ -1364,6 +1376,16 @@ const FAQS: FaqItem[] = [
     },
     {
         cat: 'office',
+        q: 'A parcel was sent from office for one of our employees — how will he know?',
+        a: `Share the courier with him: in Courier tap "Share" on the entry (or pick "Related Employees" while logging it), tick his name and tap Share.\n\n• He gets a notification at once.\n• The entry shows in his own Courier list as "Shared with you".\n• He can mark it Delivered / Received himself.\n• Every morning, while it is pending, he gets a reminder.\n\nOnly Admin, Manager, Account, HR and Store can share.`,
+    },
+    {
+        cat: 'office',
+        q: 'Why do I see a courier in my list that I did not add?',
+        a: `The office shared it with you because the parcel concerns your customer or your work. Open it to see the details, track it with the orange button, and mark it Delivered / Received once done.`,
+    },
+    {
+        cat: 'office',
         q: 'How do I track a courier?',
         a: `In Courier, tap the orange "Track" button on the entry (or in its details). The courier company's tracking page opens — for Blue Dart, Delhivery, DHL, FedEx, Xpressbees, Ecom Express and Ekart the number is already filled in. For DTDC, India Post and other couriers the docket number is copied: paste it on their page. Tapping the docket number also copies it.`,
     },
@@ -1412,7 +1434,8 @@ export default function HelpSupportScreen() {
     const { currentUser, companyProfile } = useData();
 
     // Only topics for the modules this company has (SuperAdmin sees everything).
-    const isVisible = (item: { cat: CatKey; module?: HelpModule }) => {
+    const isVisible = (item: { cat: CatKey; module?: HelpModule; notIos?: boolean }) => {
+        if (item.notIos && Platform.OS === 'ios') return false;
         const mod = item.module || CAT_BY_KEY[item.cat].module;
         if (mod === 'common' || currentUser?.role === 'SuperAdmin') return true;
         const enabled: string[] = companyProfile?.enabledModules || ['sales', 'service', 'hr'];

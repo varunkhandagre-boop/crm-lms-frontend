@@ -57,14 +57,14 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow app to access your photos to upload profile or service images.",
-          "cameraPermission": "Allow app to access your camera to take photos."
+          "photosPermission": "LMS uses your photos to set your profile picture and attach photos to service reports, expenses and visits.",
+          "cameraPermission": "LMS uses the camera to take photos for service reports, expenses, visiting cards and your profile."
         }
       ],
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Allow app to use your location for attendance tracking."
+          "locationWhenInUsePermission": "LMS uses your location to mark Day In / Day Out attendance and to save the location of customer visits."
         }
       ],
       [

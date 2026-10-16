@@ -92,6 +92,12 @@ export async function fetchUsers(): Promise<PickerUser[]> {
 }
 
 // Self profile (any role, no gate) — powers profile.tsx.
+/** "Delete my account": employee login closes at once; an admin's request goes to our team. */
+export async function requestAccountDeletion(reason?: string): Promise<{ mode: 'deactivated' | 'request' }> {
+  const res = await apiClient.post<OneResponse<{ mode: 'deactivated' | 'request' }>>(`/users/me/delete-account`, { reason });
+  return res.data;
+}
+
 export async function fetchSelf(): Promise<LegacyTeamMember> {
   const res = await apiClient.get<OneResponse<any>>(`/users/me`);
   return toLegacyTeamMember(res.data);

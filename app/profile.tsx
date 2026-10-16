@@ -20,7 +20,7 @@ import {
 import { useData } from './context/DataContext';
 
 // 🔥 Phase 10: self profile now comes from Postgres via these adapters
-import { fetchSelf, updateTeamMember } from '../services/api/users';
+import { fetchSelf, requestAccountDeletion, updateTeamMember } from '../services/api/users';
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
@@ -83,6 +83,33 @@ export default function ProfileScreen() {
       { text: "Cancel", style: "cancel" },
       { text: "Logout", style: 'destructive', onPress: async () => { if (logout) await logout(); router.replace('/' as any); } }
     ]);
+  };
+
+  // App Store rule: an account made in the app must be deletable from the app.
+  const [deleting, setDeleting] = useState(false);
+  const isCompanyAdmin = ['Admin', 'SuperAdmin'].includes(currentUser?.role || '');
+  const handleDeleteAccount = () => {
+      const msg = isCompanyAdmin
+          ? 'You are the company admin. Deleting your account also deletes your company\'s LMS data for all employees. Our team will contact you to confirm, and the deletion is done within 30 days.'
+          : 'Your login will be closed at once and your personal details removed within 30 days. Work records you created (attendance, leads, orders…) stay with your company.';
+      Alert.alert('Delete my account?', msg, [
+          { text: 'Cancel', style: 'cancel' },
+          { text: isCompanyAdmin ? 'Send delete request' : 'Delete account', style: 'destructive', onPress: async () => {
+              setDeleting(true);
+              try {
+                  const r = await requestAccountDeletion();
+                  if (r.mode === 'deactivated') {
+                      Alert.alert('Account deleted', 'Your account is closed. Your company admin has been informed.');
+                      if (logout) await logout();
+                      router.replace('/' as any);
+                  } else {
+                      Alert.alert('Request sent', 'We have received your request to delete the company account. Our team will contact you within 2 working days.');
+                  }
+              } catch (e: any) {
+                  Alert.alert('Could not send', e?.message || 'Check your internet and try again.');
+              } finally { setDeleting(false); }
+          } },
+      ]);
   };
 
   const handleProfileOptions = () => {
@@ -355,6 +382,10 @@ export default function ProfileScreen() {
               <Text style={styles.logoutText}>Log Out</Text>
           </TouchableOpacity>
           <Text style={styles.versionText}>App Version {Constants.expoConfig?.version || '1.0.0'}</Text>
+          <TouchableOpacity style={styles.deleteBtn} onPress={handleDeleteAccount} disabled={deleting} accessibilityRole="button">
+              {deleting ? <ActivityIndicator color="#d32f2f" size="small" /> : <Ionicons name="trash-outline" size={16} color="#d32f2f" />}
+              <Text style={styles.deleteText}>Delete my account</Text>
+          </TouchableOpacity>
         </View>
 
       </ScrollView>
@@ -388,6 +419,8 @@ const styles = StyleSheet.create({
   value: { color: '#222B45', fontSize: 15, fontWeight: '500' },
   actionContainer: { paddingHorizontal: 20, marginTop: 30 },
   logoutBtn: { flexDirection: 'row', backgroundColor: '#FF3D71', paddingVertical: 16, borderRadius: 16, justifyContent: 'center', alignItems: 'center', shadowColor: '#FF3D71', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 10, elevation: 6 },
+  deleteBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 18, paddingVertical: 10 },
+  deleteText: { color: '#d32f2f', fontWeight: '600', fontSize: 14, marginLeft: 6, textDecorationLine: 'underline' },
   logoutText: { color: 'white', fontWeight: 'bold', fontSize: 16, marginLeft: 10 },
   versionText: { textAlign: 'center', color: '#8F9BB3', marginTop: 20, fontSize: 12 },
   visitingCardBtn: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', backgroundColor: '#e65100', paddingVertical: 12, borderRadius: 12, marginTop: 20, shadowColor: '#e65100', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 5, elevation: 4 },

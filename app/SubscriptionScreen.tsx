@@ -25,6 +25,10 @@ import { useHeaderTop } from '../hooks/useHeaderTop';
 
 const DEFAULT_AUTOMATION_ADDON_PRICE = 3000;
 
+// App Store rule 3.1.1: on iPhone the app may not sell the plan with an outside
+// payment (Razorpay / UPI) or point to one. iOS shows the current plan only.
+const PURCHASE_ALLOWED = Platform.OS !== 'ios';
+
 // Razorpay's native SDK hands the failure back as a raw JSON string inside
 // `description` ({"error":{code,description,source,step,reason,metadata}}), which
 // is what users were seeing verbatim. Turn it into a readable message. When the
@@ -263,7 +267,7 @@ export default function SubscriptionScreen() {
         );
     }
 
-    if (plans.length === 0) {
+    if (PURCHASE_ALLOWED && plans.length === 0) {
         return (
             <View style={[styles.container, { justifyContent: 'center', padding: 20 }]}>
                 <Text style={{ textAlign: 'center', color: '#666' }}>
@@ -312,10 +316,16 @@ export default function SubscriptionScreen() {
                             <View style={{ height: 8, backgroundColor: '#ddd', borderRadius: 4, overflow: 'hidden' }}>
                                 <View style={{ height: '100%', width: `${Math.min(current.max > 0 ? (current.used / current.max) * 100 : 0, 100)}%`, backgroundColor: current.max > 0 && current.used >= current.max ? '#d32f2f' : '#4caf50' }} />
                             </View>
-                            <Text style={{ fontSize: 11, color: '#666', marginTop: 8 }}>Choose a plan below to renew, add employees or change modules.</Text>
+                            {PURCHASE_ALLOWED && <Text style={{ fontSize: 11, color: '#666', marginTop: 8 }}>Choose a plan below to renew, add employees or change modules.</Text>}
                         </View>
                     )}
 
+                    {!PURCHASE_ALLOWED ? (
+                        <View style={styles.noPaymentCard}>
+                            <Ionicons name="information-circle-outline" size={32} color="#3b5998" />
+                            <Text style={styles.noPaymentText}>Plan changes are not available in the iPhone app.</Text>
+                        </View>
+                    ) : (<>
                     <Text style={styles.sectionTitle}>Select Plan</Text>
                     <View style={styles.planContainer}>
                         {plans.map((plan) => {
@@ -503,6 +513,7 @@ export default function SubscriptionScreen() {
                             </Text>
                         </View>
                     )}
+                    </>)}
 
                 </ScrollView>
             </KeyboardAvoidingView>
