@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { saveAndShareFile } from '../../utils/saveFile';
 import * as FileSystem from 'expo-file-system/legacy';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -35,6 +35,7 @@ import {
     UsageAnalyticsRow,
 } from '../../services/api/superadminCompanies';
 import { useHeaderTop } from '../../hooks/useHeaderTop';
+import { listDeletionRequests } from '../../services/api/deletionRequests';
 
 type MainTab = 'companies' | 'analytics';
 
@@ -61,6 +62,13 @@ const PAGE_LIMIT = 30;
 export default function SuperAdminDashboard() {
     const headerTop = useHeaderTop();
     const router = useRouter();
+    // Open in-app "Delete my account" requests (30-day deadline) — badge on the header button.
+    const [deletionCounts, setDeletionCounts] = useState<{ pending: number; overdue: number } | null>(null);
+    useFocusEffect(useCallback(() => {
+        listDeletionRequests({ status: 'pending', page: 1, limit: 1 })
+            .then(r => setDeletionCounts({ pending: r.pending, overdue: r.overdue }))
+            .catch(() => {});
+    }, []));
 
     const [companies, setCompanies] = useState<Company[]>([]);
     const [page, setPage] = useState(1);
@@ -395,6 +403,19 @@ export default function SuperAdminDashboard() {
                         <Ionicons name="card" size={18} color="white" />
                         <Text style={styles.paymentsBtnText}>Gateway</Text>
                     </TouchableOpacity>
+                    <TouchableOpacity style={styles.paymentsBtn} onPress={() => router.push('/superadmin/deletion-requests' as any)}>
+                        <Ionicons name="person-remove" size={18} color="white" />
+                        <Text style={styles.paymentsBtnText}>Deletions</Text>
+                        {!!deletionCounts?.pending && (
+                            <View style={[styles.countBadge, deletionCounts.overdue > 0 && styles.countBadgeUrgent]}>
+                                <Text style={[styles.countBadgeText, deletionCounts.overdue > 0 && { color: 'white' }]}>{deletionCounts.pending}</Text>
+                            </View>
+                        )}
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.paymentsBtn} onPress={() => router.push('/superadmin/app-version' as any)}>
+                        <Ionicons name="phone-portrait" size={18} color="white" />
+                        <Text style={styles.paymentsBtnText}>App version</Text>
+                    </TouchableOpacity>
                 </View>
 
                 <View style={styles.mainTabRow}>
@@ -661,11 +682,14 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
     header: { backgroundColor: '#d32f2f', paddingHorizontal: 20, paddingBottom: 0 },
     headerTop: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
-    headerBottom: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+    headerBottom: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 12 },
     headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold', flex: 1 },
     iconBtn: { backgroundColor: 'rgba(255,255,255,0.2)', padding: 8, borderRadius: 8 },
     paymentsBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 8, paddingVertical: 6, borderRadius: 8 },
     paymentsBtnText: { color: 'white', marginLeft: 4, fontWeight: 'bold', fontSize: 11 },
+    countBadge: { backgroundColor: 'white', borderRadius: 9, minWidth: 18, paddingHorizontal: 5, marginLeft: 5, alignItems: 'center' },
+    countBadgeUrgent: { backgroundColor: '#ffab00' },
+    countBadgeText: { color: '#d32f2f', fontSize: 11, fontWeight: 'bold' },
     mainTabRow: { flexDirection: 'row', gap: 0, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.2)' },
     mainTab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12 },
     mainTabActive: { borderBottomWidth: 3, borderBottomColor: 'white', backgroundColor: 'rgba(255,255,255,0.1)' },

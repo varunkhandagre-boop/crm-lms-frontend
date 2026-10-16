@@ -10,6 +10,7 @@ import { DataProvider, useData } from './context/DataContext';
 import { canSeeTab as canSeeTabFor } from '../utils/menuAccess';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 import DesktopSidebar from '../components/DesktopSidebar';
+import AppUpdateGate from '../components/AppUpdateGate';
 
 import { Notifications, notificationsAvailable } from '../utils/notificationsModule';
 import { manageAttendanceReminders, setupNotificationPermissions } from '../utils/notificationHelper';
@@ -55,7 +56,10 @@ export default function Layout() {
   }, []);
   const app = (
     <DataProvider>
-      <NavigationLayout />
+      <View style={{ flex: 1 }}>
+        <NavigationLayout />
+        <AppUpdateGate />
+      </View>
     </DataProvider>
   );
   if (Platform.OS !== 'web') return app;

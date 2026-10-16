@@ -1051,6 +1051,11 @@ const FAQS: FaqItem[] = [
         a: `Open My Profile (tap your name / photo) → scroll down → "Delete my account" → confirm.\n\n• Employee: your login is closed at once and your personal details are removed within 30 days. Work records you created (attendance, leads, orders…) stay with your company. Your Admin is informed.\n• Admin: deleting the admin account deletes the whole company's data, so it is sent as a request — our team contacts you to confirm and completes it within 30 days.\n\nYou can also request deletion at lifelinem.com/account-deletion.html.`,
     },
     {
+        cat: 'start',
+        q: 'The app says "Update required" or "New version available"',
+        a: `We release new versions with new features and fixes.\n\n• "New version available": tap "Update now" to open the store and update, or "Later" to keep working.\n• "Update required": this version is too old to keep working with the server. Tap the update button, update LMS CRM from the Play Store / App Store, then open the app again. Your data is safe — it is stored on our server, not on the phone.\n\nIf the store still shows "Open" instead of "Update", wait a few minutes and check again.`,
+    },
+    {
         cat: 'admin',
         notIos: true,
         q: 'My plan is expiring soon — how do I renew?',

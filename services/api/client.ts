@@ -1,5 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import { appVersionHeaders } from '../../utils/appVersion';
 
 // Point this at your machine's LAN IP when testing on a physical device
 // (localhost only works in an iOS simulator / Android emulator on the same
@@ -35,6 +36,7 @@ interface ApiErrorBody {
   message: string;
   code?: string;
   fieldErrors?: Record<string, string[] | undefined>;
+  storeUrl?: string | null; // APP_UPDATE_REQUIRED only
 }
 
 export class ApiRequestError extends Error {
@@ -66,6 +68,15 @@ export function onAuthProblem(listener: (problem: AuthProblem, message: string) 
   return () => { if (authProblemListener === listener) authProblemListener = null; };
 }
 
+// The server answers 426 APP_UPDATE_REQUIRED when this build is older than the
+// minimum version — components/AppUpdateGate shows the Update screen.
+export interface UpdateRequired { message: string; storeUrl: string | null }
+let updateRequiredListener: ((info: UpdateRequired) => void) | null = null;
+export function onUpdateRequired(listener: (info: UpdateRequired) => void): () => void {
+  updateRequiredListener = listener;
+  return () => { if (updateRequiredListener === listener) updateRequiredListener = null; };
+}
+
 // Generous by default (uploads, exports, OCR); Day In / Day Out pass a shorter one.
 const DEFAULT_TIMEOUT_MS = 60_000;
 
@@ -84,6 +95,7 @@ async function request<T>(path: string, options: RequestInit = {}, opts: Request
       signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
+        ...appVersionHeaders(),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(options.headers || {}),
       },
@@ -109,6 +121,8 @@ async function request<T>(path: string, options: RequestInit = {}, opts: Request
       authProblemListener?.('SESSION_EXPIRED', error.message);
     } else if (res.status === 403 && (error.code === 'SUBSCRIPTION_EXPIRED' || error.code === 'COMPANY_SUSPENDED')) {
       authProblemListener?.(error.code, error.message);
+    } else if (res.status === 426 && error.code === 'APP_UPDATE_REQUIRED') {
+      updateRequiredListener?.({ message: error.message, storeUrl: error.storeUrl ?? null });
     }
     throw new ApiRequestError(res.status, error);
   }
