@@ -45,6 +45,15 @@ Notifications.setNotificationHandler({
   }),
 });
 
+// Desktop home card: "Good evening" in India time, and today's date.
+function greeting(): string {
+    const h = Number(new Date().toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: 'Asia/Kolkata' })) % 24;
+    return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+}
+function todayLabel(): string {
+    return new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' });
+}
+
 export default function HomeScreen() {
   const headerTop = useHeaderTop();
   const router = useRouter();
@@ -299,10 +308,11 @@ const saveTokenToDatabase = async (token: string) => {
 
   return (
       <View style={styles.container}>
+          {/* Desktop: no top bar — the logo is in the left menu, and the bell /
+              profile sit on the dashboard card (see renderDesktopHero). */}
+          {!isDesktop && (
           <View style={[styles.header, { paddingTop: headerTop }]}>
-              {isDesktop
-                  ? <View style={{ width: 28 }} /> /* desktop: the menu is always on the left */
-                  : <TouchableOpacity onPress={() => setSidebarVisible(true)}><Ionicons name="menu" size={28} color="#333" /></TouchableOpacity>}
+              <TouchableOpacity onPress={() => setSidebarVisible(true)}><Ionicons name="menu" size={28} color="#333" /></TouchableOpacity>
               <View style={{flexDirection:'row', alignItems:'center'}}>
                   {branding.logo ? (
                       <Image source={{ uri: branding.logo }} style={{width: 40, height: 40, resizeMode:'contain', marginRight: 10}} />
@@ -331,8 +341,52 @@ const saveTokenToDatabase = async (token: string) => {
                   </TouchableOpacity>
               </View>
           </View>
+          )}
 
-          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <ScrollView contentContainerStyle={[styles.scrollContent, isDesktop && styles.scrollContentDesktop]} showsVerticalScrollIndicator={false}>
+              {isDesktop ? (
+                  <View style={styles.hero}>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={styles.heroDate}>{todayLabel()}</Text>
+                          <Text style={styles.heroGreeting} numberOfLines={1}>{greeting()}, {currentUser.name.split(' ')[0]} 👋</Text>
+                          <View style={styles.heroChips}>
+                              <View style={styles.heroChip}>
+                                  <Ionicons name={statusIcon as any} size={14} color={statusColor} />
+                                  <Text style={[styles.heroChipText, { color: statusColor }]}>{statusText}</Text>
+                              </View>
+                              <TouchableOpacity style={styles.heroChip} onPress={() => router.push('/tasks' as any)}>
+                                  <Ionicons name="checkbox-outline" size={14} color="white" />
+                                  <Text style={styles.heroChipText}>{pendingTaskCount} pending tasks</Text>
+                              </TouchableOpacity>
+                              <View style={styles.heroChip}>
+                                  <Ionicons name="call-outline" size={14} color="white" />
+                                  <Text style={styles.heroChipText}>{dashboardCount} {dashboardLabel.toLowerCase()}</Text>
+                              </View>
+                          </View>
+                      </View>
+                      <View style={styles.heroActions}>
+                          <TouchableOpacity style={styles.heroDashBtn} onPress={() => router.push('/dashboard' as any)} accessibilityRole="button">
+                              <Ionicons name="stats-chart" size={16} color="#3b5998" />
+                              <Text style={styles.heroDashText}>Live Dashboard</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity style={styles.heroIconBtn} onPress={() => router.push('/notifications' as any)} accessibilityLabel="Notifications">
+                              <Ionicons name="notifications-outline" size={22} color="white" />
+                              {unreadCount > 0 && (
+                                  <View style={styles.heroBadge}>
+                                      <Text style={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+                                  </View>
+                              )}
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => router.push('/profile')} accessibilityLabel="My profile">
+                              <View style={[styles.headerAvatar, styles.heroAvatar]}>
+                                  {getUserImage()
+                                      ? <Image source={getUserImage()!} style={{ width: 40, height: 40, borderRadius: 20 }} />
+                                      : <Text style={{ color: '#3b5998', fontWeight: 'bold', fontSize: 16 }}>{currentUser.name.charAt(0)}</Text>}
+                              </View>
+                          </TouchableOpacity>
+                      </View>
+                  </View>
+              ) : (
               <TouchableOpacity style={styles.dashboardBanner} onPress={() => router.push('/dashboard' as any)}>
                   <View>
                       <Text style={styles.bannerTitle}>Live Dashboard</Text>
@@ -355,6 +409,7 @@ const saveTokenToDatabase = async (token: string) => {
                   </View>
                   <Ionicons name="stats-chart" size={30} color="white" />
               </TouchableOpacity>
+              )}
                             
               {visibleHR.length > 0 && (
                   <>
@@ -501,6 +556,19 @@ const styles = StyleSheet.create({
   },
   badgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
   scrollContent: { padding: 12, paddingBottom: 150, flexGrow: 1, paddingTop: 10 }, 
+  scrollContentDesktop: { paddingTop: 16, paddingHorizontal: 16 },
+  hero: { backgroundColor: '#3b5998', borderRadius: 14, paddingVertical: 18, paddingHorizontal: 22, flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 4 },
+  heroDate: { color: '#c5d3f0', fontSize: 12, fontWeight: '600', letterSpacing: 0.3 },
+  heroGreeting: { color: 'white', fontSize: 22, fontWeight: 'bold', marginTop: 2 },
+  heroChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  heroChip: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,255,255,0.16)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14 },
+  heroChipText: { color: 'white', fontSize: 12, fontWeight: '600' },
+  heroActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  heroDashBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'white', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20 },
+  heroDashText: { color: '#3b5998', fontWeight: 'bold', fontSize: 13 },
+  heroIconBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.16)', alignItems: 'center', justifyContent: 'center' },
+  heroBadge: { position: 'absolute', top: -3, right: -3, backgroundColor: '#e74c3c', borderRadius: 10, minWidth: 18, height: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3, borderWidth: 1.5, borderColor: '#3b5998' },
+  heroAvatar: { width: 40, height: 40, backgroundColor: 'white' },
   dashboardBanner: { backgroundColor: '#3b5998', borderRadius: 12, padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2, elevation: 4 },
   bannerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },
   bannerSub: { color: '#e3f2fd', fontSize: 12, marginTop: 4 },

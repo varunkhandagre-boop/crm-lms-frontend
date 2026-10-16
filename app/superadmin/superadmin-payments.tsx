@@ -23,6 +23,8 @@ import {
     SubscriptionRequest,
 } from '../../services/api/subscriptionRequests';
 import { useHeaderTop } from '../../hooks/useHeaderTop';
+import { createInvoiceForPayment, getInvoiceForPayment } from '../../services/api/invoices';
+import { shareInvoicePdf } from '../../utils/invoiceHtml';
 
 type TabKey = 'PENDING' | 'APPROVED' | 'ALL';
 
@@ -187,6 +189,35 @@ export default function SuperAdminPayments() {
         );
     };
 
+    // GST invoice of an approved payment; offers to create it when it is missing
+    // (e.g. approved before invoices existed).
+    const handleInvoice = async (item: SubscriptionRequest) => {
+        setProcessingId(item.id);
+        try {
+            await shareInvoicePdf(await getInvoiceForPayment(item.id));
+        } catch (e: any) {
+            if (e?.status !== 404) {
+                Alert.alert('Could not open the invoice', e?.message || 'Please try again.');
+                return;
+            }
+            Alert.alert('No invoice yet', 'Create the GST invoice for this payment now? It takes the next invoice number.', [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Create',
+                    onPress: async () => {
+                        try {
+                            await shareInvoicePdf(await createInvoiceForPayment(item.id));
+                        } catch (err: any) {
+                            Alert.alert('Could not create the invoice', err?.message || 'Please try again.');
+                        }
+                    },
+                },
+            ]);
+        } finally {
+            setProcessingId(null);
+        }
+    };
+
     const handleDelete = async (item: SubscriptionRequest) => {
         Alert.alert(
             'Delete Request',
@@ -288,6 +319,13 @@ export default function SuperAdminPayments() {
                             {processingId === item.id ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.actionText}>Approve ✅</Text>}
                         </TouchableOpacity>
                     </View>
+                )}
+
+                {isApproved && (
+                    <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#3b5998', marginTop: 10, flexDirection: 'row', gap: 6 }]} onPress={() => handleInvoice(item)} disabled={processingId === item.id}>
+                        {processingId === item.id ? <ActivityIndicator color="white" size="small" /> : <Ionicons name="receipt-outline" size={15} color="white" />}
+                        <Text style={styles.actionText}>GST Invoice</Text>
+                    </TouchableOpacity>
                 )}
 
                 {!isPending && (

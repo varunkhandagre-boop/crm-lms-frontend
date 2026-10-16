@@ -416,6 +416,10 @@ export default function SuperAdminDashboard() {
                         <Ionicons name="phone-portrait" size={18} color="white" />
                         <Text style={styles.paymentsBtnText}>App version</Text>
                     </TouchableOpacity>
+                    <TouchableOpacity style={styles.paymentsBtn} onPress={() => router.push('/superadmin/invoice-settings' as any)}>
+                        <Ionicons name="receipt" size={18} color="white" />
+                        <Text style={styles.paymentsBtnText}>Invoice</Text>
+                    </TouchableOpacity>
                 </View>
 
                 <View style={styles.mainTabRow}>

@@ -124,6 +124,10 @@ function NetworkIndicator() {
     const pathname = usePathname();
     
     const { isSessionReady, currentUser } = useData(); 
+    const isDesktop = useIsDesktop();
+    // Desktop: bottom-right, and only when there is something to say (the
+    // home card sits where the phone shows the green dot).
+    const pos = isDesktop ? { bottom: 16, top: undefined } : { top: insets.top + 50 };
 
     useEffect(() => {
         // 🔥 '(state: any)' add kar diya gaya hai TS error hatane ke liye
@@ -137,7 +141,7 @@ function NetworkIndicator() {
 
     if (isConnected === false) {
         return (
-            <View style={[styles.networkPill, { top: insets.top + 50 }]}>
+            <View style={[styles.networkPill, pos]}>
                 <View style={[styles.netDot, { backgroundColor: '#f44336' }]} />
                 <Text style={styles.netText}>Offline</Text>
             </View>
@@ -146,15 +150,16 @@ function NetworkIndicator() {
 
     if (isConnected === true && currentUser && isSessionReady === false) {
          return (
-             <View style={[styles.networkPill, { top: insets.top + 50 }]}>
+             <View style={[styles.networkPill, pos]}>
                  <ActivityIndicator size="small" color="#f57c00" style={{ marginRight: 6, transform: [{ scale: 0.6 }] }} />
                  <Text style={[styles.netText, { color: '#f57c00' }]}>Syncing...</Text>
              </View>
          );
     }
 
+    if (isDesktop) return null;
     return (
-        <View style={[styles.networkPill, { top: insets.top + 50 }]}>
+        <View style={[styles.networkPill, pos]}>
             <View style={[styles.netDot, { backgroundColor: '#4caf50' }]} />
             <Text style={styles.netText}></Text>
         </View>

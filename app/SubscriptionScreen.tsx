@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { openRazorpay, RazorpaySuccess } from '../utils/razorpay';
+import InvoicesCard from '../components/InvoicesCard';
 
 import { ActivePlan, listActivePlans } from '../services/api/plans';
 import { fetchPublicBillingSettings, fetchPublicGatewayConfig, PublicGatewayConfig } from '../services/api/settings';
@@ -339,6 +340,8 @@ export default function SubscriptionScreen() {
                             {PURCHASE_ALLOWED && <Text style={{ fontSize: 11, color: '#666', marginTop: 8 }}>Choose a plan below to renew, add employees or change modules.</Text>}
                         </View>
                     )}
+
+                    {currentUser?.role === 'Admin' && <InvoicesCard />}
 
                     {!PURCHASE_ALLOWED ? (
                         <View style={styles.noPaymentCard}>
