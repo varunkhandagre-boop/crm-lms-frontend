@@ -632,7 +632,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
             'Sidebar → "Plan & Renewal" (Admin). The card at the top shows your current plan, valid-till date, days left and employees used.',
             'Select a plan (prices are per employee per year, + GST), enter the number of employees, and optionally add the Automation add-on (one price per company). The Order Summary shows the subtotal, GST and total payable.',
             'Tap "Pay Online" (Card / UPI / Net Banking / Wallet), or scan the UPI QR code and tap "I Have Paid".',
-            'Your plan activates once the payment is verified (usually within 1 hour).',
+            'Pay Online: your plan is active as soon as the payment goes through — no waiting. UPI QR ("I Have Paid"): the plan activates once our team verifies the payment (usually within 1 hour).',
             'When 30 days or less are left, a "Plan: N days left" badge shows on the Home screen and under your name in the sidebar. Tap it to go straight to renewal.',
             'If the plan / trial ends, the app becomes view only: everyone can still log in and see old data, but nothing new can be added, edited or deleted. A red "Plan expired — view only" bar shows at the bottom; Admin can tap it to renew. Everything works again as soon as the plan is renewed.',
         ],
@@ -1059,7 +1059,7 @@ const FAQS: FaqItem[] = [
         cat: 'admin',
         notIos: true,
         q: 'My plan is expiring soon — how do I renew?',
-        a: `1. Admin: Sidebar → "Plan & Renewal" (or tap the "Plan: N days left" badge on Home).\n2. Choose the plan and number of employees, then tap "Pay Online" — or scan the UPI QR code and tap "I Have Paid".\n3. Your plan is activated after the payment is verified (usually within 1 hour).\n\nDo not wait until the last day — renew at least 2–3 days before expiry.`,
+        a: `1. Admin: Sidebar → "Plan & Renewal" (or tap the "Plan: N days left" badge on Home).\n2. Choose the plan and number of employees, then tap "Pay Online" — or scan the UPI QR code and tap "I Have Paid".\n3. Pay Online: the plan is active immediately. UPI QR: it is activated after we verify the payment (usually within 1 hour).\n\nDo not wait until the last day — renew at least 2–3 days before expiry.`,
     },
     {
         cat: 'admin',
@@ -1070,7 +1070,7 @@ const FAQS: FaqItem[] = [
         cat: 'admin',
         notIos: true,
         q: 'I made a payment but the plan is still not activated',
-        a: `1. Paid by UPI QR? Make sure you tapped "I Have Paid" — this sends the request for verification. Paid online? Keep the Razorpay payment ID from the SMS / email.\n2. Share your payment screenshot on WhatsApp with the support team.\n3. Activation usually happens within 1 hour during business hours.\n4. If it has been more than 2 hours, contact support directly.`,
+        a: `1. Paid by UPI QR? Make sure you tapped "I Have Paid" — this sends the request for verification. Paid online? The plan activates by itself within a few minutes — pull down to refresh, or log out and in again. Keep the Razorpay payment ID from the SMS / email.\n2. Share your payment screenshot on WhatsApp with the support team.\n3. UPI payments are usually activated within 1 hour during business hours.\n4. If it has been more than 2 hours, contact support directly.`,
     },
     {
         cat: 'admin',

@@ -1,5 +1,6 @@
 export type RazorpayOptions = Record<string, any>;
-export type RazorpaySuccess = { razorpay_payment_id: string };
+// Order payments (order_id in the options) also return the order id and a signature the server checks.
+export type RazorpaySuccess = { razorpay_payment_id: string; razorpay_order_id?: string; razorpay_signature?: string };
 
 const SCRIPT_URL = 'https://checkout.razorpay.com/v1/checkout.js';
 let loading: Promise<void> | null = null;

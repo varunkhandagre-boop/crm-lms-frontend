@@ -19,6 +19,8 @@ export interface SubscriptionRequest {
     amountPaid: number;
     requestedExpiryDate: string;
     status: SubscriptionRequestStatus;
+    paymentMethod?: 'MANUAL' | 'RAZORPAY' | 'WEBSITE'; // RAZORPAY / WEBSITE = activated automatically
+    razorpayPaymentId?: string | null;
     approvedAt: string | null;
     rejectionReason: string | null;
     createdAt: string;
@@ -84,5 +86,48 @@ export interface SubmitSubscriptionRequestPayload {
 
 export async function submitSubscriptionRequest(payload: SubmitSubscriptionRequestPayload): Promise<SubscriptionRequest> {
     const res = await apiClient.post<OneResponse<SubscriptionRequest>>('/subscription-requests/me', payload);
+    return res.data;
+}
+
+// ---- Pay Online: the server prices the plan and opens a Razorpay order;
+// a verified payment activates the plan at once (no approval step). ------
+
+export interface RenewalOrder {
+    renewalId: string;
+    amount: number;
+    subtotal: number;
+    gstPercent: number;
+    gstAmount: number;
+    planLabel: string;
+    razorpay: {
+        keyId: string;
+        orderId: string;
+        amount: number; // paise
+        currency: string;
+        name: string;
+        description: string;
+        image?: string;
+        color?: string;
+        prefill: { name: string; email: string; contact: string };
+    };
+}
+
+export async function createRenewalOrder(payload: { planId: string; employeesRequested: number; automationRequested: boolean }): Promise<RenewalOrder> {
+    const res = await apiClient.post<OneResponse<RenewalOrder>>('/subscription-requests/me/online-order', payload);
+    return res.data;
+}
+
+export interface RenewalResult {
+    planName: string | null;
+    expiryDate: string | null;
+    employeeLimit: number;
+    paymentId: string;
+}
+
+export async function verifyRenewal(payload: {
+    renewalId: string; razorpayOrderId: string; razorpayPaymentId: string; razorpaySignature: string;
+}): Promise<RenewalResult> {
+    // Generous timeout: the server also confirms the payment with Razorpay.
+    const res = await apiClient.post<OneResponse<RenewalResult>>('/subscription-requests/me/online-verify', payload, { timeoutMs: 90_000 });
     return res.data;
 }

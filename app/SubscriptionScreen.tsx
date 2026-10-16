@@ -14,11 +14,11 @@ import {
     View
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
-import { openRazorpay } from '../utils/razorpay';
+import { openRazorpay, RazorpaySuccess } from '../utils/razorpay';
 
 import { ActivePlan, listActivePlans } from '../services/api/plans';
 import { fetchPublicBillingSettings, fetchPublicGatewayConfig, PublicGatewayConfig } from '../services/api/settings';
-import { submitSubscriptionRequest } from '../services/api/subscriptionRequests';
+import { createRenewalOrder, RenewalOrder, submitSubscriptionRequest, verifyRenewal } from '../services/api/subscriptionRequests';
 import { fetchCompanyProfile } from '../services/api/companies';
 import { useData } from './context/DataContext';
 import { useHeaderTop } from '../hooks/useHeaderTop';
@@ -53,7 +53,7 @@ function friendlyRazorpayError(error: any): string {
 export default function SubscriptionScreen() {
     const headerTop = useHeaderTop();
     const router = useRouter();
-    const { currentUser } = useData();
+    const { currentUser, refreshCompanyProfile } = useData();
 
     const [loading, setLoading] = useState(false);
     const [alreadySubmitted, setAlreadySubmitted] = useState(false);
@@ -182,53 +182,73 @@ export default function SubscriptionScreen() {
         }
 
         setLoading(true);
+        let order: RenewalOrder;
         try {
-            const options = {
-                key: gatewayConfig.keyId,
-                amount: totalPrice * 100, // Razorpay paisa mein leta hai
-                currency: gatewayConfig.currency || 'INR',
-                name: gatewayConfig.companyName || 'CRM Subscription',
-                image: gatewayConfig.companyLogo || '',
-                description: `${selectedPlan?.label} — ${employeeCount} Users${wantsAutomation ? ' + Automation' : ''}`,
-                prefill: {
-                    name: currentUser?.name || '',
-                    email: currentUser?.email || '',
-                    contact: currentUser?.mobile || '',
-                },
-                theme: {
-                    color: gatewayConfig.companyColor || '#d32f2f',
-                },
-            };
-
-            openRazorpay(options)
-                .then(async (paymentData: any) => {
-                    console.log('✅ Razorpay Payment:', paymentData.razorpay_payment_id);
-                    try {
-                        await saveSubscriptionRequest();
-                        setAlreadySubmitted(true);
-                        Alert.alert(
-                            'Payment Successful ✅',
-                            `Payment ID: ${paymentData.razorpay_payment_id}\n\nYour plan will be activated within 1 hour.`,
-                            [{ text: 'OK', onPress: () => router.replace(currentUser ? '/' : '/login' as any) }]
-                        );
-                    } catch (e: any) {
-                        Alert.alert('Error', e.message || 'Payment succeeded but we could not record the request. Please contact support with your Payment ID.');
-                    } finally {
-                        setLoading(false);
-                    }
-                })
-                .catch((error: any) => {
-                    setLoading(false);
-                    if (error.code === 2) {
-                        console.log('Payment cancelled by user');
-                    } else {
-                        console.log('Razorpay error (raw):', error?.message || JSON.stringify(error));
-                        Alert.alert('Payment Failed', friendlyRazorpayError(error));
-                    }
-                });
-        } catch (e) {
+            // The server prices the plan and opens a Razorpay order for it.
+            order = await createRenewalOrder({
+                planId: selectedPlan!.id,
+                employeesRequested: Number(employeeCount),
+                automationRequested: wantsAutomation,
+            });
+        } catch (e: any) {
             setLoading(false);
-            Alert.alert('Error', 'Could not initiate payment. Please try again.');
+            Alert.alert('Could not start payment', e?.message || 'Please try again, or use the UPI QR option below.');
+            return;
+        }
+
+        let paymentData: RazorpaySuccess;
+        try {
+            paymentData = await openRazorpay({
+                key: order.razorpay.keyId,
+                order_id: order.razorpay.orderId,
+                amount: order.razorpay.amount,
+                currency: order.razorpay.currency,
+                name: order.razorpay.name,
+                image: order.razorpay.image || gatewayConfig.companyLogo || '',
+                description: order.razorpay.description,
+                prefill: order.razorpay.prefill,
+                theme: { color: order.razorpay.color || gatewayConfig.companyColor || '#d32f2f' },
+            });
+        } catch (error: any) {
+            setLoading(false);
+            if (error?.code === 2) {
+                console.log('Payment cancelled by user');
+            } else {
+                console.log('Razorpay error (raw):', error?.message || JSON.stringify(error));
+                Alert.alert('Payment Failed', friendlyRazorpayError(error));
+            }
+            return;
+        }
+
+        const paymentId = paymentData.razorpay_payment_id;
+        try {
+            const result = await verifyRenewal({
+                renewalId: order.renewalId,
+                razorpayOrderId: paymentData.razorpay_order_id || order.razorpay.orderId,
+                razorpayPaymentId: paymentId,
+                razorpaySignature: paymentData.razorpay_signature || '',
+            });
+            setAlreadySubmitted(true);
+            await refreshCompanyProfile?.().catch(() => {});
+            const till = result.expiryDate
+                ? new Date(result.expiryDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                : '';
+            Alert.alert(
+                'Plan activated ✅',
+                `${result.planName || selectedPlan?.label} for ${result.employeeLimit} employees is active${till ? ` till ${till}` : ''}.\n\nPayment ID: ${paymentId}`,
+                [{ text: 'OK', onPress: () => router.replace(currentUser ? '/' : '/login' as any) }]
+            );
+        } catch (e: any) {
+            // Money was taken; Razorpay also tells our server directly, which
+            // activates the plan within a few minutes.
+            setAlreadySubmitted(true);
+            Alert.alert(
+                'Payment received',
+                `Payment ID: ${paymentId}\n\n${e?.message ? e.message + '\n\n' : ''}Your plan will be activated within a few minutes. If it is not active in 30 minutes, contact support with this Payment ID.`,
+                [{ text: 'OK', onPress: () => router.replace(currentUser ? '/' : '/login' as any) }]
+            );
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -454,7 +474,7 @@ export default function SubscriptionScreen() {
                                             Pay ₹{totalPrice.toLocaleString('en-IN')} Online
                                         </Text>
                                         <Text style={styles.razorpayBtnSub}>
-                                            Card • UPI • Net Banking • Wallet
+                                            Card • UPI • Net Banking • Wallet — plan active instantly
                                         </Text>
                                     </View>
                                     <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" style={{ marginLeft: 'auto' }} />

@@ -1,7 +1,8 @@
 import RazorpayCheckout from 'react-native-razorpay';
 
 export type RazorpayOptions = Record<string, any>;
-export type RazorpaySuccess = { razorpay_payment_id: string };
+// Order payments (order_id in the options) also return the order id and a signature the server checks.
+export type RazorpaySuccess = { razorpay_payment_id: string; razorpay_order_id?: string; razorpay_signature?: string };
 
 /** Phone app: the native Razorpay SDK. The web build uses razorpay.web.ts. */
 export function openRazorpay(options: RazorpayOptions): Promise<RazorpaySuccess> {

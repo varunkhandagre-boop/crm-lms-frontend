@@ -260,6 +260,12 @@ export default function SuperAdminPayments() {
                 )}
                 <Text style={styles.detail}>Amount: <Text style={[styles.bold, { color: '#2e7d32', fontSize: 15 }]}>₹{item.amountPaid?.toLocaleString('en-IN')}</Text></Text>
                 <Text style={styles.detail}>Requested: {item.createdAt ? new Date(item.createdAt).toLocaleString() : 'N/A'}</Text>
+                {(item.paymentMethod === 'RAZORPAY' || item.paymentMethod === 'WEBSITE') && (
+                    <Text style={[styles.detail, { color: '#1565c0', fontWeight: '600' }]}>
+                        ⚡ {item.paymentMethod === 'WEBSITE' ? 'Bought on the website' : 'Paid online in the app'} — activated automatically
+                        {item.razorpayPaymentId ? ` (${item.razorpayPaymentId})` : ''}
+                    </Text>
+                )}
 
                 {item.approvedAt && (
                     <Text style={[styles.detail, { color: '#2e7d32', fontWeight: '600' }]}>

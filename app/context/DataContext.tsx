@@ -275,11 +275,18 @@ export const DataProvider = ({ children }: any) => {
       });
   }, []);
 
+  // Re-reads the company (plan, expiry, modules) — e.g. right after an online
+  // renewal, so the "Plan expired" lock lifts without a restart.
+  const refreshCompanyProfile = async () => {
+      if (currentUserRef.current?.companyId) await fetchCompanySettings(currentUserRef.current.companyId);
+  };
+
   const contextValue = useMemo(() => ({
       currentUser, loading, login, logout, activeSection, setActiveSection, shouldOpenSidebar, setShouldOpenSidebar, user: currentUser,
       isSessionReady, isSubscriptionExpired, lockReason,
       companyProfile,
       appPermissions,
+      refreshCompanyProfile,
   }), [
       currentUser, loading, activeSection, shouldOpenSidebar, isSessionReady, isSubscriptionExpired, lockReason,
       companyProfile, appPermissions
