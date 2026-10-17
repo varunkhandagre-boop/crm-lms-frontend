@@ -384,42 +384,26 @@ export default function SuperAdminDashboard() {
                 </View>
 
                 <View style={styles.headerBottom}>
-                    <TouchableOpacity style={styles.iconBtn} onPress={handleExport}>
-                        <Ionicons name="download-outline" size={20} color="white" />
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.paymentsBtn} onPress={() => router.push('/superadmin/superadmin-payments' as any)}>
-                        <Ionicons name="wallet" size={18} color="white" />
-                        <Text style={styles.paymentsBtnText}>Payments</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.paymentsBtn} onPress={() => router.push('/superadmin/manage-plans' as any)}>
-                        <Ionicons name="pricetags" size={18} color="white" />
-                        <Text style={styles.paymentsBtnText}>Plans</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.paymentsBtn} onPress={() => router.push('/superadmin/superadmin-support-settings' as any)}>
-                        <Ionicons name="headset" size={18} color="white" />
-                        <Text style={styles.paymentsBtnText}>Support</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.paymentsBtn} onPress={() => router.push('/superadmin/superadmin-payment-gateway' as any)}>
-                        <Ionicons name="card" size={18} color="white" />
-                        <Text style={styles.paymentsBtnText}>Gateway</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.paymentsBtn} onPress={() => router.push('/superadmin/deletion-requests' as any)}>
-                        <Ionicons name="person-remove" size={18} color="white" />
-                        <Text style={styles.paymentsBtnText}>Deletions</Text>
-                        {!!deletionCounts?.pending && (
-                            <View style={[styles.countBadge, deletionCounts.overdue > 0 && styles.countBadgeUrgent]}>
-                                <Text style={[styles.countBadgeText, deletionCounts.overdue > 0 && { color: 'white' }]}>{deletionCounts.pending}</Text>
-                            </View>
-                        )}
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.paymentsBtn} onPress={() => router.push('/superadmin/app-version' as any)}>
-                        <Ionicons name="phone-portrait" size={18} color="white" />
-                        <Text style={styles.paymentsBtnText}>App version</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.paymentsBtn} onPress={() => router.push('/superadmin/invoice-settings' as any)}>
-                        <Ionicons name="receipt" size={18} color="white" />
-                        <Text style={styles.paymentsBtnText}>Invoice</Text>
-                    </TouchableOpacity>
+                    {[
+                        { key: 'export', icon: 'download-outline', label: 'Export', onPress: handleExport },
+                        { key: 'payments', icon: 'wallet', label: 'Payments', onPress: () => router.push('/superadmin/superadmin-payments' as any) },
+                        { key: 'plans', icon: 'pricetags', label: 'Plans', onPress: () => router.push('/superadmin/manage-plans' as any) },
+                        { key: 'support', icon: 'headset', label: 'Support', onPress: () => router.push('/superadmin/superadmin-support-settings' as any) },
+                        { key: 'gateway', icon: 'card', label: 'Gateway', onPress: () => router.push('/superadmin/superadmin-payment-gateway' as any) },
+                        { key: 'deletions', icon: 'person-remove', label: 'Deletions', onPress: () => router.push('/superadmin/deletion-requests' as any) },
+                        { key: 'version', icon: 'phone-portrait', label: 'App version', onPress: () => router.push('/superadmin/app-version' as any) },
+                        { key: 'invoice', icon: 'receipt', label: 'Invoice', onPress: () => router.push('/superadmin/invoice-settings' as any) },
+                    ].map(tile => (
+                        <TouchableOpacity key={tile.key} style={styles.tile} onPress={tile.onPress}>
+                            <Ionicons name={tile.icon as any} size={20} color="white" />
+                            <Text style={styles.tileText} numberOfLines={1}>{tile.label}</Text>
+                            {tile.key === 'deletions' && !!deletionCounts?.pending && (
+                                <View style={[styles.countBadge, deletionCounts.overdue > 0 && styles.countBadgeUrgent]}>
+                                    <Text style={[styles.countBadgeText, deletionCounts.overdue > 0 && { color: 'white' }]}>{deletionCounts.pending}</Text>
+                                </View>
+                            )}
+                        </TouchableOpacity>
+                    ))}
                 </View>
 
                 <View style={styles.mainTabRow}>
@@ -686,12 +670,14 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f4f6f8' },
     header: { backgroundColor: '#d32f2f', paddingHorizontal: 20, paddingBottom: 0 },
     headerTop: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
-    headerBottom: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 12 },
+    headerBottom: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 8, marginBottom: 12 },
+    tile: { width: '23.5%', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 10, paddingVertical: 8, paddingHorizontal: 2 },
+    tileText: { color: 'white', fontSize: 10.5, fontWeight: '700', marginTop: 3 },
     headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold', flex: 1 },
     iconBtn: { backgroundColor: 'rgba(255,255,255,0.2)', padding: 8, borderRadius: 8 },
     paymentsBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 8, paddingVertical: 6, borderRadius: 8 },
     paymentsBtnText: { color: 'white', marginLeft: 4, fontWeight: 'bold', fontSize: 11 },
-    countBadge: { backgroundColor: 'white', borderRadius: 9, minWidth: 18, paddingHorizontal: 5, marginLeft: 5, alignItems: 'center' },
+    countBadge: { position: 'absolute', top: 3, right: 6, backgroundColor: 'white', borderRadius: 9, minWidth: 18, paddingHorizontal: 5, alignItems: 'center' },
     countBadgeUrgent: { backgroundColor: '#ffab00' },
     countBadgeText: { color: '#d32f2f', fontSize: 11, fontWeight: 'bold' },
     mainTabRow: { flexDirection: 'row', gap: 0, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.2)' },

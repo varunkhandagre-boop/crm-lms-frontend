@@ -231,7 +231,7 @@ export default function DeletionRequestsScreen() {
             )}
 
             <Modal transparent visible={!!doneFor} animationType="fade" onRequestClose={() => setDoneFor(null)}>
-                <KeyboardAvoidingView style={styles.backdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+                <KeyboardAvoidingView style={styles.backdrop} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
                     <View style={styles.sheet}>
                         <Text style={styles.sheetTitle}>Mark done</Text>
                         <Text style={styles.sheetSub}>{doneFor?.userName} • {doneFor?.companyName}</Text>

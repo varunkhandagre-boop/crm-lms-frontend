@@ -131,7 +131,7 @@ export default function SuperAdminSupportSettings() {
     return (
         <KeyboardAvoidingView
             style={styles.container}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
             {/* HEADER */}
             <View style={[styles.header, { paddingTop: headerTop }]}>
