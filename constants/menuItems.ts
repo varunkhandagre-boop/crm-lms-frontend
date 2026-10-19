@@ -74,6 +74,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'Service Engineer': [...COMMON_DEFAULTS, 'organizations', 'tickets', 'service_reports', 'pms', 'installation', 'amc_cmc', 'spares', 'map_view', 'courier', 'asset_history'],
     'Accountant': [...COMMON_DEFAULTS, 'organizations', 'payment_due', 'payment_coll', 'orders'],
     'Store Keeper': [...COMMON_DEFAULTS, 'organizations', 'spares', 'courier', 'asset_history', 'installation'],
-    'Hr': [...COMMON_DEFAULTS],
+    'Hr': [...COMMON_DEFAULTS, 'courier'],
     'Manager': [...COMMON_DEFAULTS, 'leads', 'quotations', 'orders', 'visits', 'demos', 'sales_analysis', 'catalogs', 'sales_team_report', 'map_view', 'tickets', 'service_reports', 'pms', 'installation', 'amc_cmc', 'spares', 'courier', 'organizations', 'asset_history', 'company_profile', 'payment_due', 'payment_coll'],
 };

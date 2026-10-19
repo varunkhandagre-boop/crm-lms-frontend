@@ -30,6 +30,9 @@ function toDate(hhmm: string): Date {
 const toHHMM = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 
 /** "Alerts" tab in Team & Settings (manage_team.tsx): daily alert on/off + time. */
+// Sent per person after their shift start / end; the time only applies to staff without a shift.
+const PER_SHIFT_KEYS = new Set(['day-in-reminder', 'day-out-reminder']);
+
 export default function AlertSettingsTab() {
     const { currentUser } = useData();
     const isAllowed = ['Admin', 'SuperAdmin'].includes(currentUser?.role || '');
@@ -87,8 +90,9 @@ export default function AlertSettingsTab() {
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
                 >
                     <Text style={styles.intro}>
-                        Daily alerts arrive as a phone notification and in the 🔔 list. Turn any of them off, or tap the time to change
-                        it. If today&apos;s alert has already gone, the new time applies from tomorrow.
+                        Alerts arrive as a phone notification and in the 🔔 list. Turn any of them off, or tap the time to change
+                        it. If today&apos;s alert has already gone, the new time applies from tomorrow. The Day In and Day Out
+                        reminders follow each person&apos;s shift; their time is used only for staff without a shift.
                     </Text>
 
                     {SECTIONS.map((section) => {
@@ -113,6 +117,7 @@ export default function AlertSettingsTab() {
                                         <Text style={styles.desc}>{item.description}</Text>
                                         <View style={styles.cardBottom}>
                                             <Text style={styles.recipients}>To: {item.recipients}</Text>
+                                            {PER_SHIFT_KEYS.has(item.key) && <Text style={styles.noShift}>No shift:</Text>}
                                             <TouchableOpacity
                                                 style={styles.timeBtn}
                                                 disabled={!item.enabled || savingKey === item.key}
@@ -169,5 +174,6 @@ const styles = StyleSheet.create({
     recipients: { fontSize: 11, color: 'gray', flex: 1, marginRight: 10 },
     timeBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e8eaf6', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6, gap: 4 },
     timeText: { fontSize: 13, fontWeight: 'bold', color: '#3b5998' },
+    noShift: { fontSize: 11, color: 'gray', marginRight: 6 },
     resetText: { fontSize: 11, color: '#1565c0', marginTop: 8, textAlign: 'right' },
 });

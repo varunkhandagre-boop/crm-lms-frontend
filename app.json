@@ -2,7 +2,7 @@
   "expo": {
     "name": "LMS",
     "slug": "lms-crm",
-    "version": "3.2.2",
+    "version": "3.2.3",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "mycrm",
@@ -22,7 +22,7 @@
       },
       "googleServicesFile": "./google-services.json",
       "package": "com.crm.lms",
-      "versionCode": 22,
+      "versionCode": 23,
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
