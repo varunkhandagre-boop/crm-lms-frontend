@@ -393,7 +393,7 @@ export default function TaskScreen() {
                 </TouchableOpacity>
             );
         }}
-        ListHeaderComponent={isDesktop && taskList.length > 0 ? <TableHeader columns={taskColumns} /> : null}
+        ListHeaderComponent={isDesktop && taskList.length > 0 ? <TableHeader columns={taskColumns} /> : undefined}
         stickyHeaderIndices={isDesktop && taskList.length > 0 ? [0] : undefined}
         
         ListFooterComponent={

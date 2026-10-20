@@ -726,7 +726,7 @@ export default function CourierScreen() {
         renderItem={isDesktop
             ? ({ item, index }) => <TableRow columns={courierColumns} item={item} index={index} onPress={() => openDetails(item)} />
             : renderItem}
-        ListHeaderComponent={isDesktop && courierList.length > 0 ? <TableHeader columns={courierColumns} /> : null}
+        ListHeaderComponent={isDesktop && courierList.length > 0 ? <TableHeader columns={courierColumns} /> : undefined}
         stickyHeaderIndices={isDesktop && courierList.length > 0 ? [0] : undefined}
         ListFooterComponent={
             <View style={{ paddingBottom: 100 }}>

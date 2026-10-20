@@ -283,7 +283,7 @@ export default function NearbyLeadsScreen() {
                     contentContainerStyle={{ padding: 12 }}
                     onRefresh={refresh}
                     refreshing={refreshing}
-                    ListHeaderComponent={!loading && total > 0 ? <Text style={styles.total}>{total} open lead{total === 1 ? '' : 's'}</Text> : null}
+                    ListHeaderComponent={!loading && total > 0 ? <Text style={styles.total}>{total} open lead{total === 1 ? '' : 's'}</Text> : undefined}
                     ListEmptyComponent={loading ? <ActivityIndicator size="large" color="#3b5998" style={{ marginTop: 30 }} /> : <Text style={styles.empty}>{emptyText}</Text>}
                     ListFooterComponent={footer}
                 />

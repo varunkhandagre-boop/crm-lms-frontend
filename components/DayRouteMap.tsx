@@ -152,7 +152,7 @@ export default function DayRouteMap({ userId, date, refreshKey }: Props) {
                     style={styles.list}
                     data={latest}
                     keyExtractor={(p) => p.userId}
-                    ListHeaderComponent={latest.length > 0 ? <Text style={styles.listHeader}>Last location of each employee — pick a name above for the full day</Text> : null}
+                    ListHeaderComponent={latest.length > 0 ? <Text style={styles.listHeader}>Last location of each employee — pick a name above for the full day</Text> : undefined}
                     renderItem={({ item }) => (
                         <TouchableOpacity style={styles.row} onPress={() => focus(item)}>
                             <View style={[styles.dot, { backgroundColor: '#3b5998' }]} />
@@ -166,7 +166,7 @@ export default function DayRouteMap({ userId, date, refreshKey }: Props) {
                     style={styles.list}
                     data={listItems}
                     keyExtractor={(p) => p.id}
-                    ListEmptyComponent={!loading && points.length > 0 ? <Text style={styles.empty}>Only path points today — no visits or records with location.</Text> : null}
+                    ListEmptyComponent={!loading && points.length > 0 ? <Text style={styles.empty}>Only path points today — no visits or records with location.</Text> : undefined}
                     renderItem={({ item }) => {
                         const k = KIND_STYLE[item.kind];
                         return (

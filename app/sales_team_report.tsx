@@ -364,7 +364,7 @@ export default function SalesTeamReport() {
 
             <FlatList
                 data={renderedList}
-                ListHeaderComponent={isDesktop && renderedList.length > 0 ? <TableHeader columns={teamColumns} /> : null}
+                ListHeaderComponent={isDesktop && renderedList.length > 0 ? <TableHeader columns={teamColumns} /> : undefined}
                 stickyHeaderIndices={isDesktop && renderedList.length > 0 ? [0] : undefined}
                 keyExtractor={item => item.id}
                 contentContainerStyle={{ padding: 15, paddingBottom: 20 }}

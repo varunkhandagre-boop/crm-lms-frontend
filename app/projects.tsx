@@ -230,7 +230,7 @@ export default function ProjectsScreen() {
         renderItem={isDesktop
             ? ({ item, index }) => <TableRow columns={projectColumns} item={item} index={index} onPress={() => openProject(item)} />
             : renderProjectCard}
-        ListHeaderComponent={isDesktop && fullList.length > 0 ? <TableHeader columns={projectColumns} /> : null}
+        ListHeaderComponent={isDesktop && fullList.length > 0 ? <TableHeader columns={projectColumns} /> : undefined}
         stickyHeaderIndices={isDesktop && fullList.length > 0 ? [0] : undefined}
         
         ListFooterComponent={

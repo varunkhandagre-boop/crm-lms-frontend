@@ -431,7 +431,7 @@ export default function ExpenseScreen() {
 
       <FlatList 
         data={fullFilteredList}
-        ListHeaderComponent={isDesktop && fullFilteredList.length > 0 ? <TableHeader columns={expenseColumns} /> : null}
+        ListHeaderComponent={isDesktop && fullFilteredList.length > 0 ? <TableHeader columns={expenseColumns} /> : undefined}
         stickyHeaderIndices={isDesktop && fullFilteredList.length > 0 ? [0] : undefined}
         keyExtractor={item => item.id}
         renderItem={isDesktop

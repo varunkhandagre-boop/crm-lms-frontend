@@ -216,7 +216,7 @@ export default function CompanyProfileScreen() {
     // ✅ MODALS + MAIN UI sab return() ke ANDAR hain
     return (
         <View style={styles.container}>
-            <StatusBar barStyle="light-content" backgroundColor="#3b5998" />
+            <StatusBar barStyle="light-content" />
             
             <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity onPress={() => router.back()}>

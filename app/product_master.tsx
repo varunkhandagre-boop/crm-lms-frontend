@@ -403,7 +403,7 @@ const handleBulkDelete = () => {
                         </>
                     )
                     : renderItem}
-                ListHeaderComponent={isDesktop && renderedList.length > 0 ? <TableHeader columns={productColumns} /> : null}
+                ListHeaderComponent={isDesktop && renderedList.length > 0 ? <TableHeader columns={productColumns} /> : undefined}
                 stickyHeaderIndices={isDesktop && renderedList.length > 0 ? [0] : undefined}
                 contentContainerStyle={{padding: 15, paddingBottom: 100}}
                 refreshControl={

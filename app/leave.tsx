@@ -485,7 +485,7 @@ export default function LeaveApplicationScreen() {
         renderItem={isDesktop
             ? ({ item, index }) => <TableRow columns={leaveColumns} item={item} index={index} tint={leaveRowTint(item)} onPress={() => openDetails(item)} />
             : renderItem}
-        ListHeaderComponent={isDesktop && leaveList.length > 0 ? <TableHeader columns={leaveColumns} /> : null}
+        ListHeaderComponent={isDesktop && leaveList.length > 0 ? <TableHeader columns={leaveColumns} /> : undefined}
         stickyHeaderIndices={isDesktop && leaveList.length > 0 ? [0] : undefined}
         contentContainerStyle={{padding: 12}}
         refreshControl={

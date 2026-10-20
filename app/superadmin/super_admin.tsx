@@ -488,7 +488,7 @@ export default function SuperAdminDashboard() {
                             keyboardShouldPersistTaps="handled"
                             onEndReachedThreshold={0.4}
                             onEndReached={loadMore}
-                            ListFooterComponent={loadingMore ? <ActivityIndicator style={{ marginVertical: 15 }} /> : null}
+                            ListFooterComponent={loadingMore ? <ActivityIndicator style={{ marginVertical: 15 }} /> : undefined}
                             ListEmptyComponent={<Text style={{ textAlign: 'center', marginTop: 20, color: '#999' }}>No companies found.</Text>}
                         />
                     }

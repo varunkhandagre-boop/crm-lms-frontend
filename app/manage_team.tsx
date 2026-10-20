@@ -59,7 +59,7 @@ export default function ManageTeamScreen() {
     
     return (
         <View style={styles.container}>
-            <StatusBar barStyle="light-content" backgroundColor="#2c3e50" />
+            <StatusBar barStyle="light-content" />
             
             <View style={[styles.header, { paddingTop: headerTop }]}>
                 <TouchableOpacity 
@@ -404,7 +404,7 @@ const handleBulkDeactivate = () => {
                 refreshControl={
                     <RefreshControl refreshing={usersRefreshing} onRefresh={refreshUsers} colors={['#2c3e50']} tintColor="#2c3e50" />
                 }
-                ListHeaderComponent={isDesktop && renderedUsers.length > 0 ? <TableHeader columns={userColumns} /> : null}
+                ListHeaderComponent={isDesktop && renderedUsers.length > 0 ? <TableHeader columns={userColumns} /> : undefined}
                 stickyHeaderIndices={isDesktop && renderedUsers.length > 0 ? [0] : undefined}
                 renderItem={isDesktop
                     ? ({ item, index }) => <TableRow columns={userColumns} item={item} index={index} onPress={() => bulkMode ? toggleBulkSelect(item.id) : openEdit(item)} />
@@ -479,7 +479,7 @@ const handleBulkDeactivate = () => {
                             <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12}}>
                                 --- End of Users ---
                             </Text>
-                        ) : null
+                        ) : undefined
                     )
                 }
             />
@@ -716,7 +716,7 @@ const PermissionsTab = () => {
         });
     };
     const loading = usersLoading || permissionsLoading;
-    const onRefresh = () => Promise.all([refreshUsersForPermissions(), refreshPermissions()]);
+    const onRefresh = async () => { await Promise.all([refreshUsersForPermissions(), refreshPermissions()]); };
 
     // Undefined means "never set": Activity Plan / Tasks default to ON, everything else OFF.
     // A role Admin never saved still runs on its starting defaults — show those.

@@ -256,7 +256,7 @@ export default function OrganizationScreen() {
         renderItem={isDesktop
             ? ({ item, index }) => <TableRow columns={orgColumns} item={item} index={index} onPress={() => openDetails(item)} />
             : renderItem}
-        ListHeaderComponent={isDesktop && renderedList.length > 0 ? <TableHeader columns={orgColumns} /> : null}
+        ListHeaderComponent={isDesktop && renderedList.length > 0 ? <TableHeader columns={orgColumns} /> : undefined}
         stickyHeaderIndices={isDesktop && renderedList.length > 0 ? [0] : undefined}
         contentContainerStyle={styles.contentContainer}
         refreshControl={

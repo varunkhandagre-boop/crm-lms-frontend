@@ -692,7 +692,7 @@ export default function SalesAnalysisScreen() {
                 data={listData}
                 keyExtractor={item => item.id}
                 scrollEnabled={false}
-                ListHeaderComponent={isDesktop && listData.length > 0 ? <TableHeader columns={saleTypeFilter === 'Collection' ? paymentColumns : orderColumns} /> : null}
+                ListHeaderComponent={isDesktop && listData.length > 0 ? <TableHeader columns={saleTypeFilter === 'Collection' ? paymentColumns : orderColumns} /> : undefined}
                 renderItem={({item, index}) => {
                     if (isDesktop) {
                         return saleTypeFilter === 'Collection'

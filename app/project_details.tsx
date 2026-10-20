@@ -58,7 +58,7 @@ export default function ProjectDetailsScreen() {
   const params = useLocalSearchParams();
   
   const rawId = params.id;
-  const id = Array.isArray(rawId) ? rawId[0] : rawId; 
+  const id = (Array.isArray(rawId) ? rawId[0] : rawId) ?? ''; 
 
   const { currentUser } = useData();
 

@@ -773,7 +773,7 @@ export default function ServiceCallScreen() {
         renderItem={isDesktop
             ? ({ item, index }) => <TableRow columns={callColumns} item={item} index={index} onPress={() => openDetails(item)} />
             : renderCard}
-        ListHeaderComponent={isDesktop && serviceCallList.length > 0 ? <TableHeader columns={callColumns} /> : null}
+        ListHeaderComponent={isDesktop && serviceCallList.length > 0 ? <TableHeader columns={callColumns} /> : undefined}
         stickyHeaderIndices={isDesktop && serviceCallList.length > 0 ? [0] : undefined}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         contentContainerStyle={styles.contentContainer}

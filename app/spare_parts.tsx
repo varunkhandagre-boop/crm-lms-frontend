@@ -400,7 +400,7 @@ export default function SparePartsScreen() {
                 : (activeTab === 'Parts' ? renderStockItem : 
                 (stockSubTab === 'OfficeStock' ? renderMachineItem : renderCatalogItem))
             }
-            ListHeaderComponent={isDesktop && renderedList.length > 0 ? <TableHeader columns={tableColumns} /> : null}
+            ListHeaderComponent={isDesktop && renderedList.length > 0 ? <TableHeader columns={tableColumns} /> : undefined}
             stickyHeaderIndices={isDesktop && renderedList.length > 0 ? [0] : undefined}
             ListFooterComponent={
                 <View style={{ paddingBottom: 80 }}>

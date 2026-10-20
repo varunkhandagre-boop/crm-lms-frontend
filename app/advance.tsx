@@ -337,7 +337,7 @@ export default function EmployeeAdvanceScreen() {
         renderItem={isDesktop
             ? ({ item, index }) => <TableRow columns={advanceColumns} item={item} index={index} onPress={() => openDetails(item)} />
             : renderItem}
-        ListHeaderComponent={isDesktop && fullFilteredList.length > 0 ? <TableHeader columns={advanceColumns} /> : null}
+        ListHeaderComponent={isDesktop && fullFilteredList.length > 0 ? <TableHeader columns={advanceColumns} /> : undefined}
         stickyHeaderIndices={isDesktop && fullFilteredList.length > 0 ? [0] : undefined}
         contentContainerStyle={{padding: 12, paddingBottom: 50}} 
         refreshControl={

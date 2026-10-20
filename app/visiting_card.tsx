@@ -315,7 +315,7 @@ export default function VisitingCardScreen() {
                 </TouchableOpacity>
             );
         }}
-        ListHeaderComponent={isDesktop && cardRequestList.length > 0 ? <TableHeader columns={cardColumns} /> : null}
+        ListHeaderComponent={isDesktop && cardRequestList.length > 0 ? <TableHeader columns={cardColumns} /> : undefined}
         stickyHeaderIndices={isDesktop && cardRequestList.length > 0 ? [0] : undefined}
         
         ListFooterComponent={

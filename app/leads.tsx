@@ -396,7 +396,7 @@ export default function LeadsScreen() {
             <FlatList
                 data={leadItems}
                 keyExtractor={item => item.id}
-                ListHeaderComponent={isDesktop && leadItems.length > 0 ? <TableHeader columns={leadColumns} /> : null}
+                ListHeaderComponent={isDesktop && leadItems.length > 0 ? <TableHeader columns={leadColumns} /> : undefined}
                 stickyHeaderIndices={isDesktop && leadItems.length > 0 ? [0] : undefined}
                 contentContainerStyle={styles.contentContainer}
                 refreshControl={

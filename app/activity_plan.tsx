@@ -230,7 +230,7 @@ export default function ActivityPlanScreen() {
             renderItem={isDesktop
                 ? ({ item, index }) => <TableRow columns={planColumns} item={item} index={index} tint={item.status === 'Completed' ? '#4caf50' : undefined} />
                 : renderItem}
-            ListHeaderComponent={isDesktop && displayList.length > 0 ? <TableHeader columns={planColumns} /> : null}
+            ListHeaderComponent={isDesktop && displayList.length > 0 ? <TableHeader columns={planColumns} /> : undefined}
             stickyHeaderIndices={isDesktop && displayList.length > 0 ? [0] : undefined}
             refreshControl={
                 <RefreshControl refreshing={activitiesRefreshing} onRefresh={refreshActivities} colors={['#3b5998']} tintColor="#3b5998" />
@@ -245,7 +245,7 @@ export default function ActivityPlanScreen() {
             onEndReachedThreshold={0.4}
             ListFooterComponent={
                 plansLoadingMore ? <ActivityIndicator style={{ marginVertical: 16 }} color="#3b5998" />
-                : displayList.length > 0 ? <Text style={{ textAlign: 'center', color: '#aaa', fontSize: 12, paddingBottom: 90 }}>{displayList.length} of {plansTotal}</Text> : null
+                : displayList.length > 0 ? <Text style={{ textAlign: 'center', color: '#aaa', fontSize: 12, paddingBottom: 90 }}>{displayList.length} of {plansTotal}</Text> : undefined
             }
           />
       )}

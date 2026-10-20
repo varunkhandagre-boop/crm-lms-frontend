@@ -396,7 +396,7 @@ export default function SalesReportScreen() {
           renderItem={isDesktop
               ? ({ item, index }) => <TableRow columns={visitColumns} item={item} index={index} onPress={() => openDetails(item)} tint={item.visitType === 'Cold Call' ? '#1976d2' : '#f57f17'} />
               : renderItem}
-          ListHeaderComponent={isDesktop && salesVisitList.length > 0 ? <TableHeader columns={visitColumns} /> : null}
+          ListHeaderComponent={isDesktop && salesVisitList.length > 0 ? <TableHeader columns={visitColumns} /> : undefined}
           stickyHeaderIndices={isDesktop && salesVisitList.length > 0 ? [0] : undefined}
           refreshControl={
               <RefreshControl refreshing={refreshing} onRefresh={refreshSalesVisits} colors={['#1565c0']} tintColor="#1565c0" />

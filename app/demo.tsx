@@ -434,7 +434,7 @@ export default function DemoScreen() {
         renderItem={isDesktop
             ? ({ item, index }) => <TableRow columns={demoColumns} item={item} index={index} onPress={() => openDetails(item)} />
             : renderItem}
-        ListHeaderComponent={isDesktop && demoList.length > 0 ? <TableHeader columns={demoColumns} /> : null}
+        ListHeaderComponent={isDesktop && demoList.length > 0 ? <TableHeader columns={demoColumns} /> : undefined}
         stickyHeaderIndices={isDesktop && demoList.length > 0 ? [0] : undefined}
         contentContainerStyle={{padding: 15}}
         refreshControl={

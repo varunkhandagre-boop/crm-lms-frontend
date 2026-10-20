@@ -363,7 +363,7 @@ export default function TravelNoteScreen() {
           renderItem={isDesktop
               ? ({ item, index }) => <TableRow columns={travelColumns} item={item} index={index} onPress={() => openDetails(item)} />
               : renderItem}
-          ListHeaderComponent={isDesktop && travelList.length > 0 ? <TableHeader columns={travelColumns} /> : null}
+          ListHeaderComponent={isDesktop && travelList.length > 0 ? <TableHeader columns={travelColumns} /> : undefined}
           stickyHeaderIndices={isDesktop && travelList.length > 0 ? [0] : undefined}
           contentContainerStyle={{padding: 12}}
           refreshControl={<RefreshControl refreshing={travelRefreshing} onRefresh={refreshTravel} colors={['#3b5998']} tintColor="#3b5998" />}

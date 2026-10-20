@@ -726,7 +726,7 @@ export default function AttendanceScreen() {
                         renderItem={isDesktop
                             ? ({ item, index }) => <TableRow columns={attendanceColumns} item={item} index={index} onPress={() => handleItemClick(item)} />
                             : renderItem}
-                        ListHeaderComponent={isDesktop && displayData.length > 0 ? <TableHeader columns={attendanceColumns} /> : null} 
+                        ListHeaderComponent={isDesktop && displayData.length > 0 ? <TableHeader columns={attendanceColumns} /> : undefined} 
                         scrollEnabled={false} 
                         contentContainerStyle={{paddingHorizontal: 15}} 
                         ListEmptyComponent={<Text style={{textAlign:'center', marginTop:20, color:'gray'}}>{statusFilter ? 'Nothing in this group' : `No data for ${getHeaderDateText()}`}</Text>} 
@@ -755,7 +755,7 @@ export default function AttendanceScreen() {
                                     <Text style={{textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic'}}>
                                         --- End of List ---
                                     </Text>
-                                ) : null
+                                ) : undefined
                             )
                         }
                     />

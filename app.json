@@ -2,7 +2,7 @@
   "expo": {
     "name": "LMS",
     "slug": "lms-crm",
-    "version": "3.2.3",
+    "version": "3.3.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "mycrm",
@@ -22,7 +22,7 @@
       },
       "googleServicesFile": "./google-services.json",
       "package": "com.crm.lms",
-      "versionCode": 23,
+      "versionCode": 24,
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
@@ -80,8 +80,9 @@
         "expo-build-properties",
         {
           "android": {
-            "enableProguardInReleaseBuilds": true,
-            "enableShrinkResourcesInReleaseBuilds": true
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "extraProguardRules": "-keepattributes *Annotation*\n-dontwarn com.razorpay.**\n-keep class com.razorpay.** {*;}\n-optimizations !method/inlining/\n-keepclasseswithmembers class * {\n  public void onPayment*(...);\n}"
           }
         }
       ],

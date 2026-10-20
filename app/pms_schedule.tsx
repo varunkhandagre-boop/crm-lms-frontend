@@ -578,7 +578,7 @@ export default function PMSScheduleScreen() {
         renderItem={isDesktop
             ? ({ item, index }) => <TableRow columns={pmsColumns} item={item} index={index} onPress={() => openDetails(item)} />
             : renderItem}
-        ListHeaderComponent={isDesktop && fullList.length > 0 ? <TableHeader columns={pmsColumns} /> : null}
+        ListHeaderComponent={isDesktop && fullList.length > 0 ? <TableHeader columns={pmsColumns} /> : undefined}
         stickyHeaderIndices={isDesktop && fullList.length > 0 ? [0] : undefined}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshPms} />}
         ListEmptyComponent={

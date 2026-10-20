@@ -778,7 +778,7 @@ export default function OrderListScreen() {
           renderItem={isDesktop
               ? ({ item, index }) => <TableRow columns={orderColumns} item={item} index={index} onPress={() => openDetails(item)} />
               : renderItem}
-          ListHeaderComponent={isDesktop && orderList.length > 0 ? <TableHeader columns={orderColumns} /> : null}
+          ListHeaderComponent={isDesktop && orderList.length > 0 ? <TableHeader columns={orderColumns} /> : undefined}
           stickyHeaderIndices={isDesktop && orderList.length > 0 ? [0] : undefined}
           contentContainerStyle={{padding: 5, paddingBottom: 100}} 
           refreshControl={

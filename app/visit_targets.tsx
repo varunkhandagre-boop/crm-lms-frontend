@@ -143,7 +143,7 @@ export default function VisitTargetsScreen() {
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(month, true)} />}
                     ListHeaderComponent={data?.isCurrentMonth ? (
                         <Text style={styles.hint}>Day {data.dayOfMonth} of {data.daysInMonth}. The line on the month bar shows where you should be by today.</Text>
-                    ) : null}
+                    ) : undefined}
                     ListEmptyComponent={
                         <Text style={styles.empty}>
                             {error || 'No visit targets set and no visits logged this month. Set targets in Team & Settings → edit user → "Visits / day" / "Visits / month".'}

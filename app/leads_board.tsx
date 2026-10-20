@@ -235,7 +235,7 @@ export default function LeadsBoardScreen() {
                                 ? <ActivityIndicator size="small" color="#3b5998" />
                                 : <Text style={styles.moreText}>Load more ({col.count - col.leads.length})</Text>}
                         </TouchableOpacity>
-                    ) : null}
+                    ) : undefined}
                 />
             </View>
         );

@@ -226,7 +226,7 @@ export default function DeletionRequestsScreen() {
                             </Text>
                         </View>
                     }
-                    ListFooterComponent={list.loadingMore ? <ActivityIndicator color="#d32f2f" style={{ margin: 16 }} /> : null}
+                    ListFooterComponent={list.loadingMore ? <ActivityIndicator color="#d32f2f" style={{ margin: 16 }} /> : undefined}
                 />
             )}
 

@@ -293,7 +293,7 @@ export default function NotificationScreen() {
                 )}
             </View>
         }
-        ListHeaderComponent={isDesktop && renderedList.length > 0 ? <TableHeader columns={notificationColumns} /> : null}
+        ListHeaderComponent={isDesktop && renderedList.length > 0 ? <TableHeader columns={notificationColumns} /> : undefined}
         stickyHeaderIndices={isDesktop && renderedList.length > 0 ? [0] : undefined}
         renderItem={isDesktop
           ? ({ item, index }: any) => <TableRow columns={notificationColumns} item={item} index={index} tint={!item.read ? '#1A237E' : undefined} onPress={() => handlePress(item)} />

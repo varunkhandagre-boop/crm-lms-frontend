@@ -581,7 +581,7 @@ export default function PaymentCollection() {
                 renderItem={isDesktop
                     ? ({ item, index }) => <TableRow columns={paymentColumns} item={item} index={index} onPress={() => setSelectedHistoryItem(item)} />
                     : renderItem}
-                ListHeaderComponent={isDesktop && paymentList.length > 0 ? <TableHeader columns={paymentColumns} /> : null}
+                ListHeaderComponent={isDesktop && paymentList.length > 0 ? <TableHeader columns={paymentColumns} /> : undefined}
                 stickyHeaderIndices={isDesktop && paymentList.length > 0 ? [0] : undefined}
                 refreshControl={
                     <RefreshControl refreshing={paymentsRefreshing} onRefresh={refreshPayments} colors={['#3b5998']} tintColor="#3b5998" />

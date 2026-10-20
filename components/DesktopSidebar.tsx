@@ -75,7 +75,7 @@ export default function DesktopSidebar({ ctx, companyName, logoUrl, userName, us
 
     // Search: matches the menu name or its keywords; Enter opens the first result.
     const [query, setQuery] = useState('');
-    const searchRef = useRef<TextInput>(null);
+    const searchRef = useRef<React.ComponentRef<typeof TextInput>>(null);
     const allItems = useMemo(() => {
         const seen = new Set<string>();
         return [...main, ...sections.flatMap((s) => s.items)].filter((i) => (seen.has(i.route) ? false : (seen.add(i.route), true)));

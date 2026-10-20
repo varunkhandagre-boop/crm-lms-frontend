@@ -628,7 +628,7 @@ export default function InstallationListScreen() {
         renderItem={isDesktop
             ? ({ item, index }) => <TableRow columns={installColumns} item={item} index={index} onPress={() => openDetails(item)} />
             : renderItem}
-        ListHeaderComponent={isDesktop && installList.length > 0 ? <TableHeader columns={installColumns} /> : null}
+        ListHeaderComponent={isDesktop && installList.length > 0 ? <TableHeader columns={installColumns} /> : undefined}
         stickyHeaderIndices={isDesktop && installList.length > 0 ? [0] : undefined}
         contentContainerStyle={{ padding: 5, paddingBottom: 50 }}
         refreshControl={

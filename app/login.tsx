@@ -36,7 +36,7 @@ export default function LoginScreen() {
   // does) and on Expo Go vs a real build. Padding by the full keyboard height on top of
   // an OS resize pushed the form far up. So measure how much the screen actually shrank
   // and pad only the part of the keyboard the OS didn't already make room for.
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const [kbHeight, setKbHeight] = useState(0);
   const fullHeightRef = useRef(0);
   const [viewHeight, setViewHeight] = useState(0);

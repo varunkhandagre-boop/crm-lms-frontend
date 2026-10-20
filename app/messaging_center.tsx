@@ -54,7 +54,7 @@ export default function MessagingCenterScreen() {
         return (
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
             <View style={styles.container}>
-                <StatusBar barStyle="light-content" backgroundColor="#3b5998" />
+                <StatusBar barStyle="light-content" />
 
                 <View style={[styles.header, { paddingTop: headerTop }]}>
                     <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} style={{ padding: 5 }}>
@@ -237,7 +237,7 @@ const PendingEmailsTab = () => {
                     <TouchableOpacity style={styles.loadMoreBtn} onPress={loadMorePending} disabled={pendingLoadingMore}>
                         {pendingLoadingMore ? <ActivityIndicator color="#3b5998" /> : <Text style={styles.loadMoreText}>Load more ({pendingTotal - handledCount - pendingList.length} remaining)</Text>}
                     </TouchableOpacity>
-                ) : null}
+                ) : undefined}
                 ListEmptyComponent={
                     <View style={{ alignItems: 'center', marginTop: 50 }}>
                         <Ionicons name="checkmark-done-circle" size={60} color="#ccc" />
@@ -603,7 +603,7 @@ const BroadcastTab = () => {
                             <TouchableOpacity style={styles.loadMoreBtn} onPress={loadMoreContacts} disabled={contactsLoadingMore}>
                                 {contactsLoadingMore ? <ActivityIndicator color="#3b5998" /> : <Text style={styles.loadMoreText}>Load more ({matchingTotal - contacts.length} remaining)</Text>}
                             </TouchableOpacity>
-                        ) : null}
+                        ) : undefined}
                         renderItem={({ item }) => (
                             <TouchableOpacity style={styles.contactRow} onPress={() => toggleSelection(item)}>
                                 <Ionicons name={isSelected(item.id) ? 'checkbox' : 'square-outline'} size={22} color={isSelected(item.id) ? '#2e7d32' : '#ccc'} />

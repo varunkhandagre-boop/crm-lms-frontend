@@ -421,7 +421,7 @@ export default function QuotationsListScreen() {
                     renderItem={isDesktop
                         ? ({ item, index }) => <TableRow columns={quoteColumns} item={item} index={index} onPress={() => setSelectedQuote(item)} />
                         : renderItem}
-                    ListHeaderComponent={isDesktop && renderedList.length > 0 ? <TableHeader columns={quoteColumns} /> : null}
+                    ListHeaderComponent={isDesktop && renderedList.length > 0 ? <TableHeader columns={quoteColumns} /> : undefined}
                     stickyHeaderIndices={isDesktop && renderedList.length > 0 ? [0] : undefined}
                     contentContainerStyle={{padding: 15, paddingBottom: 50}}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}

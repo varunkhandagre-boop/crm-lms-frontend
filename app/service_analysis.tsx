@@ -281,7 +281,7 @@ export default function AnalysisScreen() {
                     renderItem={isDesktop
                         ? ({ item, index }) => <TableRow columns={columns} item={item} index={index} tint={getColor(item.reportType)} onPress={() => handleItemClick(item)} />
                         : renderItem}
-                    ListHeaderComponent={isDesktop && filteredData.length > 0 ? <TableHeader columns={columns} /> : null}
+                    ListHeaderComponent={isDesktop && filteredData.length > 0 ? <TableHeader columns={columns} /> : undefined}
                     stickyHeaderIndices={isDesktop && filteredData.length > 0 ? [0] : undefined}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                     ListEmptyComponent={

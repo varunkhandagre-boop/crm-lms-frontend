@@ -331,7 +331,7 @@ export default function PaymentDueList() {
                 renderItem={isDesktop
                     ? ({ item, index }) => <TableRow columns={dueColumns} item={item} index={index} onPress={() => setSelectedItem(item)} tint={getOverdueDays(item.date || item.createdAt) > 0 ? '#e57373' : undefined} />
                     : renderItem}
-                ListHeaderComponent={isDesktop && dueItems.length > 0 ? <TableHeader columns={dueColumns} /> : null}
+                ListHeaderComponent={isDesktop && dueItems.length > 0 ? <TableHeader columns={dueColumns} /> : undefined}
                 stickyHeaderIndices={isDesktop && dueItems.length > 0 ? [0] : undefined}
                 contentContainerStyle={{padding: 15, paddingBottom: 100}}
                 refreshControl={
