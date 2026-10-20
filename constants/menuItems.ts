@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 // The app's menu, in one place: Home grid sections, the sidebar list, the
 // bottom bar and the desktop (web) sidebar all read these. `module` is the
 // permission key checked by utils/menuAccess.ts.
@@ -50,7 +51,7 @@ export const SIDEBAR_ITEMS: MenuItemDef[] = [
     { id: '103', title: 'WhatsApp & Email', icon: 'chatbubbles', route: '/messaging_center', module: 'company_profile' },
     { id: '92', title: 'Team & Settings', icon: 'settings', route: '/manage_team', module: 'users' },
     { id: '90', title: 'Company Profile', icon: 'business', route: '/company_profile', module: 'company_profile' },
-    { id: '104', title: 'Plan & Renewal', icon: 'rocket', route: '/SubscriptionScreen', module: 'plan_renewal' },
+    { id: '104', title: Platform.OS === 'ios' ? 'My Plan' : 'Plan & Renewal', icon: 'rocket', route: '/SubscriptionScreen', module: 'plan_renewal' },
     { id: '102', title: 'Help & Support', icon: 'help-circle', route: '/help_support', module: 'common' },
 ];
 

@@ -307,7 +307,7 @@ export default function SubscriptionScreen() {
                 <TouchableOpacity onPress={() => router.replace('/' as any)} style={{ position: 'absolute', left: 20, bottom: 15 }}>
                     <Ionicons name="arrow-back" size={24} color="#3b5998" />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Plan & Renewal</Text>
+                <Text style={styles.headerTitle}>{PURCHASE_ALLOWED ? 'Plan & Renewal' : 'My Plan'}</Text>
             </View>
 
             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
@@ -346,7 +346,7 @@ export default function SubscriptionScreen() {
                     {!PURCHASE_ALLOWED ? (
                         <View style={styles.noPaymentCard}>
                             <Ionicons name="information-circle-outline" size={32} color="#3b5998" />
-                            <Text style={styles.noPaymentText}>Plan changes are not available in the iPhone app.</Text>
+                            <Text style={styles.noPaymentText}>Your plan details and GST invoices are shown above. Plan changes are not available in the iPhone app.</Text>
                         </View>
                     ) : (<>
                     <Text style={styles.sectionTitle}>Select Plan</Text>

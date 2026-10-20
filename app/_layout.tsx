@@ -501,7 +501,7 @@ function ReadOnlyBar({ isAdmin, bottomInset = 0 }: { isAdmin: boolean; bottomIns
         >
             <Ionicons name="lock-closed" size={14} color="white" />
             <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 12, marginLeft: 6 }}>
-                Plan expired — view only.{isAdmin ? ' Tap to renew' : ''}
+                Plan expired — view only.{isAdmin ? (Platform.OS === 'ios' ? ' Tap for details' : ' Tap to renew') : ''}
             </Text>
         </TouchableOpacity>
     );
