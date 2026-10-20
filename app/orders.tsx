@@ -23,9 +23,8 @@ import {
     View
 } from 'react-native';
 import { urlToBase64Image } from '../utils/pdfImageHelper';
-import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
-import { compressPhoto, isPdfUrl, isUploadedFile, pdfToDataUri } from '../utils/attachments';
+import { compressPhoto, isPdfUrl, isUploadedFile } from '../utils/attachments';
 
 // 🔥 SAAS IMPORTS (payments/users still Firestore)
 import { fetchTeamMembers } from '../services/api/users';
@@ -572,24 +571,10 @@ export default function OrderListScreen() {
       }
   };
 
-  const attachPoPdf = async () => {
-      const result = await DocumentPicker.getDocumentAsync({ type: 'application/pdf', copyToCacheDirectory: true });
-      if (result.canceled || !result.assets?.length) return;
-      setPoBusy(true);
-      try {
-          const dataUri = await pdfToDataUri(result.assets[0].uri);
-          await uploadPo(dataUri, result.assets[0].name);
-      } catch (e: any) {
-          setPoBusy(false);
-          Alert.alert("PDF", e?.message || "Could not read this PDF.");
-      }
-  };
-
   const choosePoSource = () => {
       Alert.alert("Purchase Order", "Choose source", [
           { text: "Camera", onPress: () => attachPoPhoto(true) },
           { text: "Gallery", onPress: () => attachPoPhoto(false) },
-          { text: "PDF", onPress: attachPoPdf },
           { text: "Cancel", style: "cancel" },
       ]);
   };

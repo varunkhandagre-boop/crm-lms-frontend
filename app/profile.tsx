@@ -26,6 +26,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
+import { compressSmallImage } from '../utils/attachments';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -144,20 +145,19 @@ export default function ProfileScreen() {
             if (status !== 'granted') return Alert.alert("Permission Needed", "Please allow gallery access in Settings.");
         }
         let result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.2, base64: true, 
+            mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.8, 
         });
-        if (!result.canceled && result.assets[0].base64) {
-            savePhoto(result.assets[0].base64);
+        if (!result.canceled && result.assets[0]) {
+            savePhoto(await compressSmallImage(result.assets[0], 400));
         }
       } catch (error) { Alert.alert("Error", "Could not open gallery."); }
   };
 
   // 🔥 5. Phase 10: PATCHes /users/:id (self-edit)
-  const savePhoto = async (base64: string) => {
+  const savePhoto = async (imageString: string) => {
       if (!currentUser?.id) return;
       setUploading(true);
       try {
-          const imageString = `data:image/jpeg;base64,${base64}`;
           const res = await updateTeamMember(currentUser.id, { profileImage: imageString });
           if (res.success) {
               setCurrentImage(imageString);

@@ -823,7 +823,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         cat: 'start',
         title: 'Photos — PO, Service, Expense Bill, Installation, Cheque',
         steps: [
-            'Photos are compressed on the phone (about 100–200 KB) and uploaded when you save: Order PO (photo or PDF), Service Call photo, Expense bill photo, Installation photo (one photo for all machines of the report) and Payment cheque photo (when mode is Cheque).',
+            'Photos are compressed on the phone (about 60–120 KB) and uploaded when you save: Order PO (photo), Service Call photo, Expense bill photo, Installation photo (one photo for all machines of the report) and Payment cheque photo (when mode is Cheque).',
             'Open the saved record to view the photo full size, Replace it or Delete it (deleting also removes the file from storage).',
             'If an upload fails, the record is still saved — open it and add the photo again.',
         ],
@@ -1020,8 +1020,8 @@ const FAQS: FaqItem[] = [
     },
     {
         cat: 'orders',
-        q: 'My PO PDF does not upload — "larger than 2 MB"',
-        a: `PDFs can be up to 2 MB. Scanned PDFs are often bigger.\n\nTake a photo of the PO instead (camera or gallery) — photos are compressed automatically to about 100–200 KB and stay readable.`,
+        q: 'Can I attach the PO as a PDF?',
+        a: `No — to save storage, the PO is attached as a photo. Take a photo of the printed PO, or take a screenshot of the PDF on your phone and pick it from the gallery. The photo is made small automatically (about 60–120 KB) and stays clear enough to read. POs attached earlier as PDF still open as before.`,
     },
     {
         cat: 'orders',

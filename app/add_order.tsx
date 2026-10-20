@@ -2,7 +2,6 @@ import { FORM_ACCENT, themedForm } from '../constants/formTheme';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
-import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { getCurrentLocation as getGpsFix } from '../utils/getLocation';
@@ -28,7 +27,7 @@ import {
 import { useData } from './context/DataContext';
 // 🔥 Phase 3: orders & products now go through the new backend API
 import { createOrder, uploadOrderPoFile } from '../services/api/orders';
-import { compressPhoto, pdfToDataUri } from '../utils/attachments';
+import { compressPhoto } from '../utils/attachments';
 import { listProducts } from '../services/api/products';
 
 import * as FileSystem from 'expo-file-system/legacy';
@@ -384,36 +383,14 @@ export default function AddOrderScreen() {
       }
   };
 
-  const handleUploadOptions = () => {
-      Alert.alert("Upload PO", "Select file type", [
-          { text: "Cancel", style: "cancel" },
-          { text: "PDF Document 📄", onPress: pickDocument },
-          { text: "Image (Camera/Gallery) 📸", onPress: showImageOptions },
-      ]);
-  };
+  const handleUploadOptions = () => showImageOptions();
 
   const showImageOptions = () => {
-      Alert.alert("Select Image", "Choose source", [
+      Alert.alert("PO photo", "Take a photo of the PO or pick one from the gallery. PDFs are not uploaded — take a photo or screenshot of the PO instead.", [
           { text: "Camera", onPress: openCamera },
           { text: "Gallery", onPress: openGallery },
           { text: "Back", style: "cancel" },
       ]);
-  };
-
-  const pickDocument = async () => {
-      try {
-          const result = await DocumentPicker.getDocumentAsync({ type: 'application/pdf', copyToCacheDirectory: true });
-          if (!result.canceled && result.assets && result.assets.length > 0) {
-              const file = result.assets[0];
-              setPreparingFile(true);
-              const dataUri = await pdfToDataUri(file.uri);
-              setSelectedFile({ type: 'pdf', uri: file.uri, name: file.name, dataUri });
-          }
-      } catch (err: any) {
-          Alert.alert("PDF", err?.message || "Could not read this PDF.");
-      } finally {
-          setPreparingFile(false);
-      }
   };
 
   // Shrinks the photo right away so the upload at save time is small.

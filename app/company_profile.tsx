@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { getCurrentLocation as getGpsFix } from '../utils/getLocation';
+import { compressSmallImage } from '../utils/attachments';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -96,15 +97,14 @@ export default function CompanyProfileScreen() {
                 mediaTypes: ['images'],
                 allowsEditing: true,
                 aspect: field === 'signatureUrl' ? [3, 1] : [1, 1],
-                quality: 0.2,
-                base64: true,
+                quality: 0.8,
             });
             if (!result.canceled && result.assets[0]) {
                 const asset = result.assets[0];
                 if (USE_STORAGE_BUCKET) {
                     updateField(field, asset.uri);
                 } else {
-                    const b64String = `data:image/jpeg;base64,${asset.base64}`;
+                    const b64String = await compressSmallImage(asset, field === 'qrCodeUrl' ? 800 : field === 'signatureUrl' ? 600 : 512);
                     updateField(field, b64String);
                 }
             }
