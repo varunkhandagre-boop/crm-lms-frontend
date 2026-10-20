@@ -26,6 +26,19 @@ import {
     updateTemplate,
 } from '../services/api/messageTemplates';
 
+// Must match the language the template was approved in on Meta.
+const WA_LANGUAGES = [
+    { code: 'en', label: 'English' },
+    { code: 'en_US', label: 'English (US)' },
+    { code: 'en_GB', label: 'English (UK)' },
+    { code: 'hi', label: 'Hindi' },
+    { code: 'mr', label: 'Marathi' },
+];
+const languageLabel = (code?: string | null) => {
+    const c = code || 'en';
+    return WA_LANGUAGES.find((l) => l.code === c)?.label ?? c;
+};
+
 export const TemplatesTab = () => {
     const [templates, setTemplates] = useState<MessageTemplate[]>([]);
     const [loading, setLoading] = useState(true);
@@ -37,6 +50,7 @@ export const TemplatesTab = () => {
     const [templateType, setTemplateType] = useState<'email' | 'whatsapp'>('email');
     const [subject, setSubject] = useState('');
     const [body, setBody] = useState('');
+    const [language, setLanguage] = useState('en');
     const [isSaving, setIsSaving] = useState(false);
 
     const [viewModalVisible, setViewModalVisible] = useState(false);
@@ -64,6 +78,7 @@ export const TemplatesTab = () => {
         setTemplateType('email');
         setSubject('');
         setBody('');
+        setLanguage('en');
     };
 
     const openAddNew = () => {
@@ -78,6 +93,7 @@ export const TemplatesTab = () => {
         setTemplateType(item.type);
         setSubject(item.subject || '');
         setBody(item.body);
+        setLanguage(item.language || 'en');
         setModalVisible(true);
     };
 
@@ -98,6 +114,7 @@ export const TemplatesTab = () => {
                 type: templateType,
                 subject: templateType === 'email' ? subject.trim() : undefined,
                 body: body.trim(),
+                language: templateType === 'whatsapp' ? language : undefined,
             };
             if (editId) {
                 await updateTemplate(editId, payload);
@@ -242,6 +259,9 @@ export const TemplatesTab = () => {
                                 <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#333', marginBottom: 5 }}>{viewData.name}</Text>
                                 {viewData.type === 'email' && <Text style={{ fontSize: 15, color: '#1565c0', fontWeight: 'bold', marginBottom: 15 }}>Subject: {viewData.subject}</Text>}
                                 {viewData.type === 'whatsapp' && (
+                                    <Text style={{ fontSize: 13, color: '#2e7d32', fontWeight: 'bold', marginBottom: 6 }}>Language: {languageLabel(viewData.language)}</Text>
+                                )}
+                                {viewData.type === 'whatsapp' && (
                                     <Text style={{ fontSize: 11, color: '#e65100', marginBottom: 10, fontStyle: 'italic' }}>
                                         Note: this exact name must also be registered + approved on Meta's WhatsApp Business dashboard before it can be sent.
                                     </Text>
@@ -312,6 +332,28 @@ export const TemplatesTab = () => {
                                 </TouchableOpacity>
                             </View>
 
+                            {templateType === 'whatsapp' && (
+                                <>
+                                    <Text style={tStyles.label}>Template Language (as approved on Meta)</Text>
+                                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 15 }}>
+                                        {WA_LANGUAGES.map((l) => (
+                                            <TouchableOpacity
+                                                key={l.code}
+                                                style={[tStyles.langChip, language === l.code && tStyles.langChipActive]}
+                                                onPress={() => setLanguage(l.code)}
+                                            >
+                                                <Text style={[tStyles.langChipText, language === l.code && { color: 'white' }]}>{l.label}</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                        {!WA_LANGUAGES.some((l) => l.code === language) && (
+                                            <View style={[tStyles.langChip, tStyles.langChipActive]}>
+                                                <Text style={[tStyles.langChipText, { color: 'white' }]}>{language}</Text>
+                                            </View>
+                                        )}
+                                    </View>
+                                </>
+                            )}
+
                             {templateType === 'email' && (
                                 <>
                                     <Text style={tStyles.label}>Email Subject *</Text>
@@ -372,6 +414,9 @@ const tStyles = StyleSheet.create({
     typeBtn: { flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: '#f0f0f0', borderWidth: 1, borderColor: '#ddd', alignItems: 'center' },
     typeBtnActive: { backgroundColor: '#1565c0', borderColor: '#1565c0' },
     typeBtnText: { fontWeight: 'bold', color: '#333' },
+    langChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, backgroundColor: '#f0f0f0', borderWidth: 1, borderColor: '#ddd' },
+    langChipActive: { backgroundColor: '#2e7d32', borderColor: '#2e7d32' },
+    langChipText: { fontSize: 12, fontWeight: 'bold', color: '#333' },
     bigSaveBtn: { backgroundColor: '#27ae60', paddingVertical: 15, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginTop: 10, elevation: 3 },
     bigBtnText: { color: 'white', fontWeight: 'bold', fontSize: 18, textTransform: 'uppercase', letterSpacing: 1 },
     btn: { flex: 1, padding: 12, borderRadius: 8, alignItems: 'center' },

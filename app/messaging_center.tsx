@@ -324,7 +324,7 @@ const SentHistoryTab = () => {
         { key: 'status', label: 'Status', width: 100, render: (m) => <Pill text={m.status} color={STATUS_COLORS[m.status] || '#999'} bg={(STATUS_COLORS[m.status] || '#999') + '20'} /> },
         { key: 'date', label: 'Created', width: 170, render: (m) => new Date(m.createdAt).toLocaleString() },
         { key: 'sent', label: 'Sent At', width: 170, render: (m) => (m.sentAt ? new Date(m.sentAt).toLocaleString() : '-') },
-        { key: 'fail', label: 'Failure Reason', flex: 2, render: (m) => (m.status === 'FAILED' && m.failureReason ? m.failureReason : '-') },
+        { key: 'fail', label: 'Failure Reason', flex: 2, render: (m) => ((m.status === 'FAILED' || m.status === 'PENDING') && m.failureReason ? m.failureReason : '-') },
     ];
 
     return (
@@ -373,7 +373,7 @@ const SentHistoryTab = () => {
                             </View>
                             <Text style={styles.historyTemplate}>Template: {item.templateName}</Text>
                             <Text style={styles.historyDate}>{new Date(item.createdAt).toLocaleString()}</Text>
-                            {item.status === 'FAILED' && item.failureReason ? (
+                            {(item.status === 'FAILED' || item.status === 'PENDING') && item.failureReason ? (
                                 <Text style={styles.failureReason}>⚠️ {item.failureReason}</Text>
                             ) : null}
                         </View>

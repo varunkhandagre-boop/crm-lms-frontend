@@ -80,9 +80,9 @@
         "expo-build-properties",
         {
           "android": {
-            "enableMinifyInReleaseBuilds": true,
-            "enableShrinkResourcesInReleaseBuilds": true,
-            "extraProguardRules": "-keepattributes *Annotation*\n-dontwarn com.razorpay.**\n-keep class com.razorpay.** {*;}\n-optimizations !method/inlining/\n-keepclasseswithmembers class * {\n  public void onPayment*(...);\n}"
+            "enableMinifyInReleaseBuilds": false,
+            "enableShrinkResourcesInReleaseBuilds": false,
+            "extraProguardRules": "-keepattributes *Annotation*\n-dontwarn com.razorpay.**\n-keep class com.razorpay.** {*;}\n-keep class * extends androidx.room.RoomDatabase { <init>(); }\n-keep class androidx.work.impl.WorkDatabase_Impl { *; }\n-optimizations !method/inlining/\n-keepclasseswithmembers class * {\n  public void onPayment*(...);\n}"
           }
         }
       ],

@@ -9,6 +9,8 @@ export interface MessageTemplate {
     type: 'email' | 'whatsapp';
     subject: string | null;
     body: string;
+    /** WhatsApp: language code of the approved template on Meta (empty = en). */
+    language?: string | null;
     createdAt: string | null;
     updatedAt: string | null;
     /** Shared by every company (not saved for this company yet). Editing it saves your own copy. */
@@ -31,6 +33,7 @@ export interface SaveTemplatePayload {
     type: 'email' | 'whatsapp';
     subject?: string;
     body: string;
+    language?: string;
 }
 
 export async function createTemplate(payload: SaveTemplatePayload): Promise<MessageTemplate> {

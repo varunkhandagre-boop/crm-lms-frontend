@@ -709,9 +709,9 @@ const GUIDE_SECTIONS: GuideSection[] = [
         title: 'WhatsApp & Email (Templates & Broadcast)',
         steps: [
             'Go to Sidebar → "WhatsApp & Email". The ⚙️ icon at the top opens the automation settings.',
-            'Templates Tab: create and manage reusable WhatsApp/Email message templates.',
+            'Templates Tab: create and manage reusable WhatsApp/Email message templates. For WhatsApp, the name and language must match the template approved on Meta.',
             'Pending Tab: see messages waiting to be approved or sent.',
-            'History Tab: view previously sent messages and their delivery status.',
+            'History Tab: view previously sent messages and their delivery status. If WhatsApp was busy or the internet failed, the message stays Pending and is tried again automatically (after 5 min, 30 min and 2 h).',
             'Broadcast Tab: send a message to a group of contacts at once.',
         ],
     },
@@ -1041,7 +1041,7 @@ const FAQS: FaqItem[] = [
     {
         cat: 'admin',
         q: 'WhatsApp / Email message was not sent to the customer',
-        a: `1. Go to Sidebar → WhatsApp & Email → ⚙️ and check that WhatsApp / Email is turned ON.\n2. Verify the API key is entered correctly and saved.\n3. Make sure the customer's mobile number is correct (10 digits).\n4. Check the History tab in WhatsApp & Email for the delivery status.\n5. If still failing, contact support.`,
+        a: `1. Go to Sidebar → WhatsApp & Email → ⚙️ and check that WhatsApp / Email is turned ON.\n2. Verify the API key is entered correctly and saved.\n3. Make sure the customer's mobile number is correct (10 digits).\n4. Check the History tab in WhatsApp & Email for the delivery status and the reason shown under it.\n5. "Pending — will try again automatically" means WhatsApp was busy; it is retried by itself.\n6. "Template name does not exist in the translation" means the template name or language does not match Meta — open the template and pick the language it was approved in.\n7. If still failing, contact support.`,
     },
     {
         cat: 'admin',
