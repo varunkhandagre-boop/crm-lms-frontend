@@ -359,7 +359,7 @@ export default function PaymentGatewaySettings() {
                     <Text style={styles.howToTitle}>📋 How to get Razorpay Keys</Text>
                     <Text style={styles.howToStep}>1. Go to razorpay.com → Create Account</Text>
                     <Text style={styles.howToStep}>2. Dashboard → Settings → API Keys</Text>
-                    <Text style={styles.howToStep}>3. Click "Generate Test Key" for test keys</Text>
+                    <Text style={styles.howToStep}>3. Click &quot;Generate Test Key&quot; for test keys</Text>
                     <Text style={styles.howToStep}>4. Copy Key ID and Key Secret here</Text>
                     <Text style={styles.howToStep}>5. For live keys, complete KYC verification first</Text>
                     <TouchableOpacity style={styles.razorpayLink} onPress={() => Linking.openURL('https://dashboard.razorpay.com/app/keys')}>

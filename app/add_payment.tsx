@@ -27,9 +27,6 @@ import { createPaymentCollection, uploadChequePhoto } from '../services/api/paym
 import PhotoPickerField, { PendingPhoto } from '../components/PhotoPickerField';
 import { listPaymentDues } from '../services/api/paymentDues';
 
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
 import { findOrgByName, useOrgServerSearch } from '../hooks/useOrgServerSearch';
 import { fetchOrganizations } from '../services/api/organizations';

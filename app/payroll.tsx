@@ -1,9 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { saveAndShareFile } from '../utils/saveFile';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Print from 'expo-print';
 import { useRouter } from 'expo-router';
-import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
 import React, { useEffect, useState } from 'react';
 import {
@@ -595,7 +592,7 @@ const generatePayslipPDF = async (slip: Payslip) => {
                 >
                     {myCurrentMonthSummary && (
                         <>
-                            <Text style={styles.sectionTitle}>This Month's Attendance</Text>
+                            <Text style={styles.sectionTitle}>This Month&apos;s Attendance</Text>
                             <View style={styles.card}>
                                 <View style={styles.attSummaryGrid}>
                                     <AttBox label="Present" value={myCurrentMonthSummary.presentDays} />
@@ -707,7 +704,7 @@ const generatePayslipPDF = async (slip: Payslip) => {
                             <>
                                 <Text style={styles.label}>Minimum Hours Required</Text>
                                 <TextInput style={styles.input} keyboardType="numeric" value={String(settings.shortHoursThreshold)} onChangeText={(t) => updateSetting('shortHoursThreshold', Number(t) || 0)} />
-                                <Text style={styles.hint}>Penalty: half a day's salary, automatically calculated per employee.</Text>
+                                <Text style={styles.hint}>Penalty: half a day&apos;s salary, automatically calculated per employee.</Text>
                             </>
                         )}
                     </View>

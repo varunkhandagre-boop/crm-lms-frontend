@@ -13,7 +13,6 @@ import {
     View
 } from 'react-native';
 
-import { useData } from './context/DataContext';
 // 🔥 Phase 3: spare parts now go through the new backend API
 import { createSparePart } from '../services/api/spareParts';
 import { useHeaderTop } from '../hooks/useHeaderTop';

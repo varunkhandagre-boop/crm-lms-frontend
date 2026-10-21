@@ -1,10 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { saveAndShareFile } from '../utils/saveFile';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system/legacy';
 import { readFileBase64 } from '../utils/readFileBase64';
 import { useRouter } from 'expo-router';
-import * as Sharing from 'expo-sharing';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
@@ -177,7 +175,7 @@ export default function BulkImportProductsScreen() {
             <Ionicons name="cloud-upload-outline" size={40} color="#3b5998" style={{ alignSelf: 'center', marginBottom: 10 }} />
             <Text style={styles.stepTitle}>Step 2 — Upload Filled Sheet</Text>
             <Text style={styles.stepDesc}>
-              Select your filled-in Excel file. We'll check which products already exist so you can choose whether to update them.
+              Select your filled-in Excel file. We&apos;ll check which products already exist so you can choose whether to update them.
             </Text>
             <TouchableOpacity style={styles.primaryBtn} onPress={pickAndParseFile}>
               <Ionicons name="folder-open-outline" size={18} color="white" />

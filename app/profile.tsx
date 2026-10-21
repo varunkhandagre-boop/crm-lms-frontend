@@ -22,9 +22,6 @@ import { useData } from './context/DataContext';
 // 🔥 Phase 10: self profile now comes from Postgres via these adapters
 import { fetchSelf, requestAccountDeletion, updateTeamMember } from '../services/api/users';
 
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
 import { compressSmallImage } from '../utils/attachments';
 

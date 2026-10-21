@@ -41,9 +41,6 @@ import { sortAndFilterParts } from '../utils/sparePartSearch';
 import { buildCacheKey } from '../utils/listCache';
 
 // 🔥 PDF IMPORTS
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
 import { recordLocationLog } from '../services/api/locationLogs';
 import { useHeaderTop } from '../hooks/useHeaderTop';
@@ -744,7 +741,7 @@ recordLocationLog({
                   {currentSelection === 'Serial' && searchText.length > 0 && filteredData.length === 0 && (
                       <TouchableOpacity style={styles.addNewItem} onPress={() => handleAddNewSerial(searchText)}>
                           <Ionicons name="add-circle" size={24} color="green" />
-                          <Text style={{marginLeft:10, fontWeight:'bold', color:'green'}}>Add New Serial: "{searchText}"</Text>
+                          <Text style={{marginLeft:10, fontWeight:'bold', color:'green'}}>Add New Serial: &quot;{searchText}&quot;</Text>
                       </TouchableOpacity>
                   )}
 

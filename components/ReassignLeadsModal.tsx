@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { bulkReassignLeads, getAssigneeSummary } from '../services/api/leads';
 
@@ -125,14 +125,14 @@ export default function ReassignLeadsModal({ visible, onClose, onDone, teamMembe
                     <Ionicons name="close-circle" size={30} color="#d32f2f" />
                 </TouchableOpacity>
             </View>
-            <Text style={styles.muted}>Move one employee's leads to another — e.g. when someone is on leave or has left.</Text>
+            <Text style={styles.muted}>Move one employee&apos;s leads to another — e.g. when someone is on leave or has left.</Text>
 
             <Text style={styles.label}>From</Text>
             <TouchableOpacity style={styles.selectBtn} onPress={() => setPickerFor('from')}>
                 <Text style={{ color: fromId ? '#333' : 'gray', fontWeight: 'bold' }}>{nameOf(fromId) || 'Select employee...'}</Text>
                 <Ionicons name="chevron-down" size={16} color="gray" />
             </TouchableOpacity>
-            {!fromId && <Text style={[styles.muted, { marginTop: 6 }]}>Choose who the leads belong to now — you'll see how many leads will move.</Text>}
+            {!fromId && <Text style={[styles.muted, { marginTop: 6 }]}>Choose who the leads belong to now — you&apos;ll see how many leads will move.</Text>}
 
             {fromId ? (
                 loadingSummary ? (

@@ -263,7 +263,7 @@ export const TemplatesTab = () => {
                                 )}
                                 {viewData.type === 'whatsapp' && (
                                     <Text style={{ fontSize: 11, color: '#e65100', marginBottom: 10, fontStyle: 'italic' }}>
-                                        Note: this exact name must also be registered + approved on Meta's WhatsApp Business dashboard before it can be sent.
+                                        Note: this exact name must also be registered + approved on Meta&apos;s WhatsApp Business dashboard before it can be sent.
                                     </Text>
                                 )}
                                 <View style={{ backgroundColor: '#f9f9f9', padding: 15, borderRadius: 8, borderWidth: 1, borderColor: '#eee', marginTop: 10 }}>
@@ -310,7 +310,7 @@ export const TemplatesTab = () => {
                             />
                             {templateType === 'whatsapp' && (
                                 <Text style={{ fontSize: 11, color: '#e65100', marginTop: -8, marginBottom: 12 }}>
-                                    ⚠️ Must exactly match an approved template name on Meta's WhatsApp Business dashboard.
+                                    ⚠️ Must exactly match an approved template name on Meta&apos;s WhatsApp Business dashboard.
                                 </Text>
                             )}
 

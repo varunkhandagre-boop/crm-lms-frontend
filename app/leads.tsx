@@ -572,7 +572,7 @@ export default function LeadsScreen() {
                                 <Ionicons name="swap-horizontal" size={20} color="#3b5998" />
                                 <View style={{ marginLeft: 12, flex: 1 }}>
                                     <Text style={styles.menuTitle}>Reassign Leads</Text>
-                                    <Text style={styles.menuSub}>Move an employee's leads to someone else</Text>
+                                    <Text style={styles.menuSub}>Move an employee&apos;s leads to someone else</Text>
                                 </View>
                             </TouchableOpacity>
                             <TouchableOpacity style={styles.menuItem} onPress={() => { setShowAdminMenu(false); setShowCloseStale(true); }}>

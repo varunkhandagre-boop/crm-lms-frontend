@@ -36,9 +36,6 @@ import { listProducts } from '../services/api/products';
 import { buildCacheKey } from '../utils/listCache';
 
 // 🔥 PDF IMPORTS
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 

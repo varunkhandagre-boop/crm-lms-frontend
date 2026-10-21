@@ -937,7 +937,7 @@ export default function DayInScreen() {
                                         )}
 
                                         <View style={styles.divider}/>
-                                        <Text style={{fontSize:14, fontWeight:'bold', color:'#3b5998', marginBottom:8}}>💰 Today's Expenses</Text>
+                                        <Text style={{fontSize:14, fontWeight:'bold', color:'#3b5998', marginBottom:8}}>💰 Today&apos;s Expenses</Text>
                                         <View style={{backgroundColor:'#fff3e0', padding:10, borderRadius:8}}>
                                             <Text style={{color:'#333', fontSize:13}}>DA: ₹{selectedItem.expenses?.da || 0}</Text>
                                             <Text style={{color:'#333', fontSize:13}}>Hotel: ₹{selectedItem.expenses?.hotel || 0}</Text>

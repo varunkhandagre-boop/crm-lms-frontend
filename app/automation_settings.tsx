@@ -257,7 +257,7 @@ export default function AutomationSettingsScreen() {
                 </TouchableOpacity>
 
                 <Text style={styles.footNote}>
-                    Note: Templates must be approved on the provider's dashboard first — messages will fail without approval.
+                    Note: Templates must be approved on the provider&apos;s dashboard first — messages will fail without approval.
                 </Text>
 
             </ScrollView>

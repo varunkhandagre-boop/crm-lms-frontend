@@ -17,8 +17,6 @@ import {
 } from 'react-native';
 
 // 🔥 FILE SYSTEM IMPORTS
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
 
 // 🔥 SAAS IMPORTS (installations/organizations/service_calls/pms_reports/
 // payments/dues/couriers still Firestore — out of scope until Phase 4/6/8)
@@ -738,7 +736,7 @@ export default function SerialNumberScreen() {
                                     <DetailRow label="Attended By" value={resolveSerialName(selectedEvent.rawData)} />
                                     <DetailRow label="PMS Cycle" value={`Cycle ${selectedEvent.rawData.currentPmsNumber} out of ${selectedEvent.rawData.totalPms}`} />
                                     <DetailRow label="Next Due Date" value={selectedEvent.rawData.computedDueDate || selectedEvent.rawData.nextServiceDate || 'N/A'} />
-                                    <View style={styles.infoBox}><Text style={styles.infoLabel}>Engineer's Report:</Text><Text style={styles.infoValue}>{selectedEvent.rawData.remarks || selectedEvent.rawData.remark || 'No remarks provided.'}</Text></View>
+                                    <View style={styles.infoBox}><Text style={styles.infoLabel}>Engineer&apos;s Report:</Text><Text style={styles.infoValue}>{selectedEvent.rawData.remarks || selectedEvent.rawData.remark || 'No remarks provided.'}</Text></View>
                                 </>
                             )}
 

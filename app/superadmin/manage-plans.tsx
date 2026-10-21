@@ -366,7 +366,7 @@ export default function ManagePlansScreen() {
                     </View>
                     <Text style={styles.helperText}>
                         One price for the whole company (not per employee), charged when the client
-                        ticks "WhatsApp / Email Automation" in Plan & Renewal or on the website. It covers
+                        ticks &quot;WhatsApp / Email Automation&quot; in Plan & Renewal or on the website. It covers
                         our setup; the client buys their own WhatsApp / email API. GST is added on top.
                     </Text>
                     <Text style={styles.label}>Price (₹)</Text>

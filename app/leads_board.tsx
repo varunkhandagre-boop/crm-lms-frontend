@@ -302,7 +302,7 @@ export default function LeadsBoardScreen() {
                 <View style={styles.overlay}>
                     <TouchableOpacity style={StyleSheet.absoluteFill} onPress={() => setMoving(null)} />
                     <View style={styles.pickerBox}>
-                        <Text style={styles.pickerTitle} numberOfLines={2}>Move "{moving?.orgName}" to</Text>
+                        <Text style={styles.pickerTitle} numberOfLines={2}>Move &quot;{moving?.orgName}&quot; to</Text>
                         <TextInput
                             style={styles.noteInput}
                             placeholder="Add a note (optional) — e.g. Quotation sent ₹4.5L"
@@ -327,7 +327,7 @@ export default function LeadsBoardScreen() {
                             );
                         })}
                         <Text style={styles.pickerHint}>
-                            To mark a lead Won or Lost, open it and use "Log Visit & Update Lead".
+                            To mark a lead Won or Lost, open it and use &quot;Log Visit & Update Lead&quot;.
                         </Text>
                     </View>
                 </View>

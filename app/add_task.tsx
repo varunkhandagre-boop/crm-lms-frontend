@@ -3,7 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { pickerHandlers } from '../utils/datePickerHandlers';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, {  useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -25,7 +25,7 @@ import { useData } from './context/DataContext';
 import { createTask } from '../services/api/tasks';
 // 🔥 User list now comes from Postgres too — Firestore's "id" was never a
 // valid backend UUID, which is why assignedToId kept failing validation.
-import { fetchTeamMembers, LegacyTeamMember } from '../services/api/users';
+import { fetchTeamMembers } from '../services/api/users';
 // 🔥 Cache-first list loading (see hooks/useCachedList.ts)
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';

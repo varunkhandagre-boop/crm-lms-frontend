@@ -26,7 +26,7 @@ import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 import { useIsDesktop } from '../hooks/useIsDesktop';
-import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
+import { inr, Pill, TableColumn, TableHeader, TableRow } from '../components/DesktopTable';
 import { useServerPagedList } from '../hooks/useServerPagedList';
 import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';

@@ -21,7 +21,6 @@ import {
 import { useData } from './context/DataContext';
 import {
     fetchTemplates,
-    MessageTemplate,
 } from '../services/api/messageTemplates';
 import {
     AudienceContact,
@@ -223,7 +222,7 @@ const PendingEmailsTab = () => {
     return (
         <View style={{ flex: 1 }}>
             <View style={styles.infoBanner}>
-                <Text style={styles.infoBannerText}>Tap "Send" to open your email app — subject/body are pre-filled.</Text>
+                <Text style={styles.infoBannerText}>Tap &quot;Send&quot; to open your email app — subject/body are pre-filled.</Text>
             </View>
             <FlatList
                 data={pendingList}
@@ -241,7 +240,7 @@ const PendingEmailsTab = () => {
                 ListEmptyComponent={
                     <View style={{ alignItems: 'center', marginTop: 50 }}>
                         <Ionicons name="checkmark-done-circle" size={60} color="#ccc" />
-                        <Text style={{ color: 'gray', marginTop: 10 }}>All emails are sent! You're caught up.</Text>
+                        <Text style={{ color: 'gray', marginTop: 10 }}>All emails are sent! You&apos;re caught up.</Text>
                     </View>
                 }
                 renderItem={isDesktop
@@ -543,7 +542,7 @@ const BroadcastTab = () => {
                 }
             >
                 <View style={styles.infoBanner}>
-                    <Text style={styles.infoBannerText}>Uses the "bulk_broadcast" template (create both email + whatsapp types in the Templates tab first).</Text>
+                    <Text style={styles.infoBannerText}>Uses the &quot;bulk_broadcast&quot; template (create both email + whatsapp types in the Templates tab first).</Text>
                 </View>
 
                 <Text style={styles.sectionTitle}>1. Audience</Text>

@@ -1,9 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { saveAndShareFile } from '../utils/saveFile';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Print from 'expo-print';
 import { useRouter } from 'expo-router';
-import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {

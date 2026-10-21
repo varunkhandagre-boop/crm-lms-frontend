@@ -1,8 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { saveAndShareFile } from '../../utils/saveFile';
-import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
-import * as Sharing from 'expo-sharing';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,

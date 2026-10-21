@@ -30,9 +30,6 @@ import { createOrder, uploadOrderPoFile } from '../services/api/orders';
 import { compressPhoto } from '../utils/attachments';
 import { listProducts } from '../services/api/products';
 
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
 import { sharePdfFromHtml } from '../utils/sharePdf';
 import { recordLocationLog } from '../services/api/locationLogs';
 import { useOrgServerSearch } from '../hooks/useOrgServerSearch';
@@ -623,7 +620,7 @@ if (locationData) {
 
             <View style={styles.divider} />
 
-            <Text style={styles.label}>Client's PO Number *</Text>
+            <Text style={styles.label}>Client&apos;s PO Number *</Text>
             <TextInput style={styles.input} placeholder="e.g. PO-2025-XXX" value={poNumber} onChangeText={setPoNumber} />
 
             <View style={styles.row}>

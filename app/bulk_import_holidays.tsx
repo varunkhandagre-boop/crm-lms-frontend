@@ -1,10 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { saveAndShareFile } from '../utils/saveFile';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system/legacy';
 import { readFileBase64 } from '../utils/readFileBase64';
 import { useRouter } from 'expo-router';
-import * as Sharing from 'expo-sharing';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
@@ -137,7 +135,7 @@ export default function BulkImportHolidaysScreen() {
             <Ionicons name="calendar-outline" size={40} color="#3b5998" style={{ alignSelf: 'center', marginBottom: 10 }} />
             <Text style={styles.stepTitle}>Step 1 — Download Template</Text>
             <Text style={styles.stepDesc}>
-              Get a ready-made Excel sheet with sample rows. Fill in your full year's holiday list — one row per holiday.
+              Get a ready-made Excel sheet with sample rows. Fill in your full year&apos;s holiday list — one row per holiday.
             </Text>
             <TouchableOpacity style={styles.primaryBtn} onPress={downloadTemplate}>
               <Ionicons name="download-outline" size={18} color="white" />

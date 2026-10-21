@@ -18,8 +18,6 @@ import {
 } from 'react-native';
 
 // LIBRARIES
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
 
 import { useData } from './context/DataContext';
 // 🔥 Phase 5: projects + expenses/payments/items now via new backend API

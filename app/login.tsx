@@ -200,7 +200,7 @@ export default function LoginScreen() {
               {/* REGISTER COMPANY LINK */}
               <TouchableOpacity onPress={() => router.push('/register_company' as any)} style={{ marginTop: 25 }}>
                   <Text style={{ textAlign: 'center', color: '#3b5998', fontWeight: 'bold', fontSize: 15 }}>
-                      Don't have an account? Register Company
+                      Don&apos;t have an account? Register Company
                   </Text>
               </TouchableOpacity>
 

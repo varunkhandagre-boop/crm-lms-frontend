@@ -1771,7 +1771,7 @@ export default function HelpSupportScreen() {
                             );
                         })}
                         <Text style={styles.footerNote}>
-                            Didn't find your answer?{'\n'}Go to the Contact tab to reach us directly.
+                            Didn&apos;t find your answer?{'\n'}Go to the Contact tab to reach us directly.
                         </Text>
                     </>
                 )}

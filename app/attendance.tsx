@@ -12,8 +12,6 @@ import { isOffDay, offDayLabel } from '../utils/workSchedule';
 import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
 
 // 🔥 Phase 7: attendance/leaves/holidays now come from Postgres via these adapters
 import { fetchAttendance } from '../services/api/attendance';
@@ -855,7 +853,7 @@ export default function AttendanceScreen() {
                                 )}
 
                                 <View style={styles.divider}/>
-                                <Text style={{fontSize:14, fontWeight:'bold', color:'#3b5998', marginBottom:8}}>💰 Today's Expenses</Text>
+                                <Text style={{fontSize:14, fontWeight:'bold', color:'#3b5998', marginBottom:8}}>💰 Today&apos;s Expenses</Text>
                                 {selectedItem.expenses ? (
                                     <View style={{backgroundColor:'#fff3e0', padding:10, borderRadius:8}}>
                                         <DetailRow label="DA (Daily Allowance)" value={`₹${selectedItem.expenses.da || '0'}`} icon="cash-outline" />

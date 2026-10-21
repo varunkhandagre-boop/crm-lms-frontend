@@ -238,7 +238,7 @@ export default function ActivityPlanScreen() {
             ListEmptyComponent={
                 <View style={{alignItems:'center', marginTop:100}}>
                     <Ionicons name="calendar-outline" size={50} color="#ccc" />
-                    <Text style={{color:'gray', marginTop:10}}>Nothing found in "{filter}" tab.</Text>
+                    <Text style={{color:'gray', marginTop:10}}>Nothing found in &quot;{filter}&quot; tab.</Text>
                 </View>
             }
             onEndReached={() => { if (plansHaveMore && !plansLoadingMore) loadMorePlans(); }}

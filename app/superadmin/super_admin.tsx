@@ -1,8 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { saveAndShareFile } from '../../utils/saveFile';
-import * as FileSystem from 'expo-file-system/legacy';
 import { useFocusEffect, useRouter } from 'expo-router';
-import * as Sharing from 'expo-sharing';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -619,7 +617,7 @@ export default function SuperAdminDashboard() {
 
                             <View style={{ marginTop: 14 }}>
                                 <Text style={styles.label}>Modules this company can access</Text>
-                                <Text style={styles.switchHint}>Overrides what their plan set. Even Admin can't see a screen outside these.</Text>
+                                <Text style={styles.switchHint}>Overrides what their plan set. Even Admin can&apos;t see a screen outside these.</Text>
                                 <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
                                     {MODULE_OPTIONS.map(m => {
                                         const active = (selectedCompany?.enabledModules || []).includes(m.key);

@@ -1,7 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import * as Print from 'expo-print';
 import { useRouter } from 'expo-router';
-import * as Sharing from 'expo-sharing';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';

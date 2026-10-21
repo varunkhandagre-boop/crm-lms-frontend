@@ -170,7 +170,7 @@ export default function DesktopSidebar({ ctx, companyName, logoUrl, userName, us
                             ))}
                         </>
                     ) : (
-                        <Text style={styles.noResult}>No menu item for "{query}". Try another word.</Text>
+                        <Text style={styles.noResult}>No menu item for &quot;{query}&quot;. Try another word.</Text>
                     )
                 ) : (
                     <>

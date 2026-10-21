@@ -171,7 +171,7 @@ export default function SuperAdminSupportSettings() {
                         maxLength={15}
                     />
                     <Text style={styles.hint}>
-                        Include country code without "+" (e.g. 91 for India).{'\n'}
+                        Include country code without &quot;+&quot; (e.g. 91 for India).{'\n'}
                         This number is used for both WhatsApp and Call.
                     </Text>
                 </View>
