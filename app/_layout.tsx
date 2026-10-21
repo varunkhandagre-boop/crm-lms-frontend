@@ -378,6 +378,9 @@ if (currentUser && isSubscriptionExpired && lockReason === 'suspended') {
     return <SubscriptionExpiredScreen />;
 }
 const readOnly = !!currentUser && isSubscriptionExpired && currentUser.role !== 'SuperAdmin';
+// Demo company for prospects: always view only (the server refuses saving).
+const demo = !readOnly && !!currentUser && !!companyProfile?.isDemo && currentUser.role !== 'SuperAdmin';
+const bottomBar = readOnly || demo;
 
   const menuCtx = { currentUser, companyProfile, appPermissions };
   const canSeeTab = (moduleKey: string) => canSeeTabFor(moduleKey, menuCtx);
@@ -400,6 +403,7 @@ const readOnly = !!currentUser && isSubscriptionExpired && currentUser.role !== 
         />
         <View style={styles.desktopMain}>
           {readOnly && <ReadOnlyBar isAdmin={currentUser?.role === 'Admin'} />}
+          {demo && <DemoBar />}
           <PlanExpiryIndicator />
           <View style={styles.desktopPage}>
             <Slot />
@@ -426,11 +430,12 @@ const readOnly = !!currentUser && isSubscriptionExpired && currentUser.role !== 
         <Slot />
       </View>
       {readOnly && <ReadOnlyBar isAdmin={currentUser?.role === 'Admin'} bottomInset={insets.bottom} />}
+      {demo && <DemoBar bottomInset={insets.bottom} />}
       
 
       {/* BOTTOM NAVIGATION */}
       {showNavBar && (
-        <View style={[styles.bottomNavContainer, { bottom: 20 + (readOnly ? READ_ONLY_BAR_HEIGHT : insets.bottom) }]}>
+        <View style={[styles.bottomNavContainer, { bottom: 20 + (bottomBar ? READ_ONLY_BAR_HEIGHT : insets.bottom) }]}>
             <View style={styles.bottomNav}>
             
             <NavButton title="Home" iconName="home" active={pathname === '/'} onPress={() => router.push('/')} />
@@ -504,6 +509,26 @@ function ReadOnlyBar({ isAdmin, bottomInset = 0 }: { isAdmin: boolean; bottomIns
             <Ionicons name="lock-closed" size={14} color="white" />
             <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 12, marginLeft: 6 }}>
                 Plan expired — view only.{isAdmin ? (Platform.OS === 'ios' ? ' Tap for details' : ' Tap to renew') : ''}
+            </Text>
+        </TouchableOpacity>
+    );
+}
+
+// Demo company: every screen opens with sample data; saving is turned off.
+function DemoBar({ bottomInset = 0 }: { bottomInset?: number }) {
+    const onPress = () => Alert.alert(
+        'Demo account',
+        'You can open every screen and see sample data. Saving is turned off in the demo.\n\nTo use LMS CRM with your own data, start a free trial: log out and tap "Register Company" on the login screen.'
+    );
+    return (
+        <TouchableOpacity
+            onPress={onPress}
+            accessibilityLabel="Demo account, view only"
+            style={{ backgroundColor: '#1565c0', minHeight: READ_ONLY_BAR_HEIGHT, paddingBottom: bottomInset, justifyContent: 'center', alignItems: 'center', flexDirection: 'row' }}
+        >
+            <Ionicons name="eye" size={14} color="white" />
+            <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 12, marginLeft: 6 }}>
+                Demo account — view only. Tap to know more
             </Text>
         </TouchableOpacity>
     );
