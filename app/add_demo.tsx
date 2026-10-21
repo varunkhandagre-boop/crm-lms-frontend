@@ -147,13 +147,6 @@ export default function AddDemoScreen() {
       }
   }, []);
 
-  useEffect(() => {
-      if (!isEditMode && params.hospital) {
-          setHospital(params.hospital as string);
-          // Also finds organizations beyond the first 500 (one server search).
-          findOrgByName(params.hospital as string, orgList).then((found) => { if (found) selectOrganization(found); });
-      }
-  }, [params, orgList]);
 
   const formatDate = (rawDate: Date) => {
     let day = rawDate.getDate().toString().padStart(2, '0');
@@ -391,6 +384,13 @@ export default function AddDemoScreen() {
       setEmail(orgItem.email || '');
       setModalVisible(false);
   };
+  useEffect(() => {
+      if (!isEditMode && params.hospital) {
+          setHospital(params.hospital as string);
+          // Also finds organizations beyond the first 500 (one server search).
+          findOrgByName(params.hospital as string, orgList).then((found) => { if (found) selectOrganization(found); });
+      }
+  }, [params, orgList]);
 
   const openModal = (type: string, data: any[]) => {
       setCurrentModalType(type);

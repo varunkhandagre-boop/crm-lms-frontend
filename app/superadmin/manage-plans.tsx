@@ -67,9 +67,6 @@ export default function ManagePlansScreen() {
     const [isEditing, setIsEditing] = useState(false);
     const [form, setForm] = useState<PlanForm>(EMPTY_FORM);
 
-    useEffect(() => {
-        loadAll();
-    }, []);
 
     const loadAll = async () => {
         setLoading(true);
@@ -91,6 +88,9 @@ export default function ManagePlansScreen() {
             setLoading(false);
         }
     };
+    useEffect(() => {
+        loadAll();
+    }, []);
 
     // Sends all three billing fields together — the backend PUT replaces the
     // whole billing-settings record, so a partial save would wipe the rest.

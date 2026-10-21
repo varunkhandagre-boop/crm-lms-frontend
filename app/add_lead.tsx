@@ -82,7 +82,7 @@ export default function AddLeadScreen() {
   const [leadType, setLeadType] = useState('Hot');
   
   const [nextDate, setNextDate] = useState(new Date());
-  const [closingDate, setClosingDate] = useState(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)); 
+  const [closingDate, setClosingDate] = useState(() => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)); 
   const [showNextPicker, setShowNextPicker] = useState(false);
   const [showClosingPicker, setShowClosingPicker] = useState(false);
 

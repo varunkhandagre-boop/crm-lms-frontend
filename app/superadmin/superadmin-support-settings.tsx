@@ -31,9 +31,6 @@ export default function SuperAdminSupportSettings() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
 
-    useEffect(() => {
-        loadConfig();
-    }, []);
 
     const loadConfig = async () => {
         setLoading(true);
@@ -52,6 +49,9 @@ export default function SuperAdminSupportSettings() {
             setLoading(false);
         }
     };
+    useEffect(() => {
+        loadConfig();
+    }, []);
 
     const isDirty = JSON.stringify(config) !== JSON.stringify(original);
 

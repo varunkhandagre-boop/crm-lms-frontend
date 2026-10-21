@@ -33,7 +33,10 @@ export function useServerPagedList<F extends object, T extends { id: string }>({
     const requestId = useRef(0);
     const filterKey = JSON.stringify(filters);
     const fetchRef = useRef(fetchPage);
-    fetchRef.current = fetchPage;
+    // Keep the latest fetcher without re-creating the callbacks (updated after render, not during it).
+    useEffect(() => {
+        fetchRef.current = fetchPage;
+    });
 
     const fetchFirstPage = useCallback(async (isRefresh: boolean) => {
         const id = ++requestId.current;

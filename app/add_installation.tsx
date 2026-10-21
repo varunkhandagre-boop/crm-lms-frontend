@@ -142,22 +142,6 @@ export default function AddInstallationScreen() {
       return [...new Set(models), 'Other'];
   };
 
-  useEffect(() => {
-      if (params.hospital) {
-          setHospital(params.hospital as string);
-          setOrgId(params.orgId as string || '');
-          setCity(params.city as string || '');
-          setContactPerson(params.contactPerson as string || '');
-          setMobile(params.mobile as string || '');
-          setAddress(params.address as string || '');
-
-          // Also finds organizations beyond the first 500 (one server search).
-          findOrgByName(params.hospital as string, orgList).then((found) => { if (found) selectOrganization(found); });
-      }
-      if (params.product) {
-          setProduct(params.product as string);
-      }
-  }, [params, orgList]);
 
   const formatDate = (rawDate: Date) => {
     let day = rawDate.getDate().toString().padStart(2, '0');
@@ -499,6 +483,22 @@ export default function AddInstallationScreen() {
       setMobile(orgItem.mobile || orgItem.phone || '');
       setModalVisible(false);
   };
+  useEffect(() => {
+      if (params.hospital) {
+          setHospital(params.hospital as string);
+          setOrgId(params.orgId as string || '');
+          setCity(params.city as string || '');
+          setContactPerson(params.contactPerson as string || '');
+          setMobile(params.mobile as string || '');
+          setAddress(params.address as string || '');
+
+          // Also finds organizations beyond the first 500 (one server search).
+          findOrgByName(params.hospital as string, orgList).then((found) => { if (found) selectOrganization(found); });
+      }
+      if (params.product) {
+          setProduct(params.product as string);
+      }
+  }, [params, orgList]);
 
   const handleSelect = (item: any) => {
       if (currentModalType === 'Hospital') {

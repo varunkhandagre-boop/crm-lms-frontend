@@ -153,10 +153,6 @@ export default function SuperAdminDashboard() {
         loadStats();
     }, [loadStats]);
 
-    useEffect(() => {
-        if (mainTab === 'analytics') loadAnalytics();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [mainTab, selectedMonth]);
 
     const loadAnalytics = async () => {
         setAnalyticsLoading(true);
@@ -168,6 +164,10 @@ export default function SuperAdminDashboard() {
             setAnalyticsLoading(false);
         }
     };
+    useEffect(() => {
+        if (mainTab === 'analytics') loadAnalytics();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [mainTab, selectedMonth]);
 
     const onRefresh = () => {
         setRefreshing(true);

@@ -64,7 +64,10 @@ export function useCachedList<T>({
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const fetcherRef = useRef(fetcher);
-  fetcherRef.current = fetcher;
+  // Keep the latest fetcher without re-creating the callbacks (updated after render, not during it).
+  useEffect(() => {
+    fetcherRef.current = fetcher;
+  });
 
   const fetchFresh = useCallback(async (isManualRefresh: boolean) => {
     if (!cacheKey) return;

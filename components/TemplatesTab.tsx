@@ -56,9 +56,6 @@ export const TemplatesTab = () => {
     const [viewModalVisible, setViewModalVisible] = useState(false);
     const [viewData, setViewData] = useState<MessageTemplate | null>(null);
 
-    useEffect(() => {
-        loadTemplates();
-    }, []);
 
     const loadTemplates = async () => {
         setLoading(true);
@@ -71,6 +68,9 @@ export const TemplatesTab = () => {
             setLoading(false);
         }
     };
+    useEffect(() => {
+        loadTemplates();
+    }, []);
 
     const resetForm = () => {
         setEditId(null);

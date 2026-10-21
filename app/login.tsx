@@ -38,9 +38,9 @@ export default function LoginScreen() {
   // and pad only the part of the keyboard the OS didn't already make room for.
   const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const [kbHeight, setKbHeight] = useState(0);
-  const fullHeightRef = useRef(0);
+  const [fullHeight, setFullHeight] = useState(0);
   const [viewHeight, setViewHeight] = useState(0);
-  const osShrink = Math.max(0, fullHeightRef.current - viewHeight);
+  const osShrink = Math.max(0, fullHeight - viewHeight);
   const extraKbPad = Math.max(0, kbHeight - osShrink);
   useEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -116,7 +116,7 @@ export default function LoginScreen() {
       style={styles.container}
       onLayout={(e) => {
         const h = e.nativeEvent.layout.height;
-        if (kbHeight === 0) fullHeightRef.current = Math.max(fullHeightRef.current, h);
+        if (kbHeight === 0) setFullHeight((prev) => Math.max(prev, h));
         setViewHeight(h);
       }}
     >

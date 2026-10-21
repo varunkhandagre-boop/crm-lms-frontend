@@ -81,6 +81,7 @@ export default function HomeScreen() {
   const [expoPushToken, setExpoPushToken] = useState('');
   const [checkedOnboarding, setCheckedOnboarding] = useState(false);
 
+  const [unreadCount, setUnreadCount] = useState(0);
   useFocusEffect(
     useCallback(() => {
         const loadData = async () => {
@@ -121,7 +122,6 @@ export default function HomeScreen() {
     }, [currentUser, shouldOpenSidebar])
 );
 
-const [unreadCount, setUnreadCount] = useState(0);
 
 const [branding, setBranding] = useState({
       name: 'LMS',
@@ -222,13 +222,6 @@ const [branding, setBranding] = useState({
       return () => clearTimeout(timer);
   }, [currentUser, checkedOnboarding, loading]);
 
-  useEffect(() => {
-      if(currentUser) {
-          registerForPushNotificationsAsync().then(token => {
-              if (token) { setExpoPushToken(token); saveTokenToDatabase(token); }
-          });
-      }
-  }, [currentUser]);
 
 const saveTokenToDatabase = async (token: string) => {
       if (!currentUser?.id) return;
@@ -266,6 +259,13 @@ const saveTokenToDatabase = async (token: string) => {
       } 
       return token;
   }
+  useEffect(() => {
+      if(currentUser) {
+          registerForPushNotificationsAsync().then(token => {
+              if (token) { setExpoPushToken(token); saveTokenToDatabase(token); }
+          });
+      }
+  }, [currentUser]);
   
   const isDesktop = useIsDesktop();
 

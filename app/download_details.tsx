@@ -316,7 +316,8 @@ export default function DownloadDetailsScreen() {
         }
     };
 
-    const ToggleRow = ({ label, field }: { label: string, field: keyof typeof modules }) => (
+    // A render helper, not a component: a component declared inside the screen remounts on every render.
+    const toggleRow = (label: string, field: keyof typeof modules) => (
         <TouchableOpacity
             style={styles.row}
             onPress={() => setModules({ ...modules, [field]: !modules[field] })}
@@ -382,35 +383,35 @@ export default function DownloadDetailsScreen() {
 
                     <View style={styles.grid}>
                         <View style={styles.col}>
-                            <ToggleRow label="Orders" field="orders" />
-                            <ToggleRow label="Collections" field="collections" />
-                            <ToggleRow label="Expenses" field="expenses" />
-                            <ToggleRow label="Leads" field="leads" />
-                            <ToggleRow label="Attendance" field="attendance" />
+                            {toggleRow('Orders', 'orders')}
+                            {toggleRow('Collections', 'collections')}
+                            {toggleRow('Expenses', 'expenses')}
+                            {toggleRow('Leads', 'leads')}
+                            {toggleRow('Attendance', 'attendance')}
                         </View>
                         <View style={styles.col}>
-                            <ToggleRow label="Service Calls" field="service" />
-                            <ToggleRow label="PMS Reports" field="pms" />
-                            <ToggleRow label="Installations" field="installations" />
-                            <ToggleRow label="Travel" field="travel" />
-                            <ToggleRow label="Leaves" field="leaves" />
+                            {toggleRow('Service Calls', 'service')}
+                            {toggleRow('PMS Reports', 'pms')}
+                            {toggleRow('Installations', 'installations')}
+                            {toggleRow('Travel', 'travel')}
+                            {toggleRow('Leaves', 'leaves')}
                         </View>
                     </View>
                     <View style={styles.grid}>
-                        <View style={styles.col}><ToggleRow label="Couriers" field="couriers" /></View>
-                        <View style={styles.col}><ToggleRow label="Demos" field="demos" /></View>
+                        <View style={styles.col}>{toggleRow('Couriers', 'couriers')}</View>
+                        <View style={styles.col}>{toggleRow('Demos', 'demos')}</View>
                     </View>
                     <View style={styles.grid}>
-                        <View style={styles.col}><ToggleRow label="Tasks" field="tasks" /></View>
-                        <View style={styles.col}><ToggleRow label="Advances" field="advances" /></View>
+                        <View style={styles.col}>{toggleRow('Tasks', 'tasks')}</View>
+                        <View style={styles.col}>{toggleRow('Advances', 'advances')}</View>
                     </View>
                     <View style={styles.grid}>
-                        <View style={styles.col}><ToggleRow label="Projects" field="projects" /></View>
-                        <View style={styles.col}><ToggleRow label="Visits (DSR)" field="visits" /></View>
+                        <View style={styles.col}>{toggleRow('Projects', 'projects')}</View>
+                        <View style={styles.col}>{toggleRow('Visits (DSR)', 'visits')}</View>
                     </View>
                     <View style={styles.grid}>
-                        <View style={styles.col}><ToggleRow label="Activity Plans" field="activity" /></View>
-                        <View style={styles.col}><ToggleRow label="Pending Dues" field="dues" /></View>
+                        <View style={styles.col}>{toggleRow('Activity Plans', 'activity')}</View>
+                        <View style={styles.col}>{toggleRow('Pending Dues', 'dues')}</View>
                     </View>
                 </View>
 

@@ -411,7 +411,7 @@ export default function SerialNumberScreen() {
 
       const rawName = viewMode === 'DETAILS' ? selectedMachine?.serialNo : (selectedOrg?.orgName || selectedOrg?.name);
       const safeName = (rawName || 'Report').replace(/[^a-z0-9]/gi, '_').toLowerCase();
-      const fileName = `${safeName}_${Date.now()}.csv`;
+      const fileName = `${safeName}_${new Date().getTime()}.csv`;
       
       await saveAndShareFile({ content: csvString, fileName, mimeType: 'text/csv', dialogTitle: 'Download Detailed Report' });
 

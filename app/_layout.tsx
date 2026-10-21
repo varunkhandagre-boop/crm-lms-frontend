@@ -241,7 +241,9 @@ function NavigationLayout() {
   const handledResponseId = useRef<string | null>(null);
   // The listener below is registered once, so it reads readiness from a ref, not stale state.
   const sessionReady = useRef(false);
-  sessionReady.current = !loading && !!currentUser;
+  useEffect(() => {
+    sessionReady.current = !loading && !!currentUser;
+  });
 
   const openPendingRoute = () => {
     if (!pendingRoute.current || !sessionReady.current) return;

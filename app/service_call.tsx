@@ -621,7 +621,7 @@ export default function ServiceCallScreen() {
     if (!created) return null;
     const isOpen = item.status === 'Open' || item.status === 'Assigned';
     if (!isOpen && !item.closedAt) return null;
-    const end = isOpen ? Date.now() : parseDate(item.closedAt);
+    const end = isOpen ? new Date().getTime() : parseDate(item.closedAt);
     const hours = Math.max(0, (end - created) / 3600000);
     const late = isOpen && hours >= 48;
     return (

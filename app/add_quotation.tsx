@@ -172,7 +172,7 @@ export default function AddQuotationScreen() {
     const selectProduct = (prod: any) => {
         const isCustom = prod.id === 'custom_other';
         const newItem = {
-            id: Date.now().toString(), 
+            id: new Date().getTime().toString(), 
             name: isCustom ? '' : prod.name, 
             model: isCustom ? '' : prod.model, 
             specifications: prod.specifications || '',
@@ -363,7 +363,7 @@ export default function AddQuotationScreen() {
                     <div class="box-right">
                         <div><strong>Doc No:</strong> ${estimateNo}</div>
                         <div style="margin-top: 4px;"><strong>Date:</strong> ${new Date().toLocaleDateString('en-GB')}</div>
-                        <div style="margin-top: 4px;"><strong>Valid Till:</strong> ${new Date(Date.now() + 15*24*60*60*1000).toLocaleDateString('en-GB')}</div>
+                        <div style="margin-top: 4px;"><strong>Valid Till:</strong> ${new Date(new Date().getTime() + 15*24*60*60*1000).toLocaleDateString('en-GB')}</div>
                     </div>
                 </div>
 
@@ -472,6 +472,8 @@ export default function AddQuotationScreen() {
 
         const fy = getFinancialYear();
         const shortName = companyProfile?.shortName || 'EST';
+        // Runs when the quotation is saved, not during render.
+        // eslint-disable-next-line react-hooks/purity
         const estimateNo = (mode === 'edit' && existingEstimateNo) ? existingEstimateNo : `${shortName}/${fy}/${Math.floor(100 + Math.random() * 900)}`;
 
         try {
@@ -511,7 +513,7 @@ export default function AddQuotationScreen() {
                 taxType: taxType, 
                 subTotal: subTotal || 0, totalGst: totalGST || 0, grandTotal: grandTotal || 0,
                 date: new Date().toISOString().split('T')[0],
-                validTill: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                validTill: new Date(new Date().getTime() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
                 status: 'Saved',
             };
 

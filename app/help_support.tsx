@@ -1534,9 +1534,6 @@ export default function HelpSupportScreen() {
     const [supportConfig, setSupportConfig] = useState(DEFAULTS);
     const [loadingConfig, setLoadingConfig] = useState(true);
 
-    useEffect(() => {
-        loadSupportConfig();
-    }, []);
 
     const loadSupportConfig = async () => {
         try {
@@ -1553,6 +1550,9 @@ export default function HelpSupportScreen() {
             setLoadingConfig(false);
         }
     };
+    useEffect(() => {
+        loadSupportConfig();
+    }, []);
 
     const openWhatsApp = () => Linking.openURL(`https://wa.me/${supportConfig.supportPhone}`);
     const openCall = () => Linking.openURL(`tel:+${supportConfig.supportPhone}`);

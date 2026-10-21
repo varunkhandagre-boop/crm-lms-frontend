@@ -48,22 +48,22 @@ export default function ProfileScreen() {
   // force-restarted. Now retries a couple of times with a short delay, and
   // re-fetches every time this screen comes into focus (not just on mount),
   // so a transient failure self-heals the next time the user visits.
-  const loadProfile = useCallback(async (attempt = 1) => {
+  const loadProfile = useCallback(async () => {
     if (!currentUser?.companyId) return;
-    try {
-      const data = await fetchSelf();
-      setCurrentImage(data.profileImage || null);
-      // Keep the login role ("Sales Executive", "Manager" …) — /users/me returns the raw enum (FIELD_USER).
-      setUserData({ ...currentUser, ...data, role: currentUser.role });
-      setProfileLoadFailed(false);
-    } catch (error) {
-      console.log("Error fetching profile:", error);
-      if (attempt < 3) {
-        setTimeout(() => loadProfile(attempt + 1), 1000 * attempt);
-      } else {
-        setProfileLoadFailed(true);
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const data = await fetchSelf();
+        setCurrentImage(data.profileImage || null);
+        // Keep the login role ("Sales Executive", "Manager" …) — /users/me returns the raw enum (FIELD_USER).
+        setUserData({ ...currentUser, ...data, role: currentUser.role });
+        setProfileLoadFailed(false);
+        return;
+      } catch (error) {
+        console.log("Error fetching profile:", error);
+        if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
       }
     }
+    setProfileLoadFailed(true);
   }, [currentUser]);
 
   useEffect(() => {

@@ -114,27 +114,6 @@ export default function AddServiceCallScreen() {
       fetcher: listSpareParts, // was: fetchSaaSData("spare_parts")
   });
 
-  useEffect(() => {
-      if (params.org && org !== params.org) {
-          setOrg(params.org as string);
-          // Also finds organizations beyond the first 500 (one server search).
-          findOrgByName(params.org as string, orgList).then((foundOrg) => { if (foundOrg) selectOrganization(foundOrg); });
-      }
-      if (params.serial && serialNo !== params.serial) {
-          const serial = params.serial as string;
-          setSerialNo(serial);
-           if (installList.length > 0) {
-              const machine = installList.find((m:any) => m.serialNo === serial);
-              if (machine) {
-                  setMachineName(machine.productName || machine.machineName || '');
-                  setModelName(machine.model || '');
-                  setDepartment(machine.department || '');
-                  setInstallDate(machine.date || '');
-                  if(machine.orgId) setOrgId(machine.orgId);
-              }
-          }
-      }
-  }, [params, orgList, installList]);
 
   const formatDate = (rawDate: Date) => {
     let day = rawDate.getDate().toString().padStart(2, '0');
@@ -447,6 +426,27 @@ export default function AddServiceCallScreen() {
       setErrors(prev => ({...prev, org: false})); 
       setSerialNo(''); setMachineName(''); setModelName(''); setDepartment(''); setInstallDate('');
   };
+  useEffect(() => {
+      if (params.org && org !== params.org) {
+          setOrg(params.org as string);
+          // Also finds organizations beyond the first 500 (one server search).
+          findOrgByName(params.org as string, orgList).then((foundOrg) => { if (foundOrg) selectOrganization(foundOrg); });
+      }
+      if (params.serial && serialNo !== params.serial) {
+          const serial = params.serial as string;
+          setSerialNo(serial);
+           if (installList.length > 0) {
+              const machine = installList.find((m:any) => m.serialNo === serial);
+              if (machine) {
+                  setMachineName(machine.productName || machine.machineName || '');
+                  setModelName(machine.model || '');
+                  setDepartment(machine.department || '');
+                  setInstallDate(machine.date || '');
+                  if(machine.orgId) setOrgId(machine.orgId);
+              }
+          }
+      }
+  }, [params, orgList, installList]);
 
   const handleSelect = (item: any) => {
     if (currentSelection === 'Org') { 

@@ -282,9 +282,6 @@ const [selectedDate, setSelectedDate] = useState(new Date());
   const [userModalVisible, setUserModalVisible] = useState(false);
   const [timelineData, setTimelineData] = useState<any[]>([]);
 
-  useEffect(() => {
-      if (activeTab === 'timeline') generateTimeline();
-  }, [selectedDate, selectedUser, attendanceList, courierList, serviceCallList, orderList, demoList, installList, paymentList, taskList, pmsList, salesVisitList, leadsList, activeTab]);
 
   const generateTimeline = () => {
       const targetDate = getStandardDate(selectedDate);
@@ -335,6 +332,9 @@ const [selectedDate, setSelectedDate] = useState(new Date());
       events.sort((a, b) => getTimeValue(a.time) - getTimeValue(b.time));
       setTimelineData(events);
   };
+  useEffect(() => {
+      if (activeTab === 'timeline') generateTimeline();
+  }, [selectedDate, selectedUser, attendanceList, courierList, serviceCallList, orderList, demoList, installList, paymentList, taskList, pmsList, salesVisitList, leadsList, activeTab]);
 
   const renderTimelineItem = ({ item, index }: any) => (
       <TouchableOpacity style={styles.timelineRow} onPress={() => { setSelectedEvent(item); setDetailModalVisible(true); }}>
@@ -368,12 +368,6 @@ const [selectedDate, setSelectedDate] = useState(new Date());
       attendanceCount: 0, shortCount: 0, leaveCount: 0, travelCount: 0, visitsCount: 0, leadsCount: 0 
   });
 
-  useEffect(() => {
-      setEmpVisibleCount(20);
-      if (activeTab === 'employee' && empUser) {
-          generateEmployeeKundali();
-      }
-  }, [activeTab, empUser, selectedYear, selectedMonth, attendanceList, orderList, paymentList, expenseList, advanceList, leaveList, travelList, salesVisitList, serviceCallList, pmsList, leadsList]);
 
   const generateEmployeeKundali = () => {
       if (!empUser) return;
@@ -504,6 +498,12 @@ const [selectedDate, setSelectedDate] = useState(new Date());
       events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setEmpTimeline(events);
   };
+  useEffect(() => {
+      setEmpVisibleCount(20);
+      if (activeTab === 'employee' && empUser) {
+          generateEmployeeKundali();
+      }
+  }, [activeTab, empUser, selectedYear, selectedMonth, attendanceList, orderList, paymentList, expenseList, advanceList, leaveList, travelList, salesVisitList, serviceCallList, pmsList, leadsList]);
 
   const toggleEmpFilter = (type: string) => {
       setActiveEmpFilter(prev => prev === type ? 'All' : type);
@@ -533,7 +533,7 @@ const [selectedDate, setSelectedDate] = useState(new Date());
               csvString += `"${date}","${type}","${title}","${amount}","${desc}"\n`;
           });
           const safeName = (empUser?.name || 'Employee').replace(/[^a-z0-9]/gi, '_').toLowerCase();
-          const fileName = `${safeName}_360_Report_${Date.now()}.csv`;
+          const fileName = `${safeName}_360_Report_${new Date().getTime()}.csv`;
           await saveAndShareFile({ content: csvString, fileName, mimeType: 'text/csv', dialogTitle: `Export ${safeName} Data`, UTI: 'public.comma-separated-values-text' });
       } catch (error: any) { Alert.alert("Report Error", "Could not generate report."); }
   };
@@ -693,7 +693,8 @@ const [selectedDate, setSelectedDate] = useState(new Date());
       finally { setLoading(false); setProgress(''); }
   };
 
-  const ToggleRow = ({label, field}: {label: string, field: keyof typeof modules}) => (
+  // A render helper, not a component: a component declared inside the screen remounts on every render.
+    const toggleRow = (label: string, field: keyof typeof modules) => (
       <TouchableOpacity style={styles.row} onPress={() => setModules({...modules, [field]: !modules[field]})}>
           <Text style={styles.label}>{label}</Text>
           <Switch value={modules[field]} onValueChange={(val) => setModules({...modules, [field]: val})} trackColor={{false: "#767577", true: "#81b0ff"}} thumbColor={modules[field] ? "#3b5998" : "#f4f3f4"} />
@@ -941,42 +942,42 @@ const [selectedDate, setSelectedDate] = useState(new Date());
                       <Text style={styles.dlCardHeader}>3. Select Data</Text>
                       <View style={styles.grid}>
                           <View style={styles.col}>
-                              <ToggleRow label="Orders" field="orders" />
-                              <ToggleRow label="Collections" field="collections" />
-                              <ToggleRow label="Expenses" field="expenses" />
-                              <ToggleRow label="Leads" field="leads" />
-                              <ToggleRow label="Attendance" field="attendance" />
-                              <ToggleRow label="Quotations" field="quotations" />
+                              {toggleRow('Orders', 'orders')}
+                              {toggleRow('Collections', 'collections')}
+                              {toggleRow('Expenses', 'expenses')}
+                              {toggleRow('Leads', 'leads')}
+                              {toggleRow('Attendance', 'attendance')}
+                              {toggleRow('Quotations', 'quotations')}
                           </View>
                           <View style={styles.col}>
-                              <ToggleRow label="Service Calls" field="service" />
-                              <ToggleRow label="PMS Reports" field="pms" />
-                              <ToggleRow label="Installations" field="installations" />
-                              <ToggleRow label="Travel" field="travel" />
-                              <ToggleRow label="Leaves" field="leaves" />
-                              <ToggleRow label="Pending Dues" field="dues" />
-                          </View>
-                      </View>
-                      <View style={styles.grid}>
-                          <View style={styles.col}>
-                              <ToggleRow label="Couriers" field="couriers" />
-                              <ToggleRow label="Advances" field="advances" />
-                              <ToggleRow label="Projects" field="projects" />
-                          </View>
-                          <View style={styles.col}>
-                              <ToggleRow label="Demos" field="demos" />
-                              <ToggleRow label="Tasks" field="tasks" />
-                              <ToggleRow label="Organizations" field="organizations" />
+                              {toggleRow('Service Calls', 'service')}
+                              {toggleRow('PMS Reports', 'pms')}
+                              {toggleRow('Installations', 'installations')}
+                              {toggleRow('Travel', 'travel')}
+                              {toggleRow('Leaves', 'leaves')}
+                              {toggleRow('Pending Dues', 'dues')}
                           </View>
                       </View>
                       <View style={styles.grid}>
                           <View style={styles.col}>
-                              <ToggleRow label="Visits (DSR)" field="visits" />
-                              <ToggleRow label="Employees List" field="employees" />
+                              {toggleRow('Couriers', 'couriers')}
+                              {toggleRow('Advances', 'advances')}
+                              {toggleRow('Projects', 'projects')}
                           </View>
                           <View style={styles.col}>
-                              <ToggleRow label="Activity Plans" field="activity" />
-                              <ToggleRow label="Shift Roster" field="roster" />
+                              {toggleRow('Demos', 'demos')}
+                              {toggleRow('Tasks', 'tasks')}
+                              {toggleRow('Organizations', 'organizations')}
+                          </View>
+                      </View>
+                      <View style={styles.grid}>
+                          <View style={styles.col}>
+                              {toggleRow('Visits (DSR)', 'visits')}
+                              {toggleRow('Employees List', 'employees')}
+                          </View>
+                          <View style={styles.col}>
+                              {toggleRow('Activity Plans', 'activity')}
+                              {toggleRow('Shift Roster', 'roster')}
                           </View>
                       </View>
                   </View>

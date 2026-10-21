@@ -26,7 +26,8 @@ import { useIsDesktop } from '../hooks/useIsDesktop';
 import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 
 // Tab State Memory
-let savedTabState = 'Unread'; 
+// Remembers the last tab while the app is open (an object, so the screen never reassigns a module variable).
+const tabMemory = { filter: 'Unread' };
 
 export default function NotificationScreen() {
   const headerTop = useHeaderTop();
@@ -41,7 +42,10 @@ export default function NotificationScreen() {
   // 🔥 3. Lazy Loaded States
   const [notificationList, setNotificationList] = useState<any[]>([]);
 
-  const [filter, setFilter] = useState(savedTabState);
+  const [filter, setFilter] = useState(tabMemory.filter);
+  useEffect(() => {
+      tabMemory.filter = filter;
+  }, [filter]);
   const [refreshing, setRefreshing] = useState(false);
   const [searchText, setSearchText] = useState(''); 
 
@@ -77,7 +81,6 @@ export default function NotificationScreen() {
   };
 
   const changeFilter = (newFilter: any) => {
-      savedTabState = newFilter; 
       setFilter(newFilter);
       setSearchText(''); 
   };

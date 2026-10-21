@@ -56,9 +56,6 @@ export default function PaymentGatewaySettings() {
     const [showSecret, setShowSecret] = useState(false);
     const [showWebhook, setShowWebhook] = useState(false);
 
-    useEffect(() => {
-        loadConfig();
-    }, []);
 
     const loadConfig = async () => {
         setLoading(true);
@@ -87,6 +84,9 @@ export default function PaymentGatewaySettings() {
             setLoading(false);
         }
     };
+    useEffect(() => {
+        loadConfig();
+    }, []);
 
     const isDirty = JSON.stringify(config) !== JSON.stringify(original);
 
