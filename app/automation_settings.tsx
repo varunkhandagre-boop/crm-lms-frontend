@@ -17,10 +17,22 @@ import { AutomationSettings, fetchAutomationSettings, saveAutomationSettings, se
 import { useData } from './context/DataContext';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 
-const WHATSAPP_PROVIDERS = [
-    { label: 'AiSensy', value: 'aisensy' },
-    { label: 'Meta Cloud API', value: 'meta_cloud' },
-    { label: 'Gupshup', value: 'gupshup' },
+type WaProvider = 'meta_cloud' | 'aisensy' | 'wati';
+const WHATSAPP_PROVIDERS: { label: string; value: WaProvider; hint: string; keyLabel: string; idLabel?: string; idPlaceholder?: string }[] = [
+    {
+        label: 'Meta Cloud API', value: 'meta_cloud', keyLabel: 'Access Token',
+        idLabel: 'Phone Number ID', idPlaceholder: 'From Meta → WhatsApp → API Setup',
+        hint: 'Template name and language must match the template approved on Meta.',
+    },
+    {
+        label: 'AiSensy', value: 'aisensy', keyLabel: 'API Key',
+        hint: 'In AiSensy create an API campaign for each template, named exactly like the template here (e.g. order_confirmed), and set it Live. Values go in the order they appear in the template.',
+    },
+    {
+        label: 'Wati', value: 'wati', keyLabel: 'Access Token',
+        idLabel: 'API Endpoint URL', idPlaceholder: 'https://live-mt-server.wati.io/123456',
+        hint: 'Token and API Endpoint are in Wati → API Docs. Use the same variable names in the Wati template, e.g. {{customer_name}}.',
+    },
 ];
 
 // All three send over HTTPS with the company's own API key. The From address
@@ -41,7 +53,8 @@ export default function AutomationSettingsScreen() {
     const [addonEnabled, setAddonEnabled] = useState(false);
 
     const [whatsappEnabled, setWhatsappEnabled] = useState(false);
-    const [whatsappProvider, setWhatsappProvider] = useState<'aisensy' | 'meta_cloud' | 'gupshup'>('aisensy');
+    const [whatsappProvider, setWhatsappProvider] = useState<WaProvider>('meta_cloud');
+    const waInfo = WHATSAPP_PROVIDERS.find((p) => p.value === whatsappProvider) ?? WHATSAPP_PROVIDERS[0];
     const [whatsappApiKey, setWhatsappApiKey] = useState('');
     const [whatsappSenderId, setWhatsappSenderId] = useState('');
 
@@ -63,7 +76,7 @@ export default function AutomationSettingsScreen() {
                 if (!entitled) { setLoading(false); return; }
 
                 setWhatsappEnabled(settings.whatsappEnabled);
-                setWhatsappProvider(settings.whatsappProvider);
+                setWhatsappProvider(settings.whatsappProvider === 'gupshup' ? 'meta_cloud' : settings.whatsappProvider);
                 setWhatsappApiKey(settings.whatsappApiKey || '');
                 setWhatsappSenderId(settings.whatsappSenderId || '');
                 setEmailEnabled(settings.emailEnabled);
@@ -82,7 +95,11 @@ export default function AutomationSettingsScreen() {
 
     const handleSave = async () => {
         if (whatsappEnabled && !whatsappApiKey.trim()) {
-            Alert.alert('Missing API Key', 'An API key is required to enable WhatsApp.');
+            Alert.alert('Missing API Key', `${waInfo.keyLabel} is required to enable WhatsApp.`);
+            return;
+        }
+        if (whatsappEnabled && waInfo.idLabel && !whatsappSenderId.trim()) {
+            Alert.alert('Missing details', `${waInfo.idLabel} is required for ${waInfo.label}.`);
             return;
         }
         if (emailEnabled && !emailApiKey.trim()) {
@@ -194,7 +211,7 @@ export default function AutomationSettingsScreen() {
                             <TouchableOpacity
                                 key={p.value}
                                 style={[styles.pill, whatsappProvider === p.value && styles.pillActive]}
-                                onPress={() => setWhatsappProvider(p.value as any)}
+                                onPress={() => setWhatsappProvider(p.value)}
                             >
                                 <Text style={[styles.pillText, whatsappProvider === p.value && styles.pillTextActive]}>
                                     {p.label}
@@ -203,7 +220,9 @@ export default function AutomationSettingsScreen() {
                         ))}
                     </View>
 
-                    <Text style={styles.label}>API Key</Text>
+                    <Text style={styles.hint}>{waInfo.hint}</Text>
+
+                    <Text style={styles.label}>{waInfo.keyLabel}</Text>
                     <TextInput
                         style={styles.input}
                         placeholder="Copy it from your provider's dashboard"
@@ -213,12 +232,12 @@ export default function AutomationSettingsScreen() {
                         autoCapitalize="none"
                     />
 
-                    {whatsappProvider === 'meta_cloud' && (
+                    {waInfo.idLabel && (
                         <>
-                            <Text style={styles.label}>Phone Number ID (Meta Cloud only)</Text>
+                            <Text style={styles.label}>{waInfo.idLabel}</Text>
                             <TextInput
                                 style={styles.input}
-                                placeholder="From Meta Business Manager"
+                                placeholder={waInfo.idPlaceholder}
                                 value={whatsappSenderId}
                                 onChangeText={setWhatsappSenderId}
                                 autoCapitalize="none"
@@ -299,7 +318,7 @@ export default function AutomationSettingsScreen() {
                 </TouchableOpacity>
 
                 <Text style={styles.footNote}>
-                    WhatsApp templates must be approved on Meta first. Emails use your Email templates and go out automatically; if sending fails they wait in Pending Emails.
+                    WhatsApp templates must be approved (on Meta, AiSensy or Wati) before they can be sent. Emails use your Email templates and go out automatically; if sending fails they wait in Pending Emails.
                 </Text>
 
             </ScrollView>

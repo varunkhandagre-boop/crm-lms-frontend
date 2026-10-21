@@ -5,7 +5,7 @@ import { apiClient } from './client';
 
 export interface AutomationSettings {
     whatsappEnabled: boolean;
-    whatsappProvider: 'aisensy' | 'meta_cloud' | 'gupshup';
+    whatsappProvider: 'meta_cloud' | 'aisensy' | 'wati' | 'gupshup'; // gupshup: old value, not offered
     whatsappApiKey: string | null;
     whatsappSenderId: string | null;
     emailEnabled: boolean;

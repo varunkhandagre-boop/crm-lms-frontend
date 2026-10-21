@@ -263,7 +263,7 @@ export const TemplatesTab = () => {
                                 )}
                                 {viewData.type === 'whatsapp' && (
                                     <Text style={{ fontSize: 11, color: '#e65100', marginBottom: 10, fontStyle: 'italic' }}>
-                                        Note: this exact name must also be registered + approved on Meta&apos;s WhatsApp Business dashboard before it can be sent.
+                                        Note: this exact name must also be approved with your WhatsApp provider (Meta / Wati template, or an AiSensy API campaign with the same name) before it can be sent.
                                     </Text>
                                 )}
                                 <View style={{ backgroundColor: '#f9f9f9', padding: 15, borderRadius: 8, borderWidth: 1, borderColor: '#eee', marginTop: 10 }}>
@@ -310,7 +310,7 @@ export const TemplatesTab = () => {
                             />
                             {templateType === 'whatsapp' && (
                                 <Text style={{ fontSize: 11, color: '#e65100', marginTop: -8, marginBottom: 12 }}>
-                                    ⚠️ Must exactly match an approved template name on Meta&apos;s WhatsApp Business dashboard.
+                                    ⚠️ Must exactly match the approved template name on Meta / Wati, or the AiSensy API campaign name.
                                 </Text>
                             )}
 
@@ -334,7 +334,7 @@ export const TemplatesTab = () => {
 
                             {templateType === 'whatsapp' && (
                                 <>
-                                    <Text style={tStyles.label}>Template Language (as approved on Meta)</Text>
+                                    <Text style={tStyles.label}>Template Language (Meta Cloud API only)</Text>
                                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 15 }}>
                                         {WA_LANGUAGES.map((l) => (
                                             <TouchableOpacity

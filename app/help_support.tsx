@@ -568,6 +568,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
             'Sidebar → "WhatsApp & Email" → tap the ⚙️ icon at the top right. Only works for Admins with the Automation Add-on active.',
             'The Automation add-on is one price for the whole company (not per employee) and covers our setup. You buy your own WhatsApp Business API account (e.g. AiSensy, Wati) and email service; their message charges are paid to them by you.',
             'Turn on WhatsApp and/or Email, choose your provider, and paste your API key.',
+            'WhatsApp: Meta Cloud API (Access Token + Phone Number ID), AiSensy (API Key; create an API campaign named exactly like each template and set it Live) or Wati (Access Token + API Endpoint URL from Wati → API Docs).',
             'Email: pick Brevo (free 300 emails a day), Resend (free 100 a day) or SendGrid, paste its API key and a From address that is verified in that provider. Save, then tap "Send test" to check it works.',
             'Once saved, customers automatically get updates for orders, payments, installations, services, and couriers.',
         ],
