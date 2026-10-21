@@ -36,6 +36,7 @@ import {
 } from '../../services/api/superadminCompanies';
 import { useHeaderTop } from '../../hooks/useHeaderTop';
 import { listDeletionRequests } from '../../services/api/deletionRequests';
+import { listSubscriptionRequests } from '../../services/api/subscriptionRequests';
 
 type MainTab = 'companies' | 'analytics';
 
@@ -64,9 +65,14 @@ export default function SuperAdminDashboard() {
     const router = useRouter();
     // Open in-app "Delete my account" requests (30-day deadline) — badge on the header button.
     const [deletionCounts, setDeletionCounts] = useState<{ pending: number; overdue: number } | null>(null);
+    // UPI "I Have Paid" requests waiting for approval — badge on the Payments tile.
+    const [pendingPayments, setPendingPayments] = useState(0);
     useFocusEffect(useCallback(() => {
         listDeletionRequests({ status: 'pending', page: 1, limit: 1 })
             .then(r => setDeletionCounts({ pending: r.pending, overdue: r.overdue }))
+            .catch(() => {});
+        listSubscriptionRequests({ status: 'PENDING', limit: 1 })
+            .then(r => setPendingPayments(r.meta.total))
             .catch(() => {});
     }, []));
 
@@ -397,6 +403,11 @@ export default function SuperAdminDashboard() {
                         <TouchableOpacity key={tile.key} style={styles.tile} onPress={tile.onPress}>
                             <Ionicons name={tile.icon as any} size={20} color="white" />
                             <Text style={styles.tileText} numberOfLines={1}>{tile.label}</Text>
+                            {tile.key === 'payments' && pendingPayments > 0 && (
+                                <View style={[styles.countBadge, styles.countBadgeUrgent]}>
+                                    <Text style={[styles.countBadgeText, { color: 'white' }]}>{pendingPayments}</Text>
+                                </View>
+                            )}
                             {tile.key === 'deletions' && !!deletionCounts?.pending && (
                                 <View style={[styles.countBadge, deletionCounts.overdue > 0 && styles.countBadgeUrgent]}>
                                     <Text style={[styles.countBadgeText, deletionCounts.overdue > 0 && { color: 'white' }]}>{deletionCounts.pending}</Text>

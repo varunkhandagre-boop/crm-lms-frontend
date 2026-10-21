@@ -58,6 +58,11 @@ export default function SubscriptionScreen() {
 
     const [loading, setLoading] = useState(false);
     const [alreadySubmitted, setAlreadySubmitted] = useState(false);
+    // UPI QR is the fallback: hidden behind a link when Pay Online is available,
+    // so people don't tap "I Have Paid" without paying.
+    const [showUpi, setShowUpi] = useState(false);
+    const [upiRef, setUpiRef] = useState('');
+    const upiRefValid = /^\d{12}$/.test(upiRef);
     const [fetchingRates, setFetchingRates] = useState(true);
 
     const [plans, setPlans] = useState<ActivePlan[]>([]);
@@ -156,6 +161,7 @@ export default function SubscriptionScreen() {
             employeesRequested: Number(employeeCount),
             automationRequested: wantsAutomation,
             amountPaid: totalPrice,
+            upiReference: upiRef,
         });
     };
 
@@ -256,21 +262,35 @@ export default function SubscriptionScreen() {
     // =========================================================
     // 6. MANUAL UPI PAYMENT
     // =========================================================
-    const handleManualUpiSubmit = async () => {
+    const handleManualUpiSubmit = () => {
         const err = validateForm();
         if (err) { Alert.alert('Invalid Input', err); return; }
+        if (!upiRefValid) {
+            Alert.alert('UPI Ref No. needed', 'After paying, open the payment in your UPI app (PhonePe, GPay, Paytm…) and copy the 12-digit UPI Ref No. / UTR.');
+            return;
+        }
+        Alert.alert(
+            'Have you already paid?',
+            `Submit only after ₹${totalPrice.toLocaleString('en-IN')} has been sent by UPI.\n\nUPI Ref No.: ${upiRef}\n\nWe match this number with our bank before activating the plan. Requests without a matching payment are rejected.`,
+            [
+                { text: 'Not yet', style: 'cancel' },
+                { text: 'Yes, I have paid', onPress: submitManualUpi },
+            ]
+        );
+    };
 
+    const submitManualUpi = async () => {
         setLoading(true);
         try {
             await saveSubscriptionRequest();
             setAlreadySubmitted(true);
             Alert.alert(
                 'Payment Submitted ⏳',
-                'We are verifying your payment. Once confirmed by the Admin, your plan will be activated within 1 hour.',
+                'We will match your UPI Ref No. with our bank and activate your plan, usually within 1 hour (business hours). You will get a notification when it is active.',
                 [{ text: 'OK', onPress: () => router.replace(currentUser ? '/' : '/login' as any) }]
             );
         } catch (e: any) {
-            Alert.alert('Error', e.message || 'Something went wrong.');
+            Alert.alert('Could not submit', e.message || 'Something went wrong.');
         } finally {
             setLoading(false);
         }
@@ -486,27 +506,36 @@ export default function SubscriptionScreen() {
                         </TouchableOpacity>
                     )}
 
-                    {razorpayEnabled && upiId && (
-                        <View style={styles.orDivider}>
-                            <View style={styles.orLine} />
-                            <Text style={styles.orText}>OR</Text>
-                            <View style={styles.orLine} />
-                        </View>
+                    {razorpayEnabled && upiId && !showUpi && (
+                        <TouchableOpacity style={styles.upiLink} onPress={() => setShowUpi(true)} disabled={alreadySubmitted}>
+                            <Ionicons name="qr-code-outline" size={18} color="#856404" />
+                            <Text style={styles.upiLinkText}>Pay by UPI QR instead (activated after manual check, ~1 hour)</Text>
+                            <Ionicons name="chevron-down" size={16} color="#856404" />
+                        </TouchableOpacity>
                     )}
 
-                    {upiId ? (
+                    {upiId && (!razorpayEnabled || showUpi) ? (
                         <View style={styles.qrCard}>
-                            <Text style={styles.qrTitle}>👉 Scan & Pay via UPI QR</Text>
+                            <Text style={styles.qrTitle}>Pay by UPI QR — manual check</Text>
+                            <Text style={styles.qrNote}>1. Scan the QR with any UPI app and pay exactly ₹{totalPrice.toLocaleString('en-IN')}.</Text>
                             <View style={styles.qrCodeWrapper}>
                                 <QRCode value={upiString} size={180} />
                             </View>
                             <Text style={styles.upiId}>UPI ID: {upiId}</Text>
-                            <Text style={styles.qrNote}>
-                                Complete the payment using any UPI app (PhonePe, GPay, Paytm), then tap the button below.
-                            </Text>
+                            <Text style={styles.qrNote}>2. In your UPI app, open this payment and copy the 12-digit UPI Ref No. / UTR.</Text>
+                            <TextInput
+                                style={[styles.input, styles.upiRefInput]}
+                                value={upiRef}
+                                onChangeText={(t) => setUpiRef(t.replace(/\D/g, '').slice(0, 12))}
+                                placeholder="12-digit UPI Ref No."
+                                keyboardType="number-pad"
+                                maxLength={12}
+                                editable={!alreadySubmitted}
+                            />
+                            <Text style={styles.qrNote}>3. Submit. We match it with our bank and activate your plan, usually within 1 hour.</Text>
 
                             <TouchableOpacity
-                                style={[styles.manualBtn, (loading || alreadySubmitted) && { opacity: 0.6 }]}
+                                style={[styles.manualBtn, (loading || alreadySubmitted || !upiRefValid) && { opacity: 0.5 }]}
                                 onPress={handleManualUpiSubmit}
                                 disabled={loading || alreadySubmitted}
                             >
@@ -515,9 +544,10 @@ export default function SubscriptionScreen() {
                                 ) : alreadySubmitted ? (
                                     <Text style={styles.manualBtnText}>Request Sent — Awaiting Approval ⏳</Text>
                                 ) : (
-                                    <Text style={styles.manualBtnText}>I Have Paid — Submit Request</Text>
+                                    <Text style={styles.manualBtnText}>I Have Paid — Submit for Verification</Text>
                                 )}
                             </TouchableOpacity>
+                            <Text style={styles.qrWarn}>Only submit after the money has been sent. Requests without a matching payment are rejected.</Text>
                         </View>
                     ) : !razorpayEnabled ? (
                         <View style={styles.noPaymentCard}>
@@ -622,6 +652,10 @@ const styles = StyleSheet.create({
     qrNote: { fontSize: 12, color: '#856404', lineHeight: 18 },
     manualBtn: { backgroundColor: '#2e7d32', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 14 },
     manualBtnText: { color: 'white', fontSize: 15, fontWeight: 'bold' },
+    upiLink: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#ffeeba', backgroundColor: '#fffbea', marginTop: 12, marginBottom: 10 },
+    upiLinkText: { flex: 1, color: '#856404', fontSize: 13, fontWeight: '600' },
+    upiRefInput: { marginTop: 8, marginBottom: 8, letterSpacing: 2, textAlign: 'center' },
+    qrWarn: { fontSize: 11, color: '#a94442', marginTop: 8, textAlign: 'center' },
     noPaymentCard: { backgroundColor: '#fff3e0', borderRadius: 12, padding: 20, alignItems: 'center', gap: 10, borderWidth: 1, borderColor: '#ffe0b2' },
     noPaymentText: { color: '#e67e22', fontSize: 13, textAlign: 'center', lineHeight: 20 },
     testModeBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#e3f2fd', padding: 10, borderRadius: 10, marginTop: 10, borderWidth: 1, borderColor: '#bbdefb' },

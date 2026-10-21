@@ -21,6 +21,8 @@ export interface SubscriptionRequest {
     status: SubscriptionRequestStatus;
     paymentMethod?: 'MANUAL' | 'RAZORPAY' | 'WEBSITE'; // RAZORPAY / WEBSITE = activated automatically
     razorpayPaymentId?: string | null;
+    /** UPI QR payments: UPI reference / UTR typed in by the company (app 3.2.4+). */
+    upiReference?: string | null;
     approvedAt: string | null;
     rejectionReason: string | null;
     createdAt: string;
@@ -82,6 +84,8 @@ export interface SubmitSubscriptionRequestPayload {
     employeesRequested: number;
     automationRequested?: boolean;
     amountPaid: number;
+    /** 12-digit UPI reference / UTR from the payer's UPI app. */
+    upiReference?: string;
 }
 
 export async function submitSubscriptionRequest(payload: SubmitSubscriptionRequestPayload): Promise<SubscriptionRequest> {

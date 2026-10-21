@@ -141,7 +141,7 @@ export default function SuperAdminPayments() {
         const automationLine = item.automationRequested ? `\nAutomation Add-on: Yes (+₹${item.automationAmount || 3000})` : '';
         Alert.alert(
             'Approve Payment',
-            `Confirm that this payment was received?\n\nCompany: ${companyLabel}\nPlan: ${item.planLabelSnapshot}\nModules: ${formatModules(item.modulesSnapshot)}\nAmount: ₹${item.amountPaid}\nEmployees: ${item.employeesRequested}${automationLine}\n\nOn approval the company gets exactly these modules. To change them later, use the Companies tab.`,
+            `Confirm that this payment was received?\n\nCompany: ${companyLabel}\nPlan: ${item.planLabelSnapshot}\nModules: ${formatModules(item.modulesSnapshot)}\nAmount: ₹${item.amountPaid}${item.upiReference ? `\nUPI Ref No.: ${item.upiReference}` : ''}\nEmployees: ${item.employeesRequested}${automationLine}\n\nOn approval the company gets exactly these modules. To change them later, use the Companies tab.`,
             [
                 { text: 'Cancel', style: 'cancel' },
                 {
@@ -290,6 +290,11 @@ export default function SuperAdminPayments() {
                     </View>
                 )}
                 <Text style={styles.detail}>Amount: <Text style={[styles.bold, { color: '#2e7d32', fontSize: 15 }]}>₹{item.amountPaid?.toLocaleString('en-IN')}</Text></Text>
+                {item.paymentMethod !== 'RAZORPAY' && item.paymentMethod !== 'WEBSITE' && (
+                    <Text style={[styles.detail, { color: '#856404', fontWeight: '600' }]}>
+                        UPI QR — {item.upiReference ? `UPI Ref No. ${item.upiReference}` : 'no UPI Ref No. (old app)'} · check your bank before approving
+                    </Text>
+                )}
                 <Text style={styles.detail}>Requested: {item.createdAt ? new Date(item.createdAt).toLocaleString() : 'N/A'}</Text>
                 {(item.paymentMethod === 'RAZORPAY' || item.paymentMethod === 'WEBSITE') && (
                     <Text style={[styles.detail, { color: '#1565c0', fontWeight: '600' }]}>
