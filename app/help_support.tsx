@@ -51,7 +51,8 @@ const CATEGORIES: { key: CatKey; label: string; icon: any; module: HelpModule; k
 const CAT_BY_KEY = Object.fromEntries(CATEGORIES.map((c) => [c.key, c])) as Record<CatKey, (typeof CATEGORIES)[number]>;
 
 // notIos: buying a plan is not offered in the iPhone app (App Store rule), so its help is hidden there.
-type GuideSection = { cat: CatKey; module?: HelpModule; icon: string; color: string; title: string; steps: string[]; notIos?: boolean };
+// intro / note: plain text above / below the numbered steps (not numbered).
+type GuideSection = { cat: CatKey; module?: HelpModule; icon: string; color: string; title: string; intro?: string; steps: string[]; note?: string; notIos?: boolean };
 type FaqItem = { cat: CatKey; module?: HelpModule; q: string; a: string; notIos?: boolean };
 
 // =========================================================
@@ -63,20 +64,20 @@ const GUIDE_SECTIONS: GuideSection[] = [
         color: '#0d47a1',
         cat: 'start',
         title: 'Start Here — First Setup, Step by Step',
+        intro: 'Do these 10 steps once, in this order, before your team starts using the app. Each step has its own guide below if you need more detail.',
         steps: [
-            'Do these once, in this order, before your team starts using the app. Each step has its own guide below if you need more detail.',
-            'Step 1 — Company Profile: Sidebar → Company Profile. Fill name, address, phone, email, GST and bank details; upload logo, signature and UPI QR. These print on every PDF.',
-            'Step 2 — Office location: in Company Profile tap "Set Office Location" while standing in your office. Day In is then tagged Office or Field automatically.',
-            'Step 3 — Weekly off & shift: Payroll → Salary Rules → "Weekly Off & Shift". Set weekly off days and shift start / end (e.g. 10:00 – 18:00). Late marks, leave counting and the Day In / Day Out reminders all use this. Different shifts or night shifts: use the Shift Roster.',
-            'Step 4 — Holidays: Team & Settings → Setup → Holidays (upload the Excel), so nobody is marked absent or reminded on a holiday.',
-            'Step 5 — Add employees: Team & Settings → Users → "+" (or many at once from Excel in Team & Settings → Setup). Pick the right role and joining date; the email and password are their login.',
-            'Step 6 — Permissions: Team & Settings → Permissions. For each role (Sales Executive, Service Engineer, Accountant, Store Keeper, HR, Manager) tick only the screens they need, e.g. Courier for HR / Store.',
-            'Step 7 — Alerts: Team & Settings → Alerts. Keep the daily alerts you want and set their times. The Day In / Day Out reminders go to each employee after their shift starts / ends; the time shown there is only for staff without a shift.',
-            'Step 8 — Your data: Products / price list (Product Master or Excel), spare parts, and your customers (Sidebar → Org → "Add New", or scan a visiting card).',
-            'Step 9 — Payroll & leave (if you use it): Payroll → Salary Rules for late, absent, overtime and the CL / SL / EL leave policy; enter salaries in each employee.',
-            'Step 10 — Team login: everyone installs the app from Google Play (or opens app.lifelinem.com on a laptop), logs in, and allows Notifications and Location when asked. Without these there are no reminders and no Day In.',
-            'Optional — WhatsApp & Email automation (add-on) to send order, payment and service updates to customers automatically.',
+            'Company Profile: Sidebar → Company Profile. Fill name, address, phone, email, GST and bank details; upload logo, signature and UPI QR. These print on every PDF.',
+            'Office location: in Company Profile tap "Set Office Location" while standing in your office. Day In is then tagged Office or Field automatically.',
+            'Weekly off & shift: Payroll → Salary Rules → "Weekly Off & Shift". Set weekly off days and shift start / end (e.g. 10:00 – 18:00). Late marks, leave counting and the Day In / Day Out reminders all use this. Different shifts or night shifts: use the Shift Roster.',
+            'Holidays: Team & Settings → Setup → Holidays (upload the Excel), so nobody is marked absent or reminded on a holiday.',
+            'Add employees: Team & Settings → Users → "+" (or many at once from Excel in Team & Settings → Setup). Pick the right role and joining date; the email and password are their login.',
+            'Permissions: Team & Settings → Permissions. For each role (Sales Executive, Service Engineer, Accountant, Store Keeper, HR, Manager) tick only the screens they need, e.g. Courier for HR / Store.',
+            'Alerts: Team & Settings → Alerts. Keep the daily alerts you want and set their times. The Day In / Day Out reminders go to each employee after their shift starts / ends; the time shown there is only for staff without a shift.',
+            'Your data: Products / price list (Product Master or Excel), spare parts, and your customers (Sidebar → Org → "Add New", or scan a visiting card).',
+            'Payroll & leave (if you use it): Payroll → Salary Rules for late, absent, overtime and the CL / SL / EL leave policy; enter salaries in each employee.',
+            'Team login: everyone installs the app from Google Play (or opens app.lifelinem.com on a laptop), logs in, and allows Notifications and Location when asked. Without these there are no reminders and no Day In.',
         ],
+        note: 'Optional — WhatsApp & Email automation (add-on) to send order, payment and service updates to customers automatically.',
     },
     {
         icon: 'cloud-upload',
@@ -1472,7 +1473,7 @@ export default function HelpSupportScreen() {
     const words = useMemo(() => searchWords(query), [query]);
     const searching = words.length > 0;
     const guideHits = useMemo(() => !searching ? [] : guides
-        .filter((g) => matchesAll(`${g.title} ${g.steps.join(' ')} ${CAT_BY_KEY[g.cat].label} ${CAT_BY_KEY[g.cat].keywords}`.toLowerCase(), words))
+        .filter((g) => matchesAll(`${g.title} ${g.intro ?? ''} ${g.steps.join(' ')} ${g.note ?? ''} ${CAT_BY_KEY[g.cat].label} ${CAT_BY_KEY[g.cat].keywords}`.toLowerCase(), words))
         .sort((x, y) => Number(matchesAll(y.title.toLowerCase(), words)) - Number(matchesAll(x.title.toLowerCase(), words))),
         [guides, words, searching]);
     const faqHits = useMemo(() => !searching ? [] : faqs
@@ -1535,6 +1536,7 @@ export default function HelpSupportScreen() {
                 </View>
                 {isOpen && (
                     <View style={styles.stepsBox}>
+                        {section.intro ? <Highlight text={section.intro} words={words} style={styles.guideIntro} /> : null}
                         {section.steps.map((step, stepIndex) => (
                             <View key={stepIndex} style={styles.stepRow}>
                                 <View style={[styles.stepNum, { backgroundColor: section.color }]}>
@@ -1543,6 +1545,7 @@ export default function HelpSupportScreen() {
                                 <Highlight text={step} words={words} style={styles.stepText} />
                             </View>
                         ))}
+                        {section.note ? <Highlight text={section.note} words={words} style={styles.guideNote} /> : null}
                     </View>
                 )}
             </TouchableOpacity>
@@ -1914,6 +1917,8 @@ const styles = StyleSheet.create({
     },
     stepNumText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
     stepText: { flex: 1, fontSize: 13, color: '#555', lineHeight: 20 },
+    guideIntro: { fontSize: 13, color: '#333', lineHeight: 20, marginBottom: 12, fontWeight: '600' },
+    guideNote: { fontSize: 12, color: '#777', lineHeight: 18, marginTop: 2, fontStyle: 'italic' },
     categoryBlock: { marginBottom: 8 },
     categoryHeader: {
         flexDirection: 'row',

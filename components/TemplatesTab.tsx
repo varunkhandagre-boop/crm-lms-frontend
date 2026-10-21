@@ -283,7 +283,7 @@ export const TemplatesTab = () => {
 
             {/* ADD/EDIT MODAL */}
             <Modal visible={modalVisible} animationType="slide" transparent={true}>
-                <View style={tStyles.modalOverlay}>
+                <View style={tStyles.editOverlay}>
                     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={tStyles.modalContentFull}>
                         <View style={tStyles.modalHeaderRow}>
                             <Text style={tStyles.modalHeader}>{editId ? 'Edit Template' : 'New Template'}</Text>
@@ -405,7 +405,8 @@ const tStyles = StyleSheet.create({
     fab: { position: 'absolute', bottom: 20, right: 20, backgroundColor: '#2c3e50', width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center', elevation: 5 },
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
     viewModalContent: { backgroundColor: 'white', borderRadius: 10, padding: 20, elevation: 5, maxHeight: '85%' },
-    modalContentFull: { backgroundColor: 'white', borderRadius: 10, padding: 20, flex: 1, marginVertical: 40 },
+    modalContentFull: { backgroundColor: 'white', borderRadius: 10, padding: 20, flex: 1 },
+    editOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-start', paddingHorizontal: 16, paddingTop: 40, paddingBottom: 16 },
     modalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, borderBottomWidth: 1, borderBottomColor: '#eee', paddingBottom: 10 },
     modalHeader: { fontSize: 18, fontWeight: 'bold', color: '#2c3e50' },
     tipBox: { backgroundColor: '#fff3e0', padding: 10, borderRadius: 8, marginBottom: 15, borderWidth: 1, borderColor: '#ffcc80' },
