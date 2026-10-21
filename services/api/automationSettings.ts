@@ -9,7 +9,7 @@ export interface AutomationSettings {
     whatsappApiKey: string | null;
     whatsappSenderId: string | null;
     emailEnabled: boolean;
-    emailProvider: 'sendgrid';
+    emailProvider: 'brevo' | 'resend' | 'sendgrid';
     emailApiKey: string | null;
     emailFromAddress: string | null;
 }
@@ -23,6 +23,12 @@ interface OneResponse<T> { data: T }
 
 export async function fetchAutomationSettings(): Promise<AutomationSettingsResponse> {
     const res = await apiClient.get<OneResponse<AutomationSettingsResponse>>('/automation-settings');
+    return res.data;
+}
+
+/** Sends one test email with the saved settings (save first). */
+export async function sendTestEmail(to: string): Promise<{ sent: boolean; to: string; provider: string }> {
+    const res = await apiClient.post<OneResponse<{ sent: boolean; to: string; provider: string }>>('/automation-settings/test-email', { to });
     return res.data;
 }
 

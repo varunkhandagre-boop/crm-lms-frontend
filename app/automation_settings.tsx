@@ -13,7 +13,7 @@ import {
     View
 } from 'react-native';
 
-import { AutomationSettings, fetchAutomationSettings, saveAutomationSettings } from '../services/api/automationSettings';
+import { AutomationSettings, fetchAutomationSettings, saveAutomationSettings, sendTestEmail } from '../services/api/automationSettings';
 import { useData } from './context/DataContext';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 
@@ -23,8 +23,12 @@ const WHATSAPP_PROVIDERS = [
     { label: 'Gupshup', value: 'gupshup' },
 ];
 
+// All three send over HTTPS with the company's own API key. The From address
+// must be a sender / domain verified in that provider's dashboard.
 const EMAIL_PROVIDERS = [
-    { label: 'SendGrid', value: 'sendgrid' },
+    { label: 'Brevo', value: 'brevo', hint: 'Free: 300 emails a day. Brevo → SMTP & API → API Keys. Verify your sender in Brevo → Senders & Domains.' },
+    { label: 'Resend', value: 'resend', hint: 'Free: 100 emails a day (3,000 a month). Resend → API Keys. Verify your domain in Resend → Domains.' },
+    { label: 'SendGrid', value: 'sendgrid', hint: 'SendGrid → Settings → API Keys (Mail Send). Verify your sender in Sender Authentication.' },
 ];
 
 export default function AutomationSettingsScreen() {
@@ -42,9 +46,11 @@ export default function AutomationSettingsScreen() {
     const [whatsappSenderId, setWhatsappSenderId] = useState('');
 
     const [emailEnabled, setEmailEnabled] = useState(false);
-    const [emailProvider, setEmailProvider] = useState<'sendgrid'>('sendgrid');
+    const [emailProvider, setEmailProvider] = useState<'brevo' | 'resend' | 'sendgrid'>('brevo');
     const [emailApiKey, setEmailApiKey] = useState('');
     const [emailFromAddress, setEmailFromAddress] = useState('');
+    const [testTo, setTestTo] = useState('');
+    const [testing, setTesting] = useState(false);
 
     const isAllowed = ['Admin', 'SuperAdmin'].includes(currentUser?.role || '');
 
@@ -64,6 +70,7 @@ export default function AutomationSettingsScreen() {
                 setEmailProvider(settings.emailProvider);
                 setEmailApiKey(settings.emailApiKey || '');
                 setEmailFromAddress(settings.emailFromAddress || '');
+                setTestTo(currentUser?.email || '');
             } catch (e: any) {
                 console.log('Settings load error:', e);
             } finally {
@@ -80,6 +87,10 @@ export default function AutomationSettingsScreen() {
         }
         if (emailEnabled && !emailApiKey.trim()) {
             Alert.alert('Missing API Key', 'An API key is required to enable Email.');
+            return;
+        }
+        if (emailEnabled && !emailFromAddress.trim()) {
+            Alert.alert('Missing From Address', 'Enter the From email address (verified in your email provider).');
             return;
         }
 
@@ -101,6 +112,19 @@ export default function AutomationSettingsScreen() {
             Alert.alert('Error', e.message || 'Could not save, please try again.');
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleTestEmail = async () => {
+        if (!testTo.trim()) { Alert.alert('Email needed', 'Enter the email address to send the test to.'); return; }
+        setTesting(true);
+        try {
+            const r = await sendTestEmail(testTo.trim());
+            Alert.alert('Test email sent ✅', `Sent to ${r.to}. Check the inbox (and the spam folder).`);
+        } catch (e: any) {
+            Alert.alert('Test failed', e.message || 'Could not send the test email.');
+        } finally {
+            setTesting(false);
         }
     };
 
@@ -182,7 +206,7 @@ export default function AutomationSettingsScreen() {
                     <Text style={styles.label}>API Key</Text>
                     <TextInput
                         style={styles.input}
-                        placeholder="Provider dashboard se copy karein"
+                        placeholder="Copy it from your provider's dashboard"
                         value={whatsappApiKey}
                         onChangeText={setWhatsappApiKey}
                         secureTextEntry
@@ -194,7 +218,7 @@ export default function AutomationSettingsScreen() {
                             <Text style={styles.label}>Phone Number ID (Meta Cloud only)</Text>
                             <TextInput
                                 style={styles.input}
-                                placeholder="Meta Business Manager se milega"
+                                placeholder="From Meta Business Manager"
                                 value={whatsappSenderId}
                                 onChangeText={setWhatsappSenderId}
                                 autoCapitalize="none"
@@ -227,10 +251,12 @@ export default function AutomationSettingsScreen() {
                         ))}
                     </View>
 
+                    <Text style={styles.hint}>{EMAIL_PROVIDERS.find((p) => p.value === emailProvider)?.hint}</Text>
+
                     <Text style={styles.label}>API Key</Text>
                     <TextInput
                         style={styles.input}
-                        placeholder="SendGrid dashboard se copy karein"
+                        placeholder="Copy it from your email provider's dashboard"
                         value={emailApiKey}
                         onChangeText={setEmailApiKey}
                         secureTextEntry
@@ -246,6 +272,22 @@ export default function AutomationSettingsScreen() {
                         autoCapitalize="none"
                         keyboardType="email-address"
                     />
+                    <Text style={styles.hint}>Must be a sender verified in your email provider. Customer replies go to the email in Company Profile.</Text>
+
+                    <Text style={styles.label}>Send a test email (save first)</Text>
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <TextInput
+                            style={[styles.input, { flex: 1 }]}
+                            placeholder="you@yourcompany.com"
+                            value={testTo}
+                            onChangeText={setTestTo}
+                            autoCapitalize="none"
+                            keyboardType="email-address"
+                        />
+                        <TouchableOpacity style={[styles.testBtn, testing && { opacity: 0.6 }]} onPress={handleTestEmail} disabled={testing}>
+                            {testing ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.testBtnText}>Send test</Text>}
+                        </TouchableOpacity>
+                    </View>
                 </View>
 
                 <TouchableOpacity
@@ -257,7 +299,7 @@ export default function AutomationSettingsScreen() {
                 </TouchableOpacity>
 
                 <Text style={styles.footNote}>
-                    Note: Templates must be approved on the provider&apos;s dashboard first — messages will fail without approval.
+                    WhatsApp templates must be approved on Meta first. Emails use your Email templates and go out automatically; if sending fails they wait in Pending Emails.
                 </Text>
 
             </ScrollView>
@@ -283,6 +325,9 @@ const styles = StyleSheet.create({
     pillTextActive: { color: 'white' },
     saveBtn: { backgroundColor: '#4caf50', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 10, elevation: 2 },
     saveText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+    hint: { fontSize: 11, color: '#777', marginTop: 6, lineHeight: 16 },
+    testBtn: { backgroundColor: '#1565c0', borderRadius: 8, paddingHorizontal: 14, justifyContent: 'center' },
+    testBtnText: { color: 'white', fontWeight: 'bold', fontSize: 13 },
     footNote: { textAlign: 'center', color: 'gray', fontSize: 11, marginTop: 15, paddingHorizontal: 10 },
     lockedTitle: { fontSize: 17, fontWeight: 'bold', color: '#333', marginTop: 15, textAlign: 'center' },
     lockedSubtitle: { fontSize: 13, color: '#888', marginTop: 8, textAlign: 'center', lineHeight: 20 },

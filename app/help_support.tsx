@@ -568,6 +568,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
             'Sidebar → "WhatsApp & Email" → tap the ⚙️ icon at the top right. Only works for Admins with the Automation Add-on active.',
             'The Automation add-on is one price for the whole company (not per employee) and covers our setup. You buy your own WhatsApp Business API account (e.g. AiSensy, Wati) and email service; their message charges are paid to them by you.',
             'Turn on WhatsApp and/or Email, choose your provider, and paste your API key.',
+            'Email: pick Brevo (free 300 emails a day), Resend (free 100 a day) or SendGrid, paste its API key and a From address that is verified in that provider. Save, then tap "Send test" to check it works.',
             'Once saved, customers automatically get updates for orders, payments, installations, services, and couriers.',
         ],
     },
@@ -711,7 +712,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         steps: [
             'Go to Sidebar → "WhatsApp & Email". The ⚙️ icon at the top opens the automation settings.',
             'Templates Tab: create and manage reusable WhatsApp/Email message templates. For WhatsApp, the name and language must match the template approved on Meta.',
-            'Pending Tab: see messages waiting to be approved or sent.',
+            'Pending Emails Tab: emails that could not go out automatically (email not set up, or the provider refused them) — tap Send to send from your own email app.',
             'History Tab: view previously sent messages and their delivery status. If WhatsApp was busy or the internet failed, the message stays Pending and is tried again automatically (after 5 min, 30 min and 2 h).',
             'Broadcast Tab: send a message to a group of contacts at once.',
         ],

@@ -150,6 +150,18 @@ const PendingEmailsTab = () => {
             finalSubject = finalSubject.replace(regex, value);
             finalBody = finalBody.replace(regex, value);
         }
+        // Email apps take plain text from mailto:, so turn the HTML template into text.
+        finalBody = finalBody
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/(p|div|h\d|li|tr)>/gi, '\n')
+            .replace(/<li[^>]*>/gi, '• ')
+            .replace(/<[^>]+>/g, '')
+            .replace(/\{\w+\}/g, '')
+            .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+            .replace(/[ \t]+\n/g, '\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+        finalSubject = finalSubject.replace(/\{\w+\}/g, '').trim();
         return `mailto:${msg.to}?subject=${encodeURIComponent(finalSubject)}&body=${encodeURIComponent(finalBody)}`;
     };
 
@@ -222,7 +234,7 @@ const PendingEmailsTab = () => {
     return (
         <View style={{ flex: 1 }}>
             <View style={styles.infoBanner}>
-                <Text style={styles.infoBannerText}>Tap &quot;Send&quot; to open your email app — subject/body are pre-filled.</Text>
+                <Text style={styles.infoBannerText}>Emails that could not go out automatically. Tap &quot;Send&quot; to open your email app — subject/body are pre-filled.</Text>
             </View>
             <FlatList
                 data={pendingList}
@@ -251,6 +263,7 @@ const PendingEmailsTab = () => {
                             <Text style={styles.toText}>✉️ {item.to}</Text>
                             <Text style={styles.templateText}>Template: <Text style={{ fontWeight: 'bold' }}>{item.templateName}</Text></Text>
                             <Text style={styles.dateText}>Generated: {new Date(item.createdAt).toLocaleString()}</Text>
+                            {item.failureReason ? <Text style={styles.failureReason}>⚠️ {item.failureReason}</Text> : null}
                         </View>
                         <View style={{ justifyContent: 'space-between', alignItems: 'flex-end', marginLeft: 10 }}>
                             <TouchableOpacity onPress={() => handleCancel(item.id)}>
