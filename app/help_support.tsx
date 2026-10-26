@@ -23,9 +23,11 @@ import { useData } from './context/DataContext';
 const DEFAULTS = {
     supportPhone: '919999999999',
     supportEmail: 'support@yourcompany.com',
-    userManualUrl: 'https://example.com/user-manual.pdf',
-    videoTutorialUrl: 'https://youtube.com/your-tutorial-link',
+    userManualUrl: 'https://lifelinem.com/crm/LMS-CRM-User-Manual.pdf',
+    videoTutorialUrl: '', // no video yet: the card stays hidden until Super Admin sets a link
 };
+// Fixed name on the website; replace the file there to update it.
+const SETUP_GUIDE_URL = 'https://lifelinem.com/crm/LMS-CRM-Setup-Guide.pdf';
 
 // =========================================================
 // 🗂 CATEGORIES — shared by User Guide and FAQ. A topic shows only when the
@@ -1559,6 +1561,7 @@ export default function HelpSupportScreen() {
     const openEmail = () => Linking.openURL(`mailto:${supportConfig.supportEmail}`);
     const openManual = () => Linking.openURL(supportConfig.userManualUrl);
     const openVideo = () => Linking.openURL(supportConfig.videoTutorialUrl);
+    const openSetupGuide = () => Linking.openURL(SETUP_GUIDE_URL);
 
     const toggleFaq = (key: string) => setExpandedFaq(prev => prev === key ? null : key);
     const toggleGuide = (key: string) => setExpandedGuide(prev => prev === key ? null : key);
@@ -1746,12 +1749,24 @@ export default function HelpSupportScreen() {
                                 <Ionicons name="document-text" size={22} color="#d32f2f" />
                             </View>
                             <View style={{ flex: 1 }}>
-                                <Text style={styles.guideTitle}>User Manual (PDF)</Text>
-                                <Text style={styles.guideSubtitle}>Step-by-step guide to using the app</Text>
+                                <Text style={styles.guideTitle}>Download User Manual (PDF)</Text>
+                                <Text style={styles.guideSubtitle}>Every screen, step by step, with screenshots</Text>
                             </View>
-                            <Ionicons name="chevron-forward" size={20} color="#ccc" />
+                            <Ionicons name="download-outline" size={20} color="#999" />
                         </TouchableOpacity>
 
+                        <TouchableOpacity style={styles.guideCard} onPress={openSetupGuide}>
+                            <View style={[styles.guideIconBox, { backgroundColor: '#e8f5e9' }]}>
+                                <Ionicons name="rocket" size={22} color="#2e7d32" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.guideTitle}>Download Setup Guide (PDF)</Text>
+                                <Text style={styles.guideSubtitle}>First setup in 10 steps, email and WhatsApp automation</Text>
+                            </View>
+                            <Ionicons name="download-outline" size={20} color="#999" />
+                        </TouchableOpacity>
+
+                        {!!supportConfig.videoTutorialUrl && (
                         <TouchableOpacity style={styles.guideCard} onPress={openVideo}>
                             <View style={[styles.guideIconBox, { backgroundColor: '#ffebee' }]}>
                                 <Ionicons name="play-circle" size={22} color="#d32f2f" />
@@ -1762,6 +1777,7 @@ export default function HelpSupportScreen() {
                             </View>
                             <Ionicons name="chevron-forward" size={20} color="#ccc" />
                         </TouchableOpacity>
+                        )}
 
                         <View style={styles.quickLinksRow}>
                             <TouchableOpacity style={styles.quickLink} onPress={() => setActiveTab('guide')}>

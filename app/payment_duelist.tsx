@@ -28,6 +28,16 @@ import { useIsDesktop } from '../hooks/useIsDesktop';
 import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
 
+// Dates come as ISO timestamps ("2026-04-26T06:30:00.000Z"); show them as DD/MM/YYYY (India time).
+function showDate(v?: string | null): string {
+    if (!v) return '-';
+    const d = new Date(v);
+    if (isNaN(d.getTime())) return String(v);
+    const ist = new Date(d.getTime() + 5.5 * 60 * 60 * 1000);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${pad(ist.getUTCDate())}/${pad(ist.getUTCMonth() + 1)}/${ist.getUTCFullYear()}`;
+}
+
 export default function PaymentDueList() {
     const headerTop = useHeaderTop();
     const router = useRouter();
@@ -254,7 +264,7 @@ export default function PaymentDueList() {
                     <View style={{flexDirection:'row', alignItems:'center', marginTop:4}}>
                         <Ionicons name="calendar-outline" size={14} color={daysOutstanding > 0 ? '#d32f2f' : '#666'} />
                         <Text style={[styles.dateText, daysOutstanding > 0 && {color:'#d32f2f', fontWeight:'bold'}]}>
-                            Date: {dateToShow} {daysOutstanding > 0 ? `(${daysOutstanding} days outstanding)` : ''}
+                            Date: {showDate(dateToShow)} {daysOutstanding > 0 ? `(${daysOutstanding} days outstanding)` : ''}
                         </Text>
                     </View>
 
