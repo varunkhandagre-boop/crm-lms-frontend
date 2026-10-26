@@ -1029,8 +1029,8 @@ const styles = StyleSheet.create({
   idText: { fontSize:10, color:'#1565c0', fontWeight:'bold' },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { width: '90%', backgroundColor: 'white', borderRadius: 15, padding: 20, maxHeight: '80%' },
-  pickerContainer: { width: '90%', backgroundColor: 'white', borderRadius: 12, padding: 20, elevation: 10, maxHeight: '70%' },
+  modalContent: { width: '90%', backgroundColor: 'white', borderRadius: 15, padding: 20, maxHeight: '80%', maxWidth: 560, alignSelf: 'center' },
+  pickerContainer: { width: '90%', backgroundColor: 'white', borderRadius: 12, padding: 20, elevation: 10, maxHeight: '70%', maxWidth: 560, alignSelf: 'center' },
   pickerHeader: { fontSize: 18, fontWeight: 'bold', color: '#333' },
   pickerOption: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', flexDirection: 'row', justifyContent: 'space-between' },
   pickerText: { fontSize: 15, color: '#444' },
@@ -1038,7 +1038,7 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   modalHospitalName: { fontSize: 20, fontWeight: 'bold', color: '#333', marginBottom: 5 },
   productBox: { backgroundColor: '#f9f9f9', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#eee' },
-  graphModalContent: { width: '95%', backgroundColor: 'white', borderRadius: 15, padding: 20, elevation: 5, maxHeight: '85%' },
+  graphModalContent: { width: '95%', backgroundColor: 'white', borderRadius: 15, padding: 20, elevation: 5, maxHeight: '85%', maxWidth: 560, alignSelf: 'center' },
   chartContainer: { height: 400, flexDirection: 'row', alignItems: 'flex-end', paddingTop: 20 },
 
   detailRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderColor: '#eee' },

@@ -1003,17 +1003,17 @@ const styles = StyleSheet.create({
     endListText: { textAlign:'center', padding:20, color:'#aaa', fontSize:12, fontStyle:'italic' },
 
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 20 },
-    modalContent: { backgroundColor: 'white', padding: 20, borderRadius: 10 },
+    modalContent: { backgroundColor: 'white', padding: 20, borderRadius: 10, width: '100%', maxWidth: 560, alignSelf: 'center' },
     modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, color:'#3b5998' },
     input: { borderWidth: 1, borderColor: '#ddd', padding: 8, borderRadius: 5, marginBottom: 8 },
     row: { flexDirection:'row', justifyContent:'space-between', marginTop:10 },
     cancelBtn: { padding: 12, flex:1, alignItems:'center' },
     saveBtn: { backgroundColor: '#3b5998', padding: 12, alignItems: 'center', borderRadius: 5, flex:1 },
     
-    userModalContent: { backgroundColor: 'white', borderRadius: 10, padding: 20, maxHeight: 400 },
+    userModalContent: { backgroundColor: 'white', borderRadius: 10, padding: 20, maxHeight: 400, width: '100%', maxWidth: 560, alignSelf: 'center' },
     userItem: { padding: 15, borderBottomWidth: 1, borderBottomColor: '#eee' },
     closeModalBtn: { backgroundColor: '#3b5998', padding: 10, marginTop: 10, borderRadius: 5, alignItems: 'center' },
     
-    detailCard: { backgroundColor: 'white', borderRadius: 15, padding: 20, elevation: 5 },
+    detailCard: { backgroundColor: 'white', borderRadius: 15, padding: 20, elevation: 5, width: '100%', maxWidth: 560, alignSelf: 'center' },
     divider: { height: 1, backgroundColor: '#eee', marginVertical: 8 },
 });

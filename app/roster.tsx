@@ -631,7 +631,7 @@ const styles = StyleSheet.create({
     myShift: { fontSize: 15, fontWeight: 'bold' },
     mySub: { fontSize: 12, color: '#666', marginTop: 2 },
     backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 20 },
-    sheet: { backgroundColor: 'white', borderRadius: 12, padding: 16 },
+    sheet: { backgroundColor: 'white', borderRadius: 12, padding: 16, width: '100%', maxWidth: 560, alignSelf: 'center' },
     sheetTitle: { fontSize: 17, fontWeight: 'bold', color: '#333' },
     sheetSub: { color: '#666', marginTop: 2, marginBottom: 6 },
     sheetActions: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 14 },

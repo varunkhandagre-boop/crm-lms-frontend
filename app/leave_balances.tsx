@@ -276,7 +276,7 @@ const styles = StyleSheet.create({
     chipVal: { fontSize: 16, fontWeight: 'bold', color: '#2e7d32' },
     chipSub: { fontSize: 9, color: 'gray' },
     overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 20 },
-    modalBox: { backgroundColor: '#fff', borderRadius: 12, padding: 16 },
+    modalBox: { backgroundColor: '#fff', borderRadius: 12, padding: 16, width: '100%', maxWidth: 560, alignSelf: 'center' },
     modalTitle: { fontSize: 17, fontWeight: 'bold', color: '#222' },
     openRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
     openType: { width: 40, fontWeight: 'bold', color: '#3b5998' },

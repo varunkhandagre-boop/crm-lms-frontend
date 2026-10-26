@@ -324,7 +324,7 @@ const styles = themedForm(StyleSheet.create({
   saveBtnText: { color: 'white', fontWeight: 'bold', fontSize: 18 },
   
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
-  modalContent: { backgroundColor: 'white', borderRadius: 10, padding: 20, maxHeight:'60%' },
+  modalContent: { backgroundColor: 'white', borderRadius: 10, padding: 20, maxHeight:'60%', width: '100%', maxWidth: 560, alignSelf: 'center' },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, color: '#3b5998', textAlign:'center' },
   modalItem: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#eee', flexDirection:'row', justifyContent:'space-between' },
   modalItemText: { fontSize: 16, color: '#333' },

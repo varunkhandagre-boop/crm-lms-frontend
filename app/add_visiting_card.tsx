@@ -273,7 +273,7 @@ const styles = themedForm(StyleSheet.create({
   saveButton: { backgroundColor: '#3b5998', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 30 },
   saveBtnText: { color: 'white', fontWeight: 'bold', fontSize: 18 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
-  modalContent: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 20, maxHeight: '60%' },
+  modalContent: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 20, maxHeight: '60%', maxWidth: 560, alignSelf: 'center' },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center', color: '#3b5998' },
   modalItem: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#eee' },
   modalItemText: { fontSize: 16, color: '#333' }

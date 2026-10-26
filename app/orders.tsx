@@ -1117,7 +1117,7 @@ const styles = StyleSheet.create({
   footer: { flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
   
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end', padding: 10 },
-  modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 20, maxHeight:'85%', width:'100%' },
+  modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 20, maxHeight:'85%', width:'100%', maxWidth: 560, alignSelf: 'center' },
   modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
   hospitalNameLarge: { fontSize:18, fontWeight:'bold', color:'#333' },
   sectionHeader: { fontSize:14, fontWeight:'bold', color:'#3b5998', marginTop:15, marginBottom:10, backgroundColor:'#e3f2fd', padding:5, borderRadius:5 },
@@ -1144,7 +1144,7 @@ const styles = StyleSheet.create({
   endListText: { textAlign: 'center', padding: 20, color: '#aaa', fontSize: 12, fontStyle: 'italic' },
 
   pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
-  pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation:10 },
+  pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation:10, maxWidth: 560, alignSelf: 'center' },
   pickerHeader: { fontWeight:'bold', fontSize:16, marginBottom:10, color:'#3b5998', textAlign:'center' },
   pickerItem: { paddingVertical:12, borderBottomWidth:1, borderBottomColor:'#eee', flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
 });

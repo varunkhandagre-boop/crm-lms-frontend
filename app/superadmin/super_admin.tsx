@@ -737,7 +737,7 @@ const styles = StyleSheet.create({
     expiredWarning: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#fff3e0', padding: 12, borderRadius: 10, marginBottom: 12 },
     expiredWarningText: { flex: 1, fontSize: 13, color: '#e67e22', fontWeight: '600' },
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 20 },
-    modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 20, maxHeight: '90%' },
+    modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 20, maxHeight: '90%', width: '100%', maxWidth: 560, alignSelf: 'center' },
     modalTitle: { fontSize: 22, fontWeight: 'bold', color: '#333', flex: 1 },
     divider: { height: 1, backgroundColor: '#eee', marginVertical: 15 },
     label: { fontSize: 12, color: '#888', marginTop: 10, fontWeight: 'bold', textTransform: 'uppercase' },

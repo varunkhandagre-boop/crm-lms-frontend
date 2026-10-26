@@ -656,7 +656,7 @@ const styles = StyleSheet.create({
   attachBadge: { flexDirection:'row', alignItems:'center', backgroundColor:'gray', alignSelf:'flex-start', paddingHorizontal:6, paddingVertical:2, borderRadius:4, marginTop:10 },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
-  modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 25, elevation: 5, maxHeight: '85%' },
+  modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 25, elevation: 5, maxHeight: '85%', width: '100%', maxWidth: 560, alignSelf: 'center' },
   modalTitle: { fontSize: 20, fontWeight: 'bold', color:'#3b5998' },
   divider: { height:1, backgroundColor:'#eee', marginVertical:7 },
   billImage: { width: '100%', height: 200, borderRadius: 8, resizeMode: 'contain', borderWidth:1, borderColor:'#eee', backgroundColor:'#f0f0f0' },
@@ -666,7 +666,7 @@ const styles = StyleSheet.create({
   btnText: { color: 'white', fontWeight: 'bold', marginLeft: 5 },
 
   pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
-  pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation:10 },
+  pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation:10, maxWidth: 560, alignSelf: 'center' },
   pickerHeader: { fontWeight:'bold', fontSize:16, marginBottom:10, color:'#3b5998', textAlign:'center' },
   pickerItem: { paddingVertical:12, borderBottomWidth:1, borderBottomColor:'#eee', flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
 });

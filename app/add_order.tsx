@@ -867,7 +867,7 @@ const styles = themedForm(StyleSheet.create({
   modeBtn: { flex:1, paddingVertical: 10, borderRadius: 8, backgroundColor: '#f0f0f0', alignItems:'center' },
   activeMode: { backgroundColor: '#3b5998' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding:20 },
-  modalContent: { width: '100%', backgroundColor: 'white', borderRadius: 15, padding: 20, maxHeight: '80%' },
+  modalContent: { width: '100%', backgroundColor: 'white', borderRadius: 15, padding: 20, maxHeight: '80%', maxWidth: 560, alignSelf: 'center' },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign:'center', color:'#3b5998' },
   modalSearchBox: { flexDirection:'row', alignItems:'center', backgroundColor:'#f0f0f0', borderRadius:8, padding:10, marginBottom:10 },
   modalItem: { flexDirection:'row', alignItems:'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#eee' },

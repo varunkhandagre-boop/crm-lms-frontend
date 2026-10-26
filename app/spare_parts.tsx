@@ -685,9 +685,9 @@ const styles = StyleSheet.create({
         borderRadius: 15, 
         padding: 20, 
         elevation:10,
-        maxHeight: '80%'
+        maxHeight: '80%', maxWidth: 560, alignSelf: 'center'
     },
-    detailsContent: { width: '90%', backgroundColor: 'white', borderRadius: 15, padding: 25, elevation: 5, maxHeight: '80%' },
+    detailsContent: { width: '90%', backgroundColor: 'white', borderRadius: 15, padding: 25, elevation: 5, maxHeight: '80%', maxWidth: 560, alignSelf: 'center' },
     
     modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, color: '#3b5998' },
     label: { fontSize: 13, color: '#555', marginTop: 10, marginBottom: 5, fontWeight:'600' },

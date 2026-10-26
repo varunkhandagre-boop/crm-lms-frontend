@@ -1163,8 +1163,8 @@ const styles = StyleSheet.create({
     fab: { position: 'absolute', bottom: 20, right: 20, backgroundColor: '#2c3e50', width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center', elevation: 5 },
 
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
-    modalContent: { backgroundColor: 'white', borderRadius: 10, padding: 20, elevation: 5 },
-    modalContentFull: { backgroundColor: 'white', borderRadius: 10, padding: 20, flex:1, marginVertical:40 },
+    modalContent: { backgroundColor: 'white', borderRadius: 10, padding: 20, elevation: 5, width: '100%', maxWidth: 560, alignSelf: 'center' },
+    modalContentFull: { backgroundColor: 'white', borderRadius: 10, padding: 20, flex:1, marginVertical:40, width: '100%', maxWidth: 560, alignSelf: 'center' },
     modalHeaderRow: { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:15, borderBottomWidth:1, borderBottomColor:'#eee', paddingBottom:10 },
     modalHeader: { fontSize: 18, fontWeight: 'bold', color: '#2c3e50', marginBottom: 10 },
     

@@ -106,7 +106,7 @@ export default function EngineerStatsModal({ visible, onClose }: { visible: bool
 
 const styles = StyleSheet.create({
     overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-    sheet: { backgroundColor: 'white', padding: 20, paddingBottom: 35, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '80%' },
+    sheet: { backgroundColor: 'white', padding: 20, paddingBottom: 35, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '80%', width: '100%', maxWidth: 560, alignSelf: 'center' },
     headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
     title: { fontSize: 18, fontWeight: 'bold', color: '#333' },
     periodRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },

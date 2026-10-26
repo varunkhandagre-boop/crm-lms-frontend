@@ -518,7 +518,7 @@ const styles = StyleSheet.create({
     collectBtnText: { color: 'white', fontWeight: 'bold', fontSize: 10, marginRight: 3 },
     empty: { alignItems:'center', marginTop: 100 },
     modalOverlayCenter: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
-    detailCard: { width: '85%', backgroundColor: 'white', borderRadius: 20, padding: 25 },
+    detailCard: { width: '85%', backgroundColor: 'white', borderRadius: 20, padding: 25, maxWidth: 560, alignSelf: 'center' },
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
     modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
     receiptRow: { marginBottom: 12, flexDirection:'row', justifyContent:'space-between', alignItems:'center', borderBottomWidth:1, borderBottomColor:'#f0f0f0', paddingBottom:5 },

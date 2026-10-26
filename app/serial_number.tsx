@@ -822,6 +822,6 @@ const styles = StyleSheet.create({
   loadMoreBtn: { padding: 12, backgroundColor: '#fff', alignItems: 'center', marginVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ddd' },
   newSearchBtn: { alignSelf:'center', marginTop:15, padding:10, backgroundColor: '#e3f2fd', borderRadius: 8 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 20 },
-  detailCard: { backgroundColor: 'white', borderRadius: 15, padding: 20, elevation: 5, maxHeight: '80%' },
+  detailCard: { backgroundColor: 'white', borderRadius: 15, padding: 20, elevation: 5, maxHeight: '80%', width: '100%', maxWidth: 560, alignSelf: 'center' },
   infoBox: { padding: 10, borderRadius: 8, marginTop: 10, backgroundColor: '#f9f9f9' }
 });

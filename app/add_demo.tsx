@@ -742,7 +742,7 @@ const styles = themedForm(StyleSheet.create({
   btnText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
   
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { width: '95%', backgroundColor: 'white', borderRadius: 10, padding: 20, maxHeight: '70%' },
+  modalContent: { width: '95%', backgroundColor: 'white', borderRadius: 10, padding: 20, maxHeight: '70%', maxWidth: 560, alignSelf: 'center' },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center', color: '#3b5998' },
   modalSearchBox: { flexDirection:'row', alignItems:'center', backgroundColor:'#f0f0f0', borderRadius:8, padding:10, marginBottom:10 },
   modalItem: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#eee' },

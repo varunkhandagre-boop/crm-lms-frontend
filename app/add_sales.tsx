@@ -479,7 +479,7 @@ const styles = themedForm(StyleSheet.create({
     saveBtnText: { color: 'white', fontWeight: 'bold', fontSize: 18 },
     
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
-    modalContent: { width:'100%', height: '85%', backgroundColor: 'white', borderRadius: 10, padding: 20, maxHeight: '95%' },
+    modalContent: { width:'100%', height: '85%', backgroundColor: 'white', borderRadius: 10, padding: 20, maxHeight: '95%', maxWidth: 560, alignSelf: 'center' },
     modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998', marginBottom:10 },
     modalSearchBox: { flexDirection:'row', alignItems:'center', backgroundColor:'#f0f0f0', borderRadius:8, padding:10, marginBottom:10 },
     modalItem: { paddingVertical: 15, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: '#eee', borderRadius: 5 },

@@ -391,7 +391,7 @@ const styles = StyleSheet.create({
     moreText: { color: '#3b5998', fontWeight: 'bold', fontSize: 12 },
 
     overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', alignItems: 'center' },
-    pickerBox: { width: '82%', backgroundColor: 'white', borderRadius: 12, padding: 16, elevation: 10 },
+    pickerBox: { width: '82%', backgroundColor: 'white', borderRadius: 12, padding: 16, elevation: 10, maxWidth: 560, alignSelf: 'center' },
     pickerTitle: { fontSize: 16, fontWeight: 'bold', color: '#3b5998', marginBottom: 8, textAlign: 'center' },
     pickerItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eee' },
     dot: { width: 10, height: 10, borderRadius: 5, marginRight: 10 },

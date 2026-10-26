@@ -713,7 +713,7 @@ const styles = themedForm(StyleSheet.create({
     orgSubText: { color: 'gray', fontSize: 12, marginTop: 2 },
 
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding:20 },
-    modalContentSmall: { width: '90%', backgroundColor: 'white', borderRadius: 15, padding: 20, maxHeight: '60%' },
+    modalContentSmall: { width: '90%', backgroundColor: 'white', borderRadius: 15, padding: 20, maxHeight: '60%', maxWidth: 560, alignSelf: 'center' },
     modalTitleSmall: { fontSize: 18, fontWeight: 'bold', marginBottom: 5, color:'#3b5998', textAlign:'center' },
     modalItem: { padding: 15, borderBottomWidth: 1, borderBottomColor: '#eee' },
     closeBtnSmall: { marginTop: 15, alignItems: 'center', padding: 10 }

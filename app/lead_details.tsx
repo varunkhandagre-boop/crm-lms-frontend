@@ -920,7 +920,7 @@ const styles = StyleSheet.create({
     systemNote: { fontSize:11, color:'#1565c0', fontStyle:'italic', marginTop:4, fontWeight:'600' },
 
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-    modalContent: { backgroundColor: 'white', padding: 20, borderTopLeftRadius: 20, borderTopRightRadius: 20, minHeight: 400 },
+    modalContent: { backgroundColor: 'white', padding: 20, borderTopLeftRadius: 20, borderTopRightRadius: 20, minHeight: 400, width: '100%', maxWidth: 560, alignSelf: 'center' },
     modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
     updateBox: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 15 },
     label: { marginTop: 10, marginBottom: 5, fontWeight: '600', color: '#555', fontSize: 12 },
@@ -933,8 +933,8 @@ const styles = StyleSheet.create({
     micBtn: { marginTop: 15, padding: 8, backgroundColor: '#e3f2fd', borderRadius: 25 },
     
     pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
-    pickerContainerSmall: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation: 10 },
-    pickerContainerLarge: { width: '90%', height: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: '90%', elevation: 10 },
+    pickerContainerSmall: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation: 10, maxWidth: 560, alignSelf: 'center' },
+    pickerContainerLarge: { width: '90%', height: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: '90%', elevation: 10, maxWidth: 560, alignSelf: 'center' },
     pickerHeader: { fontWeight: 'bold', fontSize: 16, marginBottom: 10, color: '#3b5998', textAlign: 'center' },
     pickerItem: { paddingVertical: 12, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: '#eee', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderRadius: 5 },
     closeBtn: { marginTop: 15, alignItems:'center', padding: 12 },

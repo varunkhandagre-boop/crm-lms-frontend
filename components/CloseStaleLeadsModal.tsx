@@ -182,7 +182,7 @@ export default function CloseStaleLeadsModal({ visible, onClose, onDone, teamMem
 
 const styles = StyleSheet.create({
     overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-    sheet: { backgroundColor: 'white', padding: 20, paddingBottom: 35, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '90%' },
+    sheet: { backgroundColor: 'white', padding: 20, paddingBottom: 35, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '90%', width: '100%', maxWidth: 560, alignSelf: 'center' },
     headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
     title: { fontSize: 18, fontWeight: 'bold', color: '#333' },
     muted: { fontSize: 12, color: 'gray' },

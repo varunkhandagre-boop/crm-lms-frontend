@@ -491,7 +491,7 @@ const styles = StyleSheet.create({
   emptyText: { textAlign:'center', marginTop:15, color:'#9E9E9E', fontSize: 14 },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 20 },
-  modalContent: { backgroundColor: 'white', borderRadius: 20, padding: 25, maxHeight: '85%' },
+  modalContent: { backgroundColor: 'white', borderRadius: 20, padding: 25, maxHeight: '85%', width: '100%', maxWidth: 560, alignSelf: 'center' },
   modalHeader: { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom: 20 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#1A237E' },
   detailRow: { flexDirection:'row', justifyContent:'space-between', marginBottom: 12, borderBottomWidth: 1, borderBottomColor: '#F5F5F5', paddingBottom: 8 },
@@ -515,7 +515,7 @@ const styles = StyleSheet.create({
   receiveBtnText: { color: 'white', fontWeight: 'bold', fontSize: 15, marginLeft:10 },
 
   pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
-  pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation:10 },
+  pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation:10, maxWidth: 560, alignSelf: 'center' },
   pickerHeader: { fontWeight:'bold', fontSize:16, marginBottom:10, color:'#3b5998', textAlign:'center' },
   pickerItem: { paddingVertical:12, borderBottomWidth:1, borderBottomColor:'#eee', flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
 });

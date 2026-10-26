@@ -939,7 +939,7 @@ const styles = StyleSheet.create({
   footerText: { fontSize: 11, color: 'gray' },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { width: '100%', backgroundColor: 'white', borderRadius: 15, padding: 25, maxHeight: '85%', elevation: 5 }, 
+  modalContent: { width: '100%', backgroundColor: 'white', borderRadius: 15, padding: 25, maxHeight: '85%', elevation: 5, maxWidth: 560, alignSelf: 'center' }, 
   modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
   
   sectionHeaderBox: { backgroundColor: '#e3f2fd', padding: 6, borderRadius: 6, marginTop: 10, marginBottom: 10 },
@@ -953,7 +953,7 @@ const styles = StyleSheet.create({
   pdfBtnText: { color: '#1565c0', fontWeight: 'bold', marginLeft: 8 },
 
   pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
-  pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation: 10 },
+  pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation: 10, maxWidth: 560, alignSelf: 'center' },
   pickerHeader: { fontWeight: 'bold', fontSize: 16, marginBottom: 10, color: '#3b5998', textAlign: 'center' },
   pickerItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eee', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
 

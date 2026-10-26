@@ -617,7 +617,7 @@ const styles = StyleSheet.create({
     collText: { fontSize: 11, color: '#555' },
 
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 20 },
-    detailModalContent: { backgroundColor: 'white', borderRadius: 15, padding: 20, maxHeight: '90%' },
+    detailModalContent: { backgroundColor: 'white', borderRadius: 15, padding: 20, maxHeight: '90%', width: '100%', maxWidth: 560, alignSelf: 'center' },
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
     modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#333' },
     modalSub: { color: '#666', fontSize: 14 },
@@ -639,7 +639,7 @@ const styles = StyleSheet.create({
     monthText: { fontSize: 14, color: '#333', flex: 1 },
     monthValue: { fontSize: 14, color: '#555', flex: 1, textAlign: 'right' },
 
-    pickerContent: { backgroundColor: 'white', borderRadius: 10, padding: 20 },
+    pickerContent: { backgroundColor: 'white', borderRadius: 10, padding: 20, width: '100%', maxWidth: 560, alignSelf: 'center' },
     pickerTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, color: '#3b5998' },
     pickerItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eee', flexDirection: 'row', justifyContent: 'space-between' },
     pickerText: { fontSize: 16, color: '#333' }

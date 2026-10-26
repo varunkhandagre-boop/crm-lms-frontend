@@ -550,7 +550,7 @@ const styles = StyleSheet.create({
 
 const modalStyles = StyleSheet.create({
     overlay: { flex:1, backgroundColor:'rgba(0,0,0,0.5)', justifyContent:'flex-end' },
-    content: { backgroundColor:'white', borderTopLeftRadius:20, borderTopRightRadius:20, padding:20, maxHeight:'70%' },
+    content: { backgroundColor:'white', borderTopLeftRadius:20, borderTopRightRadius:20, padding:20, maxHeight:'70%', width: '100%', maxWidth: 560, alignSelf: 'center' },
     header: { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:15, borderBottomWidth:1, borderBottomColor:'#eee', paddingBottom:10 },
     title: { fontSize:18, fontWeight:'bold', color:'#333' },
     item: { paddingVertical:15, borderBottomWidth:1, borderBottomColor:'#f5f5f5' },

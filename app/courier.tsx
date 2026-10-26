@@ -1027,7 +1027,7 @@ const styles = StyleSheet.create({
   shareBox: { flexDirection:'row', alignItems:'center', backgroundColor:'#fff8f0', borderWidth:1, borderColor:'#ffe0b2', padding:10, borderRadius:8, marginBottom:10 },
   materialText: { fontSize:12, color:'#555', fontStyle:'italic' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end', padding: 10 },
-  modalContent: { width: '100%', backgroundColor: 'white', borderRadius: 15, padding: 25, elevation: 5, maxHeight: '90%' },
+  modalContent: { width: '100%', backgroundColor: 'white', borderRadius: 15, padding: 25, elevation: 5, maxHeight: '90%', maxWidth: 560, alignSelf: 'center' },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#3b5998' },
   materialBox: { backgroundColor:'#f0f4ff', padding:10, borderRadius:8, marginTop:10 },
   noteInput: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, height: 60, textAlignVertical: 'top', marginBottom: 10, backgroundColor:'#f9f9f9' },

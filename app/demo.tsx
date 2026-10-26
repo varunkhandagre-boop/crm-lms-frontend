@@ -659,7 +659,7 @@ const styles = StyleSheet.create({
   textOrange: { color: '#e65100', fontSize: 10, fontWeight:'bold' },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { width:'100%', backgroundColor: 'white', borderRadius: 15, padding: 20, maxHeight: '85%' },
+  modalContent: { width:'100%', backgroundColor: 'white', borderRadius: 15, padding: 20, maxHeight: '85%', maxWidth: 560, alignSelf: 'center' },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color:'#3b5998' },
   
   section: { borderBottomWidth:1, borderBottomColor:'#eee', paddingBottom:15, marginBottom:15 },
@@ -676,7 +676,7 @@ const styles = StyleSheet.create({
   editBtnText: { color: '#3b5998', fontWeight: 'bold', marginLeft: 8 },
 
   pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
-  pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation:10 },
+  pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation:10, maxWidth: 560, alignSelf: 'center' },
   pickerHeader: { fontWeight:'bold', fontSize:16, marginBottom:10, color:'#3b5998', textAlign:'center' },
   pickerItem: { paddingVertical:12, borderBottomWidth:1, borderBottomColor:'#eee', flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
 });

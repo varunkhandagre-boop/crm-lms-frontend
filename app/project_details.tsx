@@ -580,7 +580,7 @@ const styles = StyleSheet.create({
   statusPill: { flexDirection:'row', alignItems:'center', paddingHorizontal:10, paddingVertical:5, borderRadius:20 },
   sectionDivider: { height:1, backgroundColor:'#ccc', marginVertical:20 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { width: '100%', backgroundColor: 'white', borderRadius: 15, padding: 20 },
+  modalContent: { width: '100%', backgroundColor: 'white', borderRadius: 15, padding: 20, maxWidth: 560, alignSelf: 'center' },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginBottom:15 },
   label: { marginBottom: 8, fontWeight: '600', color: '#555' },
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, fontSize: 16, backgroundColor: '#f9f9f9', marginBottom:15 },

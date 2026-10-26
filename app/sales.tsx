@@ -543,7 +543,7 @@ const styles = StyleSheet.create({
   noteText: { fontSize: 13, color: '#444', marginTop:5, fontStyle:'italic' },
   
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { width: '95%', backgroundColor: 'white', borderRadius: 15, padding: 20, elevation: 5, maxHeight: '80%' },
+  modalContent: { width: '95%', backgroundColor: 'white', borderRadius: 15, padding: 20, elevation: 5, maxHeight: '80%', maxWidth: 560, alignSelf: 'center' },
   modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
   readOnlyBox: { backgroundColor:'#e3f2fd', padding:15, borderRadius:8, marginBottom:15, borderLeftWidth:4, borderLeftColor:'#3b5998' },
   roTitle: { fontSize:16, fontWeight:'bold', color:'#3b5998' },
@@ -554,7 +554,7 @@ const styles = StyleSheet.create({
   sectionHeader: { fontWeight:'bold', marginBottom:10, color:'#e65100', fontSize:12, marginTop:5, letterSpacing: 1 },
   
   pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
-  pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation:10 },
+  pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation:10, maxWidth: 560, alignSelf: 'center' },
   pickerHeader: { fontWeight: 'bold', fontSize:16, marginBottom:10, color:'#3b5998', textAlign:'center' },
   pickerItem: { paddingVertical:12, borderBottomWidth:1, borderBottomColor:'#eee', flexDirection:'row', justifyContent:'space-between' }
 });

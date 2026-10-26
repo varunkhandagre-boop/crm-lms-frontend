@@ -594,7 +594,7 @@ const styles = StyleSheet.create({
     inputBox: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, fontSize: 15, marginTop: 5, backgroundColor: '#fafafa' },
 
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 20 },
-    modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 20, maxHeight: '90%' },
+    modalContent: { backgroundColor: 'white', borderRadius: 15, padding: 20, maxHeight: '90%', width: '100%', maxWidth: 560, alignSelf: 'center' },
     modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#333', flex: 1 },
     divider: { height: 1, backgroundColor: '#eee', marginVertical: 12 },
 

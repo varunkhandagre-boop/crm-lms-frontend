@@ -605,7 +605,7 @@ const styles = StyleSheet.create({
   infoValue: { fontSize: 12, color: '#333', fontWeight: '500' },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: 'white', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 25, minHeight: '70%' },
+  modalContent: { backgroundColor: 'white', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 25, minHeight: '70%', width: '100%', maxWidth: 560, alignSelf: 'center' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#1A237E' },
   modalTaskTitle: { fontSize: 22, fontWeight: 'bold', color: '#333', marginBottom: 10 },
@@ -626,7 +626,7 @@ const styles = StyleSheet.create({
   dateLabel: { fontSize:11, color:'gray' },
   dateValue: { fontWeight:'bold', fontSize:14, color:'#333' },
 
-  dropdownModal: { backgroundColor: 'white', width: '80%', alignSelf: 'center', marginTop: 'auto', marginBottom: 'auto', borderRadius: 15, padding: 20, elevation: 10, maxHeight: '60%' },
+  dropdownModal: { backgroundColor: 'white', width: '80%', alignSelf: 'center', marginTop: 'auto', marginBottom: 'auto', borderRadius: 15, padding: 20, elevation: 10, maxHeight: '60%', maxWidth: 560 },
   dropdownTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center', color: '#333' },
   dropdownItem: { paddingVertical: 12, paddingHorizontal: 15, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
   selectedDropdownItem: { backgroundColor: '#3b5998', borderRadius: 8, borderBottomWidth: 0 },

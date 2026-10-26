@@ -931,7 +931,7 @@ const styles = StyleSheet.create({
     hAmount: { fontWeight: 'bold', color: '#27ae60', fontSize: 16 },
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
     modalOverlayCenter: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
-    detailCard: { width: '85%', backgroundColor: 'white', borderRadius: 20, padding: 25, maxHeight:'85%' },
+    detailCard: { width: '85%', backgroundColor: 'white', borderRadius: 20, padding: 25, maxHeight:'85%', maxWidth: 560, alignSelf: 'center' },
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
     modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#3b5998' },
     receiptRow: { marginBottom: 12, flexDirection:'row', justifyContent:'space-between', alignItems:'center', borderBottomWidth:1, borderBottomColor:'#f0f0f0', paddingBottom:5 },
@@ -947,6 +947,6 @@ const styles = StyleSheet.create({
     actionBtn: { padding:12, borderRadius:8, alignItems:'center' },
 
     pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
-    pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation:10 },
+    pickerContainer: { width: '80%', backgroundColor: 'white', borderRadius: 10, padding: 15, maxHeight: 300, elevation:10, maxWidth: 560, alignSelf: 'center' },
     pickerHeader: { fontWeight:'bold', fontSize:16, marginBottom:10, color:'#3b5998', textAlign:'center' }
 });

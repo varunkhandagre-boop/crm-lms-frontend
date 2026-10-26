@@ -338,7 +338,7 @@ const styles = StyleSheet.create({
     colPct: { width: 62, textAlign: 'right' },
 
     overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', alignItems: 'center' },
-    pickerBox: { width: '82%', maxHeight: '70%', backgroundColor: 'white', borderRadius: 12, padding: 16, elevation: 10 },
+    pickerBox: { width: '82%', maxHeight: '70%', backgroundColor: 'white', borderRadius: 12, padding: 16, elevation: 10, maxWidth: 560, alignSelf: 'center' },
     pickerTitle: { fontSize: 16, fontWeight: 'bold', color: '#3b5998', marginBottom: 8, textAlign: 'center' },
     pickerItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eee' },
 });
