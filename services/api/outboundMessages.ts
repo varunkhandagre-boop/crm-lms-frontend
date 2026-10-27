@@ -48,6 +48,14 @@ export async function fetchOutboundMessagesPage(params: {
     return { items: res.data, total: res.meta.total, totalPages: res.meta.totalPages };
 }
 
+// This month's count per channel (IST month) — WhatsApp & Email screen.
+export interface ChannelCount { sent: number; failed: number; pending: number; cancelled: number; total: number }
+export interface MonthlySummary { month: string; whatsapp: ChannelCount; email: ChannelCount }
+export async function fetchMonthlySummary(month?: string): Promise<MonthlySummary> {
+    const res = await apiClient.get<OneResponse<MonthlySummary>>(`/outbound-messages/monthly-summary${month ? `?month=${month}` : ''}`);
+    return res.data;
+}
+
 // ── Broadcast audience (one row per mobile/email, built on the server) ──
 export type AudienceKind = 'customers' | 'leads' | 'both';
 export interface AudienceFilter { audience: AudienceKind; type?: string; search?: string }

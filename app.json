@@ -2,7 +2,7 @@
   "expo": {
     "name": "LMS",
     "slug": "lms-crm",
-    "version": "3.2.5",
+    "version": "3.2.6",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "mycrm",
@@ -22,7 +22,7 @@
       },
       "googleServicesFile": "./google-services.json",
       "package": "com.crm.lms",
-      "versionCode": 25,
+      "versionCode": 26,
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
@@ -80,9 +80,9 @@
         "expo-build-properties",
         {
           "android": {
-            "enableMinifyInReleaseBuilds": false,
+            "enableMinifyInReleaseBuilds": true,
             "enableShrinkResourcesInReleaseBuilds": false,
-            "extraProguardRules": "-keepattributes *Annotation*\n-dontwarn com.razorpay.**\n-keep class com.razorpay.** {*;}\n-keep class * extends androidx.room.RoomDatabase { <init>(); }\n-keep class androidx.work.impl.WorkDatabase_Impl { *; }\n-optimizations !method/inlining/\n-keepclasseswithmembers class * {\n  public void onPayment*(...);\n}"
+            "extraProguardRules": "-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod\n-dontwarn com.razorpay.**\n-keep class com.razorpay.** {*;}\n-keepclasseswithmembers class * {\n  public void onPayment*(...);\n}\n-optimizations !method/inlining/\n# Room / WorkManager (used by background location): generated _Impl classes are created by reflection\n-keep class * extends androidx.room.RoomDatabase { *; }\n-keep class androidx.room.** { *; }\n-keep class androidx.work.** { *; }\n-keep class * extends androidx.work.ListenableWorker { public <init>(...); }\n-keep class * implements androidx.startup.Initializer { <init>(); }\n# Day In background tracking\n-keep class expo.modules.taskmanager.** { *; }\n-keep class expo.modules.location.** { *; }"
           }
         }
       ],

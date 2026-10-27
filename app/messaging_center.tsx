@@ -28,10 +28,12 @@ import {
     cancelMessage,
     fetchAudiencePage,
     fetchAudienceTypes,
+    fetchMonthlySummary,
     fetchOutboundMessagesPage,
     markEmailSent,
     MessageChannel,
     MessageStatus,
+    MonthlySummary,
     OutboundMessage,
     sendBroadcast,
 } from '../services/api/outboundMessages';
@@ -84,6 +86,8 @@ export default function MessagingCenterScreen() {
                     </ScrollView>
                 </View>
 
+                <MonthStrip />
+
                 <View style={{ flex: 1, padding: 10, backgroundColor: '#f4f6f8' }}>
                     {activeTab === 'Templates' && <TemplatesTab />}
                     {activeTab === 'Pending' && <PendingEmailsTab />}
@@ -94,6 +98,34 @@ export default function MessagingCenterScreen() {
         </KeyboardAvoidingView>
     );
 }
+
+// This month's WhatsApp / email count. Hidden if it can't load (e.g. an older server).
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MonthStrip = () => {
+    const [summary, setSummary] = useState<MonthlySummary | null>(null);
+    useEffect(() => {
+        fetchMonthlySummary().then(setSummary).catch(() => setSummary(null));
+    }, []);
+    if (!summary) return null;
+    const monthName = MONTHS[Number(summary.month.slice(5, 7)) - 1] ?? summary.month;
+    const part = (label: string, icon: any, color: string, c: MonthlySummary['email']) => (
+        <View style={styles.monthPart}>
+            <Ionicons name={icon} size={15} color={color} />
+            <Text style={styles.monthText}>
+                {label} <Text style={styles.monthNum}>{c.sent}</Text> sent
+                {c.failed > 0 ? <Text style={{ color: '#c62828' }}> · {c.failed} failed</Text> : null}
+                {c.pending > 0 ? <Text style={{ color: '#ef6c00' }}> · {c.pending} pending</Text> : null}
+            </Text>
+        </View>
+    );
+    return (
+        <View style={styles.monthStrip}>
+            <Text style={styles.monthTitle}>{monthName}:</Text>
+            {part('WhatsApp', 'logo-whatsapp', '#25D366', summary.whatsapp)}
+            {part('Email', 'mail', '#e67e22', summary.email)}
+        </View>
+    );
+};
 
 // ====================================================================
 // PENDING EMAILS TAB
@@ -637,6 +669,11 @@ const BroadcastTab = () => {
 };
 
 const styles = StyleSheet.create({
+    monthStrip: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', backgroundColor: 'white', paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
+    monthTitle: { fontWeight: 'bold', color: '#2c4f8f', marginRight: 8, fontSize: 13 },
+    monthPart: { flexDirection: 'row', alignItems: 'center', marginRight: 14 },
+    monthText: { marginLeft: 4, fontSize: 13, color: '#444' },
+    monthNum: { fontWeight: 'bold', color: '#222' },
     loadMoreBtn: { padding: 12, backgroundColor: '#fff', alignItems: 'center', marginVertical: 12, borderRadius: 8, borderWidth: 1, borderColor: '#ddd' },
     loadMoreText: { fontWeight: 'bold', color: '#3b5998' },
     container: { flex: 1, backgroundColor: '#f4f6f8' },

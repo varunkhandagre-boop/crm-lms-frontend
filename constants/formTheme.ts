@@ -1,11 +1,14 @@
-// Gives every "Add …" form the same coloured look: header in the screen's own
-// colour (same as its Home tile), tinted page, coloured labels and section
-// titles, white inputs with a tinted border, and a coloured Save button.
+// Gives every "Add …" form the same look: header in the screen's own colour
+// (same as its Home tile), a plain light page, section titles on a light band
+// in that colour, bold blue labels, white inputs with a light grey border, and
+// a coloured Save button — colour marks where you are, the page stays calm.
 // Only style keys a screen already defines are touched.
 
 type Styles = Record<string, any>;
 
-const tint = (hex: string, alpha: string) => (/^#[0-9a-f]{6}$/i.test(hex) ? hex + alpha : hex);
+const PAGE_BG = '#f5f6f8';
+const LABEL = '#2c4f8f'; // one blue for every label, like Order Details
+const FIELD_BORDER = '#d5d9de';
 
 export function themedForm<T extends Styles>(base: T, accent: string): T {
     const out: Styles = { ...base };
@@ -13,14 +16,14 @@ export function themedForm<T extends Styles>(base: T, accent: string): T {
         if (out[key]) out[key] = { ...out[key], ...extra };
     };
 
-    merge('container', { backgroundColor: tint(accent, '0d') });
+    merge('container', { backgroundColor: PAGE_BG });
     merge('header', { backgroundColor: accent, borderBottomWidth: 0, elevation: 4 });
     merge('headerTitle', { color: 'white' });
 
-    ['label'].forEach((k) => merge(k, { color: accent, fontWeight: '700' }));
-    ['sectionHeader', 'sectionTitle'].forEach((k) => merge(k, { color: accent, borderLeftWidth: 4, borderLeftColor: accent, paddingLeft: 8 }));
+    ['label'].forEach((k) => merge(k, { color: LABEL, fontWeight: '700' }));
+    ['sectionHeader', 'sectionTitle'].forEach((k) => merge(k, { color: accent, fontWeight: '800', backgroundColor: accent + '17', borderLeftWidth: 4, borderLeftColor: accent, paddingLeft: 10, paddingVertical: 8, borderRadius: 8, overflow: 'hidden' }));
 
-    const field = { backgroundColor: 'white', borderWidth: 1, borderColor: tint(accent, '55') };
+    const field = { backgroundColor: 'white', borderWidth: 1, borderColor: FIELD_BORDER };
     ['input', 'inputGray', 'dropdown', 'dropdownBtn', 'selector', 'textArea', 'pickerBox'].forEach((k) => merge(k, field));
 
     ['formCard'].forEach((k) => merge(k, { borderTopWidth: 4, borderTopColor: accent }));

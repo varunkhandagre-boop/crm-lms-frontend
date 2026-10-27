@@ -43,6 +43,7 @@ import { buildCacheKey } from '../utils/listCache';
 import * as ImagePicker from 'expo-image-picker';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 import { scanTextFromImage } from '../services/api/ocr';
+import { showDate } from '../utils/showDate';
 
 export default function AddInstallationScreen() {
   const headerTop = useHeaderTop();
@@ -738,7 +739,7 @@ export default function AddInstallationScreen() {
                         <View key={index} style={styles.addedItem}>
                             <View style={{flex:1}}>
                                 <Text style={{fontWeight:'bold'}}>{m.product} ({m.model})</Text>
-                                <Text style={{fontSize:12, color:'#333'}}>SN: {m.serialNo} • Expiry: {m.warrantyExpiry}</Text>
+                                <Text style={{fontSize:12, color:'#333'}}>SN: {m.serialNo} • Expiry: {showDate(m.warrantyExpiry)}</Text>
                             </View>
                             <TouchableOpacity onPress={() => removeMachine(index)}><Ionicons name="trash-outline" size={20} color="red" /></TouchableOpacity>
                         </View>

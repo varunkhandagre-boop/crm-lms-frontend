@@ -30,6 +30,7 @@ import { inr, Pill, TableColumn, TableHeader, TableRow } from '../components/Des
 import { useServerPagedList } from '../hooks/useServerPagedList';
 import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';
+import { showDate } from '../utils/showDate';
 
 export default function ExpenseScreen() {
   const headerTop = useHeaderTop();
@@ -286,7 +287,7 @@ export default function ExpenseScreen() {
         <TouchableOpacity style={[styles.card, item.status === 'Settled' && {opacity: 0.7, backgroundColor:'#f9f9f9'}]} onPress={() => openDetails(item)}>
             <View style={styles.cardHeader}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Text style={styles.date}>{item.date}</Text>
+                    <Text style={styles.date}>{showDate(item.date)}</Text>
                     {item.rowKind === 'daily' && <Text style={[styles.kindTag, { backgroundColor: '#6a1b9a' }]}>DAY OUT</Text>}
                     {item.rowKind === 'request' && <Text style={[styles.kindTag, { backgroundColor: '#e65100' }]}>APPROVAL REQUEST</Text>}
                     {item.rowKind === 'claim' && !!item.requestId && <Text style={[styles.kindTag, { backgroundColor: '#2e7d32' }]}>PRE-APPROVED</Text>}
@@ -490,7 +491,7 @@ export default function ExpenseScreen() {
                       <ScrollView showsVerticalScrollIndicator={false}>
                           {canManage && <View style={{backgroundColor:'#e3f2fd', padding:10, borderRadius:8, marginBottom:10}}><Text style={{color:'#1565c0', fontWeight:'bold', textAlign:'center'}}>👤 {selectedItem.senderName}</Text></View>}
                           
-                          <DetailRow label="Date" value={selectedItem.date} icon="calendar" />
+                          <DetailRow label="Date" value={showDate(selectedItem.date)} icon="calendar" />
                           <DetailRow label="Type" value={selectedItem.type} icon="pricetag" />
                           <DetailRow label="Status" value={selectedItem.status} icon="information-circle" />
                           <View style={styles.divider} />

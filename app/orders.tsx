@@ -49,6 +49,7 @@ import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../compo
 import { useServerPagedList } from '../hooks/useServerPagedList';
 import { PeriodTabs, StaffPeriodRow, StatusChip, TotalBar } from '../components/compact';
 import { formatInr } from '../constants/leadStatus';
+import { showDate } from '../utils/showDate';
 
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
@@ -678,7 +679,7 @@ export default function OrderListScreen() {
                     {item.advanceAmount ? <Text style={{fontSize:10, color:'green', fontWeight:'bold'}}>Adv: ₹{item.advanceAmount}</Text> : null}
                 </View>
                 <View style={{alignItems: 'flex-end'}}>
-                    <Text style={styles.date}>{item.date}</Text>
+                    <Text style={styles.date}>{showDate(item.date)}</Text>
                     
                     <View style={{backgroundColor: orderType === 'Cash' ? '#e8f5e9' : '#e3f2fd', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginTop: 4}}>
                         <Text style={{fontSize: 9, fontWeight: 'bold', color: orderType === 'Cash' ? '#2e7d32' : '#1565c0'}}>
@@ -942,7 +943,7 @@ export default function OrderListScreen() {
                           <DetailRow label="Order Type" value={selectedOrder.saleType === 'Cash' ? '💵 Cash Sale' : '📄 Billed (Credit)'} highlight />
                           <DetailRow label="Total Value" value={`₹ ${selectedOrder.amount}`} />
                           <DetailRow label="Advance Rcvd." value={selectedOrder.advanceAmount ? `₹ ${selectedOrder.advanceAmount}` : '0'} />
-                          <DetailRow label="Date" value={selectedOrder.date} />
+                          <DetailRow label="Date" value={showDate(selectedOrder.date)} />
                           
                           <View style={styles.textBox}>
                               <Text style={styles.textLabel}>Products Config:</Text>

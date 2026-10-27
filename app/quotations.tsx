@@ -18,6 +18,7 @@ import { sharePdfFromHtml } from '../utils/sharePdf';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
+import { showDate } from '../utils/showDate';
 
 
 export default function QuotationsListScreen() {
@@ -232,7 +233,7 @@ export default function QuotationsListScreen() {
                     </div>
                     <div style="text-align: right; font-size: 13px; line-height: 1.8;">
                         <div><strong>Est No:</strong> ${item.estimateNo}</div>
-                        <div><strong>Date:</strong> ${item.date}</div>
+                        <div><strong>Date:</strong> ${showDate(item.date)}</div>
                         <div><strong>Valid Till:</strong> ${item.validTill}</div>
                     </div>
                 </div>
@@ -345,7 +346,7 @@ export default function QuotationsListScreen() {
         return (
             <TouchableOpacity style={styles.card} activeOpacity={0.8} onPress={() => setSelectedQuote(item)}>
                 <View style={styles.cardHeader}>
-                    <Text style={styles.date}>{item.date}</Text>
+                    <Text style={styles.date}>{showDate(item.date)}</Text>
                     <View style={styles.statusBadge}>
                         <Text style={styles.statusText}>{item.status || 'Saved'}</Text>
                     </View>
@@ -460,7 +461,7 @@ export default function QuotationsListScreen() {
                                 <View style={styles.modalHeader}>
                                     <View>
                                         <Text style={{fontSize: 18, fontWeight: 'bold', color: '#333'}}>{selectedQuote.estimateNo}</Text>
-                                        <Text style={{fontSize: 12, color: 'gray'}}>{selectedQuote.date}</Text>
+                                        <Text style={{fontSize: 12, color: 'gray'}}>{showDate(selectedQuote.date)}</Text>
                                     </View>
                                     <TouchableOpacity onPress={() => setSelectedQuote(null)} style={{padding: 5}}>
                                         <Ionicons name="close-circle" size={28} color="red" />

@@ -35,6 +35,7 @@ import EmployeeMultiPicker from '../components/EmployeeMultiPicker';
 
 import { sharePdfFromHtml } from '../utils/sharePdf';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { showDate } from '../utils/showDate';
 
 export default function AddCourierScreen() {
   const headerTop = useHeaderTop();
@@ -298,7 +299,7 @@ export default function AddCourierScreen() {
                 <div class="doc-title">DELIVERY CHALLAN</div>
                 <div style="text-align: right; font-size: 12.5px; color: #4a4a68; line-height: 1.7;">
                   <div>DC No: <b style="color:#0f2557;">${data.dcNo}</b></div>
-                  <div>Date: <b style="color:#0f2557;">${data.date}</b></div>
+                  <div>Date: <b style="color:#0f2557;">${showDate(data.date)}</b></div>
                 </div>
               </div>
 

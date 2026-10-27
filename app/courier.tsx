@@ -38,6 +38,7 @@ import { useHeaderTop } from '../hooks/useHeaderTop';
 import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
+import { showDate } from '../utils/showDate';
 
 export default function CourierScreen() {
   const headerTop = useHeaderTop();
@@ -573,7 +574,7 @@ export default function CourierScreen() {
             <View style={styles.cardHeader}>
                 <View style={{flexDirection:'row', alignItems:'center'}}>
                     <Ionicons name="calendar-outline" size={14} color="gray" />
-                    <Text style={styles.dateText}> {item.date}</Text>
+                    <Text style={styles.dateText}> {showDate(item.date)}</Text>
                 </View>
                 <View style={{flexDirection: 'row', alignItems: 'center'}}>
                     <View style={[styles.statusBadge, {backgroundColor: statusStyle.bg}]}>
@@ -853,7 +854,7 @@ export default function CourierScreen() {
                               </TouchableOpacity>
                           )}
                           <DetailRow label="Type" value={selectedCourier.type} icon="swap-vertical" />
-                          <DetailRow label="Date" value={selectedCourier.date} icon="calendar" />
+                          <DetailRow label="Date" value={showDate(selectedCourier.date)} icon="calendar" />
                           
                           <View style={{backgroundColor:'#f9f9f9', padding:10, borderRadius:8, marginVertical:10}}>
                               <Text style={{color:'gray', fontSize:11, marginBottom:2}}>FROM:</Text>

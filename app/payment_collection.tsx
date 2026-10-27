@@ -40,6 +40,7 @@ import { useHeaderTop } from '../hooks/useHeaderTop';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
+import { showDate } from '../utils/showDate';
 
 export default function PaymentCollection() {
     const headerTop = useHeaderTop();
@@ -529,7 +530,7 @@ export default function PaymentCollection() {
                 </View>
                 <View style={{alignItems:'flex-end'}}>
                     <Text style={styles.hAmount}>₹{item.amount}</Text>
-                    <Text style={styles.hDate}>{item.date}</Text>
+                    <Text style={styles.hDate}>{showDate(item.date)}</Text>
                 </View>
             </TouchableOpacity>
         );
@@ -637,7 +638,7 @@ export default function PaymentCollection() {
                                 </View>
 
                                 <ReceiptRow label="Receipt No" value={selectedHistoryItem?.receiptNo} highlight color="#1a237e" />
-                                <ReceiptRow label="Date" value={selectedHistoryItem?.date} />
+                                <ReceiptRow label="Date" value={showDate(selectedHistoryItem?.date)} />
                                 <ReceiptRow label="Customer" value={selectedHistoryItem?.orgName} />
                                 {linkedOrgDetails && (
                                     <View style={{backgroundColor:'#f9f9f9', padding:10, borderRadius:8, marginBottom:10}}>

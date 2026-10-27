@@ -29,6 +29,7 @@ import { isCurrentFy, periodRange, useDebounced } from '../utils/periodRange';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 import { inr, Pill, TableColumn, TableHeader, TableRow } from '../components/DesktopTable';
+import { showDate } from '../utils/showDate';
 
 export default function EmployeeAdvanceScreen() {
   const headerTop = useHeaderTop();
@@ -245,7 +246,7 @@ export default function EmployeeAdvanceScreen() {
     return (
         <TouchableOpacity style={[styles.card, item.status === 'Settled' && {opacity: 0.7, backgroundColor:'#f9f9f9'}]} onPress={() => openDetails(item)}>
             <View style={styles.cardHeader}>
-                <Text style={styles.date}>{item.date}</Text>
+                <Text style={styles.date}>{showDate(item.date)}</Text>
                 <View style={{flexDirection:'row', alignItems:'center'}}>
                     <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
                         <Text style={[styles.statusText, { color: statusTextCol }]}>{item.status}</Text>
@@ -389,7 +390,7 @@ export default function EmployeeAdvanceScreen() {
                     <ScrollView>
                         {canManage && <View style={{backgroundColor:'#e3f2fd', padding:10, borderRadius:8, marginBottom:10}}><Text style={{color:'#1565c0', fontWeight:'bold', textAlign:'center'}}>👤 {selectedItem.senderName}</Text></View>}
                         
-                        <DetailRow label="Date" value={selectedItem.date} icon="calendar" />
+                        <DetailRow label="Date" value={showDate(selectedItem.date)} icon="calendar" />
                         <DetailRow label="Status" value={selectedItem.status} icon="information-circle" />
                         <View style={styles.divider} />
                         <DetailRow label="Amount" value={`₹ ${selectedItem.amount}`} icon="cash" highlight />

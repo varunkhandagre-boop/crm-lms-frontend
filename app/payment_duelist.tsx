@@ -27,16 +27,7 @@ import { useHeaderTop } from '../hooks/useHeaderTop';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
-
-// Dates come as ISO timestamps ("2026-04-26T06:30:00.000Z"); show them as DD/MM/YYYY (India time).
-function showDate(v?: string | null): string {
-    if (!v) return '-';
-    const d = new Date(v);
-    if (isNaN(d.getTime())) return String(v);
-    const ist = new Date(d.getTime() + 5.5 * 60 * 60 * 1000);
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${pad(ist.getUTCDate())}/${pad(ist.getUTCMonth() + 1)}/${ist.getUTCFullYear()}`;
-}
+import { showDate } from '../utils/showDate';
 
 export default function PaymentDueList() {
     const headerTop = useHeaderTop();
@@ -421,7 +412,7 @@ export default function PaymentDueList() {
                                 <DetailRow label={selectedItem.orderId ? "Order ID" : "Bill No"} value={selectedItem?.orderId || selectedItem?.billNo || 'N/A'} />
                                 
                                 <DetailRow label="Bill Date" value={selectedItem?.date || selectedItem?.createdAt} />
-                                {selectedItem?.dueDate && <DetailRow label="Target Due Date" value={selectedItem.dueDate} />}
+                                {selectedItem?.dueDate && <DetailRow label="Target Due Date" value={showDate(selectedItem.dueDate)} />}
                                 
                                 <DetailRow label="Original Amount" value={`₹ ${selectedItem?.amount}`} />
                                 
@@ -437,7 +428,7 @@ export default function PaymentDueList() {
                                     {selectedItem.reminderHistory && selectedItem.reminderHistory.length > 0 ? (
                                         selectedItem.reminderHistory.slice().reverse().map((log: any, idx: number) => (
                                             <View key={idx} style={{flexDirection:'row', justifyContent:'space-between', paddingVertical:4}}>
-                                                <Text style={{fontSize:11, color:'#333'}}>🔔 {log.date}</Text>
+                                                <Text style={{fontSize:11, color:'#333'}}>🔔 {showDate(log.date)}</Text>
                                                 <Text style={{fontSize:11, color:'gray'}}>by {log.sentBy}</Text>
                                             </View>
                                         ))
@@ -453,7 +444,7 @@ export default function PaymentDueList() {
                                             <View key={p.id} style={{flexDirection:'row', justifyContent:'space-between', paddingVertical:6, borderBottomWidth:1, borderBottomColor:'#f0f0f0'}}>
                                                                                                 <View>
                                                     <Text style={{fontSize:12, fontWeight:'bold', color:'#333'}}>₹ {p.amount}</Text>
-                                                    <Text style={{fontSize:10, color:'gray'}}>{p.mode} • {p.date}</Text>
+                                                    <Text style={{fontSize:10, color:'gray'}}>{p.mode} • {showDate(p.date)}</Text>
                                                     {p.mode === 'Cheque' && p.chequeStatus && p.chequeStatus !== 'Pending' && (
                                                         <Text style={{fontSize:10, fontWeight:'bold', color: p.chequeStatus === 'Bounced' ? '#d32f2f' : '#2e7d32', marginTop: 2}}>
                                                             {p.chequeStatus === 'Bounced' ? '❌ Bounced' : '✅ Cleared'}

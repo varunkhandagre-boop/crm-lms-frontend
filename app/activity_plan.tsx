@@ -14,6 +14,7 @@ import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
+import { showDate } from '../utils/showDate';
 
 export default function ActivityPlanScreen() {
   const headerTop = useHeaderTop();
@@ -163,7 +164,7 @@ export default function ActivityPlanScreen() {
           <View style={styles.cardHeader}>
               <View style={{flex:1}}>
                   <Text style={styles.hospitalName}>{item.hospital}</Text>
-                  <Text style={{fontSize:11, color:'#3b5998', fontWeight:'bold'}}>📅 {item.date}</Text>
+                  <Text style={{fontSize:11, color:'#3b5998', fontWeight:'bold'}}>📅 {showDate(item.date)}</Text>
                   {canManage && <Text style={{fontSize:10, color:'gray'}}>👤 By: {item.senderName}</Text>}
               </View>
               <View style={[styles.statusBadge, {backgroundColor: getStatusColor(item.status)}]}>

@@ -34,6 +34,7 @@ import { buildCacheKey } from '../utils/listCache';
 import { formatInr, isLostState, LOST_REASONS, LostReason } from '../constants/leadStatus';
 import { listLeadQuotations } from '../services/api/quotations';
 import { fetchTeamMembers } from '../services/api/users';
+import { showDate } from '../utils/showDate';
 
 export default function LeadDetailsScreen() {
     const router = useRouter();
@@ -381,7 +382,7 @@ export default function LeadDetailsScreen() {
             return (
                 <View key={index} style={styles.systemLogBox}>
                     <Text style={styles.systemLogText}>✨ {item.msg}</Text>
-                    <Text style={styles.tinyDate}>{item.date} • By {item.by}</Text>
+                    <Text style={styles.tinyDate}>{showDate(item.date)} • By {item.by}</Text>
                 </View>
             );
         } else {
@@ -390,7 +391,7 @@ export default function LeadDetailsScreen() {
                 <View key={index} style={[styles.chatBubble, isMe ? styles.chatBubbleMe : styles.chatBubbleOther, isVisit && {borderColor: '#4caf50', borderWidth: 1}]}>
                     <View style={styles.chatHeader}>
                         <Text style={[styles.chatUser, isMe && {color: '#3b5998'}]}>{isMe ? 'You' : item.by} {isVisit && '📍 (Visit)'}</Text>
-                        <Text style={styles.chatDate}>{item.date}</Text>
+                        <Text style={styles.chatDate}>{showDate(item.date)}</Text>
                     </View>
                     <Text style={styles.chatText}>{item.msg}</Text>
                     {item.changeNote ? <Text style={styles.systemNote}>{item.changeNote}</Text> : null}

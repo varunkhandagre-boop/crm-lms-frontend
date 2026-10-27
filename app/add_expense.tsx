@@ -24,6 +24,7 @@ import { useData } from './context/DataContext';
 import { createExpense, getExpenseSettings, listOpenRequests, uploadExpenseBillPhoto } from '../services/api/expenses';
 import PhotoPickerField, { PendingPhoto } from '../components/PhotoPickerField';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { showDate } from '../utils/showDate';
 
 export default function AddExpenseScreen() {
   const headerTop = useHeaderTop();
@@ -291,7 +292,7 @@ export default function AddExpenseScreen() {
                     keyExtractor={(item) => item?.id ?? 'none'}
                     renderItem={({ item }) => (
                         <TouchableOpacity style={styles.modalItem} onPress={() => pickRequest(item)}>
-                            <Text style={styles.modalItemText}>{item ? `${item.type} — ₹${item.amount} (${item.date})` : 'None (normal claim)'}</Text>
+                            <Text style={styles.modalItemText}>{item ? `${item.type} — ₹${item.amount} (${showDate(item.date)})` : 'None (normal claim)'}</Text>
                             {(linkedRequest?.id ?? null) === (item?.id ?? null) && <Ionicons name="checkmark" size={20} color="#3b5998" />}
                         </TouchableOpacity>
                     )}

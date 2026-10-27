@@ -31,6 +31,7 @@ import { useHeaderTop } from '../hooks/useHeaderTop';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';
 import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 import { useIsDesktop } from '../hooks/useIsDesktop';
+import { showDate } from '../utils/showDate';
 
 
 export default function SalesAnalysisScreen() {
@@ -431,7 +432,7 @@ export default function SalesAnalysisScreen() {
                           return `
                           <tr>
                               <td class="center">${index + 1}</td>
-                              <td>${item.date}</td>
+                              <td>${showDate(item.date)}</td>
                               <td>${item.orderId || 'N/A'}</td>
                               <td><strong>${item.hospitalName}</strong></td>
                               <td>${getCity(item)}</td>
@@ -708,7 +709,7 @@ export default function SalesAnalysisScreen() {
                                     <View style={[styles.idBadge, {backgroundColor:'#fff3e0'}]}>
                                         <Text style={[styles.idText, {color:'#e65100'}]}>{item.receiptNo || 'Receipt'}</Text>
                                     </View>
-                                    <Text style={styles.dateText}>{item.date}</Text>
+                                    <Text style={styles.dateText}>{showDate(item.date)}</Text>
                                 </View>
                                 
                                 <Text style={styles.hospitalName} numberOfLines={1}>{item.orgName}</Text>
@@ -751,7 +752,7 @@ export default function SalesAnalysisScreen() {
                                 <View style={styles.idBadge}>
                                     <Text style={styles.idText}>{item.orderId || 'No ID'}</Text>
                                 </View>
-                                <Text style={styles.dateText}>{item.date}</Text>
+                                <Text style={styles.dateText}>{showDate(item.date)}</Text>
                             </View>
 
                             <Text style={styles.hospitalName} numberOfLines={1}>{item.hospitalName}</Text>
@@ -843,14 +844,14 @@ export default function SalesAnalysisScreen() {
                 {selectedOrder && (
                     <ScrollView showsVerticalScrollIndicator={false}>
                         <Text style={styles.modalHospitalName}>{selectedOrder.hospitalName}</Text>
-                        <Text style={{color:'gray', marginBottom:15}}>PO: {selectedOrder.poNumber} • Date: {selectedOrder.date}</Text>
+                        <Text style={{color:'gray', marginBottom:15}}>PO: {selectedOrder.poNumber} • Date: {showDate(selectedOrder.date)}</Text>
 
                         <View style={{backgroundColor:'#f0f4c3', padding:10, borderRadius:8, marginBottom:15}}>
                             <Text style={{fontWeight:'bold', color:'#555', marginBottom:5}}>PAYMENT HISTORY</Text>
                             {getOrderPayments(selectedOrder).length > 0 ? (
                                 getOrderPayments(selectedOrder).map((p:any, i:number) => (
                                     <View key={i} style={{flexDirection:'row', justifyContent:'space-between', borderBottomWidth:1, borderColor:'#dce775', paddingVertical:5}}>
-                                        <Text style={{fontSize:12}}>{p.date}</Text>
+                                        <Text style={{fontSize:12}}>{showDate(p.date)}</Text>
                                         <Text style={{fontSize:12}}>{p.mode}</Text>
                                         <Text style={{fontSize:12, fontWeight:'bold', color:'#2e7d32'}}>₹{p.amount}</Text>
                                     </View>
@@ -891,7 +892,7 @@ export default function SalesAnalysisScreen() {
                   {selectedPayment && (
                       <ScrollView showsVerticalScrollIndicator={false}>
                           <Text style={styles.modalHospitalName}>{selectedPayment.orgName}</Text>
-                          <Text style={{color:'gray', marginBottom:15}}>Date: {selectedPayment.date}</Text>
+                          <Text style={{color:'gray', marginBottom:15}}>Date: {showDate(selectedPayment.date)}</Text>
 
                           <View style={{backgroundColor:'#e8f5e9', padding:15, borderRadius:10, marginBottom:15, alignItems:'center'}}>
                               <Text style={{fontSize:12, color:'gray', fontWeight:'bold'}}>AMOUNT RECEIVED</Text>

@@ -32,6 +32,7 @@ import { useHeaderTop } from '../hooks/useHeaderTop';
 import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
+import { showDate } from '../utils/showDate';
 
 export default function TaskScreen() {
   const headerTop = useHeaderTop();
@@ -369,7 +370,7 @@ export default function TaskScreen() {
                         <View style={styles.infoRow}>
                             <Ionicons name="calendar-outline" size={12} color="#666" />
                             <Text style={styles.infoLabel}>Due:</Text>
-                            <Text style={[styles.infoValue, {color: timing.color}]}>{item.dueDate}</Text>
+                            <Text style={[styles.infoValue, {color: timing.color}]}>{showDate(item.dueDate)}</Text>
                         </View>
                         
                         {/* Admin Info */}
@@ -460,7 +461,7 @@ export default function TaskScreen() {
                               </View>
                               <View style={{alignItems:'flex-end'}}>
                                   <Text style={styles.dateLabel}>Due Date</Text>
-                                  <Text style={[styles.dateValue, {color: '#D32F2F'}]}>{selectedTask.dueDate}</Text>
+                                  <Text style={[styles.dateValue, {color: '#D32F2F'}]}>{showDate(selectedTask.dueDate)}</Text>
                               </View>
                           </View>
                           <Text style={styles.sectionHeading}>Task Description</Text>

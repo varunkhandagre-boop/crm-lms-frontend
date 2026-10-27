@@ -32,6 +32,7 @@ import { useHeaderTop } from '../hooks/useHeaderTop';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
+import { showDate } from '../utils/showDate';
 
 export default function DemoScreen() {
   const headerTop = useHeaderTop();
@@ -332,7 +333,7 @@ export default function DemoScreen() {
   const renderItem = ({ item }: any) => (
     <TouchableOpacity style={styles.card} onPress={() => openDetails(item)}>
         <View style={styles.row}>
-            <Text style={{color:'gray', fontSize:12, fontWeight:'bold'}}>{item.date}</Text>
+            <Text style={{color:'gray', fontSize:12, fontWeight:'bold'}}>{showDate(item.date)}</Text>
             <View style={item.isFromSales ? styles.badgeOrange : styles.badgeBlue}>
                 <Text style={item.isFromSales ? styles.textOrange : styles.textBlue}>
                     {item.isFromSales ? 'From Sales' : 'Direct Demo'}
@@ -490,7 +491,7 @@ export default function DemoScreen() {
                           
                           <View style={styles.section}>
                               <Text style={styles.hospitalHeader}>{selectedItem.hospital}</Text>
-                              <Text style={{color:'gray', fontSize:12, marginBottom:5}}>{selectedItem.date}</Text>
+                              <Text style={{color:'gray', fontSize:12, marginBottom:5}}>{showDate(selectedItem.date)}</Text>
                               
                               {orgDetails && (
                                   <View style={{flexDirection:'row', alignItems:'center', marginTop:5}}>

@@ -44,6 +44,7 @@ import { useHeaderTop } from '../hooks/useHeaderTop';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
+import { showDate } from '../utils/showDate';
 
 export default function InstallationListScreen() {
   const headerTop = useHeaderTop();
@@ -337,7 +338,7 @@ export default function InstallationListScreen() {
                       <div class="model-sub">Model: ${item.model || '-'}</div>
                     </td>
                     <td><b>${item.serialNo || '-'}</b></td>
-                    <td>${warrantyYearsLabel}${item.warrantyExpiry ? `Exp: ${item.warrantyExpiry}` : '-'}</td>
+                    <td>${warrantyYearsLabel}${item.warrantyExpiry ? `Exp: ${showDate(item.warrantyExpiry)}` : '-'}</td>
                   </tr>
                 </tbody>
               </table>
@@ -694,7 +695,7 @@ export default function InstallationListScreen() {
 
                       <Text style={styles.inputLabel}>Installation Date</Text>
                       <TouchableOpacity style={styles.editDateBtn} onPress={() => setShowEditInstallDate(true)}>
-                          <Text style={{color: '#333'}}>{editData.date}</Text>
+                          <Text style={{color: '#333'}}>{showDate(editData.date)}</Text>
                           <Ionicons name="calendar" size={18} color="gray" />
                       </TouchableOpacity>
                       {showEditInstallDate && (
@@ -713,7 +714,7 @@ export default function InstallationListScreen() {
 
                       <Text style={styles.inputLabel}>Warranty Expiry</Text>
                       <TouchableOpacity style={styles.editDateBtn} onPress={() => setShowEditExpiryDate(true)}>
-                          <Text style={{color: '#333'}}>{editData.warrantyExpiry}</Text>
+                          <Text style={{color: '#333'}}>{showDate(editData.warrantyExpiry)}</Text>
                           <Ionicons name="calendar" size={18} color="gray" />
                       </TouchableOpacity>
                       {showEditExpiryDate && (
@@ -780,7 +781,7 @@ export default function InstallationListScreen() {
                     <Text style={styles.sectionHeaderText}>📅 Warranty Info</Text>
                 </View>
                 <DetailRow label="Installed On" value={selectedItem.date || selectedItem.displayDate || selectedItem.dateIso || '-'} icon="calendar" />
-                <DetailRow label="Warranty Expiry" value={selectedItem.warrantyExpiry} icon="hourglass" color="#d32f2f" />
+                <DetailRow label="Warranty Expiry" value={showDate(selectedItem.warrantyExpiry)} icon="hourglass" color="#d32f2f" />
 
                 <View style={styles.divider} />
                 <DetailRow label="Entry By" value={selectedItem.senderName || 'Unknown'} icon="person" />

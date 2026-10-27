@@ -30,6 +30,7 @@ import { useHeaderTop } from '../hooks/useHeaderTop';
 import { PeriodTabs, StaffPeriodRow } from '../components/compact';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 import { inr, Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
+import { showDate } from '../utils/showDate';
 
 export default function TravelNoteScreen() {
   const headerTop = useHeaderTop();
@@ -232,7 +233,7 @@ export default function TravelNoteScreen() {
     return (
         <TouchableOpacity style={[styles.card, isSettled && {opacity: 0.7, backgroundColor:'#f9f9f9'}]} onPress={() => openDetails(item)}>
             <View style={styles.cardHeader}>
-                <Text style={styles.date}>{item.date}</Text>
+                <Text style={styles.date}>{showDate(item.date)}</Text>
                 <View style={{flexDirection:'row', alignItems:'center'}}>
                     <View style={[styles.amountBadge, isSettled && {backgroundColor:'#e0e0e0', borderColor:'#ccc'}]}>
                         <Text style={[styles.amountText, isSettled && {color:'gray'}]}>₹{item.amount || '0'}</Text>
@@ -417,7 +418,7 @@ export default function TravelNoteScreen() {
                         )}
 
                         <Text style={styles.sectionHeader}>Journey Details</Text>
-                        <DetailRow label="Date" value={selectedItem.date} icon="calendar" />
+                        <DetailRow label="Date" value={showDate(selectedItem.date)} icon="calendar" />
                         <DetailRow label="Mode" value={selectedItem.mode} icon={getModeIcon(selectedItem.mode)} />
                         <DetailRow label="From" value={selectedItem.from} icon="location" />
                         <DetailRow label="To" value={selectedItem.to} icon="flag" />

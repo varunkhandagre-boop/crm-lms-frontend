@@ -30,6 +30,7 @@ import { periodRange, useDebounced } from '../utils/periodRange';
 import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 import { Pill, TableColumn, TableHeader, TableRow } from '../components/DesktopTable';
+import { showDate } from '../utils/showDate';
 
 export default function LeaveApplicationScreen() {
   const headerTop = useHeaderTop();
@@ -325,7 +326,7 @@ export default function LeaveApplicationScreen() {
           onPress={() => openDetails(item)}
       >
           <View style={styles.cardHeader}>
-              <Text style={styles.date}>{item.fromDate} ({item.days} Day)</Text>
+              <Text style={styles.date}>{showDate(item.fromDate)} ({item.days} Day)</Text>
               <View style={[styles.statusBadge, { backgroundColor: isEarnedRecord ? '#e8f5e9' : statusInfo.bg }]}>
                   <Text style={[styles.statusText, {color: isEarnedRecord ? 'green' : statusInfo.text}]}>{isShortRecord ? 'Short' : item.status}</Text>
               </View>
@@ -534,8 +535,8 @@ export default function LeaveApplicationScreen() {
                               </View>
                           )}
                           
-                          <DetailRow label="Date" value={selectedItem.fromDate} />
-                          {!selectedItem.isAutoRecord && <DetailRow label="To" value={selectedItem.toDate} />}
+                          <DetailRow label="Date" value={showDate(selectedItem.fromDate)} />
+                          {!selectedItem.isAutoRecord && <DetailRow label="To" value={showDate(selectedItem.toDate)} />}
                           <DetailRow label={selectedItem.isEarned ? "Days Earned" : (selectedItem.isCancelled ? "Days Refunded" : "Days Deducted")} value={selectedItem.days} highlight />
                           <DetailRow label="Type" value={selectedItem.type} color={selectedItem.isCancelled ? '#1565c0' : (selectedItem.isAutoRecord ? (selectedItem.isEarned ? '#2e7d32' : (selectedItem.type === 'Half Day' ? '#e65100' : '#d32f2f')) : undefined)} />
                           <DetailRow

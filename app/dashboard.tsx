@@ -25,6 +25,7 @@ import { useData } from './context/DataContext';
 import { useCachedObject } from '../hooks/useCachedObject';
 import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { showDate } from '../utils/showDate';
 
 const SCREEN_WIDTH = Dimensions.get('window').width - 36;
 
@@ -252,7 +253,7 @@ export default function UpdatedDashboard() {
                             <View style={styles.dueIcon}><Ionicons name="alert-circle" size={18} color="#D32F2F" /></View>
                             <View style={{ flex: 1, marginLeft: 12 }}>
                                 <Text style={styles.dueOrg} numberOfLines={1}>{item.orgName}</Text>
-                                <Text style={styles.dueDate}>Due: {item.dueDate}</Text>
+                                <Text style={styles.dueDate}>Due: {showDate(item.dueDate)}</Text>
                             </View>
                             <Text style={styles.dueAmount}>₹{Number(item.amount).toLocaleString()}</Text>
                         </View>

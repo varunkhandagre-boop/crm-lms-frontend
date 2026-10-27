@@ -35,6 +35,7 @@ import { useCachedList } from '../hooks/useCachedList';
 import { buildCacheKey } from '../utils/listCache';
 import { urlToBase64Image } from '../utils/pdfImageHelper';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { showDate } from '../utils/showDate';
 
 export default function AddPaymentScreen() {
     const headerTop = useHeaderTop();
@@ -653,7 +654,7 @@ export default function AddPaymentScreen() {
                                         <Text style={{fontWeight:'bold', color:'#d32f2f'}}>Due: ₹{order.balance !== undefined ? order.balance : order.amount}</Text>
                                     </View>
                                     <Text style={{fontSize:11, color:'gray'}}>
-                                        Date: {order.date} • Total: {order.amount} • {order.status}
+                                        Date: {showDate(order.date)} • Total: {order.amount} • {order.status}
                                     </Text>
                                 </TouchableOpacity>
                             ))}
