@@ -7,6 +7,7 @@ import {
     Alert,
     Keyboard,
     Modal,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
@@ -248,7 +249,7 @@ export default function SerialNumberScreen() {
               type: 'Order',
               date: o.dateIso || o.createdAt || o.date || new Date().toISOString(),
               title: `Order: ${o.name || o.product || 'New Order'}`,
-              desc: isFinanceRole ? `Value: ₹${(Number(o.totalValue || o.orderValue || o.amount) || 0).toLocaleString()}` : 'Order Placed',
+              desc: isFinanceRole ? `Value: ₹${(Number(o.totalValue || o.orderValue || o.amount) || 0).toLocaleString('en-IN')}` : 'Order Placed',
               status: o.status || 'Confirmed',
               icon: 'cart',
               color: '#8e24aa', 
@@ -257,7 +258,7 @@ export default function SerialNumberScreen() {
           ...matchedPayments.map((pay: any) => ({
               type: 'Payment',
               date: pay.dateIso || pay.date || pay.paymentDate || new Date().toISOString(),
-              title: `Payment Recd: ₹${(Number(pay.amount || pay.receivedAmount) || 0).toLocaleString()}`,
+              title: `Payment Recd: ₹${(Number(pay.amount || pay.receivedAmount) || 0).toLocaleString('en-IN')}`,
               desc: `Mode: ${pay.mode || pay.paymentMode || 'N/A'}\nNote: ${pay.note || pay.remark || '-'}`,
               status: 'Received',
               icon: 'cash',
@@ -269,8 +270,8 @@ export default function SerialNumberScreen() {
               return {
                   type: 'Due',
                   date: due.dueDate || due.dateIso || due.date || due.createdAt || new Date().toISOString(),
-                  title: `Pending Due: ₹${pendingBalance.toLocaleString()}`,
-                  desc: `Original Bill: ₹${Number(due.amount || 0).toLocaleString()}`,
+                  title: `Pending Due: ₹${pendingBalance.toLocaleString('en-IN')}`,
+                  desc: `Original Bill: ₹${Number(due.amount || 0).toLocaleString('en-IN')}`,
                   status: due.status || 'Pending',
                   icon: 'alert-circle',
                   color: pendingBalance > 0 ? '#d32f2f' : '#388e3c', 
@@ -422,7 +423,12 @@ export default function SerialNumberScreen() {
   };
 
   return (
-    <TouchableWithoutFeedback onPress={() => { setShowSuggestions(false); Keyboard.dismiss(); }}>
+    <TouchableWithoutFeedback
+        // On the web this wrapper also catches the click on the search box, and
+        // Keyboard.dismiss() there takes the focus away — so typing never worked.
+        onPress={() => { setShowSuggestions(false); if (Platform.OS !== 'web') Keyboard.dismiss(); }}
+        accessible={false}
+    >
         <View style={styles.container}>
         
         <View style={[styles.header, { paddingTop: headerTop }]}>
@@ -569,12 +575,12 @@ export default function SerialNumberScreen() {
                             <Text style={styles.financeCardLabel}>Financial Overview</Text>
                             <View style={styles.divider} />
                             <View style={{flexDirection: 'row', justifyContent: 'space-between'}}>
-                                <View><Text style={styles.infoLabel}>Total Orders</Text><Text style={[styles.infoValue, {color: '#1565c0'}]}>₹ {orgFinance.totalValue.toLocaleString()}</Text></View>
-                                <View style={{alignItems: 'flex-end'}}><Text style={styles.infoLabel}>Total Received</Text><Text style={[styles.infoValue, {color: '#2e7d32'}]}>₹ {orgFinance.totalReceived.toLocaleString()}</Text></View>
+                                <View><Text style={styles.infoLabel}>Total Orders</Text><Text style={[styles.infoValue, {color: '#1565c0'}]}>₹ {orgFinance.totalValue.toLocaleString('en-IN')}</Text></View>
+                                <View style={{alignItems: 'flex-end'}}><Text style={styles.infoLabel}>Total Received</Text><Text style={[styles.infoValue, {color: '#2e7d32'}]}>₹ {orgFinance.totalReceived.toLocaleString('en-IN')}</Text></View>
                             </View>
                             <View style={[styles.balanceBox, { backgroundColor: orgFinance.totalDues > 0 ? '#ffebee' : '#e8f5e9' }]}>
                                 <Text style={{fontWeight: 'bold', color: orgFinance.totalDues > 0 ? '#c62828' : '#2e7d32'}}>
-                                    Due Balance: ₹ {orgFinance.totalDues.toLocaleString()}
+                                    Due Balance: ₹ {orgFinance.totalDues.toLocaleString('en-IN')}
                                 </Text>
                             </View>
                         </View>
@@ -666,9 +672,9 @@ export default function SerialNumberScreen() {
                                     <DetailRow label="Product/Name" value={selectedEvent.rawData.name || selectedEvent.rawData.product || selectedEvent.rawData.productDetails} />
                                     {isFinanceRole && (
                                         <>
-                                            <DetailRow label="Order Value" value={`₹ ${Number(selectedEvent.rawData.totalValue || selectedEvent.rawData.orderValue || selectedEvent.rawData.amount || 0).toLocaleString()}`} />
-                                            <DetailRow label="Amount Received" value={`₹ ${Number(selectedEvent.rawData.totalReceived || selectedEvent.rawData.advanceAmount || 0).toLocaleString()}`} />
-                                            <DetailRow label="Pending Balance" value={`₹ ${Number(selectedEvent.rawData.balance ?? ((selectedEvent.rawData.totalValue || 0) - (selectedEvent.rawData.totalReceived || 0))).toLocaleString()}`} />
+                                            <DetailRow label="Order Value" value={`₹ ${Number(selectedEvent.rawData.totalValue || selectedEvent.rawData.orderValue || selectedEvent.rawData.amount || 0).toLocaleString('en-IN')}`} />
+                                            <DetailRow label="Amount Received" value={`₹ ${Number(selectedEvent.rawData.totalReceived || selectedEvent.rawData.advanceAmount || 0).toLocaleString('en-IN')}`} />
+                                            <DetailRow label="Pending Balance" value={`₹ ${Number(selectedEvent.rawData.balance ?? ((selectedEvent.rawData.totalValue || 0) - (selectedEvent.rawData.totalReceived || 0))).toLocaleString('en-IN')}`} />
                                         </>
                                     )}
                                     <DetailRow label="Created By" value={selectedEvent.rawData.createdBy || resolveSerialName(selectedEvent.rawData)} />
@@ -678,7 +684,7 @@ export default function SerialNumberScreen() {
                             
                             {selectedEvent.type === 'Payment' && (
                                 <>
-                                    <DetailRow label="Amount Received" value={`₹ ${Number(selectedEvent.rawData.amount || selectedEvent.rawData.receivedAmount || 0).toLocaleString()}`} />
+                                    <DetailRow label="Amount Received" value={`₹ ${Number(selectedEvent.rawData.amount || selectedEvent.rawData.receivedAmount || 0).toLocaleString('en-IN')}`} />
                                     <DetailRow label="Payment Mode" value={selectedEvent.rawData.mode || selectedEvent.rawData.paymentMode} />
                                     <DetailRow label="Added By" value={selectedEvent.rawData.addedBy || resolveSerialName(selectedEvent.rawData)} />
                                     <View style={styles.infoBox}><Text style={styles.infoLabel}>Note:</Text><Text style={styles.infoValue}>{selectedEvent.rawData.note || selectedEvent.rawData.remark || '-'}</Text></View>
@@ -687,8 +693,8 @@ export default function SerialNumberScreen() {
 
                             {selectedEvent.type === 'Due' && (
                                 <>
-                                    <DetailRow label="Pending Amount" value={`₹ ${Number(selectedEvent.rawData.balance !== undefined ? selectedEvent.rawData.balance : (selectedEvent.rawData.dueAmount || selectedEvent.rawData.amount || 0)).toLocaleString()}`} />
-                                    <DetailRow label="Original Bill" value={`₹ ${Number(selectedEvent.rawData.amount || 0).toLocaleString()}`} />
+                                    <DetailRow label="Pending Amount" value={`₹ ${Number(selectedEvent.rawData.balance !== undefined ? selectedEvent.rawData.balance : (selectedEvent.rawData.dueAmount || selectedEvent.rawData.amount || 0)).toLocaleString('en-IN')}`} />
+                                    <DetailRow label="Original Bill" value={`₹ ${Number(selectedEvent.rawData.amount || 0).toLocaleString('en-IN')}`} />
                                     <DetailRow label="Expected Due Date" value={selectedEvent.rawData.dueDate ? new Date(selectedEvent.rawData.dueDate).toLocaleDateString('en-GB') : '-'} />
                                     <DetailRow label="Added By" value={selectedEvent.rawData.addedBy || resolveSerialName(selectedEvent.rawData)} />
                                     <View style={styles.infoBox}><Text style={styles.infoLabel}>Note:</Text><Text style={styles.infoValue}>{selectedEvent.rawData.note || selectedEvent.rawData.remark || '-'}</Text></View>

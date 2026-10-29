@@ -943,7 +943,7 @@ const HolidaysTab = () => {
     const onDateChange = (event: any, selectedDate?: Date) => {
         setShowPicker(Platform.OS === 'ios'); 
         if (selectedDate) setNewHoliday({ ...newHoliday, date: selectedDate });
-        if (Platform.OS === 'android') setShowPicker(false);
+        if (Platform.OS !== 'ios') setShowPicker(false);
     };
 
     return (
@@ -1037,7 +1037,7 @@ const TrackingTab = () => {
     const onDateChange = (event: any, selectedDate?: Date) => {
         setShowDatePicker(Platform.OS === 'ios');
         if (selectedDate) setMapDate(selectedDate);
-        if (Platform.OS === 'android') setShowDatePicker(false);
+        if (Platform.OS !== 'ios') setShowDatePicker(false);
     };
 
     return (

@@ -1,4 +1,5 @@
 import '../utils/webAlert';
+import '../utils/webStyles';
 import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
 import { Slot, usePathname, useRouter } from 'expo-router';

@@ -99,7 +99,7 @@ export default function AddExpenseScreen() {
       if (!isRequest && !linkedRequest && approvalLimit && value > approvalLimit) {
           Alert.alert(
               "Approval needed",
-              `Purchases above ₹${approvalLimit.toLocaleString()} should be approved before buying.`,
+              `Purchases above ₹${approvalLimit.toLocaleString('en-IN')} should be approved before buying.`,
               [
                   { text: "Cancel", style: "cancel" },
                   { text: "Submit Claim Anyway", onPress: () => submit('CLAIM') },
@@ -224,7 +224,7 @@ export default function AddExpenseScreen() {
                 placeholder="0.00"
             />
             {!isRequest && !linkedRequest && !!approvalLimit && (parseFloat(amount) || 0) > approvalLimit && (
-                <Text style={styles.limitHint}>Above ₹{approvalLimit.toLocaleString()} — needs approval before buying.</Text>
+                <Text style={styles.limitHint}>Above ₹{approvalLimit.toLocaleString('en-IN')} — needs approval before buying.</Text>
             )}
             {!!linkedRequest && (parseFloat(amount) || 0) > Number(linkedRequest.amount) && (
                 <Text style={styles.limitHint}>More than the approved ₹{linkedRequest.amount} — this claim will need approval again.</Text>

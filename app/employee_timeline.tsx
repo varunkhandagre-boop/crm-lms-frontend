@@ -828,18 +828,18 @@ const [selectedDate, setSelectedDate] = useState(new Date());
                       <Text style={styles.sectionHeader}>Financial Performance</Text>
                       <View style={styles.financeGrid}>
                           <TouchableOpacity onPress={()=> toggleEmpFilter('Order')} style={[styles.finBox, activeEmpFilter==='Order' && styles.activeFinBox, {backgroundColor: '#f3e5f5'}]}>
-                              <Text style={[styles.finVal, {color: '#8e24aa'}]}>₹ {(empSummary as any).ordersVal?.toLocaleString()}</Text><Text style={styles.finLabel}>Orders</Text>
+                              <Text style={[styles.finVal, {color: '#8e24aa'}]}>₹ {(empSummary as any).ordersVal?.toLocaleString('en-IN')}</Text><Text style={styles.finLabel}>Orders</Text>
                           </TouchableOpacity>
                           <TouchableOpacity onPress={()=> toggleEmpFilter('Payment')} style={[styles.finBox, activeEmpFilter==='Payment' && styles.activeFinBox, {backgroundColor: '#e0f2f1'}]}>
-                              <Text style={[styles.finVal, {color: '#00897b'}]}>₹ {(empSummary as any).collectionsVal?.toLocaleString()}</Text><Text style={styles.finLabel}>Collections</Text>
+                              <Text style={[styles.finVal, {color: '#00897b'}]}>₹ {(empSummary as any).collectionsVal?.toLocaleString('en-IN')}</Text><Text style={styles.finLabel}>Collections</Text>
                           </TouchableOpacity>
                       </View>
                       <View style={styles.financeGrid}>
                           <TouchableOpacity onPress={()=> toggleEmpFilter('Expense')} style={[styles.finBox, activeEmpFilter==='Expense' && styles.activeFinBox, {backgroundColor: '#ffebee'}]}>
-                              <Text style={[styles.finVal, {color: '#d32f2f'}]}>₹ {(empSummary as any).expensesVal?.toLocaleString()}</Text><Text style={styles.finLabel}>Day Expenses</Text>
+                              <Text style={[styles.finVal, {color: '#d32f2f'}]}>₹ {(empSummary as any).expensesVal?.toLocaleString('en-IN')}</Text><Text style={styles.finLabel}>Day Expenses</Text>
                           </TouchableOpacity>
                           <TouchableOpacity onPress={()=> toggleEmpFilter('Advance')} style={[styles.finBox, activeEmpFilter==='Advance' && styles.activeFinBox, {backgroundColor: '#fff3e0'}]}>
-                              <Text style={[styles.finVal, {color: '#f57c00'}]}>₹ {(empSummary as any).advancesVal?.toLocaleString()}</Text><Text style={styles.finLabel}>Advances</Text>
+                              <Text style={[styles.finVal, {color: '#f57c00'}]}>₹ {(empSummary as any).advancesVal?.toLocaleString('en-IN')}</Text><Text style={styles.finLabel}>Advances</Text>
                           </TouchableOpacity>
                       </View>
 
@@ -887,7 +887,7 @@ const [selectedDate, setSelectedDate] = useState(new Date());
                                   </View>
                                   <Text style={{fontWeight: 'bold', fontSize: 14, color: '#333'}}>{item.title}</Text>
                                   <Text style={{fontSize: 13, color: '#555', marginTop: 2}} numberOfLines={2}>{item.desc}</Text>
-                                  {item.amount > 0 && <Text style={{fontWeight: 'bold', marginTop: 5, color: '#333'}}>Amount: ₹{item.amount.toLocaleString()}</Text>}
+                                  {item.amount > 0 && <Text style={{fontWeight: 'bold', marginTop: 5, color: '#333'}}>Amount: ₹{item.amount.toLocaleString('en-IN')}</Text>}
                               </TouchableOpacity>
                           ))
                       )}
@@ -1023,7 +1023,7 @@ const [selectedDate, setSelectedDate] = useState(new Date());
                                   <DetailRow label="Product/Name" value={getProductName(selectedEvent.rawData)} />
                                   <DetailRow label="Quantity" value={selectedEvent.rawData.qty || '1'} />
                                   {isFinanceRole && (
-                                      <DetailRow label="Order Value" value={`₹ ${Number(selectedEvent.rawData.totalValue || selectedEvent.rawData.orderValue || selectedEvent.rawData.amount || 0).toLocaleString()}`} />
+                                      <DetailRow label="Order Value" value={`₹ ${Number(selectedEvent.rawData.totalValue || selectedEvent.rawData.orderValue || selectedEvent.rawData.amount || 0).toLocaleString('en-IN')}`} />
                                   )}
                                   <DetailRow label="Client / Location" value={`${getClientName(selectedEvent.rawData)} (${selectedEvent.rawData.city || (typeof selectedEvent.rawData.location === 'string' ? selectedEvent.rawData.location : selectedEvent.rawData.location?.address) || 'N/A'})`} />
                                   <View style={styles.infoBox}><Text style={styles.infoLabel}>Remark:</Text><Text style={styles.infoValue}>{selectedEvent.rawData.remark || selectedEvent.rawData.note || '-'}</Text></View>
@@ -1032,7 +1032,7 @@ const [selectedDate, setSelectedDate] = useState(new Date());
                           
                           {selectedEvent.type === 'Payment' && (
                               <>
-                                  <DetailRow label="Amount Received" value={`₹ ${Number(selectedEvent.rawData.amount || selectedEvent.rawData.receivedAmount || 0).toLocaleString()}`} />
+                                  <DetailRow label="Amount Received" value={`₹ ${Number(selectedEvent.rawData.amount || selectedEvent.rawData.receivedAmount || 0).toLocaleString('en-IN')}`} />
                                   <DetailRow label="Payment Mode" value={selectedEvent.rawData.mode || selectedEvent.rawData.paymentMode} />
                                   <DetailRow label="Client Name" value={getClientName(selectedEvent.rawData)} />
                                   <View style={styles.infoBox}><Text style={styles.infoLabel}>Note:</Text><Text style={styles.infoValue}>{selectedEvent.rawData.note || selectedEvent.rawData.remark || '-'}</Text></View>
@@ -1053,7 +1053,7 @@ const [selectedDate, setSelectedDate] = useState(new Date());
                                   <DetailRow label="In Time" value={selectedEvent.rawData.inTime || 'N/A'} />
                                   <DetailRow label="Out Time" value={selectedEvent.rawData.outTime || 'N/A'} />
                                   <DetailRow label="Total Hrs" value={selectedEvent.rawData.workHrs || 'N/A'} />
-                                  <DetailRow label="Day Expense" value={`₹ ${Number(selectedEvent.rawData.expenses?.totalAmount || selectedEvent.rawData.dayExpense || selectedEvent.rawData.expense || 0).toLocaleString()}`} />
+                                  <DetailRow label="Day Expense" value={`₹ ${Number(selectedEvent.rawData.expenses?.totalAmount || selectedEvent.rawData.dayExpense || selectedEvent.rawData.expense || 0).toLocaleString('en-IN')}`} />
                                   <View style={styles.infoBox}><Text style={styles.infoLabel}>Login Location:</Text><Text style={styles.infoValue}>{locationText(selectedEvent.rawData.inLocation, selectedEvent.rawData.location, '-')}</Text></View>
                                   {selectedEvent.rawData.outTime && selectedEvent.rawData.outTime !== '--' ? (
                                       <View style={styles.infoBox}><Text style={styles.infoLabel}>Logout Location:</Text><Text style={styles.infoValue}>{locationText(selectedEvent.rawData.outAddress, selectedEvent.rawData.outLocation, '-')}</Text></View>
@@ -1072,14 +1072,14 @@ const [selectedDate, setSelectedDate] = useState(new Date());
                           {selectedEvent.type === 'Expense' && (
                               <>
                                   <DetailRow label="Category" value={selectedEvent.rawData.category || 'Misc'} />
-                                  <DetailRow label="Amount" value={`₹ ${Number(selectedEvent.rawData.amount || 0).toLocaleString()}`} />
+                                  <DetailRow label="Amount" value={`₹ ${Number(selectedEvent.rawData.amount || 0).toLocaleString('en-IN')}`} />
                                   <View style={styles.infoBox}><Text style={styles.infoLabel}>Note:</Text><Text style={styles.infoValue}>{selectedEvent.rawData.note || selectedEvent.rawData.remark || '-'}</Text></View>
                               </>
                           )}
 
                           {selectedEvent.type === 'Advance' && (
                               <>
-                                  <DetailRow label="Amount Taken" value={`₹ ${Number(selectedEvent.rawData.amount || 0).toLocaleString()}`} />
+                                  <DetailRow label="Amount Taken" value={`₹ ${Number(selectedEvent.rawData.amount || 0).toLocaleString('en-IN')}`} />
                                   <DetailRow label="Status" value={selectedEvent.rawData.status || 'Pending'} />
                                   <View style={styles.infoBox}><Text style={styles.infoLabel}>Reason:</Text><Text style={styles.infoValue}>{selectedEvent.rawData.reason || selectedEvent.rawData.note || '-'}</Text></View>
                               </>

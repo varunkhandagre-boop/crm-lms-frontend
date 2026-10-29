@@ -36,6 +36,7 @@ import EmployeeMultiPicker from '../components/EmployeeMultiPicker';
 import { sharePdfFromHtml } from '../utils/sharePdf';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 import { showDate } from '../utils/showDate';
+import { pickerCardStyle, pickerModalProps } from '../utils/pickerModal';
 
 export default function AddCourierScreen() {
   const headerTop = useHeaderTop();
@@ -640,8 +641,8 @@ export default function AddCourierScreen() {
           onSave={(ids) => { setSharedWithIds(ids); setShowSharePicker(false); }}
       />
 
-      <Modal visible={showOrgModal} animationType="slide">
-        <View style={[styles.modalContainer, { paddingTop: headerTop }]}>
+      <Modal visible={showOrgModal} animationType="slide" {...pickerModalProps}>
+        <View style={[styles.modalContainer, pickerCardStyle, { paddingTop: headerTop }]}>
             <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Select {type === 'Outward' ? 'Receiver' : 'Sender'}</Text>
                 <TouchableOpacity onPress={() => setShowOrgModal(false)}><Ionicons name="close-circle" size={30} color="#d32f2f"/></TouchableOpacity>
@@ -675,8 +676,8 @@ export default function AddCourierScreen() {
         </View>
       </Modal>
 
-      <Modal visible={showProductModal} animationType="slide">
-        <View style={[styles.modalContainer, { paddingTop: headerTop }]}>
+      <Modal visible={showProductModal} animationType="slide" {...pickerModalProps}>
+        <View style={[styles.modalContainer, pickerCardStyle, { paddingTop: headerTop }]}>
             <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Select Item</Text>
                 <TouchableOpacity onPress={() => setShowProductModal(false)}><Ionicons name="close-circle" size={30} color="#d32f2f"/></TouchableOpacity>

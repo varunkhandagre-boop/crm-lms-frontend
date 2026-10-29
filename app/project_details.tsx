@@ -280,17 +280,17 @@ export default function ProjectDetailsScreen() {
                                       </TouchableOpacity>
                                   )}
                               </View>
-                              <Text style={[styles.bigValue, {color:'#1565c0'}]}>₹ {project.totalValue?.toLocaleString()}</Text>
+                              <Text style={[styles.bigValue, {color:'#1565c0'}]}>₹ {project.totalValue?.toLocaleString('en-IN')}</Text>
                           </View>
                           <View style={{alignItems:'flex-end'}}>
                               <Text style={styles.subLabel}>Balance</Text>
-                              <Text style={[styles.bigValue, {color:'#ff9800'}]}>₹ {pendingAmount.toLocaleString()}</Text>
+                              <Text style={[styles.bigValue, {color:'#ff9800'}]}>₹ {pendingAmount.toLocaleString('en-IN')}</Text>
                           </View>
                       </View>
                       <View style={styles.divider} />
                       <View style={{flexDirection:'row', justifyContent:'space-between'}}>
-                           <Text style={{color:'#4caf50', fontWeight:'bold'}}>Recd: ₹{project.totalReceived?.toLocaleString() || 0}</Text>
-                           <Text style={{color:'#d32f2f', fontWeight:'bold'}}>Exp: ₹{project.totalExpense?.toLocaleString() || 0}</Text>
+                           <Text style={{color:'#4caf50', fontWeight:'bold'}}>Recd: ₹{project.totalReceived?.toLocaleString('en-IN') || 0}</Text>
+                           <Text style={{color:'#d32f2f', fontWeight:'bold'}}>Exp: ₹{project.totalExpense?.toLocaleString('en-IN') || 0}</Text>
                       </View>
                   </View>
 
@@ -305,7 +305,7 @@ export default function ProjectDetailsScreen() {
 
                   <View style={[styles.card, {backgroundColor: profit >= 0 ? '#e8f5e9' : '#ffebee'}]}>
                       <Text style={styles.cardLabel}>Net Profit / Loss</Text>
-                      <Text style={[styles.profitValue, {color: profit >= 0 ? 'green' : 'red'}]}>{profit >= 0 ? '+' : ''} ₹ {profit.toLocaleString()}</Text>
+                      <Text style={[styles.profitValue, {color: profit >= 0 ? 'green' : 'red'}]}>{profit >= 0 ? '+' : ''} ₹ {profit.toLocaleString('en-IN')}</Text>
                   </View>
                   
                   <Text style={styles.sectionTitle}>Activity Timeline</Text>
@@ -469,7 +469,7 @@ export default function ProjectDetailsScreen() {
               <View style={styles.modalContent}>
                   <View style={{flexDirection:'row', justifyContent:'space-between'}}><Text style={styles.modalTitle}>Mark Delivered</Text><CloseButton onPress={()=>setDeliveryModalVisible(false)}/></View>
                   <TextInput style={styles.input} placeholder="Delivery Mode (Courier/Hand)" value={deliveryMode} onChangeText={setDeliveryMode} />
-                  <TouchableOpacity style={styles.input} onPress={()=>setShowDatePicker(true)}><Text>{deliveryDate.toLocaleDateString()}</Text></TouchableOpacity>
+                  <TouchableOpacity style={styles.input} onPress={()=>setShowDatePicker(true)}><Text>{deliveryDate.toLocaleDateString('en-IN')}</Text></TouchableOpacity>
                   {showDatePicker && <DateTimePicker value={deliveryDate} mode="date" {...pickerHandlers((e,d)=>{setShowDatePicker(false);if(d)setDeliveryDate(d)})} />}
                   <TouchableOpacity onPress={confirmDelivery} style={[styles.saveBtn, {backgroundColor:'#4caf50'}]} disabled={isSaving}><Text style={{color:'white'}}>Confirm</Text></TouchableOpacity>
               </View>
@@ -487,7 +487,7 @@ export default function ProjectDetailsScreen() {
                           {detailType==='Item' && <><DetailRow label="Item" value={selectedDetailItem.name} /><DetailRow label="Qty" value={selectedDetailItem.qty} /><DetailRow label="Value" value={selectedDetailItem.value ? `₹${selectedDetailItem.value}` : '-'} /></>}
                           {(detailType==='Expense' || detailType==='Payment') && <View style={{backgroundColor:'#eee', padding:10, borderRadius:8, marginVertical:10, alignItems:'center'}}><Text style={{fontSize:24, fontWeight:'bold', color: detailType==='Expense'?'red':'green'}}>₹ {selectedDetailItem.amount}</Text></View>}
                           <Text style={styles.label}>Notes</Text><Text style={{backgroundColor:'#f9f9f9', padding:10, borderRadius:8}}>{selectedDetailItem.note || selectedDetailItem.mode || selectedDetailItem.category || 'No Details'}</Text>
-                          {selectedDetailItem.status === 'Delivered' && <View style={{marginTop:15, backgroundColor:'#e8f5e9', padding:10}}><Text style={{color:'green', fontWeight:'bold'}}>✅ Delivered via {selectedDetailItem.deliveryMode}</Text><Text style={{fontSize:11}}>on {new Date(selectedDetailItem.deliveryDate).toLocaleDateString()}</Text></View>}
+                          {selectedDetailItem.status === 'Delivered' && <View style={{marginTop:15, backgroundColor:'#e8f5e9', padding:10}}><Text style={{color:'green', fontWeight:'bold'}}>✅ Delivered via {selectedDetailItem.deliveryMode}</Text><Text style={{fontSize:11}}>on {new Date(selectedDetailItem.deliveryDate).toLocaleDateString('en-IN')}</Text></View>}
                           <TouchableOpacity style={{alignSelf:'center', marginTop:20}} onPress={()=>{
                               deleteProjectEntry(detailType, selectedDetailItem.id); 
                           }}><Text style={{color:'red', fontWeight:'bold'}}>Delete Entry</Text></TouchableOpacity>

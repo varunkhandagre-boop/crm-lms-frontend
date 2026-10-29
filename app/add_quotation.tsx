@@ -16,6 +16,7 @@ import { useCachedList } from '../hooks/useCachedList';
 import { listProducts } from '../services/api/products';
 import { createQuotation, getQuotation, updateQuotation } from '../services/api/quotations';
 import { buildCacheKey } from '../utils/listCache';
+import { pickerCardStyle, pickerModalProps } from '../utils/pickerModal';
 
 export default function AddQuotationScreen() {
     const router = useRouter();
@@ -670,18 +671,18 @@ export default function AddQuotationScreen() {
                             </View>
 
                             <View style={styles.summaryCard}>
-                                <View style={styles.summaryRow}><Text style={styles.summaryText}>Sub Total</Text><Text style={styles.summaryText}>₹ {subTotal.toLocaleString()}</Text></View>
+                                <View style={styles.summaryRow}><Text style={styles.summaryText}>Sub Total</Text><Text style={styles.summaryText}>₹ {subTotal.toLocaleString('en-IN')}</Text></View>
                                 
                                 {Object.keys(gstBreakdown).map((rateStr) => {
                                     const rate = Number(rateStr);
                                     const amount = gstBreakdown[rate];
                                     if (taxType === 'IGST') {
-                                        return <View key={`igst-${rate}`} style={styles.summaryRow}><Text style={styles.summarySubText}>IGST @ {rate}%</Text><Text style={styles.summarySubText}>₹ {amount.toLocaleString()}</Text></View>;
+                                        return <View key={`igst-${rate}`} style={styles.summaryRow}><Text style={styles.summarySubText}>IGST @ {rate}%</Text><Text style={styles.summarySubText}>₹ {amount.toLocaleString('en-IN')}</Text></View>;
                                     } else {
                                         return (
                                             <React.Fragment key={`cgst-sgst-${rate}`}>
-                                                <View style={styles.summaryRow}><Text style={styles.summarySubText}>CGST @ {rate/2}%</Text><Text style={styles.summarySubText}>₹ {(amount/2).toLocaleString()}</Text></View>
-                                                <View style={styles.summaryRow}><Text style={styles.summarySubText}>SGST @ {rate/2}%</Text><Text style={styles.summarySubText}>₹ {(amount/2).toLocaleString()}</Text></View>
+                                                <View style={styles.summaryRow}><Text style={styles.summarySubText}>CGST @ {rate/2}%</Text><Text style={styles.summarySubText}>₹ {(amount/2).toLocaleString('en-IN')}</Text></View>
+                                                <View style={styles.summaryRow}><Text style={styles.summarySubText}>SGST @ {rate/2}%</Text><Text style={styles.summarySubText}>₹ {(amount/2).toLocaleString('en-IN')}</Text></View>
                                             </React.Fragment>
                                         );
                                     }
@@ -689,7 +690,7 @@ export default function AddQuotationScreen() {
 
                                 <View style={[styles.summaryRow, {borderTopWidth: 1, borderColor: '#eee', paddingTop: 10, marginTop: 5}]}>
                                     <Text style={styles.grandTotalText}>Grand Total</Text>
-                                    <Text style={styles.grandTotalText}>₹ {grandTotal.toLocaleString()}</Text>
+                                    <Text style={styles.grandTotalText}>₹ {grandTotal.toLocaleString('en-IN')}</Text>
                                 </View>
                             </View>
                         </>
@@ -733,8 +734,8 @@ export default function AddQuotationScreen() {
             </View>
 
             {/* MODALS */}
-            <Modal visible={showOrgModal} animationType="slide">
-                <View style={styles.modalContainer}>
+            <Modal visible={showOrgModal} animationType="slide" {...pickerModalProps}>
+                <View style={[styles.modalContainer, pickerCardStyle]}>
                     <View style={[styles.modalHeader, {paddingTop: insets.top + 10}]}>
                         <Text style={styles.modalTitle}>Select Client</Text>
                         <TouchableOpacity onPress={() => setShowOrgModal(false)}><Ionicons name="close" size={28} color="black" /></TouchableOpacity>
@@ -758,8 +759,8 @@ export default function AddQuotationScreen() {
                 </View>
             </Modal>
 
-            <Modal visible={showProductModal} animationType="slide">
-                <View style={styles.modalContainer}>
+            <Modal visible={showProductModal} animationType="slide" {...pickerModalProps}>
+                <View style={[styles.modalContainer, pickerCardStyle]}>
                     <View style={[styles.modalHeader, {paddingTop: insets.top + 10}]}>
                         <Text style={styles.modalTitle}>Select Product</Text>
                         <TouchableOpacity onPress={() => setShowProductModal(false)}><Ionicons name="close" size={28} color="black" /></TouchableOpacity>

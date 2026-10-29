@@ -281,14 +281,14 @@ export default function EmployeeAdvanceScreen() {
           <View style={{flexDirection:'row', justifyContent:'space-between', width:'100%'}}>
               <View style={{alignItems:'center', flex:1}}>
                   <Text style={styles.statLabel}>Outstanding (Due)</Text>
-                  <Text style={[styles.statValue, {color:'#d32f2f'}]}>₹{outstandingAmount.toLocaleString()}</Text>
+                  <Text style={[styles.statValue, {color:'#d32f2f'}]}>₹{outstandingAmount.toLocaleString('en-IN')}</Text>
               </View>
 
               <View style={styles.vDivider} />
 
               <View style={{alignItems:'center', flex:1}}>
                   <Text style={styles.statLabel}>Total Taken</Text>
-                  <Text style={[styles.statValue, {color:'#3b5998'}]}>₹{totalHistoryAmount.toLocaleString()}</Text>
+                  <Text style={[styles.statValue, {color:'#3b5998'}]}>₹{totalHistoryAmount.toLocaleString('en-IN')}</Text>
               </View>
           </View>
           

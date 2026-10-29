@@ -34,6 +34,7 @@ import {
 } from '../services/api/personalNotes';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 import { pickerHandlers } from '../utils/datePickerHandlers';
+import { pickerCardStyle, pickerModalProps } from '../utils/pickerModal';
 
 const NOTE_COLORS = ['#fff9c4', '#bbdefb', '#c8e6c9', '#f8bbd0', '#ffecb3', '#e1bee7'];
 
@@ -395,8 +396,8 @@ export default function PersonalNotesScreen() {
                 </>
             )}
 
-            <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet">
-                <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+            <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet" {...pickerModalProps}>
+                <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={[{ flex: 1 }, pickerCardStyle]}>
                     <View style={[styles.modalContainer, { backgroundColor: selectedColor }]}>
 
                         <View style={styles.modalHeader}>

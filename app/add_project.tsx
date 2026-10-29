@@ -27,6 +27,7 @@ import { useCachedList } from '../hooks/useCachedList';
 import { createProject } from '../services/api/projects';
 import { buildCacheKey } from '../utils/listCache';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import { pickerCardStyle, pickerModalProps } from '../utils/pickerModal';
 
 export default function AddProjectScreen() {
   const headerTop = useHeaderTop();
@@ -220,8 +221,8 @@ export default function AddProjectScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      <Modal visible={modalVisible} animationType="slide">
-          <View style={[styles.modalContainer, { paddingTop: headerTop }]}>
+      <Modal visible={modalVisible} animationType="slide" {...pickerModalProps}>
+          <View style={[styles.modalContainer, pickerCardStyle, { paddingTop: headerTop }]}>
               <View style={styles.modalHeader}>
                   <TouchableOpacity onPress={() => setModalVisible(false)}>
                       <Ionicons name="arrow-back" size={24} color="#333" />

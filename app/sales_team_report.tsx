@@ -401,11 +401,11 @@ export default function SalesTeamReport() {
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 5 }}>
                             <View>
                                 <Text style={styles.subText}>Sales</Text>
-                                <Text style={styles.salesAmount}>₹{item.totalSales.toLocaleString()}</Text>
+                                <Text style={styles.salesAmount}>₹{item.totalSales.toLocaleString('en-IN')}</Text>
                             </View>
                             <View style={{ alignItems: 'flex-end' }}>
                                 <Text style={styles.subText}>Incentive</Text>
-                                <Text style={[styles.incentiveAmount, { color: item.incentive > 0 ? '#2e7d32' : '#d32f2f' }]}>₹{item.incentive.toLocaleString()}</Text>
+                                <Text style={[styles.incentiveAmount, { color: item.incentive > 0 ? '#2e7d32' : '#d32f2f' }]}>₹{item.incentive.toLocaleString('en-IN')}</Text>
                             </View>
                         </View>
 
@@ -418,7 +418,7 @@ export default function SalesTeamReport() {
                             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                                 <Ionicons name="wallet-outline" size={14} color="#555" />
                                 <Text style={styles.collText}> Collection: </Text>
-                                <Text style={{ fontWeight: 'bold', color: '#333' }}>₹{item.totalCollected.toLocaleString()}</Text>
+                                <Text style={{ fontWeight: 'bold', color: '#333' }}>₹{item.totalCollected.toLocaleString('en-IN')}</Text>
                             </View>
                             <Text style={{ fontSize: 10, color: '#555' }}>Click for Report</Text>
                         </View>
@@ -472,17 +472,17 @@ export default function SalesTeamReport() {
                         <View style={{ flexDirection: 'row', backgroundColor: '#f0f4f8', padding: 10, borderRadius: 8, marginBottom: 15, justifyContent: 'space-between', borderWidth: 1, borderColor: '#e0e0e0' }}>
                             <View style={{ alignItems: 'center', flex: 1 }}>
                                 <Text style={{ fontSize: 10, color: 'gray', marginBottom: 2 }}>💵 Cash Sales</Text>
-                                <Text style={{ fontWeight: 'bold', color: '#2e7d32', fontSize: 13 }}>₹{selectedStaff?.cashSales?.toLocaleString()}</Text>
+                                <Text style={{ fontWeight: 'bold', color: '#2e7d32', fontSize: 13 }}>₹{selectedStaff?.cashSales?.toLocaleString('en-IN')}</Text>
                             </View>
                             <View style={{ width: 1, backgroundColor: '#ccc' }} />
                             <View style={{ alignItems: 'center', flex: 1 }}>
                                 <Text style={{ fontSize: 10, color: 'gray', marginBottom: 2 }}>📄 Credit (Billed)</Text>
-                                <Text style={{ fontWeight: 'bold', color: '#1565c0', fontSize: 13 }}>₹{selectedStaff?.creditSales?.toLocaleString()}</Text>
+                                <Text style={{ fontWeight: 'bold', color: '#1565c0', fontSize: 13 }}>₹{selectedStaff?.creditSales?.toLocaleString('en-IN')}</Text>
                             </View>
                             <View style={{ width: 1, backgroundColor: '#ccc' }} />
                             <View style={{ alignItems: 'center', flex: 1 }}>
                                 <Text style={{ fontSize: 10, color: 'gray', marginBottom: 2 }}>💰 Total Sales</Text>
-                                <Text style={{ fontWeight: 'bold', color: '#333', fontSize: 13 }}>₹{selectedStaff?.totalSales?.toLocaleString()}</Text>
+                                <Text style={{ fontWeight: 'bold', color: '#333', fontSize: 13 }}>₹{selectedStaff?.totalSales?.toLocaleString('en-IN')}</Text>
                             </View>
                         </View>
 
@@ -515,11 +515,11 @@ export default function SalesTeamReport() {
                                     ))}
                                     <View style={{ marginTop: 15, padding: 10, backgroundColor: '#e3f2fd', borderRadius: 8 }}>
                                         <Text style={{ textAlign: 'center', fontSize: 12, color: '#1565c0', fontWeight: 'bold', marginBottom: 4 }}>
-                                            Total {viewMode === 'FY' ? 'FY' : 'Year'} Sales: ₹{monthlyStats.reduce((a, b) => a + b.sales, 0).toLocaleString()}
+                                            Total {viewMode === 'FY' ? 'FY' : 'Year'} Sales: ₹{monthlyStats.reduce((a, b) => a + b.sales, 0).toLocaleString('en-IN')}
                                         </Text>
                                         <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 15 }}>
-                                            <Text style={{ fontSize: 10, color: '#2e7d32' }}>Cash: ₹{monthlyStats.reduce((a, b) => a + b.cash, 0).toLocaleString()}</Text>
-                                            <Text style={{ fontSize: 10, color: '#1565c0' }}>Credit: ₹{monthlyStats.reduce((a, b) => a + b.credit, 0).toLocaleString()}</Text>
+                                            <Text style={{ fontSize: 10, color: '#2e7d32' }}>Cash: ₹{monthlyStats.reduce((a, b) => a + b.cash, 0).toLocaleString('en-IN')}</Text>
+                                            <Text style={{ fontSize: 10, color: '#1565c0' }}>Credit: ₹{monthlyStats.reduce((a, b) => a + b.credit, 0).toLocaleString('en-IN')}</Text>
                                         </View>
                                     </View>
                                 </View>
@@ -531,7 +531,7 @@ export default function SalesTeamReport() {
                                         <View key={index} style={styles.detailItem}>
                                             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                                                 <Text style={styles.itemTitle}>{order.hospitalName || 'Unknown'}</Text>
-                                                <Text style={styles.itemAmount}>₹{order.amount.toLocaleString()}</Text>
+                                                <Text style={styles.itemAmount}>₹{order.amount.toLocaleString('en-IN')}</Text>
                                             </View>
                                             <Text style={styles.itemSub}>
                                                 {formatDateShort(getValidDateStr(order))} • {order.status} • {order.saleType === 'Cash' ? '💵 Cash' : '📄 Credit'}
@@ -547,7 +547,7 @@ export default function SalesTeamReport() {
                                         <View key={index} style={styles.detailItem}>
                                             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                                                 <Text style={styles.itemTitle}>{pay.orgName || 'Unknown'}</Text>
-                                                <Text style={styles.itemAmount}>₹{pay.amount.toLocaleString()}</Text>
+                                                <Text style={styles.itemAmount}>₹{pay.amount.toLocaleString('en-IN')}</Text>
                                             </View>
                                             <Text style={styles.itemSub}>{formatDateShort(getValidDateStr(pay))} • {pay.mode}</Text>
                                             {pay.billRef && <Text style={{ fontSize: 10, color: '#e65100', marginTop: 2 }}>🔗 {pay.billRef}</Text>}

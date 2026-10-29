@@ -1,5 +1,10 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { showDate } from '../utils/showDate';
+
+// A cell that is just a date ("2026-10-23" or an ISO timestamp) is shown DD/MM/YYYY.
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}(T[\d:.]+(Z|[+-]\d{2}:?\d{2})?)?$/;
+const cellValue = (v: unknown) => (typeof v === 'string' && ISO_DATE.test(v) ? showDate(v) : v);
 
 // Laptop / desktop web: lists shown as an Excel-like table. Used inside the
 // screen's existing FlatList (header = ListHeaderComponent, rows = renderItem)
@@ -44,7 +49,7 @@ export function TableRow<T>({ columns, item, index, onPress, tint }: {
             ]}
         >
             {columns.map((c) => {
-                const v = c.render(item);
+                const v = cellValue(c.render(item)) as React.ReactNode;
                 return (
                     <View key={c.key} style={[styles.cell, cellBox(c), { alignItems: c.align === 'right' ? 'flex-end' : c.align === 'center' ? 'center' : 'flex-start' }]}>
                         {typeof v === 'string' || typeof v === 'number'
@@ -70,8 +75,8 @@ export function Pill({ text, color, bg }: { text: string; color: string; bg: str
 export function TwoLine({ main, sub }: { main: string; sub?: string }) {
     return (
         <View style={styles.twoLine}>
-            <Text style={styles.mainText} numberOfLines={1}>{main || '-'}</Text>
-            {!!sub && <Text style={styles.subText} numberOfLines={1}>{sub}</Text>}
+            <Text style={styles.mainText} numberOfLines={1}>{(cellValue(main) as string) || '-'}</Text>
+            {!!sub && <Text style={styles.subText} numberOfLines={1}>{cellValue(sub) as string}</Text>}
         </View>
     );
 }

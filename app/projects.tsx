@@ -139,13 +139,13 @@ export default function ProjectsScreen() {
               <View>
                   <Text style={styles.label}>Order Value</Text>
                   <Text style={styles.value}>
-                      ₹ {(parseInt(item.totalValue) || 0).toLocaleString()}
+                      ₹ {(parseInt(item.totalValue) || 0).toLocaleString('en-IN')}
                   </Text>
               </View>
               <View>
                   <Text style={styles.label}>Total Expense</Text>
                   <Text style={[styles.value, {color:'#d32f2f'}]}>
-                      ₹ {(item.totalExpense ? parseInt(item.totalExpense) : 0).toLocaleString()}
+                      ₹ {(item.totalExpense ? parseInt(item.totalExpense) : 0).toLocaleString('en-IN')}
                   </Text>
               </View>
           </View>

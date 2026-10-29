@@ -36,6 +36,7 @@ import { buildCacheKey } from '../utils/listCache';
 import { urlToBase64Image } from '../utils/pdfImageHelper';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 import { showDate } from '../utils/showDate';
+import { pickerCardStyle, pickerModalProps } from '../utils/pickerModal';
 
 export default function AddPaymentScreen() {
     const headerTop = useHeaderTop();
@@ -463,12 +464,12 @@ export default function AddPaymentScreen() {
     };
 
     const onChangeDate = (event: any, selectedDate?: Date) => {
-        if (Platform.OS === 'android') setShowDatePicker(false);
+        if (Platform.OS !== 'ios') setShowDatePicker(false);
         if (selectedDate) setDate(selectedDate);
     };
 
     const onChangePdcDate = (event: any, selectedDate?: Date) => {
-        if (Platform.OS === 'android') setShowPdcDatePicker(false);
+        if (Platform.OS !== 'ios') setShowPdcDatePicker(false);
         if (selectedDate) setPdcDate(selectedDate);
     };
 
@@ -606,8 +607,8 @@ export default function AddPaymentScreen() {
                 </ScrollView>
             </KeyboardAvoidingView>
 
-            <Modal visible={showOrgModal} animationType="slide">
-                <View style={[styles.modalContainer, { paddingTop: headerTop }]}>
+            <Modal visible={showOrgModal} animationType="slide" {...pickerModalProps}>
+                <View style={[styles.modalContainer, pickerCardStyle, { paddingTop: headerTop }]}>
                     <View style={styles.modalHeader}>
                         <Text style={styles.modalTitle}>Select Party</Text>
                         <TouchableOpacity onPress={() => setShowOrgModal(false)}><Ionicons name="close-circle" size={30} color="#d32f2f"/></TouchableOpacity>

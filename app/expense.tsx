@@ -351,21 +351,21 @@ export default function ExpenseScreen() {
           <View style={{flexDirection:'row', justifyContent:'space-between', width:'100%'}}>
               <View style={{alignItems:'center', flex:1}}>
                   <Text style={styles.statLabel}>Outstanding (Due)</Text>
-                  <Text style={[styles.statValue, {color:'#d32f2f'}]}>₹{outstandingAmount.toLocaleString()}</Text>
+                  <Text style={[styles.statValue, {color:'#d32f2f'}]}>₹{outstandingAmount.toLocaleString('en-IN')}</Text>
               </View>
 
               <View style={styles.vDivider} />
 
               <View style={{alignItems:'center', flex:1}}>
                   <Text style={styles.statLabel}>Day Out</Text>
-                  <Text style={[styles.statValue, {color:'#6a1b9a'}]}>₹{totals.daily.toLocaleString()}</Text>
+                  <Text style={[styles.statValue, {color:'#6a1b9a'}]}>₹{totals.daily.toLocaleString('en-IN')}</Text>
               </View>
 
               <View style={styles.vDivider} />
 
               <View style={{alignItems:'center', flex:1}}>
                   <Text style={styles.statLabel}>Total Spent</Text>
-                  <Text style={[styles.statValue, {color:'#3b5998'}]}>₹{totals.total.toLocaleString()}</Text>
+                  <Text style={[styles.statValue, {color:'#3b5998'}]}>₹{totals.total.toLocaleString('en-IN')}</Text>
               </View>
           </View>
           

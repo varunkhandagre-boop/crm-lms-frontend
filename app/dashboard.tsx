@@ -255,7 +255,7 @@ export default function UpdatedDashboard() {
                                 <Text style={styles.dueOrg} numberOfLines={1}>{item.orgName}</Text>
                                 <Text style={styles.dueDate}>Due: {showDate(item.dueDate)}</Text>
                             </View>
-                            <Text style={styles.dueAmount}>₹{Number(item.amount).toLocaleString()}</Text>
+                            <Text style={styles.dueAmount}>₹{Number(item.amount).toLocaleString('en-IN')}</Text>
                         </View>
                     )) : <Text style={styles.emptyText}>{loading ? 'Loading...' : 'No pending dues.'}</Text>}
                 </View>

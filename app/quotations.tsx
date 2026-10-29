@@ -174,13 +174,13 @@ export default function QuotationsListScreen() {
                 const rate = Number(rateStr);
                 const amount = gstBreakdown[rate];
                 if (item.taxType === 'IGST') {
-                    gstHtmlRows += `<div class="summary-row"><span>IGST @ ${rate}%</span> <span>₹${amount.toLocaleString()}</span></div>`;
+                    gstHtmlRows += `<div class="summary-row"><span>IGST @ ${rate}%</span> <span>₹${amount.toLocaleString('en-IN')}</span></div>`;
                 } else {
                     const halfRate = rate / 2;
                     const halfAmount = amount / 2;
                     gstHtmlRows += `
-                        <div class="summary-row"><span>CGST @ ${halfRate}%</span> <span>₹${halfAmount.toLocaleString()}</span></div>
-                        <div class="summary-row"><span>SGST @ ${halfRate}%</span> <span>₹${halfAmount.toLocaleString()}</span></div>
+                        <div class="summary-row"><span>CGST @ ${halfRate}%</span> <span>₹${halfAmount.toLocaleString('en-IN')}</span></div>
+                        <div class="summary-row"><span>SGST @ ${halfRate}%</span> <span>₹${halfAmount.toLocaleString('en-IN')}</span></div>
                     `;
                 }
             });
@@ -262,9 +262,9 @@ export default function QuotationsListScreen() {
                                     ${prod.specifications ? `<div class="specs">${prod.specifications}</div>` : ''}
                                 </td>
                                 <td>${prod.qty}</td>
-                                <td style="text-align:right;">₹${prod.price.toLocaleString()}</td>
-                                <td style="text-align:right;">₹${gstAmount.toLocaleString()}<br><span style="font-size:10px; color:gray;">(${prod.gstRate}%)</span></td>
-                                <td style="text-align:right; font-weight:bold;">₹${rowTotal.toLocaleString()}</td>
+                                <td style="text-align:right;">₹${prod.price.toLocaleString('en-IN')}</td>
+                                <td style="text-align:right;">₹${gstAmount.toLocaleString('en-IN')}<br><span style="font-size:10px; color:gray;">(${prod.gstRate}%)</span></td>
+                                <td style="text-align:right; font-weight:bold;">₹${rowTotal.toLocaleString('en-IN')}</td>
                             </tr>
                             `;
                         }).join('')}
@@ -273,8 +273,8 @@ export default function QuotationsListScreen() {
                             <td colspan="2" style="text-align:right; font-weight:bold; padding:10px; font-size:14px;">Total</td>
                             <td style="font-weight:bold; padding:10px; font-size:14px;">${totalQty}</td>
                             <td></td>
-                            <td style="text-align:right; font-weight:bold; padding:10px; font-size:14px;">₹${item.totalGST?.toLocaleString()}</td>
-                            <td style="text-align:right; font-weight:bold; padding:10px; font-size:14px;">₹${item.grandTotal?.toLocaleString()}</td>
+                            <td style="text-align:right; font-weight:bold; padding:10px; font-size:14px;">₹${item.totalGST?.toLocaleString('en-IN')}</td>
+                            <td style="text-align:right; font-weight:bold; padding:10px; font-size:14px;">₹${item.grandTotal?.toLocaleString('en-IN')}</td>
                         </tr>
                     </tbody>
                 </table>
@@ -305,9 +305,9 @@ export default function QuotationsListScreen() {
 
                     <div style="width: 40%; display: flex; flex-direction: column; justify-content: space-between;">
                         <div class="summary" style="border: 1px solid #ddd; border-radius: 5px;">
-                            <div class="summary-row"><span>Sub Total</span> <span>₹${item.subTotal?.toLocaleString()}</span></div>
+                            <div class="summary-row"><span>Sub Total</span> <span>₹${item.subTotal?.toLocaleString('en-IN')}</span></div>
                             ${gstHtmlRows}
-                            <div class="summary-row total"><span>Grand Total</span> <span>₹${item.grandTotal?.toLocaleString()}</span></div>
+                            <div class="summary-row total"><span>Grand Total</span> <span>₹${item.grandTotal?.toLocaleString('en-IN')}</span></div>
                         </div>
 
                         <div class="signature-box" style="text-align: center; margin-top: 40px;">
@@ -357,7 +357,7 @@ export default function QuotationsListScreen() {
                         <Text style={styles.orgName} numberOfLines={1}>{item.orgName}</Text>
                         <Text style={{fontSize: 12, color: 'gray', marginTop: 2}}>Est No: {item.estimateNo}</Text>
                     </View>
-                    <Text style={styles.amount}>₹ {item.grandTotal?.toLocaleString()}</Text>
+                    <Text style={styles.amount}>₹ {item.grandTotal?.toLocaleString('en-IN')}</Text>
                 </View>
 
                 <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 5}}>
@@ -479,21 +479,21 @@ export default function QuotationsListScreen() {
                                     {(selectedQuote.items || []).map((item: any, idx: number) => (
                                         <View key={idx} style={{flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderColor: '#f0f0f0', paddingVertical: 10}}>
                                             <Text style={{fontSize: 13, flex: 1, color: '#333'}} numberOfLines={2}>{item.qty}x {item.name}</Text>
-                                            <Text style={{fontSize: 13, fontWeight: 'bold', color: '#333'}}>₹{(item.qty * item.price).toLocaleString()}</Text>
+                                            <Text style={{fontSize: 13, fontWeight: 'bold', color: '#333'}}>₹{(item.qty * item.price).toLocaleString('en-IN')}</Text>
                                         </View>
                                     ))}
                                 </ScrollView>
 
                                 <View style={{marginTop: 15, borderTopWidth: 2, borderColor: '#eee', paddingTop: 15}}>
                                     <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5}}>
-                                        <Text style={{color: 'gray', fontSize: 13}}>Sub Total:</Text><Text style={{fontSize: 13}}>₹{selectedQuote.subTotal?.toLocaleString()}</Text>
+                                        <Text style={{color: 'gray', fontSize: 13}}>Sub Total:</Text><Text style={{fontSize: 13}}>₹{selectedQuote.subTotal?.toLocaleString('en-IN')}</Text>
                                     </View>
                                     <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10}}>
-                                        <Text style={{color: 'gray', fontSize: 13}}>Total GST:</Text><Text style={{fontSize: 13}}>₹{selectedQuote.totalGST?.toLocaleString()}</Text>
+                                        <Text style={{color: 'gray', fontSize: 13}}>Total GST:</Text><Text style={{fontSize: 13}}>₹{selectedQuote.totalGST?.toLocaleString('en-IN')}</Text>
                                     </View>
                                     <View style={{flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#e8f5e9', padding: 10, borderRadius: 8}}>
                                         <Text style={{fontSize: 16, fontWeight: 'bold', color: '#2e7d32'}}>Grand Total:</Text>
-                                        <Text style={{fontSize: 16, fontWeight: 'bold', color: '#2e7d32'}}>₹{selectedQuote.grandTotal?.toLocaleString()}</Text>
+                                        <Text style={{fontSize: 16, fontWeight: 'bold', color: '#2e7d32'}}>₹{selectedQuote.grandTotal?.toLocaleString('en-IN')}</Text>
                                     </View>
                                 </View>
 

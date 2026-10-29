@@ -243,7 +243,7 @@ const PendingEmailsTab = () => {
     const pendingColumns: TableColumn<any>[] = [
         { key: 'to', label: 'To', flex: 2, render: (m) => <TwoLine main={m.to} /> },
         { key: 'tpl', label: 'Template', flex: 2, render: (m) => m.templateName || '-' },
-        { key: 'date', label: 'Generated', width: 170, render: (m) => new Date(m.createdAt).toLocaleString() },
+        { key: 'date', label: 'Generated', width: 170, render: (m) => new Date(m.createdAt).toLocaleString('en-IN') },
         { key: 'act', label: '', width: 130, align: 'center', render: (m) => (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <TouchableOpacity style={styles.sendBtn} onPress={() => handleSendEmail(m)} disabled={processingId === m.id}>
@@ -294,7 +294,7 @@ const PendingEmailsTab = () => {
                         <View style={{ flex: 1 }}>
                             <Text style={styles.toText}>✉️ {item.to}</Text>
                             <Text style={styles.templateText}>Template: <Text style={{ fontWeight: 'bold' }}>{item.templateName}</Text></Text>
-                            <Text style={styles.dateText}>Generated: {new Date(item.createdAt).toLocaleString()}</Text>
+                            <Text style={styles.dateText}>Generated: {new Date(item.createdAt).toLocaleString('en-IN')}</Text>
                             {item.failureReason ? <Text style={styles.failureReason}>⚠️ {item.failureReason}</Text> : null}
                         </View>
                         <View style={{ justifyContent: 'space-between', alignItems: 'flex-end', marginLeft: 10 }}>
@@ -366,8 +366,8 @@ const SentHistoryTab = () => {
         { key: 'to', label: 'To', flex: 2, render: (m) => <TwoLine main={m.to} /> },
         { key: 'tpl', label: 'Template', flex: 2, render: (m) => m.templateName || '-' },
         { key: 'status', label: 'Status', width: 100, render: (m) => <Pill text={m.status} color={STATUS_COLORS[m.status] || '#999'} bg={(STATUS_COLORS[m.status] || '#999') + '20'} /> },
-        { key: 'date', label: 'Created', width: 170, render: (m) => new Date(m.createdAt).toLocaleString() },
-        { key: 'sent', label: 'Sent At', width: 170, render: (m) => (m.sentAt ? new Date(m.sentAt).toLocaleString() : '-') },
+        { key: 'date', label: 'Created', width: 170, render: (m) => new Date(m.createdAt).toLocaleString('en-IN') },
+        { key: 'sent', label: 'Sent At', width: 170, render: (m) => (m.sentAt ? new Date(m.sentAt).toLocaleString('en-IN') : '-') },
         { key: 'fail', label: 'Failure Reason', flex: 2, render: (m) => ((m.status === 'FAILED' || m.status === 'PENDING') && m.failureReason ? m.failureReason : '-') },
     ];
 
@@ -416,7 +416,7 @@ const SentHistoryTab = () => {
                                 </View>
                             </View>
                             <Text style={styles.historyTemplate}>Template: {item.templateName}</Text>
-                            <Text style={styles.historyDate}>{new Date(item.createdAt).toLocaleString()}</Text>
+                            <Text style={styles.historyDate}>{new Date(item.createdAt).toLocaleString('en-IN')}</Text>
                             {(item.status === 'FAILED' || item.status === 'PENDING') && item.failureReason ? (
                                 <Text style={styles.failureReason}>⚠️ {item.failureReason}</Text>
                             ) : null}

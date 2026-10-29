@@ -122,8 +122,8 @@ export default function SuperAdminPayments() {
                     item.automationRequested ? 'Yes' : 'No',
                     item.amountPaid || 0,
                     item.status || '',
-                    item.createdAt ? new Date(item.createdAt).toLocaleString() : '',
-                    item.approvedAt ? new Date(item.approvedAt).toLocaleString() : ''
+                    item.createdAt ? new Date(item.createdAt).toLocaleString('en-IN') : '',
+                    item.approvedAt ? new Date(item.approvedAt).toLocaleString('en-IN') : ''
                 ].map(escapeCSV).join(',');
             });
             const csvContent = [headers.map(escapeCSV).join(','), ...rows].join('\n');
@@ -293,7 +293,7 @@ export default function SuperAdminPayments() {
                         UPI QR — {item.upiReference ? `UPI Ref No. ${item.upiReference}` : 'no UPI Ref No. (old app)'} · check your bank before approving
                     </Text>
                 )}
-                <Text style={styles.detail}>Requested: {item.createdAt ? new Date(item.createdAt).toLocaleString() : 'N/A'}</Text>
+                <Text style={styles.detail}>Requested: {item.createdAt ? new Date(item.createdAt).toLocaleString('en-IN') : 'N/A'}</Text>
                 {(item.paymentMethod === 'RAZORPAY' || item.paymentMethod === 'WEBSITE') && (
                     <Text style={[styles.detail, { color: '#1565c0', fontWeight: '600' }]}>
                         ⚡ {item.paymentMethod === 'WEBSITE' ? 'Bought on the website' : 'Paid online in the app'} — activated automatically
@@ -303,7 +303,7 @@ export default function SuperAdminPayments() {
 
                 {item.approvedAt && (
                     <Text style={[styles.detail, { color: '#2e7d32', fontWeight: '600' }]}>
-                        ✅ Approved on: {new Date(item.approvedAt).toLocaleString()}
+                        ✅ Approved on: {new Date(item.approvedAt).toLocaleString('en-IN')}
                     </Text>
                 )}
                 {item.status === 'REJECTED' && (

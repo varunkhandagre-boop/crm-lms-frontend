@@ -206,7 +206,7 @@ export const TemplatesTab = () => {
                                     ) : null}
                                     {!item.isStandard && (item.updatedAt || item.createdAt) ? (
                                         <Text style={{ fontSize: 10, color: 'gray', marginLeft: 10 }}>
-                                            Updated: {new Date((item.updatedAt || item.createdAt) as string).toLocaleDateString()}
+                                            Updated: {new Date((item.updatedAt || item.createdAt) as string).toLocaleDateString('en-IN')}
                                         </Text>
                                     ) : null}
                                 </View>

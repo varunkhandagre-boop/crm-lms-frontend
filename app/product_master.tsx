@@ -272,7 +272,7 @@ const handleBulkDelete = () => {
                     <View style={styles.detailsBox}>
                         
                         <View style={styles.priceRow}>
-                            <Text style={styles.priceText}>₹ {item.price ? item.price.toLocaleString() : '0'}</Text>
+                            <Text style={styles.priceText}>₹ {item.price ? item.price.toLocaleString('en-IN') : '0'}</Text>
                             <Text style={styles.gstBadge}>GST: {item.gstRate || 0}%</Text>
                         </View>
 
