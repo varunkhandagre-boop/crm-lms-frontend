@@ -108,11 +108,13 @@ const MonthStrip = () => {
     }, []);
     if (!summary) return null;
     const monthName = MONTHS[Number(summary.month.slice(5, 7)) - 1] ?? summary.month;
-    const part = (label: string, icon: any, color: string, c: MonthlySummary['email']) => (
+    const part = (label: string, icon: any, color: string, c: MonthlySummary['whatsapp']) => (
         <View style={styles.monthPart}>
             <Ionicons name={icon} size={15} color={color} />
             <Text style={styles.monthText}>
                 {label} <Text style={styles.monthNum}>{c.sent}</Text> sent
+                {c.delivered ? <Text style={{ color: '#2e7d32' }}> · {c.delivered} delivered</Text> : null}
+                {c.read ? <Text style={{ color: '#1e88e5' }}> · {c.read} read</Text> : null}
                 {c.failed > 0 ? <Text style={{ color: '#c62828' }}> · {c.failed} failed</Text> : null}
                 {c.pending > 0 ? <Text style={{ color: '#ef6c00' }}> · {c.pending} pending</Text> : null}
             </Text>
@@ -327,6 +329,15 @@ const STATUS_COLORS: Record<string, string> = {
     CANCELLED: '#999',
 };
 
+// WhatsApp receipts from the provider's status webhook: ✓ sent, ✓✓ delivered, blue ✓✓ read.
+const fmtWhen = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: '2-digit', hour: 'numeric', minute: '2-digit' });
+const Receipt = ({ m }: { m: OutboundMessage }) => {
+    if (m.channel !== 'whatsapp' || m.status !== 'SENT') return null;
+    if (m.readAt) return <Text style={[styles.receipt, { color: '#1e88e5' }]}>✓✓ Read · {fmtWhen(m.readAt)}</Text>;
+    if (m.deliveredAt) return <Text style={[styles.receipt, { color: '#555' }]}>✓✓ Delivered · {fmtWhen(m.deliveredAt)}</Text>;
+    return <Text style={[styles.receipt, { color: '#999' }]}>✓ Sent</Text>;
+};
+
 const SentHistoryTab = () => {
     const { currentUser } = useData();
     const [channelFilter, setChannelFilter] = useState<'all' | 'whatsapp' | 'email'>('all');
@@ -368,6 +379,7 @@ const SentHistoryTab = () => {
         { key: 'status', label: 'Status', width: 100, render: (m) => <Pill text={m.status} color={STATUS_COLORS[m.status] || '#999'} bg={(STATUS_COLORS[m.status] || '#999') + '20'} /> },
         { key: 'date', label: 'Created', width: 170, render: (m) => new Date(m.createdAt).toLocaleString('en-IN') },
         { key: 'sent', label: 'Sent At', width: 170, render: (m) => (m.sentAt ? new Date(m.sentAt).toLocaleString('en-IN') : '-') },
+        { key: 'receipt', label: 'Delivery', width: 170, render: (m) => <Receipt m={m} /> },
         { key: 'fail', label: 'Failure Reason', flex: 2, render: (m) => ((m.status === 'FAILED' || m.status === 'PENDING') && m.failureReason ? m.failureReason : '-') },
     ];
 
@@ -417,6 +429,7 @@ const SentHistoryTab = () => {
                             </View>
                             <Text style={styles.historyTemplate}>Template: {item.templateName}</Text>
                             <Text style={styles.historyDate}>{new Date(item.createdAt).toLocaleString('en-IN')}</Text>
+                            <Receipt m={item} />
                             {(item.status === 'FAILED' || item.status === 'PENDING') && item.failureReason ? (
                                 <Text style={styles.failureReason}>⚠️ {item.failureReason}</Text>
                             ) : null}
@@ -706,6 +719,7 @@ const styles = StyleSheet.create({
     historyTemplate: { fontSize: 12, color: '#666', marginTop: 3 },
     historyDate: { fontSize: 11, color: '#999', marginTop: 2 },
     failureReason: { fontSize: 11, color: '#d32f2f', marginTop: 4, fontStyle: 'italic' },
+    receipt: { fontSize: 12, marginTop: 4, fontWeight: '600' },
 
     sectionTitle: { fontSize: 13, fontWeight: '700', color: '#555', marginTop: 14, marginBottom: 8, textTransform: 'uppercase' },
     pillRow: { flexDirection: 'row', gap: 8 },

@@ -23,6 +23,9 @@ export interface OutboundMessage {
     sentAt: string | null;
     failureReason: string | null;
     retryCount: number;
+    // WhatsApp only, filled by the provider's status webhook (older servers: absent)
+    deliveredAt?: string | null;
+    readAt?: string | null;
     createdAt: string;
 }
 
@@ -50,7 +53,7 @@ export async function fetchOutboundMessagesPage(params: {
 
 // This month's count per channel (IST month) — WhatsApp & Email screen.
 export interface ChannelCount { sent: number; failed: number; pending: number; cancelled: number; total: number }
-export interface MonthlySummary { month: string; whatsapp: ChannelCount; email: ChannelCount }
+export interface MonthlySummary { month: string; whatsapp: ChannelCount & { delivered?: number; read?: number }; email: ChannelCount }
 export async function fetchMonthlySummary(month?: string): Promise<MonthlySummary> {
     const res = await apiClient.get<OneResponse<MonthlySummary>>(`/outbound-messages/monthly-summary${month ? `?month=${month}` : ''}`);
     return res.data;

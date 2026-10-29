@@ -16,6 +16,7 @@ import {
 import { AutomationSettings, fetchAutomationSettings, saveAutomationSettings, sendTestEmail } from '../services/api/automationSettings';
 import { useData } from './context/DataContext';
 import { useHeaderTop } from '../hooks/useHeaderTop';
+import WhatsAppStatusWebhookCard from '../components/WhatsAppStatusWebhookCard';
 
 type WaProvider = 'meta_cloud' | 'aisensy' | 'wati';
 const WHATSAPP_PROVIDERS: { label: string; value: WaProvider; hint: string; keyLabel: string; idLabel?: string; idPlaceholder?: string }[] = [
@@ -245,6 +246,8 @@ export default function AutomationSettingsScreen() {
                         </>
                     )}
                 </View>
+
+                <WhatsAppStatusWebhookCard provider={whatsappProvider} />
 
                 <View style={styles.card}>
                     <View style={styles.cardHeaderRow}>

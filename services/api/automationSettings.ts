@@ -32,6 +32,18 @@ export async function sendTestEmail(to: string): Promise<{ sent: boolean; to: st
     return res.data;
 }
 
+// WhatsApp delivered / read receipts: the URL (and Meta's Verify Token) to
+// paste into the provider's webhook settings. Regenerate makes the old URL stop working.
+export interface StatusWebhook { url: string; verifyToken: string }
+export async function fetchStatusWebhook(): Promise<StatusWebhook> {
+    const res = await apiClient.get<OneResponse<StatusWebhook>>('/automation-settings/status-webhook');
+    return res.data;
+}
+export async function regenerateStatusWebhook(): Promise<StatusWebhook> {
+    const res = await apiClient.post<OneResponse<StatusWebhook>>('/automation-settings/status-webhook/regenerate', {});
+    return res.data;
+}
+
 export async function saveAutomationSettings(payload: AutomationSettings): Promise<AutomationSettings> {
     const res = await apiClient.put<OneResponse<AutomationSettings>>('/automation-settings', payload);
     return res.data;
