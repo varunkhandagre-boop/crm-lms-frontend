@@ -225,6 +225,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
             'Upload your Signature image — it appears at the bottom of PDFs as the authorized signatory.',
             'Add Bank Details (Account No, IFSC, Bank Name, Branch) — these appear on Payment Receipts and Challans.',
             'Upload your UPI QR Code image — shown in the Payment Collection screen so clients can scan and pay directly.',
+            'Optional — 🌐 Social Media & Online Stores (bottom of the screen): add your Facebook, Instagram, YouTube, LinkedIn, Telegram, IndiaMART, TradeIndia and ExportersIndia links. They appear as buttons in customer emails such as Order Confirmation; empty ones are hidden.',
             'Tap Save after filling all details. Any update here reflects immediately across all modules.',
         ],
     },
@@ -346,6 +347,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
             'Home → Activity Report → "Installation".',
             'Select the client and product being installed.',
             'Add installation date, serial number, warranty expiry date and notes.',
+            'Tip: tap "Scan Machine Label (S/N)" and photograph the machine\'s label — the serial number (and model, if found) are filled in for you. Check them before saving.',
             'Once saved, an Installation Report PDF can be generated with full company details from Company Profile.',
             'Fill the Warranty Expiry date carefully: 60 days before it ends, Service is alerted and an AMC lead is created for the salesperson who handles that hospital.',
         ],
@@ -358,6 +360,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
         steps: [
             'Tap "Service" in the bottom bar (or Sidebar → Service on a laptop) and tap "+ New".',
             'Select the client and machine, describe the problem, and add any spare parts already used.',
+            'Photo (optional): tap the photo button and choose Camera or Gallery. Retake or remove it before saving.',
             'Admin / Manager: open a call → "Assign" to give it to an engineer. The engineer gets a notification that opens the call directly. Use "Change" or "Remove engineer" if needed.',
             'Each card shows the engineer and how long the call has been open ("Open 2 days" turns red after 48 hours), or how long it took to close.',
             'Tap "My Calls" to see only the calls assigned to you.',
@@ -573,7 +576,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
             'Settings: Sidebar → "WhatsApp & Email" → ⚙️ (top right). Admin only. Turn on WhatsApp and/or Email, choose the provider, paste the key(s), Save. The two guides below show where to get each key.',
             'Templates tab: the messages that are sent. Standard templates are ready to use; edit one to make your own copy.',
             'When an entry is saved the message goes out at once. If the provider is busy, it is tried again after 5 min, 30 min and 2 hours.',
-            'Sent History tab: every message with its status; the reason is shown under any message that did not go.',
+            'Sent History tab: every message with its status; the reason is shown under any message that did not go. WhatsApp messages also show ✓ Sent, ✓✓ Delivered or blue ✓✓ Read once the status webhook is connected (see WhatsApp Setup).',
             'Pending Emails tab: emails that could not go out automatically (email not set up, or the provider refused them). Tap Send to send from your own email app.',
         ],
     },
@@ -607,6 +610,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
             'Wati: open "API Docs" in the top menu and copy the "API Endpoint URL" (https://live-mt-server.wati.io/…) and the Bearer / Access Token. In Wati templates use the same variable names as ours, e.g. {{customer_name}}.',
             'In the app: WhatsApp & Email → ⚙️ → WhatsApp ON → pick the provider → paste the token / key (and the Phone Number ID or API Endpoint URL) → Save.',
             'Test: create a test order for yourself with your own mobile number and check Sent History. Customer numbers must be correct 10-digit mobiles (or with +91).',
+            'Optional — Delivered & Read ticks: in ⚙️, the "Delivered & Read status" card shows your Webhook URL. Copy it and paste it once in your provider: Meta → your app → WhatsApp → Configuration → Webhook (Callback URL + the Verify Token shown in the app), then subscribe to "messages"; Wati → Webhooks → Add Webhook (sent, delivered, read, failed events); AiSensy → Manage → Webhooks (ask AiSensy support if you do not see it). Keep the URL private.',
         ],
     },
     {
@@ -1091,6 +1095,16 @@ const FAQS: FaqItem[] = [
         cat: 'admin',
         q: 'WhatsApp error: "Campaign not live" / template not found / invalid template',
         a: `AiSensy: create an API Campaign for that template, named exactly like our template (e.g. order_confirmed), and set it Live.\nWati: the template must be approved and use the same name and variable names, e.g. {{customer_name}}.\nMeta: the template must be approved in WhatsApp Manager with the same name; pick the same language on the template in our Templates tab.\nThe template name to use is shown in Sidebar → WhatsApp & Email → Templates.`,
+    },
+    {
+        cat: 'admin',
+        q: 'How do I know if the customer received or read our WhatsApp?',
+        a: `Sidebar → WhatsApp & Email → Sent History. Under each WhatsApp message:\n✓ Sent — accepted by your provider\n✓✓ Delivered — reached the customer's phone (with time)\nblue ✓✓ Read — the customer opened it\n\nThis needs the status webhook connected once (Admin): ⚙️ → "Delivered & Read status" card → copy the Webhook URL → paste it in your WhatsApp provider (steps are in the card and in Help → WhatsApp Setup). Only messages sent after connecting get ticks.\n\nIf the provider reports the message could not reach the phone (wrong number, not on WhatsApp), it moves to Failed with the reason.`,
+    },
+    {
+        cat: 'admin',
+        q: 'How do I add our Facebook / Instagram / IndiaMART links to customer emails?',
+        a: `Admin: Sidebar → Company Profile → scroll to the bottom → 🌐 Social Media & Online Stores. Paste your page links (https:// is added automatically) → Save Global Settings.\n\nEmails like Order Confirmation then show them as buttons; a link you leave empty is hidden. In your own templates use {company_fb}, {company_insta}, {company_youtube}, {company_linkedin}, {company_telegram}, {company_indiamart}, {company_tradeindia} or {company_exporter}.`,
     },
     {
         cat: 'admin',
