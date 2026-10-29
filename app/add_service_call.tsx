@@ -566,10 +566,23 @@ recordLocationLog({
   const updatePartQty = (id: string, qty: string) => setUsedParts(usedParts.map(p => p.id === id ? { ...p, usedQty: qty } : p));
   const removePart = (id: string) => setUsedParts(usedParts.filter(p => p.id !== id));
   
-  const pickImage = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') return Alert.alert("Permission Denied");
-    let result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], allowsEditing: false, quality: 0.8 });
+  // Camera or gallery, same choice as on the call's details screen.
+  const pickImage = () => {
+    Alert.alert('Photo', 'Choose source', [
+      { text: 'Camera', onPress: () => addPhoto(true) },
+      { text: 'Gallery', onPress: () => addPhoto(false) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const addPhoto = async (fromCamera: boolean) => {
+    const perm = fromCamera
+      ? await ImagePicker.requestCameraPermissionsAsync()
+      : Platform.OS === 'ios' ? await ImagePicker.requestMediaLibraryPermissionsAsync() : { status: 'granted' };
+    if (perm.status !== 'granted') return Alert.alert("Permission Denied");
+    const result = fromCamera
+      ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], allowsEditing: false, quality: 0.8 })
+      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: false, quality: 0.8 });
     if (result.canceled) return;
     setPreparingImage(true);
     try {
@@ -674,7 +687,7 @@ recordLocationLog({
             <View style={styles.cameraContainer}>
                 <TouchableOpacity style={styles.cameraBtn} onPress={pickImage} disabled={preparingImage}>
                     {preparingImage ? <ActivityIndicator color="#3b5998" /> : <Ionicons name="camera" size={24} color="#3b5998" />}
-                    <Text style={{color:'#3b5998', marginLeft:10}}>{preparingImage ? 'Preparing photo...' : image ? 'Retake Photo' : 'Take Photo'}</Text>
+                    <Text style={{color:'#3b5998', marginLeft:10}}>{preparingImage ? 'Preparing photo...' : image ? 'Change Photo' : 'Add Photo (Camera / Gallery)'}</Text>
                 </TouchableOpacity>
                 {image && <Image source={{ uri: image.uri }} style={styles.previewImage} />}
                 {image && (
