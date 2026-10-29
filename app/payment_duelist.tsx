@@ -411,7 +411,7 @@ export default function PaymentDueList() {
                                 <DetailRow label="Customer" value={selectedItem?.orgName || selectedItem?.hospitalName} />
                                 <DetailRow label={selectedItem.orderId ? "Order ID" : "Bill No"} value={selectedItem?.orderId || selectedItem?.billNo || 'N/A'} />
                                 
-                                <DetailRow label="Bill Date" value={selectedItem?.date || selectedItem?.createdAt} />
+                                <DetailRow label="Bill Date" value={showDate(selectedItem?.date || selectedItem?.createdAt)} />
                                 {selectedItem?.dueDate && <DetailRow label="Target Due Date" value={showDate(selectedItem.dueDate)} />}
                                 
                                 <DetailRow label="Original Amount" value={`₹ ${selectedItem?.amount}`} />

@@ -40,6 +40,7 @@ import { useHeaderTop } from '../hooks/useHeaderTop';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 import { Pill, TableColumn, TableHeader, TableRow, TwoLine } from '../components/DesktopTable';
 import { PeriodTabs, StaffPeriodRow, TotalBar } from '../components/compact';
+import { showDate } from '../utils/showDate';
 
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const fyStart = (d: Date) => (d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1);
@@ -684,7 +685,7 @@ export default function ServiceCallScreen() {
         {renderAge(item)}
         <View style={styles.divider} />
         <View style={styles.cardFooter}>
-          <Text style={styles.footerText}>{item.dateIso || item.date}</Text>
+          <Text style={styles.footerText}>{showDate(item.dateIso || item.date)}</Text>
           <Text style={[styles.footerText, { color: '#3b5998', fontWeight: 'bold' }]}>
             {item.senderName ? item.senderName.split(' ')[0] : 'Unknown'}
           </Text>
@@ -834,7 +835,7 @@ export default function ServiceCallScreen() {
                 <DetailRow label="Hospital" value={selectedCall.hospitalName} icon="business" highlight />
                 <DetailRow label="City" value={selectedCall.city} icon="location" />
                 <DetailRow label="Ticket No" value={selectedCall.scrId} icon="pricetag" />
-                <DetailRow label="Date" value={selectedCall.dateIso || selectedCall.date} icon="calendar" />
+                <DetailRow label="Date" value={showDate(selectedCall.dateIso || selectedCall.date)} icon="calendar" />
                 <DetailRow label="Logged by" value={selectedCall.senderName || selectedCall.userName} icon="person" />
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
                   <View style={{ width: 25 }}><Ionicons name="construct" size={16} color="#3b5998" /></View>

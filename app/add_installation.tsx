@@ -44,6 +44,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 import { scanTextFromImage } from '../services/api/ocr';
 import { showDate } from '../utils/showDate';
+import { extractModel, extractSerial } from '../utils/labelOcr';
+import { compressForOcr } from '../utils/attachments';
 
 export default function AddInstallationScreen() {
   const headerTop = useHeaderTop();
@@ -195,15 +197,12 @@ export default function AddInstallationScreen() {
               return;
           }
 
-          const result = await ImagePicker.launchCameraAsync({
-              mediaTypes: ['images'],
-              quality: 0.2, 
-              base64: true,
-          });
+          const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.9 });
 
-          if (!result.canceled && result.assets[0].base64) {
+          if (!result.canceled && result.assets[0]) {
               setIsScanning(true);
-              const extractedText = await scanTextFromImage(result.assets[0].base64);
+              // Sharper, larger photo than before (small serial numbers were unreadable at 20% quality).
+              const extractedText = await scanTextFromImage(await compressForOcr(result.assets[0]));
               if (extractedText) {
                   processMachineOCR(extractedText);
               } else {
@@ -221,21 +220,14 @@ export default function AddInstallationScreen() {
       let foundSomething = false;
       const fullTextLower = text.toLowerCase();
 
-      const snMatch = text.match(/(?:SN|S\/N|Serial No\.?|Serial Number|S\.N\.|Ser\.No)\s*[:\-]?\s*([A-Za-z0-9\-]{5,20})/i);
-      if (snMatch && snMatch[1]) {
-          setSerialNo(snMatch[1].toUpperCase());
+      const scannedModel = extractModel(text);
+      const scannedSerial = extractSerial(text, scannedModel);
+      if (scannedSerial) {
+          setSerialNo(scannedSerial);
           foundSomething = true;
-      } else {
-          const fallbackSN = text.match(/\b[A-Z0-9]{8,20}\b/i);
-          if (fallbackSN) {
-              setSerialNo(fallbackSN[0].toUpperCase());
-              foundSomething = true;
-          }
       }
-
-      const modelMatch = text.match(/(?:Model|REF|M\/N|PN|P\/N|Part No\.?)\s*[:\-]?\s*([A-Za-z0-9\-]{3,15})/i);
-      if (modelMatch && modelMatch[1]) {
-          setModel(modelMatch[1].toUpperCase());
+      if (scannedModel) {
+          setModel(scannedModel);
           foundSomething = true;
       }
 

@@ -48,6 +48,18 @@ export async function compressPhoto(photo: PickedPhoto): Promise<{ dataUri: stri
     };
 }
 
+// Label / card photos for text reading: bigger (1600 px) and JPEG so small
+// print like serial numbers stays sharp; kept under ~900 KB for the OCR service.
+export async function compressForOcr(photo: PickedPhoto): Promise<string> {
+    const image = await shrink(photo, 1600);
+    let saved = await image.saveAsync({ format: SaveFormat.JPEG, compress: 0.75, base64: true });
+    if (saved.base64 && base64Bytes(saved.base64) > 900 * 1024) {
+        saved = await image.saveAsync({ format: SaveFormat.JPEG, compress: 0.5, base64: true });
+    }
+    if (!saved.base64) throw new Error('Could not read the photo');
+    return saved.base64;
+}
+
 // Profile photo, logo, signature: kept small (they are stored with the record
 // and printed on PDFs). JPEG, because every PDF viewer shows it.
 export async function compressSmallImage(photo: PickedPhoto, longSide = 512): Promise<string> {
