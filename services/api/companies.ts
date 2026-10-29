@@ -2,6 +2,19 @@
 // "company_profile" + "companies" collections.
 import { apiClient } from "./client";
 
+// Social media / online store links (shown in customer emails).
+export const SOCIAL_LINKS = [
+  { key: 'facebook', label: 'Facebook page', placeholder: 'facebook.com/yourcompany' },
+  { key: 'instagram', label: 'Instagram', placeholder: 'instagram.com/yourcompany' },
+  { key: 'youtube', label: 'YouTube channel', placeholder: 'youtube.com/@yourcompany' },
+  { key: 'linkedin', label: 'LinkedIn', placeholder: 'linkedin.com/company/yourcompany' },
+  { key: 'telegram', label: 'Telegram', placeholder: 't.me/yourcompany' },
+  { key: 'indiamart', label: 'IndiaMART store', placeholder: 'indiamart.com/yourcompany' },
+  { key: 'tradeindia', label: 'TradeIndia store', placeholder: 'tradeindia.com/yourcompany' },
+  { key: 'exportersindia', label: 'ExportersIndia store', placeholder: 'exportersindia.com/yourcompany' },
+] as const;
+export type SocialLinks = Partial<Record<(typeof SOCIAL_LINKS)[number]['key'], string>>;
+
 export interface LegacyCompanyProfile {
   id: string;
   companyName: string;
@@ -20,6 +33,7 @@ export interface LegacyCompanyProfile {
   mobile: string;      // alias of contactPhone
   landline: string;
   website: string;
+  socialLinks: SocialLinks;
   logoUrl: string;
   signatureUrl: string;
   qrCodeUrl: string;
@@ -63,6 +77,7 @@ function toLegacyCompanyProfile(c: any): LegacyCompanyProfile {
     mobile: c.contactPhone ?? '',
     landline: c.landline ?? '',
     website: c.website ?? '',
+    socialLinks: (c.socialLinks && typeof c.socialLinks === 'object' ? c.socialLinks : {}) as SocialLinks,
     logoUrl: c.logoUrl ?? '',
     signatureUrl: c.signatureUrl ?? '',
     qrCodeUrl: c.qrCodeUrl ?? '',
@@ -101,6 +116,7 @@ export interface CompanyProfilePayload {
   contactPhone?: string;
   landline?: string;
   website?: string;
+  socialLinks?: SocialLinks;
   logoUrl?: string;
   signatureUrl?: string;
   qrCodeUrl?: string;

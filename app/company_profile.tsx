@@ -28,7 +28,7 @@ import { useData } from './context/DataContext';
 
 // 🔥 Phase 10: company profile now lives on the Company row in Postgres via
 // this adapter — replaces the Firestore "company_profile" + "companies" collections.
-import { fetchCompanyProfile, updateCompanyProfile } from '../services/api/companies';
+import { fetchCompanyProfile, updateCompanyProfile, SOCIAL_LINKS, SocialLinks } from '../services/api/companies';
 import { useHeaderTop } from '../hooks/useHeaderTop';
 
 const USE_STORAGE_BUCKET = false; 
@@ -60,6 +60,7 @@ export default function CompanyProfileScreen() {
         bank1_name: '', bank1_acc: '', bank1_ifsc: '', bank1_branch: '',
         bank2_name: '', bank2_acc: '', bank2_ifsc: '', bank2_branch: '',
         officeLatitude: null as number | null, officeLongitude: null as number | null,
+        socialLinks: {} as SocialLinks,
     });
 
     useEffect(() => {
@@ -76,6 +77,7 @@ export default function CompanyProfileScreen() {
                     bank1_name: cp.bankDetails1?.bankName || '', bank1_acc: cp.bankDetails1?.accountNo || '', bank1_ifsc: cp.bankDetails1?.ifsc || '', bank1_branch: cp.bankDetails1?.branch || '',
                     bank2_name: cp.bankDetails2?.bankName || '', bank2_acc: cp.bankDetails2?.accountNo || '', bank2_ifsc: cp.bankDetails2?.ifsc || '', bank2_branch: cp.bankDetails2?.branch || '',
                     officeLatitude: cp.officeLatitude ?? null, officeLongitude: cp.officeLongitude ?? null,
+                    socialLinks: cp.socialLinks || {},
                 }));
 
 
@@ -147,6 +149,7 @@ export default function CompanyProfileScreen() {
                 contactPhone: profile.phone,
                 landline: profile.landline,
                 website: profile.website,
+                socialLinks: profile.socialLinks,
                 logoUrl: profile.logoUrl,
                 signatureUrl: profile.signatureUrl,
                 qrCodeUrl: profile.qrCodeUrl,
@@ -422,6 +425,27 @@ export default function CompanyProfileScreen() {
                                 </TouchableOpacity>
                             ) : null}
                         </View>
+                    </View>
+
+                    {/* 7. SOCIAL / ONLINE STORES */}
+                    <View style={styles.section}>
+                        <Text style={styles.sectionHeader}>🌐 Social Media & Online Stores</Text>
+                        <Text style={{ fontSize: 12, color: '#666', marginBottom: 6 }}>
+                            Optional. Filled links appear as buttons in customer emails (e.g. order confirmation). Leave empty to hide.
+                        </Text>
+                        {SOCIAL_LINKS.map((l) => (
+                            <View key={l.key}>
+                                <InputLabel label={l.label} />
+                                <TextInput
+                                    style={styles.input}
+                                    value={profile.socialLinks[l.key] || ''}
+                                    onChangeText={(t) => setProfile((prev) => ({ ...prev, socialLinks: { ...prev.socialLinks, [l.key]: t } }))}
+                                    placeholder={l.placeholder}
+                                    autoCapitalize="none"
+                                    keyboardType="url"
+                                />
+                            </View>
+                        ))}
                     </View>
 
                     <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={saving || uploading}>
