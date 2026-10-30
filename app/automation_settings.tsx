@@ -44,6 +44,28 @@ const EMAIL_PROVIDERS = [
     { label: 'SendGrid', value: 'sendgrid', hint: 'SendGrid → Settings → API Keys (Mail Send). Verify your sender in Sender Authentication.' },
 ];
 
+const waComplete = (s: Pick<AutomationSettings, 'whatsappProvider' | 'whatsappApiKey' | 'whatsappSenderId'>) => {
+    const info = WHATSAPP_PROVIDERS.find((p) => p.value === s.whatsappProvider);
+    return !!info && !!s.whatsappApiKey?.trim() && (!info.idLabel || !!s.whatsappSenderId?.trim());
+};
+const emailComplete = (s: Pick<AutomationSettings, 'emailApiKey' | 'emailFromAddress'>) => !!s.emailApiKey?.trim() && !!s.emailFromAddress?.trim();
+const masked = (key: string) => (key.length > 4 ? `•••• ${key.slice(-4)}` : '••••');
+
+function SavedLine({ title, lines, onChange }: { title: string; lines: string[]; onChange: () => void }) {
+    return (
+        <View style={styles.savedBox}>
+            <Ionicons name="checkmark-circle" size={20} color="#2e7d32" />
+            <View style={{ flex: 1, marginLeft: 8 }}>
+                <Text style={styles.savedTitle}>{title}</Text>
+                {lines.map((l) => <Text key={l} style={styles.savedSub} numberOfLines={1}>{l}</Text>)}
+            </View>
+            <TouchableOpacity onPress={onChange} style={styles.changeBtn}>
+                <Text style={styles.changeText}>Change</Text>
+            </TouchableOpacity>
+        </View>
+    );
+}
+
 export default function AutomationSettingsScreen() {
     const headerTop = useHeaderTop();
     const router = useRouter();
@@ -65,6 +87,12 @@ export default function AutomationSettingsScreen() {
     const [emailFromAddress, setEmailFromAddress] = useState('');
     const [testTo, setTestTo] = useState('');
     const [testing, setTesting] = useState(false);
+    // Details already saved: shown as a short "connected" line (Change opens the
+    // fields again), and the ON/OFF switch saves at once without asking again.
+    const [waSaved, setWaSaved] = useState(false);
+    const [waEdit, setWaEdit] = useState(false);
+    const [emailSaved, setEmailSaved] = useState(false);
+    const [emailEdit, setEmailEdit] = useState(false);
 
     const isAllowed = ['Admin', 'SuperAdmin'].includes(currentUser?.role || '');
 
@@ -84,6 +112,8 @@ export default function AutomationSettingsScreen() {
                 setEmailProvider(settings.emailProvider);
                 setEmailApiKey(settings.emailApiKey || '');
                 setEmailFromAddress(settings.emailFromAddress || '');
+                setWaSaved(waComplete(settings));
+                setEmailSaved(emailComplete(settings));
                 setTestTo(currentUser?.email || '');
             } catch (e: any) {
                 console.log('Settings load error:', e);
@@ -94,43 +124,73 @@ export default function AutomationSettingsScreen() {
         loadSettings();
     }, []);
 
-    const handleSave = async () => {
-        if (whatsappEnabled && !whatsappApiKey.trim()) {
-            Alert.alert('Missing API Key', `${waInfo.keyLabel} is required to enable WhatsApp.`);
-            return;
-        }
-        if (whatsappEnabled && waInfo.idLabel && !whatsappSenderId.trim()) {
-            Alert.alert('Missing details', `${waInfo.idLabel} is required for ${waInfo.label}.`);
-            return;
-        }
-        if (emailEnabled && !emailApiKey.trim()) {
-            Alert.alert('Missing API Key', 'An API key is required to enable Email.');
-            return;
-        }
-        if (emailEnabled && !emailFromAddress.trim()) {
-            Alert.alert('Missing From Address', 'Enter the From email address (verified in your email provider).');
-            return;
-        }
+    const current = (): AutomationSettings => ({
+        whatsappEnabled,
+        whatsappProvider,
+        whatsappApiKey: whatsappApiKey.trim() || null,
+        whatsappSenderId: whatsappSenderId.trim() || null,
+        emailEnabled,
+        emailProvider,
+        emailApiKey: emailApiKey.trim() || null,
+        emailFromAddress: emailFromAddress.trim() || null,
+    });
 
+    const persist = async (over: Partial<AutomationSettings>, okTitle: string, okMsg: string) => {
+        const p = { ...current(), ...over };
+        const wa = WHATSAPP_PROVIDERS.find((x) => x.value === p.whatsappProvider) ?? WHATSAPP_PROVIDERS[0];
+        if (p.whatsappEnabled && !p.whatsappApiKey) {
+            Alert.alert('Missing API Key', `${wa.keyLabel} is required to enable WhatsApp.`);
+            return false;
+        }
+        if (p.whatsappEnabled && wa.idLabel && !p.whatsappSenderId) {
+            Alert.alert('Missing details', `${wa.idLabel} is required for ${wa.label}.`);
+            return false;
+        }
+        if (p.emailEnabled && !p.emailApiKey) {
+            Alert.alert('Missing API Key', 'An API key is required to enable Email.');
+            return false;
+        }
+        if (p.emailEnabled && !p.emailFromAddress) {
+            Alert.alert('Missing From Address', 'Enter the From email address (verified in your email provider).');
+            return false;
+        }
         setSaving(true);
         try {
-            const payload: AutomationSettings = {
-                whatsappEnabled,
-                whatsappProvider,
-                whatsappApiKey: whatsappApiKey.trim() || null,
-                whatsappSenderId: whatsappSenderId.trim() || null,
-                emailEnabled,
-                emailProvider,
-                emailApiKey: emailApiKey.trim() || null,
-                emailFromAddress: emailFromAddress.trim() || null,
-            };
-            await saveAutomationSettings(payload);
-            Alert.alert('Saved', 'Automation settings saved successfully.');
+            await saveAutomationSettings(p);
+            setWhatsappEnabled(p.whatsappEnabled);
+            setEmailEnabled(p.emailEnabled);
+            setWaSaved(waComplete(p));
+            setEmailSaved(emailComplete(p));
+            setWaEdit(false);
+            setEmailEdit(false);
+            Alert.alert(okTitle, okMsg);
+            return true;
         } catch (e: any) {
             Alert.alert('Error', e.message || 'Could not save, please try again.');
+            return false;
         } finally {
             setSaving(false);
         }
+    };
+
+    const handleSave = () => persist({}, 'Saved', 'Automation settings saved successfully.');
+
+    // Switch: with details already saved it saves at once; otherwise it opens the fields.
+    const toggleWhatsApp = (on: boolean) => {
+        if (waSaved && !waEdit) {
+            persist({ whatsappEnabled: on }, on ? 'WhatsApp is ON' : 'WhatsApp is OFF', on ? 'Customers get WhatsApp updates again.' : 'No WhatsApp messages are sent until you turn it on.');
+            return;
+        }
+        setWhatsappEnabled(on);
+        if (on) setWaEdit(true);
+    };
+    const toggleEmail = (on: boolean) => {
+        if (emailSaved && !emailEdit) {
+            persist({ emailEnabled: on }, on ? 'Email is ON' : 'Email is OFF', on ? 'Customers get email updates again.' : 'Emails now wait in Pending Emails until you turn it on.');
+            return;
+        }
+        setEmailEnabled(on);
+        if (on) setEmailEdit(true);
     };
 
     const handleTestEmail = async () => {
@@ -203,9 +263,16 @@ export default function AutomationSettingsScreen() {
                             <Ionicons name="logo-whatsapp" size={22} color="#25D366" />
                             <Text style={styles.cardTitle}>WhatsApp Automation</Text>
                         </View>
-                        <Switch value={whatsappEnabled} onValueChange={setWhatsappEnabled} />
+                        <Switch value={whatsappEnabled} onValueChange={toggleWhatsApp} disabled={saving} />
                     </View>
 
+                    {waSaved && !waEdit ? (
+                        <SavedLine
+                            title={`${waInfo.label} — details saved`}
+                            lines={[`${waInfo.keyLabel}: ${masked(whatsappApiKey)}`, ...(waInfo.idLabel ? [`${waInfo.idLabel}: ${whatsappSenderId}`] : [])]}
+                            onChange={() => setWaEdit(true)}
+                        />
+                    ) : (<>
                     <Text style={styles.label}>Provider</Text>
                     <View style={styles.pillRow}>
                         {WHATSAPP_PROVIDERS.map((p) => (
@@ -245,6 +312,7 @@ export default function AutomationSettingsScreen() {
                             />
                         </>
                     )}
+                    </>)}
                 </View>
 
                 <WhatsAppStatusWebhookCard provider={whatsappProvider} />
@@ -255,9 +323,16 @@ export default function AutomationSettingsScreen() {
                             <Ionicons name="mail" size={22} color="#1565c0" />
                             <Text style={styles.cardTitle}>Email Automation</Text>
                         </View>
-                        <Switch value={emailEnabled} onValueChange={setEmailEnabled} />
+                        <Switch value={emailEnabled} onValueChange={toggleEmail} disabled={saving} />
                     </View>
 
+                    {emailSaved && !emailEdit ? (
+                        <SavedLine
+                            title={`${EMAIL_PROVIDERS.find((p) => p.value === emailProvider)?.label ?? 'Email'} — details saved`}
+                            lines={[`API Key: ${masked(emailApiKey)}`, `From: ${emailFromAddress}`]}
+                            onChange={() => setEmailEdit(true)}
+                        />
+                    ) : (<>
                     <Text style={styles.label}>Provider</Text>
                     <View style={styles.pillRow}>
                         {EMAIL_PROVIDERS.map((p) => (
@@ -295,6 +370,7 @@ export default function AutomationSettingsScreen() {
                         keyboardType="email-address"
                     />
                     <Text style={styles.hint}>Must be a sender verified in your email provider. Customer replies go to the email in Company Profile.</Text>
+                    </>)}
 
                     <Text style={styles.label}>Send a test email (save first)</Text>
                     <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -321,7 +397,7 @@ export default function AutomationSettingsScreen() {
                 </TouchableOpacity>
 
                 <Text style={styles.footNote}>
-                    WhatsApp templates must be approved (on Meta, AiSensy or Wati) before they can be sent. Emails use your Email templates and go out automatically; if sending fails they wait in Pending Emails.
+                    Once the details are saved, the ON / OFF switches save at once. WhatsApp templates must be approved (on Meta, AiSensy or Wati) before they can be sent. Emails use your Email templates and go out automatically; if sending fails they wait in Pending Emails.
                 </Text>
 
             </ScrollView>
@@ -348,6 +424,11 @@ const styles = StyleSheet.create({
     saveBtn: { backgroundColor: '#4caf50', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 10, elevation: 2 },
     saveText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
     hint: { fontSize: 11, color: '#777', marginTop: 6, lineHeight: 16 },
+    savedBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#eef7ee', borderWidth: 1, borderColor: '#cfe8cf', borderRadius: 8, padding: 10 },
+    savedTitle: { fontSize: 13, fontWeight: 'bold', color: '#2e7d32' },
+    savedSub: { fontSize: 12, color: '#555', marginTop: 2 },
+    changeBtn: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: '#3b5998', backgroundColor: 'white' },
+    changeText: { color: '#3b5998', fontWeight: 'bold', fontSize: 12 },
     testBtn: { backgroundColor: '#1565c0', borderRadius: 8, paddingHorizontal: 14, justifyContent: 'center' },
     testBtnText: { color: 'white', fontWeight: 'bold', fontSize: 13 },
     footNote: { textAlign: 'center', color: 'gray', fontSize: 11, marginTop: 15, paddingHorizontal: 10 },

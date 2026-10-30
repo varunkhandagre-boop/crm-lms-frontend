@@ -17,6 +17,8 @@ export interface MessageTemplate {
     isStandard?: boolean;
     /** Your own version of a standard template — deleting it brings the standard back. */
     overridesStandard?: boolean;
+    /** OFF = this automatic message is not sent (older servers: absent = on). */
+    enabled?: boolean;
 }
 
 interface OneResponse<T> { data: T }
@@ -44,6 +46,11 @@ export async function createTemplate(payload: SaveTemplatePayload): Promise<Mess
 export async function updateTemplate(id: string, payload: Partial<SaveTemplatePayload>): Promise<MessageTemplate> {
     const res = await apiClient.patch<OneResponse<MessageTemplate>>(`/message-templates/${id}`, payload);
     return res.data;
+}
+
+/** Turns one automatic message (type + name) ON or OFF for the company. */
+export async function setTemplateEnabled(type: 'email' | 'whatsapp', name: string, enabled: boolean): Promise<void> {
+    await apiClient.put('/message-templates/switch', { type, name, enabled });
 }
 
 export async function deleteTemplate(id: string): Promise<void> {

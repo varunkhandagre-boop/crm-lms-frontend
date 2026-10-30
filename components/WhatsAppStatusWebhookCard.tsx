@@ -31,10 +31,13 @@ export default function WhatsAppStatusWebhookCard({ provider }: { provider: Prov
     const [hook, setHook] = useState<StatusWebhook | null>(null);
     const [error, setError] = useState('');
     const [busy, setBusy] = useState(false);
+    // Folded by default: it is a one-time setup, not something to fill each visit.
+    const [open, setOpen] = useState(false);
 
     useEffect(() => {
+        if (!open || hook) return;
         fetchStatusWebhook().then(setHook).catch((e) => setError(e.message || 'Could not load the webhook URL.'));
-    }, []);
+    }, [open, hook]);
 
     const copy = async (text: string, what: string) => {
         await Clipboard.setStringAsync(text);
@@ -55,10 +58,14 @@ export default function WhatsAppStatusWebhookCard({ provider }: { provider: Prov
 
     return (
         <View style={styles.card}>
-            <View style={styles.titleRow}>
+            <TouchableOpacity style={styles.titleRow} onPress={() => setOpen((o) => !o)}>
                 <Ionicons name="checkmark-done" size={20} color="#34B7F1" />
                 <Text style={styles.title}>Delivered & Read status (optional)</Text>
-            </View>
+                <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color="#888" />
+            </TouchableOpacity>
+            {!open ? (
+                <Text style={styles.hint}>One-time setup in your WhatsApp provider for ✓✓ ticks in Sent History. Tap to see the Webhook URL.</Text>
+            ) : (<>
             <Text style={styles.hint}>
                 Connect this once and Sent History shows ✓✓ Delivered and Read for each WhatsApp message, and messages that never reached the phone move to Failed with the reason. Works for messages sent after it is connected.
             </Text>
@@ -100,6 +107,7 @@ export default function WhatsAppStatusWebhookCard({ provider }: { provider: Prov
                     <Text style={styles.hint}>Keep this URL private — anyone with it can change message statuses.</Text>
                 </>
             )}
+            </>)}
         </View>
     );
 }
@@ -107,7 +115,7 @@ export default function WhatsAppStatusWebhookCard({ provider }: { provider: Prov
 const styles = StyleSheet.create({
     card: { backgroundColor: '#f9f9f9', borderRadius: 12, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: '#eee' },
     titleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
-    title: { fontSize: 15, fontWeight: 'bold', color: '#333', marginLeft: 8 },
+    title: { flex: 1, fontSize: 15, fontWeight: 'bold', color: '#333', marginLeft: 8 },
     hint: { fontSize: 11, color: '#777', marginTop: 6, lineHeight: 16 },
     error: { fontSize: 12, color: '#c62828', marginTop: 10 },
     label: { fontSize: 12, color: '#666', fontWeight: '600', marginBottom: 6, marginTop: 12 },

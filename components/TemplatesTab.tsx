@@ -12,6 +12,7 @@ import {
     Platform,
     ScrollView,
     StyleSheet,
+    Switch,
     Text,
     TextInput,
     TouchableOpacity,
@@ -23,8 +24,10 @@ import {
     deleteTemplate,
     fetchTemplates,
     MessageTemplate,
+    setTemplateEnabled,
     updateTemplate,
 } from '../services/api/messageTemplates';
+import { useData } from '../app/context/DataContext';
 
 // Must match the language the template was approved in on Meta.
 const WA_LANGUAGES = [
@@ -40,6 +43,9 @@ const languageLabel = (code?: string | null) => {
 };
 
 export const TemplatesTab = () => {
+    const { currentUser } = useData();
+    const isAdmin = ['Admin', 'SuperAdmin'].includes(currentUser?.role || '');
+    const [switching, setSwitching] = useState<string | null>(null);
     const [templates, setTemplates] = useState<MessageTemplate[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchText, setSearchText] = useState('');
@@ -152,6 +158,21 @@ export const TemplatesTab = () => {
         ]);
     };
 
+    // ON / OFF: an OFF message is simply not sent (nothing in Sent History).
+    const toggleEnabled = async (t: MessageTemplate, on: boolean) => {
+        const key = `${t.type}:${t.name}`;
+        setSwitching(key);
+        setTemplates((list) => list.map((x) => (x.type === t.type && x.name === t.name ? { ...x, enabled: on } : x)));
+        try {
+            await setTemplateEnabled(t.type, t.name, on);
+        } catch (e: any) {
+            setTemplates((list) => list.map((x) => (x.type === t.type && x.name === t.name ? { ...x, enabled: !on } : x)));
+            Alert.alert('Error', e.message || 'Could not change it.');
+        } finally {
+            setSwitching(null);
+        }
+    };
+
     const filteredTemplates = templates.filter(
         (t) =>
             (t.name || '').toLowerCase().includes(searchText.toLowerCase()) ||
@@ -199,6 +220,9 @@ export const TemplatesTab = () => {
                                             {item.type === 'email' ? 'EMAIL' : 'WHATSAPP'}
                                         </Text>
                                     </View>
+                                    {item.enabled === false ? (
+                                        <Text style={[tStyles.originBadge, { color: '#616161', backgroundColor: '#eeeeee' }]}>OFF</Text>
+                                    ) : null}
                                     {item.isStandard ? (
                                         <Text style={[tStyles.originBadge, { color: '#6a1b9a', backgroundColor: '#f3e5f5' }]}>STANDARD</Text>
                                     ) : item.overridesStandard ? (
@@ -227,6 +251,17 @@ export const TemplatesTab = () => {
                                     <Text style={{ color: '#d32f2f', fontWeight: 'bold', marginLeft: 5 }}>{item.overridesStandard ? 'Use standard' : 'Delete'}</Text>
                                 </TouchableOpacity>
                             )}
+                            {isAdmin && item.enabled !== undefined ? (
+                                // Own touchable so a tap on the switch doesn't also open the template.
+                                <TouchableOpacity activeOpacity={1} onPress={() => {}} style={tStyles.switchWrap}>
+                                    <Text style={[tStyles.switchText, { color: item.enabled ? '#2e7d32' : '#757575' }]}>{item.enabled ? 'Sending ON' : 'OFF'}</Text>
+                                    <Switch
+                                        value={item.enabled}
+                                        disabled={switching === `${item.type}:${item.name}`}
+                                        onValueChange={(on) => toggleEnabled(item, on)}
+                                    />
+                                </TouchableOpacity>
+                            ) : null}
                         </View>
                     </TouchableOpacity>
                 )}
@@ -402,6 +437,8 @@ const tStyles = StyleSheet.create({
     bodyPreview: { fontSize: 12, color: '#777', marginTop: 4 },
     actionRow: { flexDirection: 'row', gap: 15, marginTop: 10, borderTopWidth: 1, borderTopColor: '#f0f0f0', paddingTop: 10 },
     actionBtn: { flexDirection: 'row', alignItems: 'center' },
+    switchWrap: { flexDirection: 'row', alignItems: 'center', marginLeft: 'auto', gap: 6 },
+    switchText: { fontSize: 12, fontWeight: 'bold' },
     fab: { position: 'absolute', bottom: 20, right: 20, backgroundColor: '#2c3e50', width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center', elevation: 5 },
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
     viewModalContent: { backgroundColor: 'white', borderRadius: 10, padding: 20, elevation: 5, maxHeight: '85%', width: '100%', maxWidth: 560, alignSelf: 'center' },
