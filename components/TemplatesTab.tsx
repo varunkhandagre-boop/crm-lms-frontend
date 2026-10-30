@@ -49,6 +49,7 @@ export const TemplatesTab = () => {
     const [templates, setTemplates] = useState<MessageTemplate[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchText, setSearchText] = useState('');
+    const [typeFilter, setTypeFilter] = useState<'all' | 'whatsapp' | 'email'>('all');
 
     const [modalVisible, setModalVisible] = useState(false);
     const [editId, setEditId] = useState<string | null>(null);
@@ -175,8 +176,9 @@ export const TemplatesTab = () => {
 
     const filteredTemplates = templates.filter(
         (t) =>
-            (t.name || '').toLowerCase().includes(searchText.toLowerCase()) ||
-            (t.subject || '').toLowerCase().includes(searchText.toLowerCase())
+            (typeFilter === 'all' || t.type === typeFilter) &&
+            ((t.name || '').toLowerCase().includes(searchText.toLowerCase()) ||
+                (t.subject || '').toLowerCase().includes(searchText.toLowerCase()))
     );
 
     if (loading) return <ActivityIndicator size="large" color="#3b5998" style={{ marginTop: 50 }} />;
@@ -196,6 +198,16 @@ export const TemplatesTab = () => {
                         <Ionicons name="close-circle" size={20} color="gray" />
                     </TouchableOpacity>
                 )}
+            </View>
+
+            <View style={tStyles.typeRow}>
+                {([['all', 'All'], ['whatsapp', 'WhatsApp'], ['email', 'Email']] as const).map(([key, label]) => (
+                    <TouchableOpacity key={key} style={[tStyles.typeChip, typeFilter === key && tStyles.typeChipActive]} onPress={() => setTypeFilter(key)}>
+                        <Text style={[tStyles.typeChipText, typeFilter === key && { color: 'white' }]}>
+                            {label} ({key === 'all' ? templates.length : templates.filter((t) => t.type === key).length})
+                        </Text>
+                    </TouchableOpacity>
+                ))}
             </View>
 
             <FlatList
@@ -437,6 +449,10 @@ const tStyles = StyleSheet.create({
     bodyPreview: { fontSize: 12, color: '#777', marginTop: 4 },
     actionRow: { flexDirection: 'row', gap: 15, marginTop: 10, borderTopWidth: 1, borderTopColor: '#f0f0f0', paddingTop: 10 },
     actionBtn: { flexDirection: 'row', alignItems: 'center' },
+    typeRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+    typeChip: { paddingVertical: 7, paddingHorizontal: 14, borderRadius: 20, backgroundColor: 'white', borderWidth: 1, borderColor: '#ddd' },
+    typeChipActive: { backgroundColor: '#3b5998', borderColor: '#3b5998' },
+    typeChipText: { fontSize: 13, fontWeight: '600', color: '#555' },
     switchWrap: { flexDirection: 'row', alignItems: 'center', marginLeft: 'auto', gap: 6 },
     switchText: { fontSize: 12, fontWeight: 'bold' },
     fab: { position: 'absolute', bottom: 20, right: 20, backgroundColor: '#2c3e50', width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center', elevation: 5 },

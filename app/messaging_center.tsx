@@ -21,6 +21,7 @@ import {
 import { useData } from './context/DataContext';
 import {
     fetchTemplates,
+    MessageTemplate,
 } from '../services/api/messageTemplates';
 import {
     AudienceContact,
@@ -455,6 +456,12 @@ const SentHistoryTab = () => {
 type Audience = 'Customers' | 'Leads' | 'Both';
 type Channel = 'WhatsApp' | 'Email' | 'Both';
 
+// Sent automatically by the app (orders, payments, service…) — not offered for a broadcast.
+const AUTOMATIC_TEMPLATES = new Set([
+    'order_confirmed', 'quotation_sent', 'demo_completed', 'sales_visit_thanks', 'lead_welcome',
+    'payment_receipt', 'due_reminder', 'cheque_bounced', 'installation_completed', 'pms_completed',
+    'service_ticket_created', 'service_ticket_closed', 'warranty_reminder', 'courier_dispatched',
+]);
 
 const BroadcastTab = () => {
     const { currentUser } = useData();
@@ -462,6 +469,23 @@ const BroadcastTab = () => {
     const [channel, setChannel] = useState<Channel>('Both');
     const [subject, setSubject] = useState('');
     const [messageBody, setMessageBody] = useState('');
+    // WhatsApp: an approved template (e.g. modular_ot_promo); only {customer_name} is filled in.
+    // Email: the bulk_broadcast template with the subject and message typed here.
+    const [waTemplates, setWaTemplates] = useState<MessageTemplate[]>([]);
+    const [waTemplateName, setWaTemplateName] = useState('');
+    const usesWhatsApp = channel !== 'Email';
+    const usesEmail = channel !== 'WhatsApp';
+    const waTemplate = waTemplates.find((t) => t.name === waTemplateName) ?? null;
+    useEffect(() => {
+        fetchTemplates('whatsapp')
+            .then((list) => {
+                // The standard bulk_broadcast is free text, which Meta does not approve; your own approved templates only.
+                const usable = list.filter((t) => !AUTOMATIC_TEMPLATES.has(t.name) && t.enabled !== false && !(t.isStandard && t.name === 'bulk_broadcast'));
+                setWaTemplates(usable);
+                setWaTemplateName((cur) => cur || usable.find((t) => t.name !== 'bulk_broadcast')?.name || usable[0]?.name || '');
+            })
+            .catch(() => setWaTemplates([]));
+    }, []);
 
     const [searchText, setSearchText] = useState('');
     const [selectedType, setSelectedType] = useState('All');
@@ -543,28 +567,29 @@ const BroadcastTab = () => {
 
     // targets = explicit list (test / hand-picked); 'audience' = everyone
     // matching the filter except the unticked ones (resolved on the server).
-    const runBroadcast = async (targets: { name: string; email?: string; phone?: string }[] | 'audience') => {
+    const runBroadcast = async (targets: { name: string; email?: string; phone?: string }[] | 'audience', only?: 'whatsapp' | 'email') => {
         setIsSending(true);
         try {
-            const apiChannel = channel === 'WhatsApp' ? 'whatsapp' : channel === 'Email' ? 'email' : 'both';
             const shared = { broadcast_subject: subject, broadcast_message: messageBody };
-            const result = targets === 'audience'
-                ? await sendBroadcast({
-                    channel: apiChannel, templateName: 'bulk_broadcast',
-                    audienceFilter, excludeIds: Array.from(excludedIds), variables: shared,
-                })
-                : await sendBroadcast({
-                    channel: apiChannel, templateName: 'bulk_broadcast',
-                    recipients: targets.map((t) => ({
-                        email: t.email || undefined,
-                        phone: t.phone || undefined,
-                        variables: { customer_name: t.name, ...shared },
-                    })),
-                });
-            const sent = result.results.filter((r) => r.status === 'SENT').length;
-            const failed = result.results.filter((r) => r.status === 'FAILED').length;
-            const pending = result.results.filter((r) => r.status === 'PENDING').length;
-            Alert.alert('Broadcast Complete', `Total: ${result.total}\n✅ Sent: ${sent}\n⏳ Queued: ${pending}\n❌ Failed: ${failed}`);
+            const send = (ch: 'whatsapp' | 'email') => {
+                const templateName = ch === 'whatsapp' ? waTemplateName : 'bulk_broadcast';
+                return targets === 'audience'
+                    ? sendBroadcast({ channel: ch, templateName, audienceFilter, excludeIds: Array.from(excludedIds), variables: shared })
+                    : sendBroadcast({
+                        channel: ch, templateName,
+                        recipients: targets.map((t) => ({
+                            email: t.email || undefined,
+                            phone: t.phone || undefined,
+                            variables: { customer_name: t.name, ...shared },
+                        })),
+                    });
+            };
+            const channels: ('whatsapp' | 'email')[] = only ? [only] : [...(usesWhatsApp ? ['whatsapp' as const] : []), ...(usesEmail ? ['email' as const] : [])];
+            const results = (await Promise.all(channels.map(send))).flatMap((r) => r.results);
+            const sent = results.filter((r) => r.status === 'SENT').length;
+            const failed = results.filter((r) => r.status === 'FAILED').length;
+            const pending = results.filter((r) => r.status === 'PENDING').length;
+            Alert.alert('Broadcast Complete', `Total: ${results.length}\n✅ Sent: ${sent}\n⏳ Queued: ${pending}\n❌ Failed: ${failed}`);
         } catch (e: any) {
             Alert.alert('Error', e.message || 'Broadcast failed.');
         } finally {
@@ -572,19 +597,26 @@ const BroadcastTab = () => {
         }
     };
 
+    const checkMessage = () => {
+        if (usesWhatsApp && !waTemplateName) { Alert.alert('Required', 'Choose the WhatsApp template to send.'); return false; }
+        if (usesEmail && !messageBody.trim()) { Alert.alert('Required', 'Please write the email message.'); return false; }
+        return true;
+    };
+
     const handleSendTest = () => {
-        if (!messageBody.trim()) { Alert.alert('Required', 'Please write a message to test.'); return; }
         if (!testContact.trim()) { Alert.alert('Required', 'Enter a phone number or email to send the test to.'); return; }
         const isEmail = testContact.includes('@');
+        if (isEmail && !messageBody.trim()) { Alert.alert('Required', 'Please write the email message to test.'); return; }
+        if (!isEmail && !waTemplateName) { Alert.alert('Required', 'Choose the WhatsApp template to test.'); return; }
         Alert.alert('Test Mode 🧪', `Sending a test message to ${testContact}.`, [
             { text: 'Cancel', style: 'cancel' },
-            { text: 'Send Test', onPress: () => runBroadcast([{ name: 'Test', email: isEmail ? testContact.trim() : undefined, phone: !isEmail ? testContact.trim() : undefined }]) },
+            { text: 'Send Test', onPress: () => runBroadcast([{ name: 'Test', email: isEmail ? testContact.trim() : undefined, phone: !isEmail ? testContact.trim() : undefined }], isEmail ? 'email' : 'whatsapp') },
         ]);
     };
 
     const handleSendBroadcast = () => {
-        if (!messageBody.trim()) { Alert.alert('Required', 'Please write a message.'); return; }
-        if (channel !== 'WhatsApp' && !subject.trim()) { Alert.alert('Required', 'Please enter a subject (used for email).'); return; }
+        if (!checkMessage()) return;
+        if (usesEmail && !subject.trim()) { Alert.alert('Required', 'Please enter a subject (used for email).'); return; }
         if (selectedCount === 0) { Alert.alert('Empty List', 'Please select at least one contact.'); return; }
         Alert.alert('Double Confirmation ⚠️', `Send this message to ${selectedCount} contacts via ${channel}?`, [
             { text: 'No, Cancel', style: 'cancel' },
@@ -608,7 +640,7 @@ const BroadcastTab = () => {
                 }
             >
                 <View style={styles.infoBanner}>
-                    <Text style={styles.infoBannerText}>Uses the &quot;bulk_broadcast&quot; template (create both email + whatsapp types in the Templates tab first).</Text>
+                    <Text style={styles.infoBannerText}>WhatsApp sends an approved template (e.g. a product offer) with each customer&apos;s name. Email sends the subject and message you type here (the &quot;bulk_broadcast&quot; email template).</Text>
                 </View>
 
                 <Text style={styles.sectionTitle}>1. Audience</Text>
@@ -630,8 +662,30 @@ const BroadcastTab = () => {
                 </View>
 
                 <Text style={styles.sectionTitle}>3. Message</Text>
-                {channel !== 'WhatsApp' && <TextInput style={styles.input} placeholder="Subject (for Email)" value={subject} onChangeText={setSubject} />}
-                <TextInput style={[styles.input, { height: 90, textAlignVertical: 'top' }]} placeholder="Type your broadcast message..." value={messageBody} onChangeText={setMessageBody} multiline />
+                {usesWhatsApp ? (
+                    <>
+                        <Text style={styles.subLabel}>WhatsApp template (must be approved on Meta)</Text>
+                        {waTemplates.length === 0 ? (
+                            <Text style={styles.noTplText}>No WhatsApp offer templates yet. Create one in the Templates tab (+) with the same name as on Meta, e.g. modular_ot_promo.</Text>
+                        ) : (
+                            <View style={[styles.pillRow, { flexWrap: 'wrap', gap: 8 }]}>
+                                {waTemplates.map((t) => (
+                                    <TouchableOpacity key={t.id} style={[styles.pill, waTemplateName === t.name && styles.pillActive]} onPress={() => setWaTemplateName(t.name)}>
+                                        <Text style={[styles.pillText, waTemplateName === t.name && { color: 'white' }]}>{t.name}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        )}
+                        {waTemplate ? <Text style={styles.tplPreview} numberOfLines={8}>{waTemplate.body}</Text> : null}
+                    </>
+                ) : null}
+                {usesEmail ? (
+                    <>
+                        {usesWhatsApp ? <Text style={styles.subLabel}>Email</Text> : null}
+                        <TextInput style={styles.input} placeholder="Subject (for Email)" value={subject} onChangeText={setSubject} />
+                        <TextInput style={[styles.input, { height: 90, textAlignVertical: 'top' }]} placeholder="Type your email message..." value={messageBody} onChangeText={setMessageBody} multiline />
+                    </>
+                ) : null}
 
                 <View style={styles.testRow}>
                     <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="Test phone or email" value={testContact} onChangeText={setTestContact} autoCapitalize="none" />
@@ -697,6 +751,9 @@ const styles = StyleSheet.create({
     monthNum: { fontWeight: 'bold', color: '#222' },
     loadMoreBtn: { padding: 12, backgroundColor: '#fff', alignItems: 'center', marginVertical: 12, borderRadius: 8, borderWidth: 1, borderColor: '#ddd' },
     loadMoreText: { fontWeight: 'bold', color: '#3b5998' },
+    subLabel: { fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 6, marginTop: 4 },
+    noTplText: { fontSize: 12, color: '#8a5a00', backgroundColor: '#fff6e0', padding: 8, borderRadius: 6, marginBottom: 8 },
+    tplPreview: { fontSize: 12, color: '#444', backgroundColor: '#f0f7f0', borderRadius: 8, padding: 10, marginBottom: 10, lineHeight: 17 },
     container: { flex: 1, backgroundColor: '#f4f6f8' },
     header: { backgroundColor: '#3b5998', padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     headerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },
