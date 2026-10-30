@@ -53,7 +53,7 @@ export async function fetchOutboundMessagesPage(params: {
 
 // This month's count per channel (IST month) — WhatsApp & Email screen.
 export interface ChannelCount { sent: number; failed: number; pending: number; cancelled: number; total: number }
-export interface MonthlySummary { month: string; whatsapp: ChannelCount & { delivered?: number; read?: number }; email: ChannelCount }
+export interface MonthlySummary { month: string; whatsappReady?: boolean; whatsapp: ChannelCount & { delivered?: number; read?: number }; email: ChannelCount }
 export async function fetchMonthlySummary(month?: string): Promise<MonthlySummary> {
     const res = await apiClient.get<OneResponse<MonthlySummary>>(`/outbound-messages/monthly-summary${month ? `?month=${month}` : ''}`);
     return res.data;

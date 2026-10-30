@@ -121,11 +121,19 @@ const MonthStrip = () => {
         </View>
     );
     return (
-        <View style={styles.monthStrip}>
-            <Text style={styles.monthTitle}>{monthName}:</Text>
-            {part('WhatsApp', 'logo-whatsapp', '#25D366', summary.whatsapp)}
-            {part('Email', 'mail', '#e67e22', summary.email)}
-        </View>
+        <>
+            <View style={styles.monthStrip}>
+                <Text style={styles.monthTitle}>{monthName}:</Text>
+                {part('WhatsApp', 'logo-whatsapp', '#25D366', summary.whatsapp)}
+                {part('Email', 'mail', '#e67e22', summary.email)}
+            </View>
+            {summary.whatsappReady === false ? (
+                <View style={styles.waOffBanner}>
+                    <Ionicons name="information-circle" size={16} color="#8a5a00" />
+                    <Text style={styles.waOffText}>WhatsApp is not set up, so no WhatsApp messages are sent. Admin: tap ⚙️ (top right) to connect your WhatsApp provider.</Text>
+                </View>
+            ) : null}
+        </>
     );
 };
 
@@ -720,6 +728,8 @@ const styles = StyleSheet.create({
     historyDate: { fontSize: 11, color: '#999', marginTop: 2 },
     failureReason: { fontSize: 11, color: '#d32f2f', marginTop: 4, fontStyle: 'italic' },
     receipt: { fontSize: 12, marginTop: 4, fontWeight: '600' },
+    waOffBanner: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, backgroundColor: '#fff6e0', borderColor: '#f3d48a', borderWidth: 1, borderRadius: 8, padding: 8, marginHorizontal: 12, marginTop: 8, marginBottom: 4 },
+    waOffText: { flex: 1, fontSize: 12, color: '#8a5a00', lineHeight: 17 },
 
     sectionTitle: { fontSize: 13, fontWeight: '700', color: '#555', marginTop: 14, marginBottom: 8, textTransform: 'uppercase' },
     pillRow: { flexDirection: 'row', gap: 8 },
