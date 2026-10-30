@@ -574,6 +574,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
             'It is an add-on: one price for the whole company (not per employee), which covers our setup help. Ask us to activate it, or buy it in Plan & Renewal.',
             'You open your own accounts with a WhatsApp provider (Meta Cloud API, AiSensy or Wati) and an email service (Brevo, Resend or SendGrid). Their message charges are paid to them by you; the free plans of Brevo and Resend are enough for most companies.',
             'Settings: Sidebar → "WhatsApp & Email" → ⚙️ (top right). Admin only. Turn on WhatsApp and/or Email, choose the provider, paste the key(s), Save. The two guides below show where to get each key.',
+            'Once saved, the keys show as one green "details saved" line (tap Change to edit them), and the WhatsApp / Email ON-OFF switches save at once — no need to type the keys again.',
             'Templates tab: the messages that are sent. Standard templates are ready to use; edit one to make your own copy.',
             'When an entry is saved the message goes out at once. If the provider is busy, it is tried again after 5 min, 30 min and 2 hours.',
             'Sent History tab: every message with its status; the reason is shown under any message that did not go. WhatsApp messages also show ✓ Sent, ✓✓ Delivered or blue ✓✓ Read once the status webhook is connected (see WhatsApp Setup).',
@@ -752,10 +753,12 @@ const GUIDE_SECTIONS: GuideSection[] = [
         title: 'WhatsApp & Email (Templates & Broadcast)',
         steps: [
             'Go to Sidebar → "WhatsApp & Email". The ⚙️ icon at the top opens the automation settings.',
-            'Templates Tab: create and manage reusable WhatsApp/Email message templates. For WhatsApp, the name and language must match the template approved on Meta.',
+            'Templates Tab: create and manage reusable WhatsApp/Email message templates. For WhatsApp, the name and language must match the template approved on Meta. Use the All / WhatsApp / Email buttons to see one kind only.',
+            'Each template has a Sending ON / OFF switch (Admin). OFF = that automatic message is not sent to customers (e.g. switch off sales_visit_thanks). One name can have only one WhatsApp and one Email template; "Use standard" removes your own copy and brings the standard text back.',
             'Pending Emails Tab: emails that could not go out automatically (email not set up, or the provider refused them) — tap Send to send from your own email app.',
             'History Tab: view previously sent messages and their delivery status. If WhatsApp was busy or the internet failed, the message stays Pending and is tried again automatically (after 5 min, 30 min and 2 h).',
-            'Broadcast Tab: send a message to a group of contacts at once.',
+            'Broadcast Tab: send a message to a group of contacts at once. WhatsApp: pick one of your approved templates (e.g. a product offer) — each customer\'s name is filled in. Email: type the subject and message.',
+            'New WhatsApp offer: create and get it approved on Meta first (Marketing, no image in the header), then Templates → + → WhatsApp → the same name and text (with {customer_name} for {{1}}). It then appears in Broadcast. Test on your own number before sending to customers.',
         ],
     },
     {
