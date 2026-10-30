@@ -89,7 +89,7 @@ export default function MessagingCenterScreen() {
 
                 <MonthStrip />
 
-                <View style={{ flex: 1, padding: 10, backgroundColor: '#f4f6f8' }}>
+                <View style={{ flex: 1, paddingHorizontal: 10, paddingTop: 8, backgroundColor: '#f4f6f8' }}>
                     {activeTab === 'Templates' && <TemplatesTab />}
                     {activeTab === 'Pending' && <PendingEmailsTab />}
                     {activeTab === 'History' && <SentHistoryTab />}
@@ -744,7 +744,7 @@ const BroadcastTab = () => {
 };
 
 const styles = StyleSheet.create({
-    monthStrip: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', backgroundColor: 'white', paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
+    monthStrip: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', backgroundColor: 'white', paddingHorizontal: 12, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
     monthTitle: { fontWeight: 'bold', color: '#2c4f8f', marginRight: 8, fontSize: 13 },
     monthPart: { flexDirection: 'row', alignItems: 'center', marginRight: 14 },
     monthText: { marginLeft: 4, fontSize: 13, color: '#444' },
@@ -785,7 +785,7 @@ const styles = StyleSheet.create({
     historyDate: { fontSize: 11, color: '#999', marginTop: 2 },
     failureReason: { fontSize: 11, color: '#d32f2f', marginTop: 4, fontStyle: 'italic' },
     receipt: { fontSize: 12, marginTop: 4, fontWeight: '600' },
-    waOffBanner: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, backgroundColor: '#fff6e0', borderColor: '#f3d48a', borderWidth: 1, borderRadius: 8, padding: 8, marginHorizontal: 12, marginTop: 8, marginBottom: 4 },
+    waOffBanner: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, backgroundColor: '#fff6e0', borderColor: '#f3d48a', borderWidth: 1, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 6, marginHorizontal: 10, marginTop: 6, marginBottom: 0 },
     waOffText: { flex: 1, fontSize: 12, color: '#8a5a00', lineHeight: 17 },
 
     sectionTitle: { fontSize: 13, fontWeight: '700', color: '#555', marginTop: 14, marginBottom: 8, textTransform: 'uppercase' },
