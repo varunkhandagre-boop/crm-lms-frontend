@@ -308,7 +308,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
             'Choose Cash or Credit sale, enter PO number, amount, and products.',
             'Tap Submit — the order is saved and the customer gets a WhatsApp/Email update automatically (if automation is enabled).',
             'The order PDF (Delivery Challan) will include your company name, logo, address, and bank details from Company Profile.',
-            'Attaching the PO: a photo is best (it is compressed automatically). A PDF can be up to 2 MB — for a bigger scanned PDF, take a photo of the PO instead.',
+            'Attaching the PO: tap Attach PO → Camera or Gallery. The PO is saved as a photo (made small automatically); a PDF cannot be attached — take a photo of the printed PO, or a screenshot of the PDF and pick it from the Gallery.',
             'Advance received at booking: enter the amount and how it was paid (Cash / UPI / NEFT / Cheque). It is saved as a payment with its own receipt number — you will see it in Collect Payment and in the order\'s Pending Due.',
         ],
     },
