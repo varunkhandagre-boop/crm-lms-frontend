@@ -384,7 +384,7 @@ const SentHistoryTab = () => {
             </View>
         ) },
         { key: 'to', label: 'To', flex: 2, render: (m) => <TwoLine main={m.to} /> },
-        { key: 'tpl', label: 'Template', flex: 2, render: (m) => m.templateName || '-' },
+        { key: 'tpl', label: 'Template', flex: 2, render: (m) => (m.attachmentName ? `${m.templateName} · 📎 ${m.attachmentName}` : m.templateName || '-') },
         { key: 'status', label: 'Status', width: 100, render: (m) => <Pill text={m.status} color={STATUS_COLORS[m.status] || '#999'} bg={(STATUS_COLORS[m.status] || '#999') + '20'} /> },
         { key: 'date', label: 'Created', width: 170, render: (m) => new Date(m.createdAt).toLocaleString('en-IN') },
         { key: 'sent', label: 'Sent At', width: 170, render: (m) => (m.sentAt ? new Date(m.sentAt).toLocaleString('en-IN') : '-') },
@@ -438,6 +438,7 @@ const SentHistoryTab = () => {
                             </View>
                             <Text style={styles.historyTemplate}>Template: {item.templateName}</Text>
                             <Text style={styles.historyDate}>{new Date(item.createdAt).toLocaleString('en-IN')}</Text>
+                            {item.attachmentName ? <Text style={styles.attachText}>📎 {item.attachmentName}</Text> : null}
                             <Receipt m={item} />
                             {(item.status === 'FAILED' || item.status === 'PENDING') && item.failureReason ? (
                                 <Text style={styles.failureReason}>⚠️ {item.failureReason}</Text>
@@ -785,6 +786,7 @@ const styles = StyleSheet.create({
     historyDate: { fontSize: 11, color: '#999', marginTop: 2 },
     failureReason: { fontSize: 11, color: '#d32f2f', marginTop: 4, fontStyle: 'italic' },
     receipt: { fontSize: 12, marginTop: 4, fontWeight: '600' },
+    attachText: { fontSize: 12, color: '#ad1457', marginTop: 3 },
     waOffBanner: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, backgroundColor: '#fff6e0', borderColor: '#f3d48a', borderWidth: 1, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 6, marginHorizontal: 10, marginTop: 6, marginBottom: 0 },
     waOffText: { flex: 1, fontSize: 12, color: '#8a5a00', lineHeight: 17 },
 

@@ -11,6 +11,8 @@ export interface MessageTemplate {
     body: string;
     /** WhatsApp: language code of the approved template on Meta (empty = en). */
     language?: string | null;
+    /** WhatsApp: "document" = the Meta template has a PDF header (e.g. order_confirmed_pdf). */
+    headerType?: 'document' | null;
     createdAt: string | null;
     updatedAt: string | null;
     /** Shared by every company (not saved for this company yet). Editing it saves your own copy. */
@@ -36,6 +38,7 @@ export interface SaveTemplatePayload {
     subject?: string;
     body: string;
     language?: string;
+    headerType?: 'none' | 'document';
 }
 
 export async function createTemplate(payload: SaveTemplatePayload): Promise<MessageTemplate> {

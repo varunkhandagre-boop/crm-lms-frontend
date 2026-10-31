@@ -58,6 +58,7 @@ export const TemplatesTab = () => {
     const [subject, setSubject] = useState('');
     const [body, setBody] = useState('');
     const [language, setLanguage] = useState('en');
+    const [pdfHeader, setPdfHeader] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
 
     const [viewModalVisible, setViewModalVisible] = useState(false);
@@ -86,6 +87,7 @@ export const TemplatesTab = () => {
         setSubject('');
         setBody('');
         setLanguage('en');
+        setPdfHeader(false);
     };
 
     const openAddNew = () => {
@@ -101,6 +103,7 @@ export const TemplatesTab = () => {
         setSubject(item.subject || '');
         setBody(item.body);
         setLanguage(item.language || 'en');
+        setPdfHeader(item.headerType === 'document');
         setModalVisible(true);
     };
 
@@ -122,6 +125,7 @@ export const TemplatesTab = () => {
                 subject: templateType === 'email' ? subject.trim() : undefined,
                 body: body.trim(),
                 language: templateType === 'whatsapp' ? language : undefined,
+                headerType: templateType === 'whatsapp' ? (pdfHeader ? 'document' as const : 'none' as const) : undefined,
             };
             if (editId) {
                 await updateTemplate(editId, payload);
@@ -232,6 +236,9 @@ export const TemplatesTab = () => {
                                             {item.type === 'email' ? 'EMAIL' : 'WHATSAPP'}
                                         </Text>
                                     </View>
+                                    {item.headerType === 'document' ? (
+                                        <Text style={[tStyles.originBadge, { color: '#ad1457', backgroundColor: '#fce4ec' }]}>📎 PDF</Text>
+                                    ) : null}
                                     {item.enabled === false ? (
                                         <Text style={[tStyles.originBadge, { color: '#616161', backgroundColor: '#eeeeee' }]}>OFF</Text>
                                     ) : null}
@@ -398,6 +405,21 @@ export const TemplatesTab = () => {
                                             </View>
                                         )}
                                     </View>
+
+                                    <Text style={tStyles.label}>Header (as approved on Meta)</Text>
+                                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 6 }}>
+                                        {([[false, 'None (text only)'], [true, 'Document (PDF)']] as const).map(([v, label]) => (
+                                            <TouchableOpacity key={label} style={[tStyles.langChip, pdfHeader === v && tStyles.langChipActive]} onPress={() => setPdfHeader(v)}>
+                                                <Text style={[tStyles.langChipText, pdfHeader === v && { color: 'white' }]}>{label}</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                    {pdfHeader ? (
+                                        <Text style={tStyles.pdfHint}>
+                                            The PDF is attached automatically. Name it after the message with _pdf at the end — quotation_sent_pdf, order_confirmed_pdf, payment_receipt_pdf or installation_completed_pdf — and keep the same body as the text one. While it is ON, it is used instead of the text message (Meta Cloud API only).
+                                        </Text>
+                                    ) : null}
+                                    <View style={{ height: 9 }} />
                                 </>
                             )}
 
@@ -449,6 +471,7 @@ const tStyles = StyleSheet.create({
     bodyPreview: { fontSize: 12, color: '#777', marginTop: 4 },
     actionRow: { flexDirection: 'row', alignItems: 'center', gap: 15, marginTop: 6, borderTopWidth: 1, borderTopColor: '#f0f0f0', paddingTop: 6 },
     actionBtn: { flexDirection: 'row', alignItems: 'center' },
+    pdfHint: { fontSize: 11, color: '#8a5a00', backgroundColor: '#fff6e0', borderRadius: 6, padding: 8, lineHeight: 16 },
     typeRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
     typeChip: { paddingVertical: 5, paddingHorizontal: 14, borderRadius: 20, backgroundColor: 'white', borderWidth: 1, borderColor: '#ddd' },
     typeChipActive: { backgroundColor: '#3b5998', borderColor: '#3b5998' },

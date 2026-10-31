@@ -26,6 +26,8 @@ export interface OutboundMessage {
     // WhatsApp only, filled by the provider's status webhook (older servers: absent)
     deliveredAt?: string | null;
     readAt?: string | null;
+    /** WhatsApp sent with a PDF (quotation / order / receipt): its file name. */
+    attachmentName?: string | null;
     createdAt: string;
 }
 
