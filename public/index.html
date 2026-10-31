@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <title>LMS</title>
+    <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
+    <style id="expo-reset">
+      /* These styles make the body full-height */
+      html,
+      body {
+        height: 100%;
+      }
+      /* These styles disable body scrolling if you are using <ScrollView> */
+      body {
+        overflow: hidden;
+      }
+      /* These styles make the root element full-height */
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+      }
+    </style>
+  <style id="lms-auth-style">
+/* Login / Register: white sheet fills to the bottom; centred card on wide screens */
+.lms-auth-content { min-height: 100% !important; display: flex !important; flex-direction: column !important; }
+.lms-auth-sheet { flex-grow: 1 !important; }
+@media (min-width: 700px) {
+  .lms-auth-content { max-width: 520px !important; width: 100% !important; margin: 0 auto !important; }
+  .lms-auth-sheet { border-top-left-radius: 28px !important; border-top-right-radius: 28px !important; box-shadow: 0 -6px 24px rgba(14, 42, 71, .18); padding-left: 8px; padding-right: 8px; }
+}
+</style>
+<script>
+(function () {
+  var AUTH = /^\/(login|register_company)?\/?$/;
+  function apply() {
+    var root = document.getElementById('root'); if (!root) return;
+    var on = AUTH.test(location.pathname);
+    var old = root.querySelectorAll('.lms-auth-content, .lms-auth-sheet');
+    if (!on) { for (var i = 0; i < old.length; i++) old[i].classList.remove('lms-auth-content', 'lms-auth-sheet'); return; }
+    var all = root.querySelectorAll('div'), scroller = null;
+    for (var j = 0; j < all.length && j < 60; j++) { var oy = getComputedStyle(all[j]).overflowY; if (oy === 'auto' || oy === 'scroll') { scroller = all[j]; break; } }
+    if (!scroller || !scroller.firstElementChild) return;
+    var content = scroller.firstElementChild, sheet = content.lastElementChild;
+    if (!sheet || getComputedStyle(sheet).backgroundColor !== 'rgb(255, 255, 255)') return;
+    content.classList.add('lms-auth-content'); sheet.classList.add('lms-auth-sheet');
+  }
+  var t; new MutationObserver(function () { clearTimeout(t); t = setTimeout(apply, 60); }).observe(document.documentElement, { childList: true, subtree: true });
+  window.addEventListener('popstate', apply); window.addEventListener('resize', apply);
+})();
+</script>
+</head>
+
+  <body>
+    <!-- Use static rendering with Expo Router to support running without JavaScript. -->
+    <noscript> You need to enable JavaScript to run this app. </noscript>
+    <!-- The root element for your Expo app. -->
+    <div id="root"></div>
+</body>
+</html>
