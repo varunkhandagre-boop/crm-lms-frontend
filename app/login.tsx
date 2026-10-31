@@ -8,6 +8,7 @@ import {
     Image,
     Keyboard,
     KeyboardAvoidingView,
+    Linking,
     Platform,
     ScrollView,
     StyleSheet,
@@ -19,9 +20,21 @@ import {
 
 // 🔥 SAAS IMPORTS
 import { useData } from './context/DataContext';
+import { useIsDesktop } from '../hooks/useIsDesktop';
+
+const PLAY_URL = 'https://play.google.com/store/apps/details?id=com.crm.lms';
+// Laptop login: what the app does, shown beside the form.
+const FEATURES: { icon: React.ComponentProps<typeof Ionicons>['name']; title: string; text: string }[] = [
+  { icon: 'trending-up', title: 'Sales', text: 'Leads, quotations, orders and payment collection' },
+  { icon: 'construct', title: 'Service', text: 'Service calls, installations and PMS schedule' },
+  { icon: 'location', title: 'Attendance', text: 'GPS Day In / Day Out, Day Map and shift roster' },
+  { icon: 'wallet', title: 'HR & Payroll', text: 'Leave, expenses, advances and salary' },
+  { icon: 'logo-whatsapp', title: 'Customer updates', text: 'Automatic WhatsApp and email messages' },
+];
 
 export default function LoginScreen() {
   const router = useRouter();
+  const isDesktop = useIsDesktop();
   
   // 🔥 SaaS Auth System is mapped via DataContext's login function
   const { login } = useData();
@@ -111,6 +124,110 @@ export default function LoginScreen() {
       }
   };
 
+  const formFields = (
+    <>
+              <Text style={styles.welcomeText}>Welcome Back!</Text>
+              <Text style={styles.subText}>Sign in to continue</Text>
+
+              <View style={styles.inputWrapper}>
+                  <Ionicons name="mail-outline" size={20} color="#666" style={styles.icon} />
+                  <TextInput 
+                      style={styles.input} 
+                      placeholder="Email Address" 
+                      value={email} 
+                      onChangeText={setEmail} 
+                      autoCapitalize="none" 
+                      keyboardType="email-address"
+                  />
+              </View>
+
+              <View style={styles.inputWrapper}>
+                  <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.icon} />
+                  <TextInput 
+                      style={styles.input} 
+                      placeholder="Password" 
+                      value={password} 
+                      onChangeText={setPassword} 
+                      secureTextEntry={!showPassword}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      returnKeyType="go"
+                      onSubmitEditing={handleLogin}
+                  />
+                  <TouchableOpacity onPress={() => setShowPassword(v => !v)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                      <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={22} color="#666" />
+                  </TouchableOpacity>
+              </View>
+
+              {/* 🔥 NEW: FORGOT PASSWORD BUTTON 🔥 */}
+              <TouchableOpacity onPress={handleForgotPassword} style={{ alignSelf: 'flex-end', marginBottom: 20 }}>
+                  <Text style={{ color: '#3b5998', fontWeight: 'bold' }}>Forgot Password?</Text>
+              </TouchableOpacity>
+
+              {/* LOGIN BUTTON WITH SPINNER */}
+              <TouchableOpacity 
+                  style={[styles.loginBtn, isLoading && { opacity: 0.6 }]} 
+                  onPress={handleLogin} 
+                  disabled={isLoading}
+                  activeOpacity={0.7}
+              >
+                  {isLoading ? (
+                      <ActivityIndicator color="white" />
+                  ) : (
+                      <Text style={styles.loginText}>LOGIN</Text>
+                  )}
+              </TouchableOpacity>
+
+              {/* REGISTER COMPANY LINK */}
+              <TouchableOpacity onPress={() => router.push('/register_company' as any)} style={{ marginTop: 25 }}>
+                  <Text style={{ textAlign: 'center', color: '#3b5998', fontWeight: 'bold', fontSize: 15 }}>
+                      Don&apos;t have an account? Register Company
+                  </Text>
+              </TouchableOpacity>
+
+              <Text style={styles.footerText}>Need Help? Contact Admin</Text>
+    </>
+  );
+
+  // Laptop / desktop web: brand panel on the left, the form on the right.
+  if (isDesktop) {
+    return (
+      <View style={styles.deskPage}>
+        <View style={styles.deskBrand}>
+          <View style={styles.deskBrandInner}>
+            <View style={styles.deskLogoRow}>
+              <View style={styles.deskLogoBox}>
+                <Image source={branding.logo ? { uri: branding.logo } : require('../assets/images/icon.png')} style={styles.deskLogoImg} />
+              </View>
+              <View>
+                <Text style={styles.deskAppName}>{branding.name}</Text>
+                <Text style={styles.tagline}>{branding.tagline}</Text>
+              </View>
+            </View>
+            <Text style={styles.deskHeadline}>One app for your field team</Text>
+            <Text style={styles.deskLead}>Sales, service, attendance and payroll — on Android and on your laptop with the same login.</Text>
+            {FEATURES.map((f) => (
+              <View key={f.title} style={styles.deskFeature}>
+                <View style={styles.deskFeatureIcon}><Ionicons name={f.icon} size={18} color="#3b5998" /></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.deskFeatureTitle}>{f.title}</Text>
+                  <Text style={styles.deskFeatureText}>{f.text}</Text>
+                </View>
+              </View>
+            ))}
+            <TouchableOpacity style={styles.deskPlayBtn} onPress={() => Linking.openURL(PLAY_URL)}>
+              <Ionicons name="logo-google-playstore" size={18} color="white" />
+              <Text style={styles.deskPlayText}>Get the Android app</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+        <ScrollView style={styles.deskFormSide} contentContainerStyle={styles.deskFormScroll} keyboardShouldPersistTaps="handled">
+          <View style={styles.deskCard}>{formFields}</View>
+        </ScrollView>
+      </View>
+    );
+  }
+
   return (
     <View
       style={styles.container}
@@ -147,64 +264,7 @@ export default function LoginScreen() {
 
           {/* --- FORM SECTION --- */}
           <View style={[styles.formContainer, kbHeight > 0 && { paddingBottom: 30 + extraKbPad }]}>
-              <Text style={styles.welcomeText}>Welcome Back!</Text>
-              <Text style={styles.subText}>Sign in to continue</Text>
-
-              <View style={styles.inputWrapper}>
-                  <Ionicons name="mail-outline" size={20} color="#666" style={styles.icon} />
-                  <TextInput 
-                      style={styles.input} 
-                      placeholder="Email Address" 
-                      value={email} 
-                      onChangeText={setEmail} 
-                      autoCapitalize="none" 
-                      keyboardType="email-address"
-                  />
-              </View>
-
-              <View style={styles.inputWrapper}>
-                  <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.icon} />
-                  <TextInput 
-                      style={styles.input} 
-                      placeholder="Password" 
-                      value={password} 
-                      onChangeText={setPassword} 
-                      secureTextEntry={!showPassword}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                  />
-                  <TouchableOpacity onPress={() => setShowPassword(v => !v)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-                      <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={22} color="#666" />
-                  </TouchableOpacity>
-              </View>
-
-              {/* 🔥 NEW: FORGOT PASSWORD BUTTON 🔥 */}
-              <TouchableOpacity onPress={handleForgotPassword} style={{ alignSelf: 'flex-end', marginBottom: 20 }}>
-                  <Text style={{ color: '#3b5998', fontWeight: 'bold' }}>Forgot Password?</Text>
-              </TouchableOpacity>
-
-              {/* LOGIN BUTTON WITH SPINNER */}
-              <TouchableOpacity 
-                  style={[styles.loginBtn, isLoading && { opacity: 0.6 }]} 
-                  onPress={handleLogin} 
-                  disabled={isLoading}
-                  activeOpacity={0.7}
-              >
-                  {isLoading ? (
-                      <ActivityIndicator color="white" />
-                  ) : (
-                      <Text style={styles.loginText}>LOGIN</Text>
-                  )}
-              </TouchableOpacity>
-
-              {/* REGISTER COMPANY LINK */}
-              <TouchableOpacity onPress={() => router.push('/register_company' as any)} style={{ marginTop: 25 }}>
-                  <Text style={{ textAlign: 'center', color: '#3b5998', fontWeight: 'bold', fontSize: 15 }}>
-                      Don&apos;t have an account? Register Company
-                  </Text>
-              </TouchableOpacity>
-
-              <Text style={styles.footerText}>Need Help? Contact Admin</Text>
+              {formFields}
           </View>
 
         </ScrollView>
@@ -250,4 +310,24 @@ const styles = StyleSheet.create({
   loginText: { color: 'white', fontSize: 18, fontWeight: 'bold' },
 
   footerText: { textAlign: 'center', color: '#aaa', marginTop: 20, fontSize: 13 },
+
+  // Laptop layout
+  deskPage: { flex: 1, flexDirection: 'row', backgroundColor: '#f4f6f8' },
+  deskBrand: { flex: 1, backgroundColor: '#3b5998', justifyContent: 'center', paddingHorizontal: 56, paddingVertical: 40 },
+  deskBrandInner: { maxWidth: 520, width: '100%', alignSelf: 'center' },
+  deskLogoRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 36 },
+  deskLogoBox: { width: 64, height: 64, borderRadius: 32, backgroundColor: 'white', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  deskLogoImg: { width: 52, height: 52, resizeMode: 'contain' },
+  deskAppName: { fontSize: 26, fontWeight: 'bold', color: 'white', letterSpacing: 1, textTransform: 'uppercase' },
+  deskHeadline: { fontSize: 34, fontWeight: 'bold', color: 'white', lineHeight: 42 },
+  deskLead: { fontSize: 15, color: '#dce6f7', marginTop: 10, marginBottom: 28, lineHeight: 22 },
+  deskFeature: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16 },
+  deskFeatureIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: 'white', justifyContent: 'center', alignItems: 'center' },
+  deskFeatureTitle: { fontSize: 15, fontWeight: 'bold', color: 'white' },
+  deskFeatureText: { fontSize: 13, color: '#dce6f7', marginTop: 1 },
+  deskPlayBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start', marginTop: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.6)', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 16 },
+  deskPlayText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
+  deskFormSide: { flex: 1 },
+  deskFormScroll: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
+  deskCard: { width: '100%', maxWidth: 420, backgroundColor: 'white', borderRadius: 16, padding: 36, borderWidth: 1, borderColor: '#e6e9ee', boxShadow: '0 8px 30px rgba(14, 42, 71, 0.08)' } as any,
 });

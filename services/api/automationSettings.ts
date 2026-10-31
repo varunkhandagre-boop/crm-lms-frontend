@@ -8,6 +8,8 @@ export interface AutomationSettings {
     whatsappProvider: 'meta_cloud' | 'aisensy' | 'wati' | 'gupshup'; // gupshup: old value, not offered
     whatsappApiKey: string | null;
     whatsappSenderId: string | null;
+    /** Test mode: comma-separated numbers; WhatsApp goes only to them. Empty = every customer. */
+    whatsappTestNumbers?: string | null;
     emailEnabled: boolean;
     emailProvider: 'brevo' | 'resend' | 'sendgrid';
     emailApiKey: string | null;

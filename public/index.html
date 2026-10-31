@@ -37,7 +37,8 @@
   var AUTH = /^\/(login|register_company)?\/?$/;
   function apply() {
     var root = document.getElementById('root'); if (!root) return;
-    var on = AUTH.test(location.pathname);
+    // Laptops (1024 px and up) get their own two-panel login from the app itself.
+    var on = AUTH.test(location.pathname) && window.innerWidth < 1024;
     var old = root.querySelectorAll('.lms-auth-content, .lms-auth-sheet');
     if (!on) { for (var i = 0; i < old.length; i++) old[i].classList.remove('lms-auth-content', 'lms-auth-sheet'); return; }
     var all = root.querySelectorAll('div'), scroller = null;

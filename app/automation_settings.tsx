@@ -80,6 +80,7 @@ export default function AutomationSettingsScreen() {
     const waInfo = WHATSAPP_PROVIDERS.find((p) => p.value === whatsappProvider) ?? WHATSAPP_PROVIDERS[0];
     const [whatsappApiKey, setWhatsappApiKey] = useState('');
     const [whatsappSenderId, setWhatsappSenderId] = useState('');
+    const [whatsappTestNumbers, setWhatsappTestNumbers] = useState('');
 
     const [emailEnabled, setEmailEnabled] = useState(false);
     const [emailProvider, setEmailProvider] = useState<'brevo' | 'resend' | 'sendgrid'>('brevo');
@@ -108,6 +109,7 @@ export default function AutomationSettingsScreen() {
                 setWhatsappProvider(settings.whatsappProvider === 'gupshup' ? 'meta_cloud' : settings.whatsappProvider);
                 setWhatsappApiKey(settings.whatsappApiKey || '');
                 setWhatsappSenderId(settings.whatsappSenderId || '');
+                setWhatsappTestNumbers(settings.whatsappTestNumbers || '');
                 setEmailEnabled(settings.emailEnabled);
                 setEmailProvider(settings.emailProvider);
                 setEmailApiKey(settings.emailApiKey || '');
@@ -129,6 +131,7 @@ export default function AutomationSettingsScreen() {
         whatsappProvider,
         whatsappApiKey: whatsappApiKey.trim() || null,
         whatsappSenderId: whatsappSenderId.trim() || null,
+        whatsappTestNumbers: whatsappTestNumbers.trim() || null,
         emailEnabled,
         emailProvider,
         emailApiKey: emailApiKey.trim() || null,
@@ -313,6 +316,17 @@ export default function AutomationSettingsScreen() {
                         </>
                     )}
                     </>)}
+
+                    <View style={[styles.testBox, whatsappTestNumbers.trim() ? styles.testBoxOn : null]}>
+                        <Text style={styles.testTitle}>{whatsappTestNumbers.trim() ? '🧪 TEST MODE ON — customers get no WhatsApp' : '🧪 Test mode (optional)'}</Text>
+                        <Text style={styles.hint}>Put your own mobile number(s) here, separated by commas, and tap Save Settings. WhatsApp then goes ONLY to these numbers, whoever makes the entry. Empty the box and save to send to all customers.</Text>
+                        <TextInput
+                            style={[styles.input, { marginTop: 8 }]}
+                            placeholder="e.g. 9822000001, 8007772224"
+                            value={whatsappTestNumbers}
+                            onChangeText={setWhatsappTestNumbers}
+                        />
+                    </View>
                 </View>
 
                 <WhatsAppStatusWebhookCard provider={whatsappProvider} />
@@ -424,6 +438,9 @@ const styles = StyleSheet.create({
     saveBtn: { backgroundColor: '#4caf50', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 10, elevation: 2 },
     saveText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
     hint: { fontSize: 11, color: '#777', marginTop: 6, lineHeight: 16 },
+    testBox: { marginTop: 12, borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 8, padding: 10, backgroundColor: 'white' },
+    testBoxOn: { borderColor: '#f3d48a', backgroundColor: '#fff6e0' },
+    testTitle: { fontSize: 13, fontWeight: 'bold', color: '#8a5a00' },
     savedBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#eef7ee', borderWidth: 1, borderColor: '#cfe8cf', borderRadius: 8, padding: 10 },
     savedTitle: { fontSize: 13, fontWeight: 'bold', color: '#2e7d32' },
     savedSub: { fontSize: 12, color: '#555', marginTop: 2 },
